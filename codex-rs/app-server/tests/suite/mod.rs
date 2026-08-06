@@ -1,13 +1,6 @@
-mod archive_conversation;
 mod auth;
-mod codex_message_processor_flow;
-mod config;
-mod create_conversation;
+mod conversation_summary;
 mod fuzzy_file_search;
-mod interrupt;
-mod list_resume;
-mod login;
-mod send_message;
-mod set_default_model;
-mod user_agent;
-mod user_info;
+mod logging;
+mod strict_config;
+mod v2;

@@ -15,10 +15,10 @@ path = "src/lib.rs"
 default = ["code-fork"]
 # Gate verbose debug logging inside the TUI implementation.
 debug-logs = []
-dev-faults = []
+dev-faults = ["code-auto-drive-core/dev-faults"]
 # Fork-specific extensions layered on top of upstream history rendering.
 code-fork = []
-test-helpers = []
+test-helpers = ["code-auto-drive-core/test-helpers"]
 
 [lints]
 workspace = true
@@ -42,8 +42,11 @@ code-git-tooling = { path = "../git-tooling" }
 code-login = { path = "../login" }
 code-ollama = { path = "../ollama" }
 code-protocol = { path = "../protocol" }
+code-utils-rustls-provider = { workspace = true }
 code-version = { path = "../code-version" }
 code-cloud-tasks-client = { path = "../cloud-tasks-client", features = ["mock"] }
+code-auto-drive-diagnostics = { path = "../code-auto-drive-diagnostics" }
+code-auto-drive-core = { workspace = true }
 color-eyre = "0.6.3"
 crossterm = { version = "0.28.1", features = ["bracketed-paste"] }
 diffy = "0.4.2"
@@ -69,7 +72,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 shlex = "1.3.0"
 sha2 = { workspace = true }
 tempfile = "3"
-arboard = "3"
+arboard = { workspace = true }
 strum = "0.27.2"
 strum_macros = "0.27.2"
 supports-color = "3.0.2"
@@ -106,16 +109,19 @@ vt100 = "0.15.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+signal-hook = "0.3"
 
 
 [dev-dependencies]
 chrono = { version = "0.4", features = ["serde"] }
+filetime = { workspace = true }
 indoc = "2.0"
 insta = "1.43.1"
 pretty_assertions = "1"
 rand = "0.9"
 strip-ansi-escapes = "0.1"
 serde_bytes = "0.11"
+toml = { workspace = true }
 code-tui = { path = ".", features = ["test-helpers"] }
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }

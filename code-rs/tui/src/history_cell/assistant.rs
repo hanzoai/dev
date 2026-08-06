@@ -41,6 +41,14 @@ impl AssistantMarkdownCell {
         self.layout_cache.borrow_mut().clear();
     }
 
+    pub(crate) fn set_mid_turn(&mut self, mid_turn: bool) {
+        if self.state.mid_turn == mid_turn {
+            return;
+        }
+        self.state.mid_turn = mid_turn;
+        self.layout_cache.borrow_mut().clear();
+    }
+
     pub(crate) fn stream_id(&self) -> Option<&str> {
         self.state.stream_id.as_deref()
     }
@@ -93,7 +101,11 @@ impl AssistantMarkdownCell {
         buf: &mut Buffer,
         skip_rows: u16,
     ) {
-        let cell_bg = crate::colors::assistant_bg();
+        let cell_bg = if self.state.mid_turn {
+            crate::colors::assistant_mid_turn_bg()
+        } else {
+            crate::colors::assistant_bg()
+        };
         let bg_style = Style::default().bg(cell_bg);
         fill_rect(buf, area, Some(' '), bg_style);
 
@@ -165,7 +177,11 @@ impl AssistantMarkdownCell {
 
                     let temp_area = Rect::new(0, 0, card_w, full_height);
                     let mut temp_buf = Buffer::empty(temp_area);
-                    let code_bg = crate::colors::code_block_bg();
+                    let code_bg = if self.state.mid_turn {
+                        cell_bg
+                    } else {
+                        crate::colors::code_block_bg()
+                    };
                     let blk = Block::default()
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(crate::colors::border()))
@@ -254,6 +270,14 @@ impl HistoryCell for AssistantMarkdownCell {
         HistoryCellType::Assistant
     }
 
+    fn gutter_symbol(&self) -> Option<&'static str> {
+        if self.state.mid_turn {
+            None
+        } else {
+            super::gutter_symbol_for_kind(self.kind())
+        }
+    }
+
     fn display_lines(&self) -> Vec<Line<'static>> {
         assistant_markdown_lines_with_context(&self.state, self.file_opener, &self.cwd)
     }
@@ -305,11 +329,15 @@ pub(crate) fn assistant_markdown_lines_with_context(
         &mut out,
         file_opener,
         cwd,
-        true,
+        !state.mid_turn,
     );
-    let bright = crate::colors::text_bright();
+    let fg = if state.mid_turn {
+        crate::colors::text_mid()
+    } else {
+        crate::colors::text_bright()
+    };
     for line in out.iter_mut().skip(1) {
-        line.style = line.style.patch(Style::default().fg(bright));
+        line.style = line.style.patch(Style::default().fg(fg));
     }
     out.into_iter().skip(1).collect()
 }
@@ -391,6 +419,12 @@ pub(crate) fn compute_assistant_layout_with_context(
                 let _ = content_lines.pop();
             }
 
+            if content_lines.is_empty() {
+                continue;
+            }
+
+            let code_wrap_width = width.saturating_sub(6) as usize;
+            let content_lines = wrap_code_lines(content_lines, code_wrap_width);
             if content_lines.is_empty() {
                 continue;
             }
@@ -479,6 +513,127 @@ pub(crate) enum AssistantSeg {
         lang_label: Option<String>,
         max_line_width: u16,
     },
+}
+
+fn wrap_code_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'static>> {
+    if width == 0 {
+        return lines;
+    }
+
+    let mut out = Vec::new();
+    for line in lines {
+        let trimmed = trim_code_line_padding(line);
+        out.extend(wrap_code_line(trimmed, width));
+    }
+    out
+}
+
+fn wrap_code_line(line: Line<'static>, width: usize) -> Vec<Line<'static>> {
+    if width == 0 {
+        return vec![line];
+    }
+
+    fn flush_current_line(
+        out: &mut Vec<Line<'static>>,
+        current_spans: &mut Vec<Span<'static>>,
+        style: Style,
+        alignment: Option<Alignment>,
+        current_width: &mut usize,
+    ) {
+        if current_spans.is_empty() {
+            return;
+        }
+        out.push(Line {
+            style,
+            alignment,
+            spans: std::mem::take(current_spans),
+        });
+        *current_width = 0;
+    }
+
+    let line_width: usize = line
+        .spans
+        .iter()
+        .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
+        .sum();
+    if line_width <= width {
+        return vec![line];
+    }
+
+    let mut out: Vec<Line<'static>> = Vec::new();
+    let mut current_spans: Vec<Span<'static>> = Vec::new();
+    let mut current_width = 0usize;
+    let style = line.style;
+    let alignment = line.alignment;
+
+    for span in line.spans {
+        let span_style = span.style;
+        let mut remaining = span.content.into_owned();
+        while !remaining.is_empty() {
+            if current_width >= width {
+                flush_current_line(&mut out, &mut current_spans, style, alignment, &mut current_width);
+            }
+
+            let available = width.saturating_sub(current_width);
+            if available == 0 {
+                continue;
+            }
+
+            let (prefix, suffix, taken) = crate::live_wrap::take_prefix_by_width(&remaining, available);
+            if taken == 0 {
+                if current_width > 0 {
+                    flush_current_line(&mut out, &mut current_spans, style, alignment, &mut current_width);
+                }
+                if let Some((idx, ch)) = remaining.char_indices().next() {
+                    let len = idx + ch.len_utf8();
+                    let piece = remaining[..len].to_string();
+                    current_width += unicode_width::UnicodeWidthStr::width(piece.as_str());
+                    current_spans.push(Span::styled(piece, span_style));
+                    remaining = remaining[len..].to_string();
+                } else {
+                    break;
+                }
+            } else {
+                current_width += taken;
+                current_spans.push(Span::styled(prefix, span_style));
+                remaining = suffix.to_string();
+            }
+
+            if current_width >= width {
+                flush_current_line(&mut out, &mut current_spans, style, alignment, &mut current_width);
+            }
+        }
+    }
+
+    if !current_spans.is_empty() {
+        out.push(Line {
+            style,
+            alignment,
+            spans: current_spans,
+        });
+    } else if out.is_empty() {
+        out.push(Line {
+            style,
+            alignment,
+            spans: Vec::new(),
+        });
+    }
+
+    out
+}
+
+fn trim_code_line_padding(mut line: Line<'static>) -> Line<'static> {
+    let pad_style = Style::default().bg(crate::colors::code_block_bg());
+    while let Some(last) = line.spans.last() {
+        if last.style != pad_style {
+            break;
+        }
+        if !last.content.chars().all(|ch| ch == ' ') {
+            break;
+        }
+        line.spans.pop();
+    }
+    line
 }
 
 // Detect lines that start with a markdown bullet produced by our renderer and return (indent, bullet)
@@ -729,4 +884,24 @@ pub(crate) fn is_horizontal_rule_line(line: &ratatui::text::Line<'_>) -> bool {
     (only('-') && chars.iter().filter(|c| **c == '-').count() >= 3)
         || (only('*') && chars.iter().filter(|c| **c == '*').count() >= 3)
         || (only('_') && chars.iter().filter(|c| **c == '_').count() >= 3)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn line_text(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn wrap_code_line_moves_wide_grapheme() {
+        let line = Line::from(vec![Span::raw("abc界")]);
+        let wrapped = wrap_code_line(line, 4);
+        let rendered: Vec<String> = wrapped.iter().map(line_text).collect();
+        assert_eq!(rendered, vec!["abc", "界"]);
+        for text in rendered {
+            assert!(unicode_width::UnicodeWidthStr::width(text.as_str()) <= 4);
+        }
+    }
 }

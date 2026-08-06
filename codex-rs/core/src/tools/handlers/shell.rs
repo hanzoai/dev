@@ -1,101 +1,250 @@
-use async_trait::async_trait;
-use codex_protocol::models::ShellToolCallParams;
+use codex_features::Feature;
+use codex_protocol::models::ShellCommandToolCallParams;
+use serde_json::Value as JsonValue;
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
-use crate::codex::TurnContext;
 use crate::exec::ExecParams;
-use crate::exec_env::create_env;
+use crate::exec_policy::ExecApprovalRequest;
 use crate::function_tool::FunctionCallError;
-use crate::tools::context::ToolInvocation;
-use crate::tools::context::ToolOutput;
+use crate::session::turn_context::TurnContext;
+use crate::session::turn_context::TurnEnvironment;
+use crate::shell::ShellType;
+use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolPayload;
-use crate::tools::handle_container_exec_with_params;
-use crate::tools::registry::ToolHandler;
-use crate::tools::registry::ToolKind;
+use crate::tools::events::ToolEmitter;
+use crate::tools::events::ToolEventCtx;
+use crate::tools::handlers::apply_granted_turn_permissions;
+use crate::tools::handlers::apply_patch::intercept_apply_patch;
+use crate::tools::handlers::implicit_granted_permissions;
+use crate::tools::handlers::normalize_and_validate_additional_permissions;
+use crate::tools::handlers::parse_arguments;
+use crate::tools::orchestrator::ToolOrchestrator;
+use crate::tools::runtimes::shell::ShellRequest;
+use crate::tools::runtimes::shell::ShellRuntime;
+use crate::tools::runtimes::shell::ShellRuntimeBackend;
+use crate::tools::sandboxing::ToolCtx;
+use codex_protocol::models::AdditionalPermissionProfile;
+use codex_protocol::protocol::ExecCommandSource;
+use codex_tools::ToolName;
+use codex_utils_path_uri::PathUri;
 
-pub struct ShellHandler;
+mod shell_command;
 
-impl ShellHandler {
-    fn to_exec_params(params: ShellToolCallParams, turn_context: &TurnContext) -> ExecParams {
-        ExecParams {
-            command: params.command,
-            cwd: turn_context.resolve_path(params.workdir.clone()),
-            timeout_ms: params.timeout_ms,
-            env: create_env(&turn_context.shell_environment_policy),
-            with_escalated_permissions: params.with_escalated_permissions,
-            justification: params.justification,
-        }
-    }
+pub use shell_command::ShellCommandHandler;
+pub(crate) use shell_command::ShellCommandHandlerOptions;
+
+fn shell_command_payload_command(payload: &ToolPayload) -> Option<String> {
+    let ToolPayload::Function { arguments } = payload else {
+        return None;
+    };
+
+    parse_arguments::<ShellCommandToolCallParams>(arguments)
+        .ok()
+        .map(|params| params.command)
 }
 
-#[async_trait]
-impl ToolHandler for ShellHandler {
-    fn kind(&self) -> ToolKind {
-        ToolKind::Function
-    }
+struct RunExecLikeArgs {
+    tool_name: ToolName,
+    exec_params: ExecParams,
+    cancellation_token: CancellationToken,
+    hook_command: String,
+    shell_type: Option<ShellType>,
+    additional_permissions: Option<AdditionalPermissionProfile>,
+    prefix_rule: Option<Vec<String>>,
+    session: Arc<crate::session::session::Session>,
+    turn: Arc<TurnContext>,
+    turn_environment: TurnEnvironment,
+    tracker: crate::tools::context::SharedTurnDiffTracker,
+    call_id: String,
+    shell_runtime_backend: ShellRuntimeBackend,
+}
 
-    fn matches_kind(&self, payload: &ToolPayload) -> bool {
-        matches!(
-            payload,
-            ToolPayload::Function { .. } | ToolPayload::LocalShell { .. }
+async fn run_exec_like(args: RunExecLikeArgs) -> Result<FunctionToolOutput, FunctionCallError> {
+    let RunExecLikeArgs {
+        tool_name,
+        exec_params,
+        cancellation_token,
+        hook_command,
+        shell_type,
+        additional_permissions,
+        prefix_rule,
+        session,
+        turn,
+        turn_environment,
+        tracker,
+        call_id,
+        shell_runtime_backend,
+    } = args;
+
+    let fs = turn_environment.environment.get_filesystem();
+
+    let explicit_env_overrides = turn
+        .config
+        .permissions
+        .shell_environment_policy
+        .r#set
+        .clone();
+    let exec_permission_approvals_enabled =
+        session.features().enabled(Feature::ExecPermissionApprovals);
+    let requested_additional_permissions = additional_permissions.clone();
+    let effective_additional_permissions = apply_granted_turn_permissions(
+        session.as_ref(),
+        &turn_environment.environment_id,
+        exec_params.cwd.as_path(),
+        exec_params.sandbox_permissions,
+        additional_permissions,
+    )
+    .await;
+    let additional_permissions_allowed = exec_permission_approvals_enabled
+        || (session.features().enabled(Feature::RequestPermissionsTool)
+            && effective_additional_permissions.permissions_preapproved);
+    let normalized_additional_permissions = implicit_granted_permissions(
+        exec_params.sandbox_permissions,
+        requested_additional_permissions.as_ref(),
+        &effective_additional_permissions,
+    )
+    .map_or_else(
+        || {
+            normalize_and_validate_additional_permissions(
+                additional_permissions_allowed,
+                turn.approval_policy(),
+                effective_additional_permissions.sandbox_permissions,
+                effective_additional_permissions.additional_permissions,
+                effective_additional_permissions.permissions_preapproved,
+                &exec_params.cwd,
+            )
+        },
+        |permissions| Ok(Some(permissions)),
+    )
+    .map_err(FunctionCallError::RespondToModel)?;
+
+    // Approval policy guard for explicit escalation in non-OnRequest modes.
+    // Sticky turn permissions have already been approved, so they should
+    // continue through the normal exec approval flow for the command.
+    if effective_additional_permissions
+        .sandbox_permissions
+        .requests_sandbox_override()
+        && !effective_additional_permissions.permissions_preapproved
+        && !matches!(
+            turn.approval_policy(),
+            codex_protocol::protocol::AskForApproval::OnRequest
         )
+    {
+        let approval_policy = turn.approval_policy();
+        return Err(FunctionCallError::RespondToModel(format!(
+            "approval policy is {approval_policy:?}; reject command — you should not ask for escalated permissions if the approval policy is {approval_policy:?}"
+        )));
     }
 
-    async fn handle(&self, invocation: ToolInvocation) -> Result<ToolOutput, FunctionCallError> {
-        let ToolInvocation {
-            session,
-            turn,
-            tracker,
-            sub_id,
-            call_id,
-            tool_name,
-            payload,
-        } = invocation;
-
-        match payload {
-            ToolPayload::Function { arguments } => {
-                let params: ShellToolCallParams =
-                    serde_json::from_str(&arguments).map_err(|e| {
-                        FunctionCallError::RespondToModel(format!(
-                            "failed to parse function arguments: {e:?}"
-                        ))
-                    })?;
-                let exec_params = Self::to_exec_params(params, turn.as_ref());
-                let content = handle_container_exec_with_params(
-                    tool_name.as_str(),
-                    exec_params,
-                    Arc::clone(&session),
-                    Arc::clone(&turn),
-                    Arc::clone(&tracker),
-                    sub_id.clone(),
-                    call_id.clone(),
-                )
-                .await?;
-                Ok(ToolOutput::Function {
-                    content,
-                    success: Some(true),
-                })
-            }
-            ToolPayload::LocalShell { params } => {
-                let exec_params = Self::to_exec_params(params, turn.as_ref());
-                let content = handle_container_exec_with_params(
-                    tool_name.as_str(),
-                    exec_params,
-                    Arc::clone(&session),
-                    Arc::clone(&turn),
-                    Arc::clone(&tracker),
-                    sub_id.clone(),
-                    call_id.clone(),
-                )
-                .await?;
-                Ok(ToolOutput::Function {
-                    content,
-                    success: Some(true),
-                })
-            }
-            _ => Err(FunctionCallError::RespondToModel(format!(
-                "unsupported payload for shell handler: {tool_name}"
-            ))),
-        }
+    // Intercept apply_patch if present.
+    let apply_patch_cwd = PathUri::from_abs_path(&exec_params.cwd);
+    if let Some(output) = intercept_apply_patch(
+        &exec_params.command,
+        &apply_patch_cwd,
+        fs.as_ref(),
+        turn_environment.clone(),
+        session.clone(),
+        turn.clone(),
+        Some(&tracker),
+        &call_id,
+        tool_name.name.as_str(),
+    )
+    .await?
+    {
+        return Ok(output);
     }
+
+    let source = ExecCommandSource::Agent;
+    let plugin_attribution =
+        turn.plugin_attribution_for_command(&exec_params.command, &exec_params.cwd);
+    let emitter = ToolEmitter::shell(
+        exec_params.command.clone(),
+        exec_params.cwd.clone(),
+        source,
+        plugin_attribution,
+    );
+    let event_ctx = ToolEventCtx::new(
+        session.as_ref(),
+        turn.as_ref(),
+        &call_id,
+        /*turn_diff_tracker*/ None,
+    );
+    emitter.begin(event_ctx).await;
+
+    let exec_approval_requirement = session
+        .services
+        .exec_policy
+        .create_exec_approval_requirement_for_command(ExecApprovalRequest {
+            command: &exec_params.command,
+            approval_policy: turn.approval_policy(),
+            permission_profile: turn_environment.permission_profile().clone(),
+            windows_sandbox_level: turn.windows_sandbox_level,
+            sandbox_permissions: if effective_additional_permissions.permissions_preapproved {
+                codex_protocol::models::SandboxPermissions::UseDefault
+            } else {
+                effective_additional_permissions.sandbox_permissions
+            },
+            prefix_rule,
+        })
+        .await;
+
+    let req = ShellRequest {
+        command: exec_params.command.clone(),
+        turn_environment: turn_environment.clone(),
+        shell_type,
+        hook_command,
+        cwd: exec_params.cwd.clone(),
+        timeout_ms: exec_params.expiration.timeout_ms(),
+        cancellation_token,
+        env: exec_params.env.clone(),
+        explicit_env_overrides,
+        network: exec_params.network.clone(),
+        sandbox_permissions: effective_additional_permissions.sandbox_permissions,
+        additional_permissions: normalized_additional_permissions,
+        #[cfg(unix)]
+        additional_permissions_preapproved: effective_additional_permissions
+            .permissions_preapproved,
+        justification: exec_params.justification.clone(),
+        exec_approval_requirement,
+    };
+    let mut orchestrator = ToolOrchestrator::new();
+    let mut runtime = ShellRuntime::for_shell_command(shell_runtime_backend);
+    let tool_ctx = ToolCtx {
+        session: session.clone(),
+        turn: turn.clone(),
+        call_id: call_id.clone(),
+        tool_name,
+    };
+    let out = orchestrator
+        .run(&mut runtime, &req, &tool_ctx, &turn, turn.approval_policy())
+        .await
+        .map(|result| result.output);
+    let event_ctx = ToolEventCtx::new(
+        session.as_ref(),
+        turn.as_ref(),
+        &call_id,
+        /*turn_diff_tracker*/ None,
+    );
+    let post_tool_use_response = out
+        .as_ref()
+        .ok()
+        .map(|output| {
+            crate::tools::format_exec_output_str(output, turn.model_info.truncation_policy.into())
+        })
+        .map(JsonValue::String);
+    let content = emitter
+        .finish(event_ctx, out, /*applied_patch_delta*/ None)
+        .await?;
+    Ok(FunctionToolOutput {
+        body: vec![
+            codex_protocol::models::FunctionCallOutputContentItem::InputText { text: content },
+        ],
+        success: Some(true),
+        post_tool_use_response,
+    })
 }
+
+#[cfg(test)]
+#[path = "shell_tests.rs"]
+mod tests;

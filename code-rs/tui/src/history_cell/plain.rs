@@ -1,5 +1,6 @@
 use super::*;
 use super::text::{message_lines_from_ratatui, message_lines_to_ratatui};
+use crate::account_label::key_suffix;
 use crate::history::state::{
     HistoryId,
     InlineSpan,
@@ -13,12 +14,24 @@ use crate::history::state::{
     TextEmphasis,
     TextTone,
 };
+use crate::colors;
+use crate::sanitize::Mode as SanitizeMode;
+use crate::sanitize::Options as SanitizeOptions;
+use crate::sanitize::sanitize_for_tui;
+use crate::slash_command::SlashCommand;
 use crate::theme::{current_theme, Theme};
+use code_ansi_escape::ansi_escape_line;
+use code_common::create_config_summary_entries;
+use code_core::config::Config;
+use code_core::config_types::ReasoningEffort;
+use code_core::protocol::{SessionConfiguredEvent, TokenUsage};
+use code_protocol::num_format::format_with_separators_u64;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Padding, Paragraph, Wrap};
+use std::collections::HashMap;
 
 struct PlainLayoutCache {
     requested_width: u16,
@@ -53,8 +66,46 @@ pub(crate) struct PlainHistoryCell {
 }
 
 impl PlainHistoryCell {
+    pub(crate) fn is_auto_review_notice(&self) -> bool {
+        self.state
+            .header()
+            .map(|h| h.label.to_lowercase().contains("auto review"))
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn auto_review_bg() -> ratatui::style::Color {
+        // Match the diff success background tint for consistent success styling.
+        colors::tint_background_toward(colors::success())
+    }
+
+    pub(crate) fn auto_review_padding() -> (u16, u16) {
+        // Symmetric top/bottom padding for auto-review notices.
+        (1, 1)
+    }
+
+    fn is_warning_notice(&self) -> bool {
+        if self.state.kind != HistoryCellType::Notice {
+            return false;
+        }
+
+        self.state
+            .body()
+            .first()
+            .and_then(|line| line.spans.first())
+            .map(|span| span.text.starts_with("⚠ "))
+            .unwrap_or(false)
+    }
     pub(crate) fn from_state(state: PlainMessageState) -> Self {
-        let kind = history_cell_kind_from_plain(state.kind);
+        let mut kind = history_cell_kind_from_plain(state.kind);
+        if kind == HistoryCellType::User {
+            if let Some(first_line) = state.lines.first() {
+                if first_line.spans.first().map_or(false, |span| {
+                    span.text.starts_with("[Compaction Summary]")
+                }) {
+                    kind = HistoryCellType::CompactionSummary;
+                }
+            }
+        }
         Self {
             state: PlainCellState {
                 message: state,
@@ -116,8 +167,11 @@ impl PlainHistoryCell {
             };
         }
 
+        let is_auto_review = self.is_auto_review_notice();
         let cell_bg = match self.state.kind {
             HistoryCellType::Assistant => crate::colors::assistant_bg(),
+            HistoryCellType::CompactionSummary => crate::colors::background(),
+            _ if is_auto_review => Self::auto_review_bg(),
             _ => crate::colors::background(),
         };
         let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
@@ -125,10 +179,20 @@ impl PlainHistoryCell {
         let trimmed_lines = self.display_lines_trimmed();
         let text = Text::from(trimmed_lines.clone());
         let paragraph = Paragraph::new(text).wrap(Wrap { trim: false });
-        let height: u16 = paragraph
+
+        let (pad_top, pad_bottom) = if is_auto_review {
+            Self::auto_review_padding()
+        } else {
+            (0, 0)
+        };
+
+        let inner_height: u16 = paragraph
             .line_count(effective_width)
             .try_into()
             .unwrap_or(0);
+        let height = inner_height
+            .saturating_add(pad_top)
+            .saturating_add(pad_bottom);
 
         if height == 0 {
             return PlainLayoutCache {
@@ -142,7 +206,8 @@ impl PlainHistoryCell {
         let render_height = height.max(1);
         let render_area = Rect::new(0, 0, requested_width, render_height);
         let mut buffer = Buffer::empty(render_area);
-        fill_rect(&mut buffer, render_area, Some(' '), bg_style);
+        // Paint full cell (including padding) with the cell background so tint extends through padding.
+        fill_rect(&mut buffer, render_area, Some(' '), Style::default().bg(cell_bg).fg(crate::colors::text()));
 
         let paragraph_lines = Text::from(trimmed_lines);
         if matches!(self.state.kind, HistoryCellType::User) {
@@ -161,11 +226,22 @@ impl PlainHistoryCell {
                 .render(render_area, &mut buffer);
         } else {
             let block = Block::default().style(Style::default().bg(cell_bg));
+            let inner_area = if pad_top + pad_bottom < render_height {
+                Rect::new(
+                    render_area.x,
+                    render_area.y.saturating_add(pad_top),
+                    render_area.width,
+                    render_height.saturating_sub(pad_top + pad_bottom),
+                )
+            } else {
+                render_area
+            };
+
             Paragraph::new(paragraph_lines)
                 .block(block)
                 .wrap(Wrap { trim: false })
                 .style(Style::default().bg(cell_bg))
-                .render(render_area, &mut buffer);
+                .render(inner_area, &mut buffer);
         }
 
         PlainLayoutCache {
@@ -206,6 +282,19 @@ impl HistoryCell for PlainHistoryCell {
         self.state.kind
     }
 
+    fn gutter_symbol(&self) -> Option<&'static str> {
+        if self.is_warning_notice() {
+            return Some("⚠");
+        }
+        if let Some(header) = self.state.header() {
+            let label = header.label.trim().to_lowercase();
+            if label == "auto review" {
+                return Some("•");
+            }
+        }
+        super::gutter_symbol_for_kind(self.kind())
+    }
+
     fn display_lines(&self) -> Vec<Line<'static>> {
         let theme = current_theme();
         let mut lines: Vec<Line<'static>> = Vec::new();
@@ -216,12 +305,20 @@ impl HistoryCell for PlainHistoryCell {
             }
         }
 
-        lines.extend(message_lines_to_ratatui(self.state.body(), &theme));
+        let mut body_lines = message_lines_to_ratatui(self.state.body(), &theme);
+        if self.is_warning_notice()
+            && let Some(first_line) = body_lines.first_mut()
+            && let Some(first_span) = first_line.spans.first_mut()
+            && let Some(stripped) = first_span.content.as_ref().strip_prefix("⚠ ")
+        {
+            first_span.content = stripped.to_string().into();
+        }
+        lines.extend(body_lines);
         lines
     }
 
     fn has_custom_render(&self) -> bool {
-        matches!(self.state.kind, HistoryCellType::User)
+        matches!(self.state.kind, HistoryCellType::User) || self.is_auto_review_notice()
     }
 
     fn desired_height(&self, width: u16) -> u16 {
@@ -248,11 +345,13 @@ impl HistoryCell for PlainHistoryCell {
             requested_width
         };
 
+        let is_auto_review = self.is_auto_review_notice();
         let cell_bg = match self.state.kind {
             HistoryCellType::Assistant => crate::colors::assistant_bg(),
+            _ if is_auto_review => Self::auto_review_bg(),
             _ => crate::colors::background(),
         };
-        if matches!(self.state.kind, HistoryCellType::Assistant) {
+        if matches!(self.state.kind, HistoryCellType::Assistant) || is_auto_review {
             let bg_style = Style::default().bg(cell_bg).fg(crate::colors::text());
             fill_rect(buf, area, Some(' '), bg_style);
         }
@@ -297,7 +396,6 @@ impl HistoryCell for PlainHistoryCell {
         trim_empty_lines(self.display_lines())
     }
 }
-
 struct PlainMessageStateBuilder;
 
 impl PlainMessageStateBuilder {
@@ -460,4 +558,515 @@ fn line_plain_text(line: &Line<'_>) -> String {
             .collect::<Vec<String>>()
             .join("")
     }
+}
+
+pub(crate) fn new_session_info(
+    config: &Config,
+    event: SessionConfiguredEvent,
+    is_first_event: bool,
+    latest_version: Option<&str>,
+) -> PlainMessageState {
+    let SessionConfiguredEvent {
+        model,
+        session_id: _,
+        history_log_id: _,
+        history_entry_count: _,
+        ..
+    } = event;
+
+    if is_first_event {
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(Line::from("notice".dim()));
+        lines.extend(popular_commands_lines(latest_version));
+        plain_message_state_from_lines(lines, HistoryCellType::Notice)
+    } else if config.model == model {
+        plain_message_state_from_lines(Vec::new(), HistoryCellType::Notice)
+    } else {
+        let lines = vec![
+            Line::from("model changed:")
+                .fg(crate::colors::keyword())
+                .bold(),
+            Line::from(format!("requested: {}", config.model)),
+            Line::from(format!("used: {model}")),
+            // No empty line at end - trimming and spacing handled by renderer
+        ];
+        plain_message_state_from_lines(lines, HistoryCellType::Notice)
+    }
+}
+
+/// Build the common lines for the "Popular commands" section (without the leading
+/// "notice" marker). Shared between the initial session info and the startup prelude.
+fn popular_commands_lines(_latest_version: Option<&str>) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::styled(
+        "Popular commands:",
+        Style::default().fg(crate::colors::text_bright()),
+    ));
+    lines.push(Line::from(vec![
+        Span::styled("/settings", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Settings.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/auto", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Auto.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/chrome", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Chrome.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/plan", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Plan.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/code", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Code.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("/model", Style::default().fg(crate::colors::primary())),
+        Span::from(" - "),
+        Span::from(SlashCommand::Model.description())
+            .style(Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(
+            " NEW fast mode & 1M Auto Context",
+            Style::default().fg(crate::colors::primary()),
+        ),
+    ]));
+
+    lines
+}
+
+pub(crate) fn new_popular_commands_notice(
+    _connecting_mcp: bool,
+    latest_version: Option<&str>,
+) -> PlainMessageState {
+    if crate::chatwidget::is_test_mode() {
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(Line::from(""));
+        let legacy_line = "  /code - perform a coding task (multiple agents)";
+        #[cfg(any(test, feature = "test-helpers"))]
+        println!("legacy command line: {legacy_line}");
+        lines.push(Line::from(legacy_line));
+        return plain_message_state_from_lines(lines, HistoryCellType::Notice);
+    }
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from("notice".dim()));
+    lines.extend(popular_commands_lines(latest_version));
+    // Connecting status is now rendered as a separate BackgroundEvent cell
+    // with its own gutter icon and spacing. Keep this notice focused.
+    plain_message_state_from_lines(lines, HistoryCellType::Notice)
+}
+
+pub(crate) fn new_user_prompt(message: String) -> PlainMessageState {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from("user"));
+    // Sanitize user-provided text for terminal safety and stable layout:
+    // - Normalize common TTY overwrite sequences (\r, \x08, ESC[K)
+    // - Expand tabs to spaces with a fixed tab stop so wrapping is deterministic
+    // - Parse ANSI sequences into spans so we never emit raw control bytes
+    let normalized = normalize_overwrite_sequences(&message);
+    let sanitized = sanitize_for_tui(
+        &normalized,
+        SanitizeMode::AnsiPreserving,
+        SanitizeOptions {
+            expand_tabs: true,
+            tabstop: 4,
+            debug_markers: false,
+        },
+    );
+    // Build content lines with ANSI converted to styled spans
+    let content: Vec<Line<'static>> = sanitized.lines().map(|l| ansi_escape_line(l)).collect();
+    let content = trim_empty_lines(content);
+    lines.extend(content);
+    // No empty line at end - trimming and spacing handled by renderer
+    plain_message_state_from_lines(lines, HistoryCellType::User)
+}
+
+/// Render a queued user message that will be sent in the next turn.
+/// Visually identical to a normal user cell, but the header shows a
+/// small "(queued)" suffix so it’s clear it hasn’t been executed yet.
+pub(crate) fn new_queued_user_prompt(message: String) -> PlainMessageState {
+    use ratatui::style::Style;
+    use ratatui::text::Span;
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    // Header: "user (queued)"
+    lines.push(Line::from(vec![
+        Span::from("user "),
+        Span::from("(queued)").style(Style::default().fg(crate::colors::text_dim())),
+    ]));
+    // Normalize and render body like normal user messages
+    let normalized = normalize_overwrite_sequences(&message);
+    let sanitized = sanitize_for_tui(
+        &normalized,
+        SanitizeMode::AnsiPreserving,
+        SanitizeOptions {
+            expand_tabs: true,
+            tabstop: 4,
+            debug_markers: false,
+        },
+    );
+    let content: Vec<Line<'static>> = sanitized.lines().map(|l| ansi_escape_line(l)).collect();
+    let content = trim_empty_lines(content);
+    lines.extend(content);
+    plain_message_state_from_lines(lines, HistoryCellType::User)
+}
+
+#[allow(dead_code)]
+pub(crate) fn new_text_line(line: Line<'static>) -> PlainMessageState {
+    plain_message_state_from_lines(vec![line], HistoryCellType::Notice)
+}
+
+pub(crate) fn new_error_event(message: String) -> PlainMessageState {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::styled(
+        "error",
+        Style::default()
+            .fg(crate::colors::error())
+            .add_modifier(Modifier::BOLD),
+    ));
+    let msg_norm = normalize_overwrite_sequences(&message);
+    lines.extend(
+        msg_norm
+            .lines()
+            .map(|line| ansi_escape_line(line).style(Style::default().fg(crate::colors::error()))),
+    );
+    // No empty line at end - trimming and spacing handled by renderer
+    plain_message_state_from_lines(lines, HistoryCellType::Error)
+}
+
+pub(crate) fn new_reasoning_output(reasoning_effort: &ReasoningEffort) -> PlainMessageState {
+    let lines = vec![
+        Line::from(""),
+        Line::from("Reasoning Effort")
+            .fg(crate::colors::keyword())
+            .bold(),
+        Line::from(format!("Value: {}", reasoning_effort)),
+    ];
+    plain_message_state_from_lines(lines, HistoryCellType::Notice)
+}
+
+pub(crate) fn new_model_output(model: &str, effort: ReasoningEffort) -> PlainMessageState {
+    let lines = vec![
+        Line::from(""),
+        Line::from("Model Selection")
+            .fg(crate::colors::keyword())
+            .bold(),
+        Line::from(format!("Model: {}", model)),
+        Line::from(format!("Reasoning Effort: {}", effort)),
+    ];
+    plain_message_state_from_lines(lines, HistoryCellType::Notice)
+}
+
+fn response_model_matches_request(requested_model: &str, response_model: &str) -> bool {
+    let requested = requested_model.trim().to_ascii_lowercase();
+    let response = response_model.trim().to_ascii_lowercase();
+
+    if response == requested {
+        return true;
+    }
+
+    response
+        .strip_prefix(&requested)
+        .is_some_and(|suffix| suffix.starts_with('-') && suffix.len() > 1)
+}
+
+pub(crate) fn new_status_output(
+    config: &Config,
+    total_usage: &TokenUsage,
+    last_usage: &TokenUsage,
+    requested_model: Option<&str>,
+    latest_response_model: Option<&str>,
+) -> PlainMessageState {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    lines.push(Line::from("/status").fg(crate::colors::keyword()));
+    lines.push(Line::from(""));
+
+    // 🔧 Configuration
+    lines.push(Line::from(vec!["🔧 ".into(), "Configuration".bold()]));
+
+    // Prepare config summary with custom prettification
+    let summary_entries = create_config_summary_entries(config);
+    let summary_map: HashMap<String, String> = summary_entries
+        .iter()
+        .map(|(key, value)| (key.to_string(), value.clone()))
+        .collect();
+
+    let lookup = |key: &str| -> String { summary_map.get(key).unwrap_or(&String::new()).clone() };
+    let title_case = |s: &str| -> String {
+        s.split_whitespace()
+            .map(|w| {
+                let mut chars = w.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+
+    // Format model name with proper capitalization
+    let formatted_model = if config.model.to_lowercase().starts_with("gpt-") {
+        format!("GPT{}", &config.model[3..])
+    } else {
+        config.model.clone()
+    };
+    lines.push(Line::from(vec![
+        "  • Name: ".into(),
+        formatted_model.into(),
+    ]));
+    let provider_disp = pretty_provider_name(&config.model_provider_id);
+    lines.push(Line::from(vec![
+        "  • Provider: ".into(),
+        provider_disp.into(),
+    ]));
+
+    // Only show Reasoning fields if present in config summary
+    let reff = lookup("reasoning effort");
+    if !reff.is_empty() {
+        lines.push(Line::from(vec![
+            "  • Reasoning Effort: ".into(),
+            title_case(&reff).into(),
+        ]));
+    }
+    let rsum = lookup("reasoning summaries");
+    if !rsum.is_empty() {
+        lines.push(Line::from(vec![
+            "  • Reasoning Summaries: ".into(),
+            title_case(&rsum).into(),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+
+    // 🔁 Model routing
+    lines.push(Line::from(vec!["🔁 ".into(), "Model Routing".bold()]));
+    let requested_display = requested_model.unwrap_or(config.model.as_str());
+    lines.push(Line::from(vec![
+        "  • Requested model: ".into(),
+        requested_display.to_string().into(),
+    ]));
+    if let Some(response_model) = latest_response_model {
+        let same_model = response_model_matches_request(requested_display, response_model);
+        let (match_marker, match_label, match_style) = if same_model {
+            (
+                "✓",
+                "requested model matches response",
+                Style::default().fg(colors::success()),
+            )
+        } else {
+            (
+                "✗",
+                "requested model does not match response",
+                Style::default().fg(colors::error()),
+            )
+        };
+        lines.push(Line::from(vec![
+            "  • Latest response model: ".into(),
+            response_model.to_string().into(),
+        ]));
+        lines.push(Line::from(vec![
+            "  • Match: ".into(),
+            Span::styled(format!("{match_marker} {match_label}"), match_style),
+        ]));
+    } else {
+        lines.push(Line::from("  • Latest response model: unavailable"));
+        lines.push(Line::from("  • Match: ? waiting for a completed response"));
+    }
+
+    lines.push(Line::from(""));
+
+    // 🔐 Authentication
+    lines.push(Line::from(vec!["🔐 ".into(), "Authentication".bold()]));
+    {
+        use code_login::AuthMode;
+        use code_login::CodexAuth;
+        use code_login::OPENAI_API_KEY_ENV_VAR;
+        use code_login::try_read_auth_json;
+
+        // Determine effective auth mode the core would choose
+        let auth_result = CodexAuth::from_code_home(
+            &config.code_home,
+            AuthMode::ChatGPT,
+            &config.responses_originator_header,
+        );
+
+        match auth_result {
+            Ok(Some(auth)) => match auth.mode {
+                AuthMode::ApiKey => {
+                    // Prefer suffix from auth.json; fall back to env var if needed
+                    let suffix =
+                        try_read_auth_json(&code_login::get_auth_file(&config.code_home))
+                            .ok()
+                            .and_then(|a| a.openai_api_key)
+                            .or_else(|| std::env::var(OPENAI_API_KEY_ENV_VAR).ok())
+                            .map(|k| key_suffix(&k))
+                            .unwrap_or_else(|| "????".to_string());
+                    lines.push(Line::from(format!("  • Method: API key (…{suffix})")));
+                }
+                AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens | AuthMode::Headers => {
+                    let account_id = auth
+                        .get_account_id()
+                        .unwrap_or_else(|| "unknown".to_string());
+                    lines.push(Line::from(format!(
+                        "  • Method: ChatGPT account (account_id: {account_id})"
+                    )));
+                }
+            },
+            _ => {
+                lines.push(Line::from("  • Method: unauthenticated"));
+            }
+        }
+    }
+
+    lines.push(Line::from(""));
+
+    // 📊 Token Usage
+    lines.push(Line::from(vec!["📊 ".into(), "Token Usage".bold()]));
+    // Input: <input> [+ <cached> cached]
+    let mut input_line_spans: Vec<Span<'static>> = vec![
+        "  • Input: ".into(),
+        format_with_separators_u64(last_usage.non_cached_input()).into(),
+    ];
+    if last_usage.cached_input_tokens > 0 {
+        input_line_spans.push(
+            format!(
+                " (+ {} cached)",
+                format_with_separators_u64(last_usage.cached_input_tokens)
+            )
+            .into(),
+        );
+    }
+    lines.push(Line::from(input_line_spans));
+    // Output: <output>
+    lines.push(Line::from(vec![
+        "  • Output: ".into(),
+        format_with_separators_u64(last_usage.output_tokens).into(),
+    ]));
+    // Total: <total>
+    lines.push(Line::from(vec![
+        "  • Total: ".into(),
+        format_with_separators_u64(last_usage.blended_total()).into(),
+    ]));
+    lines.push(Line::from(vec![
+        "  • Session total: ".into(),
+        format_with_separators_u64(total_usage.blended_total()).into(),
+    ]));
+
+    // 📐 Model Limits
+    let context_window = config.model_context_window;
+    let max_output_tokens = config.model_max_output_tokens;
+    let auto_compact_limit = config.model_auto_compact_token_limit;
+
+    if context_window.is_some() || max_output_tokens.is_some() || auto_compact_limit.is_some() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec!["📐 ".into(), "Model Limits".bold()]));
+
+        if let Some(context_window) = context_window {
+            let used = last_usage.tokens_in_context_window().min(context_window);
+            let percent_full = if context_window > 0 {
+                ((used as f64 / context_window as f64) * 100.0).min(100.0)
+            } else {
+                0.0
+            };
+            lines.push(Line::from(format!(
+                "  • Context window: {} used of {} ({:.0}% full)",
+                format_with_separators_u64(used),
+                format_with_separators_u64(context_window),
+                percent_full
+            )));
+        }
+
+        if let Some(max_output_tokens) = max_output_tokens {
+            lines.push(Line::from(format!(
+                "  • Max output tokens: {}",
+                format_with_separators_u64(max_output_tokens)
+            )));
+        }
+
+        match auto_compact_limit {
+            Some(limit) if limit > 0 => {
+                let limit_u64 = limit as u64;
+                let remaining = limit_u64.saturating_sub(total_usage.total_tokens);
+                lines.push(Line::from(format!(
+                    "  • Auto-compact threshold: {} ({} remaining)",
+                    format_with_separators_u64(limit_u64),
+                    format_with_separators_u64(remaining)
+                )));
+                if total_usage.total_tokens > limit_u64 {
+                    lines.push(Line::from("    • Compacting will trigger on the next turn".dim()));
+                }
+            }
+            _ => {
+                if let Some(window) = context_window {
+                    if window > 0 {
+                        let used = last_usage.tokens_in_context_window();
+                        let remaining = window.saturating_sub(used);
+                        let percent_left = if window == 0 {
+                            0.0
+                        } else {
+                            (remaining as f64 / window as f64) * 100.0
+                        };
+                        lines.push(Line::from(format!(
+                            "  • Context window: {} used of {} ({:.0}% left)",
+                            format_with_separators_u64(used),
+                            format_with_separators_u64(window),
+                            percent_left
+                        )));
+                        lines.push(Line::from(format!(
+                            "  • {} tokens before overflow",
+                            format_with_separators_u64(remaining)
+                        )));
+                        lines.push(Line::from("  • Auto-compaction runs after overflow errors".to_string()));
+                    } else {
+                        lines.push(Line::from("  • Auto-compaction runs after overflow errors".to_string()));
+                    }
+                } else {
+                    lines.push(Line::from("  • Auto-compaction runs after overflow errors".to_string()));
+                }
+            }
+        }
+    }
+
+    plain_message_state_from_lines(lines, HistoryCellType::Notice)
+}
+
+pub(crate) fn new_warning_event(message: String) -> PlainMessageState {
+    let warn_style = Style::default().fg(crate::colors::warning());
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from("notice"));
+
+    let mut message_lines = message.lines();
+    if let Some(first) = message_lines.next() {
+        lines.push(Line::from(vec![Span::styled(format!("⚠ {first}"), warn_style)]));
+        lines.extend(message_lines.map(|line| Line::from(vec![Span::styled(line.to_string(), warn_style)])));
+    }
+
+    plain_message_state_from_lines(lines, HistoryCellType::Notice)
+}
+
+pub(crate) fn new_prompts_output() -> PlainMessageState {
+    let lines: Vec<Line<'static>> = vec![
+        Line::from("/prompts").fg(crate::colors::keyword()),
+        Line::from(""),
+        Line::from(" 1. Explain this codebase"),
+        Line::from(" 2. Summarize recent commits"),
+        Line::from(" 3. Implement {feature}"),
+        Line::from(" 4. Find and fix a bug in @filename"),
+        Line::from(" 5. Write tests for @filename"),
+        Line::from(" 6. Improve documentation in @filename"),
+        Line::from(""),
+    ];
+    plain_message_state_from_lines(lines, HistoryCellType::Notice)
 }

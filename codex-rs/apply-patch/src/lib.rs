@@ -1,35 +1,44 @@
+mod invocation;
 mod parser;
 mod seek_sequence;
 mod standalone_executable;
+mod streaming_parser;
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::io;
 use std::path::PathBuf;
-use std::str::Utf8Error;
-use std::sync::LazyLock;
 
 use anyhow::Context;
 use anyhow::Result;
+use codex_exec_server::CreateDirectoryOptions;
+use codex_exec_server::ExecutorFileSystem;
+use codex_exec_server::FileSystemSandboxContext;
+use codex_exec_server::RemoveOptions;
+use codex_utils_path_uri::PathUri;
+use codex_utils_path_uri::PathUriParseError;
 pub use parser::Hunk;
 pub use parser::ParseError;
 use parser::ParseError::*;
-use parser::UpdateFileChunk;
+pub use parser::UpdateFileChunk;
 pub use parser::parse_patch;
 use similar::TextDiff;
+pub use streaming_parser::StreamingPatchParser;
 use thiserror::Error;
-use tree_sitter::LanguageError;
-use tree_sitter::Parser;
-use tree_sitter::Query;
-use tree_sitter::QueryCursor;
-use tree_sitter::StreamingIterator;
-use tree_sitter_bash::LANGUAGE as BASH;
 
+pub use invocation::maybe_parse_apply_patch_verified;
+pub use invocation::verify_apply_patch_args;
 pub use standalone_executable::main;
 
-/// Detailed instructions for gpt-4.1 on how to use the `apply_patch` tool.
-pub const APPLY_PATCH_TOOL_INSTRUCTIONS: &str = include_str!("../apply_patch_tool_instructions.md");
+use crate::invocation::ExtractHeredocError;
 
-const APPLY_PATCH_COMMANDS: [&str; 2] = ["apply_patch", "applypatch"];
+/// Special argv[1] flag used when the Codex executable self-invokes to run the
+/// internal `apply_patch` path.
+///
+/// Although this constant lives in `codex-apply-patch` (to avoid forcing
+/// `codex-arg0` to depend on `codex-core`), it remains part of the "codex core"
+/// process-invocation contract for the standalone `apply_patch` command
+/// surface.
+pub const CODEX_CORE_APPLY_PATCH_ARG1: &str = "--codex-run-as-apply-patch";
 
 #[derive(Debug, Error, PartialEq)]
 pub enum ApplyPatchError {
@@ -40,6 +49,9 @@ pub enum ApplyPatchError {
     /// Error that occurs while computing replacements when applying patch chunks
     #[error("{0}")]
     ComputeReplacements(String),
+    /// A patch path could not be resolved as a path URI.
+    #[error(transparent)]
+    PathUri(#[from] PathUriParseError),
     /// A raw patch body was provided without an explicit `apply_patch` invocation.
     #[error(
         "patch detected without explicit call to apply_patch. Rerun as [\"apply_patch\", \"<patch>\"]"
@@ -79,14 +91,6 @@ impl PartialEq for IoError {
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum MaybeApplyPatch {
-    Body(ApplyPatchArgs),
-    ShellParseError(ExtractHeredocError),
-    PatchParseError(ParseError),
-    NotApplyPatch,
-}
-
 /// Both the raw PATCH argument to `apply_patch` as well as the PATCH argument
 /// parsed into hunks.
 #[derive(Debug, PartialEq)]
@@ -94,33 +98,7 @@ pub struct ApplyPatchArgs {
     pub patch: String,
     pub hunks: Vec<Hunk>,
     pub workdir: Option<String>,
-}
-
-pub fn maybe_parse_apply_patch(argv: &[String]) -> MaybeApplyPatch {
-    match argv {
-        // Direct invocation: apply_patch <patch>
-        [cmd, body] if APPLY_PATCH_COMMANDS.contains(&cmd.as_str()) => match parse_patch(body) {
-            Ok(source) => MaybeApplyPatch::Body(source),
-            Err(e) => MaybeApplyPatch::PatchParseError(e),
-        },
-        // Bash heredoc form: (optional `cd <path> &&`) apply_patch <<'EOF' ...
-        [bash, flag, script] if bash == "bash" && flag == "-lc" => {
-            match extract_apply_patch_from_bash(script) {
-                Ok((body, workdir)) => match parse_patch(&body) {
-                    Ok(mut source) => {
-                        source.workdir = workdir;
-                        MaybeApplyPatch::Body(source)
-                    }
-                    Err(e) => MaybeApplyPatch::PatchParseError(e),
-                },
-                Err(ExtractHeredocError::CommandDidNotStartWithApplyPatch) => {
-                    MaybeApplyPatch::NotApplyPatch
-                }
-                Err(e) => MaybeApplyPatch::ShellParseError(e),
-            }
-        }
-        _ => MaybeApplyPatch::NotApplyPatch,
-    }
+    pub environment_id: Option<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -133,7 +111,7 @@ pub enum ApplyPatchFileChange {
     },
     Update {
         unified_diff: String,
-        move_path: Option<PathBuf>,
+        move_path: Option<PathUri>,
         /// new_content that will result after the unified_diff is applied.
         new_content: String,
     },
@@ -158,15 +136,15 @@ pub enum MaybeApplyPatchVerified {
 /// construction, all paths should be absolute paths.
 #[derive(Debug, PartialEq)]
 pub struct ApplyPatchAction {
-    changes: HashMap<PathBuf, ApplyPatchFileChange>,
+    changes: HashMap<PathUri, ApplyPatchFileChange>,
 
-    /// The raw patch argument that can be used with `apply_patch` as an exec
-    /// call. i.e., if the original arg was parsed in "lenient" mode with a
+    /// The raw patch argument that can be used to apply the patch. i.e., if the
+    /// original arg was parsed in "lenient" mode with a
     /// heredoc, this should be the value without the heredoc wrapper.
     pub patch: String,
 
     /// The working directory that was used to resolve relative paths in the patch.
-    pub cwd: PathBuf,
+    pub cwd: PathUri,
 }
 
 impl ApplyPatchAction {
@@ -175,22 +153,15 @@ impl ApplyPatchAction {
     }
 
     /// Returns the changes that would be made by applying the patch.
-    pub fn changes(&self) -> &HashMap<PathBuf, ApplyPatchFileChange> {
+    pub fn changes(&self) -> &HashMap<PathUri, ApplyPatchFileChange> {
         &self.changes
     }
 
     /// Should be used exclusively for testing. (Not worth the overhead of
     /// creating a feature flag for this.)
-    pub fn new_add_for_test(path: &Path, content: String) -> Self {
-        if !path.is_absolute() {
-            panic!("path must be absolute");
-        }
-
+    pub fn new_add_for_test(path: &PathUri, content: String) -> Self {
         #[expect(clippy::expect_used)]
-        let filename = path
-            .file_name()
-            .expect("path should not be empty")
-            .to_string_lossy();
+        let filename = path.basename().expect("path should not be empty");
         let patch = format!(
             r#"*** Begin Patch
 *** Update File: {filename}
@@ -198,288 +169,126 @@ impl ApplyPatchAction {
 + {content}
 *** End Patch"#,
         );
-        let changes = HashMap::from([(path.to_path_buf(), ApplyPatchFileChange::Add { content })]);
+        let changes = HashMap::from([(path.clone(), ApplyPatchFileChange::Add { content })]);
         #[expect(clippy::expect_used)]
         Self {
             changes,
-            cwd: path
-                .parent()
-                .expect("path should have parent")
-                .to_path_buf(),
+            cwd: path.parent().expect("path should have parent"),
             patch,
         }
     }
 }
 
-/// cwd must be an absolute path so that we can resolve relative paths in the
-/// patch.
-pub fn maybe_parse_apply_patch_verified(argv: &[String], cwd: &Path) -> MaybeApplyPatchVerified {
-    // Detect a raw patch body passed directly as the command or as the body of a bash -lc
-    // script. In these cases, report an explicit error rather than applying the patch.
-    match argv {
-        [body] => {
-            if parse_patch(body).is_ok() {
-                return MaybeApplyPatchVerified::CorrectnessError(
-                    ApplyPatchError::ImplicitInvocation,
-                );
-            }
-        }
-        [bash, flag, script] if bash == "bash" && flag == "-lc" => {
-            if parse_patch(script).is_ok() {
-                return MaybeApplyPatchVerified::CorrectnessError(
-                    ApplyPatchError::ImplicitInvocation,
-                );
-            }
-        }
-        _ => {}
+/// Textual file changes that were actually committed while applying a patch.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppliedPatchDelta {
+    changes: Vec<AppliedPatchChange>,
+    exact: bool,
+}
+
+impl AppliedPatchDelta {
+    fn new(changes: Vec<AppliedPatchChange>, exact: bool) -> Self {
+        Self { changes, exact }
     }
 
-    match maybe_parse_apply_patch(argv) {
-        MaybeApplyPatch::Body(ApplyPatchArgs {
-            patch,
-            hunks,
-            workdir,
-        }) => {
-            let effective_cwd = workdir
-                .as_ref()
-                .map(|dir| {
-                    let path = Path::new(dir);
-                    if path.is_absolute() {
-                        path.to_path_buf()
-                    } else {
-                        cwd.join(path)
-                    }
-                })
-                .unwrap_or_else(|| cwd.to_path_buf());
-            let mut changes = HashMap::new();
-            for hunk in hunks {
-                let path = hunk.resolve_path(&effective_cwd);
-                match hunk {
-                    Hunk::AddFile { contents, .. } => {
-                        changes.insert(path, ApplyPatchFileChange::Add { content: contents });
-                    }
-                    Hunk::DeleteFile { .. } => {
-                        let content = match std::fs::read_to_string(&path) {
-                            Ok(content) => content,
-                            Err(e) => {
-                                return MaybeApplyPatchVerified::CorrectnessError(
-                                    ApplyPatchError::IoError(IoError {
-                                        context: format!("Failed to read {}", path.display()),
-                                        source: e,
-                                    }),
-                                );
-                            }
-                        };
-                        changes.insert(path, ApplyPatchFileChange::Delete { content });
-                    }
-                    Hunk::UpdateFile {
-                        move_path, chunks, ..
-                    } => {
-                        let ApplyPatchFileUpdate {
-                            unified_diff,
-                            content: contents,
-                        } = match unified_diff_from_chunks(&path, &chunks) {
-                            Ok(diff) => diff,
-                            Err(e) => {
-                                return MaybeApplyPatchVerified::CorrectnessError(e);
-                            }
-                        };
-                        changes.insert(
-                            path,
-                            ApplyPatchFileChange::Update {
-                                unified_diff,
-                                move_path: move_path.map(|p| cwd.join(p)),
-                                new_content: contents,
-                            },
-                        );
-                    }
-                }
-            }
-            MaybeApplyPatchVerified::Body(ApplyPatchAction {
-                changes,
-                patch,
-                cwd: effective_cwd,
-            })
-        }
-        MaybeApplyPatch::ShellParseError(e) => MaybeApplyPatchVerified::ShellParseError(e),
-        MaybeApplyPatch::PatchParseError(e) => MaybeApplyPatchVerified::CorrectnessError(e.into()),
-        MaybeApplyPatch::NotApplyPatch => MaybeApplyPatchVerified::NotApplyPatch,
+    fn empty() -> Self {
+        Self::new(Vec::new(), /*exact*/ true)
+    }
+
+    pub fn changes(&self) -> &[AppliedPatchChange] {
+        &self.changes
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.changes.is_empty()
+    }
+
+    pub fn is_exact(&self) -> bool {
+        self.exact
+    }
+
+    /// Appends a later committed prefix while preserving the aggregate exactness.
+    pub fn append(&mut self, other: Self) {
+        self.changes.extend(other.changes);
+        self.exact &= other.exact;
     }
 }
 
-/// Extract the heredoc body (and optional `cd` workdir) from a `bash -lc` script
-/// that invokes the apply_patch tool using a heredoc.
-///
-/// Supported top‑level forms (must be the only top‑level statement):
-/// - `apply_patch <<'EOF'\n...\nEOF`
-/// - `cd <path> && apply_patch <<'EOF'\n...\nEOF`
-///
-/// Notes about matching:
-/// - Parsed with Tree‑sitter Bash and a strict query that uses anchors so the
-///   heredoc‑redirected statement is the only top‑level statement.
-/// - The connector between `cd` and `apply_patch` must be `&&` (not `|` or `||`).
-/// - Exactly one positional `word` argument is allowed for `cd` (no flags, no quoted
-///   strings, no second argument).
-/// - The apply command is validated in‑query via `#any-of?` to allow `apply_patch`
-///   or `applypatch`.
-/// - Preceding or trailing commands (e.g., `echo ...;` or `... && echo done`) do not match.
-///
-/// Returns `(heredoc_body, Some(path))` when the `cd` variant matches, or
-/// `(heredoc_body, None)` for the direct form. Errors are returned if the script
-/// cannot be parsed or does not match the allowed patterns.
-fn extract_apply_patch_from_bash(
-    src: &str,
-) -> std::result::Result<(String, Option<String>), ExtractHeredocError> {
-    // This function uses a Tree-sitter query to recognize one of two
-    // whole-script forms, each expressed as a single top-level statement:
-    //
-    // 1. apply_patch <<'EOF'\n...\nEOF
-    // 2. cd <path> && apply_patch <<'EOF'\n...\nEOF
-    //
-    // Key ideas when reading the query:
-    // - dots (`.`) between named nodes enforces adjacency among named children and
-    //   anchor to the start/end of the expression.
-    // - we match a single redirected_statement directly under program with leading
-    //   and trailing anchors (`.`). This ensures it is the only top-level statement
-    //   (so prefixes like `echo ...;` or suffixes like `... && echo done` do not match).
-    //
-    // Overall, we want to be conservative and only match the intended forms, as other
-    // forms are likely to be model errors, or incorrectly interpreted by later code.
-    //
-    // If you're editing this query, it's helpful to start by creating a debugging binary
-    // which will let you see the AST of an arbitrary bash script passed in, and optionally
-    // also run an arbitrary query against the AST. This is useful for understanding
-    // how tree-sitter parses the script and whether the query syntax is correct. Be sure
-    // to test both positive and negative cases.
-    static APPLY_PATCH_QUERY: LazyLock<Query> = LazyLock::new(|| {
-        let language = BASH.into();
-        #[expect(clippy::expect_used)]
-        Query::new(
-            &language,
-            r#"
-            (
-              program
-                . (redirected_statement
-                    body: (command
-                            name: (command_name (word) @apply_name) .)
-                    (#any-of? @apply_name "apply_patch" "applypatch")
-                    redirect: (heredoc_redirect
-                                . (heredoc_start)
-                                . (heredoc_body) @heredoc
-                                . (heredoc_end)
-                                .))
-                .)
-
-            (
-              program
-                . (redirected_statement
-                    body: (list
-                            . (command
-                                name: (command_name (word) @cd_name) .
-                                argument: [
-                                  (word) @cd_path
-                                  (string (string_content) @cd_path)
-                                  (raw_string) @cd_raw_string
-                                ] .)
-                            "&&"
-                            . (command
-                                name: (command_name (word) @apply_name))
-                            .)
-                    (#eq? @cd_name "cd")
-                    (#any-of? @apply_name "apply_patch" "applypatch")
-                    redirect: (heredoc_redirect
-                                . (heredoc_start)
-                                . (heredoc_body) @heredoc
-                                . (heredoc_end)
-                                .))
-                .)
-            "#,
-        )
-        .expect("valid bash query")
-    });
-
-    let lang = BASH.into();
-    let mut parser = Parser::new();
-    parser
-        .set_language(&lang)
-        .map_err(ExtractHeredocError::FailedToLoadBashGrammar)?;
-    let tree = parser
-        .parse(src, None)
-        .ok_or(ExtractHeredocError::FailedToParsePatchIntoAst)?;
-
-    let bytes = src.as_bytes();
-    let root = tree.root_node();
-
-    let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&APPLY_PATCH_QUERY, root, bytes);
-    while let Some(m) = matches.next() {
-        let mut heredoc_text: Option<String> = None;
-        let mut cd_path: Option<String> = None;
-
-        for capture in m.captures.iter() {
-            let name = APPLY_PATCH_QUERY.capture_names()[capture.index as usize];
-            match name {
-                "heredoc" => {
-                    let text = capture
-                        .node
-                        .utf8_text(bytes)
-                        .map_err(ExtractHeredocError::HeredocNotUtf8)?
-                        .trim_end_matches('\n')
-                        .to_string();
-                    heredoc_text = Some(text);
-                }
-                "cd_path" => {
-                    let text = capture
-                        .node
-                        .utf8_text(bytes)
-                        .map_err(ExtractHeredocError::HeredocNotUtf8)?
-                        .to_string();
-                    cd_path = Some(text);
-                }
-                "cd_raw_string" => {
-                    let raw = capture
-                        .node
-                        .utf8_text(bytes)
-                        .map_err(ExtractHeredocError::HeredocNotUtf8)?;
-                    let trimmed = raw
-                        .strip_prefix('\'')
-                        .and_then(|s| s.strip_suffix('\''))
-                        .unwrap_or(raw);
-                    cd_path = Some(trimmed.to_string());
-                }
-                _ => {}
-            }
-        }
-
-        if let Some(heredoc) = heredoc_text {
-            return Ok((heredoc, cd_path));
-        }
+impl Default for AppliedPatchDelta {
+    fn default() -> Self {
+        Self::empty()
     }
-
-    Err(ExtractHeredocError::CommandDidNotStartWithApplyPatch)
 }
 
-#[derive(Debug, PartialEq)]
-pub enum ExtractHeredocError {
-    CommandDidNotStartWithApplyPatch,
-    FailedToLoadBashGrammar(LanguageError),
-    HeredocNotUtf8(Utf8Error),
-    FailedToParsePatchIntoAst,
-    FailedToFindHeredocBody,
+/// A committed file change, preserved in the order it was applied.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppliedPatchChange {
+    pub path: PathUri,
+    pub change: AppliedPatchFileChange,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum AppliedPatchFileChange {
+    Add {
+        content: String,
+        overwritten_content: Option<String>,
+    },
+    Delete {
+        content: String,
+    },
+    Update {
+        move_path: Option<PathUri>,
+        old_content: String,
+        overwritten_move_content: Option<String>,
+        new_content: String,
+    },
+}
+
+/// A failed patch application together with the textual mutations that were
+/// definitely committed before the failure was observed.
+#[derive(Debug, Error)]
+#[error("{error}")]
+pub struct ApplyPatchFailure {
+    #[source]
+    error: ApplyPatchError,
+    delta: AppliedPatchDelta,
+}
+
+impl ApplyPatchFailure {
+    fn new(error: ApplyPatchError, delta: AppliedPatchDelta) -> Self {
+        Self { error, delta }
+    }
+
+    fn without_delta(error: ApplyPatchError) -> Self {
+        Self::new(error, AppliedPatchDelta::empty())
+    }
+
+    pub fn delta(&self) -> &AppliedPatchDelta {
+        &self.delta
+    }
+
+    pub fn into_parts(self) -> (ApplyPatchError, AppliedPatchDelta) {
+        (self.error, self.delta)
+    }
 }
 
 /// Applies the patch and prints the result to stdout/stderr.
-pub fn apply_patch(
+pub async fn apply_patch(
     patch: &str,
+    cwd: &PathUri,
     stdout: &mut impl std::io::Write,
     stderr: &mut impl std::io::Write,
-) -> Result<(), ApplyPatchError> {
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
+) -> Result<AppliedPatchDelta, ApplyPatchFailure> {
     let hunks = match parse_patch(patch) {
         Ok(source) => source.hunks,
         Err(e) => {
             match &e {
                 InvalidPatchError(message) => {
-                    writeln!(stderr, "Invalid patch: {message}").map_err(ApplyPatchError::from)?;
+                    writeln!(stderr, "Invalid patch: {message}")
+                        .map_err(ApplyPatchError::from)
+                        .map_err(ApplyPatchFailure::without_delta)?;
                 }
                 InvalidHunkError {
                     message,
@@ -489,74 +298,58 @@ pub fn apply_patch(
                         stderr,
                         "Invalid patch hunk on line {line_number}: {message}"
                     )
-                    .map_err(ApplyPatchError::from)?;
+                    .map_err(ApplyPatchError::from)
+                    .map_err(ApplyPatchFailure::without_delta)?;
                 }
             }
-            return Err(ApplyPatchError::ParseError(e));
+            return Err(ApplyPatchFailure::without_delta(
+                ApplyPatchError::ParseError(e),
+            ));
         }
     };
 
-    apply_hunks(&hunks, stdout, stderr)?;
-
-    Ok(())
+    apply_hunks(&hunks, cwd, stdout, stderr, fs, sandbox).await
 }
 
 /// Applies hunks and continues to update stdout/stderr
-pub fn apply_hunks(
+pub async fn apply_hunks(
     hunks: &[Hunk],
+    cwd: &PathUri,
     stdout: &mut impl std::io::Write,
     stderr: &mut impl std::io::Write,
-) -> Result<(), ApplyPatchError> {
-    let _existing_paths: Vec<&Path> = hunks
-        .iter()
-        .filter_map(|hunk| match hunk {
-            Hunk::AddFile { .. } => {
-                // The file is being added, so it doesn't exist yet.
-                None
-            }
-            Hunk::DeleteFile { path } => Some(path.as_path()),
-            Hunk::UpdateFile {
-                path, move_path, ..
-            } => match move_path {
-                Some(move_path) => {
-                    if std::fs::metadata(move_path)
-                        .map(|m| m.is_file())
-                        .unwrap_or(false)
-                    {
-                        Some(move_path.as_path())
-                    } else {
-                        None
-                    }
-                }
-                None => Some(path.as_path()),
-            },
-        })
-        .collect::<Vec<&Path>>();
-
-    // Delegate to a helper that applies each hunk to the filesystem.
-    match apply_hunks_to_files(hunks) {
-        Ok(affected) => {
-            print_summary(&affected, stdout).map_err(ApplyPatchError::from)?;
-            Ok(())
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
+) -> Result<AppliedPatchDelta, ApplyPatchFailure> {
+    let mut delta = AppliedPatchDelta::empty();
+    match apply_hunks_to_files(hunks, cwd, fs, sandbox, &mut delta).await {
+        Ok(affected_paths) => {
+            print_summary(&affected_paths, stdout).map_err(|error| {
+                ApplyPatchFailure::new(ApplyPatchError::from(error), delta.clone())
+            })?;
+            Ok(delta)
         }
-        Err(err) => {
-            let msg = err.to_string();
-            writeln!(stderr, "{msg}").map_err(ApplyPatchError::from)?;
-            if let Some(io) = err.downcast_ref::<std::io::Error>() {
-                Err(ApplyPatchError::from(io))
+        Err(error) => {
+            let msg = error.to_string();
+            writeln!(stderr, "{msg}").map_err(|error| {
+                ApplyPatchFailure::new(ApplyPatchError::from(error), delta.clone())
+            })?;
+            let error = if let Some(io) = error.downcast_ref::<std::io::Error>() {
+                ApplyPatchError::from(io)
             } else {
-                Err(ApplyPatchError::IoError(IoError {
+                ApplyPatchError::IoError(IoError {
                     context: msg,
-                    source: std::io::Error::other(err),
-                }))
-            }
+                    source: std::io::Error::other(error),
+                })
+            };
+            Err(ApplyPatchFailure::new(error, delta))
         }
     }
 }
 
 /// Applies each parsed patch hunk to the filesystem.
 /// Returns an error if any of the changes could not be applied.
-/// Tracks file paths affected by applying a patch.
+/// Tracks file paths affected by applying a patch, preserving the path spelling
+/// from the patch for user-facing summaries.
 pub struct AffectedPaths {
     pub added: Vec<PathBuf>,
     pub modified: Vec<PathBuf>,
@@ -565,7 +358,13 @@ pub struct AffectedPaths {
 
 /// Apply the hunks to the filesystem, returning which files were added, modified, or deleted.
 /// Returns an error if the patch could not be applied.
-fn apply_hunks_to_files(hunks: &[Hunk]) -> anyhow::Result<AffectedPaths> {
+async fn apply_hunks_to_files(
+    hunks: &[Hunk],
+    cwd: &PathUri,
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
+    delta: &mut AppliedPatchDelta,
+) -> anyhow::Result<AffectedPaths> {
     if hunks.is_empty() {
         anyhow::bail!("No files were modified.");
     }
@@ -573,49 +372,188 @@ fn apply_hunks_to_files(hunks: &[Hunk]) -> anyhow::Result<AffectedPaths> {
     let mut added: Vec<PathBuf> = Vec::new();
     let mut modified: Vec<PathBuf> = Vec::new();
     let mut deleted: Vec<PathBuf> = Vec::new();
-    for hunk in hunks {
-        match hunk {
-            Hunk::AddFile { path, contents } => {
-                if let Some(parent) = path.parent()
-                    && !parent.as_os_str().is_empty()
-                {
-                    std::fs::create_dir_all(parent).with_context(|| {
-                        format!("Failed to create parent directories for {}", path.display())
-                    })?;
+    // A failed write can still have modified the target before surfacing an
+    // error (for example by truncating before ENOSPC), so the accumulated
+    // delta is no longer exact when a write fails.
+    macro_rules! try_write {
+        ($result:expr) => {
+            match $result {
+                Ok(value) => value,
+                Err(error) => {
+                    delta.exact = false;
+                    return Err(anyhow::Error::from(error));
                 }
-                std::fs::write(path, contents)
-                    .with_context(|| format!("Failed to write file {}", path.display()))?;
-                added.push(path.clone());
             }
-            Hunk::DeleteFile { path } => {
-                std::fs::remove_file(path)
-                    .with_context(|| format!("Failed to delete file {}", path.display()))?;
-                deleted.push(path.clone());
+        };
+    }
+
+    for hunk in hunks {
+        let affected_path = hunk.path().to_path_buf();
+        let path_uri = hunk.resolve_path(cwd)?;
+        match hunk {
+            Hunk::AddFile { contents, .. } => {
+                let overwritten_content =
+                    read_optional_file_text_for_delta(&path_uri, fs, sandbox, &mut delta.exact)
+                        .await;
+                try_write!(
+                    write_file_with_missing_parent_retry(
+                        fs,
+                        &path_uri,
+                        contents.clone().into_bytes(),
+                        sandbox,
+                    )
+                    .await
+                );
+                delta.changes.push(AppliedPatchChange {
+                    path: path_uri,
+                    change: AppliedPatchFileChange::Add {
+                        content: contents.clone(),
+                        overwritten_content,
+                    },
+                });
+                added.push(affected_path);
+            }
+            Hunk::DeleteFile { .. } => {
+                note_existing_path_delta_support(&path_uri, fs, sandbox, &mut delta.exact).await;
+                let deleted_content = fs.read_file_text(&path_uri, sandbox).await.ok();
+                if deleted_content.is_none() {
+                    delta.exact = false;
+                }
+                ensure_not_directory(&path_uri, fs, sandbox)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "Failed to delete file {}",
+                            path_uri.inferred_native_path_string()
+                        )
+                    })?;
+                if let Err(error) = fs
+                    .remove(
+                        &path_uri,
+                        RemoveOptions {
+                            recursive: false,
+                            force: false,
+                        },
+                        sandbox,
+                    )
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "Failed to delete file {}",
+                            path_uri.inferred_native_path_string()
+                        )
+                    })
+                {
+                    delta.exact &= remove_failure_was_side_effect_free(
+                        &path_uri,
+                        deleted_content.as_deref(),
+                        fs,
+                        sandbox,
+                    )
+                    .await;
+                    return Err(error);
+                }
+                if let Some(content) = deleted_content {
+                    delta.changes.push(AppliedPatchChange {
+                        path: path_uri,
+                        change: AppliedPatchFileChange::Delete { content },
+                    });
+                }
+                deleted.push(affected_path);
             }
             Hunk::UpdateFile {
-                path,
-                move_path,
-                chunks,
+                move_path, chunks, ..
             } => {
-                let AppliedPatch { new_contents, .. } =
-                    derive_new_contents_from_chunks(path, chunks)?;
+                note_existing_path_delta_support(&path_uri, fs, sandbox, &mut delta.exact).await;
+                let AppliedPatch {
+                    original_contents,
+                    new_contents,
+                } = derive_new_contents_from_chunks(&path_uri, chunks, fs, sandbox).await?;
                 if let Some(dest) = move_path {
-                    if let Some(parent) = dest.parent()
-                        && !parent.as_os_str().is_empty()
-                    {
-                        std::fs::create_dir_all(parent).with_context(|| {
-                            format!("Failed to create parent directories for {}", dest.display())
+                    let dest_uri = cwd.join(&dest.to_string_lossy())?;
+                    let overwritten_move_content =
+                        read_optional_file_text_for_delta(&dest_uri, fs, sandbox, &mut delta.exact)
+                            .await;
+                    try_write!(
+                        write_file_with_missing_parent_retry(
+                            fs,
+                            &dest_uri,
+                            new_contents.clone().into_bytes(),
+                            sandbox,
+                        )
+                        .await
+                    );
+                    let dest_write_change_index = delta.changes.len();
+                    delta.changes.push(AppliedPatchChange {
+                        path: dest_uri.clone(),
+                        change: AppliedPatchFileChange::Add {
+                            content: new_contents.clone(),
+                            overwritten_content: overwritten_move_content.clone(),
+                        },
+                    });
+                    ensure_not_directory(&path_uri, fs, sandbox)
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "Failed to remove original {}",
+                                path_uri.inferred_native_path_string()
+                            )
                         })?;
+                    if let Err(error) = fs
+                        .remove(
+                            &path_uri,
+                            RemoveOptions {
+                                recursive: false,
+                                force: false,
+                            },
+                            sandbox,
+                        )
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "Failed to remove original {}",
+                                path_uri.inferred_native_path_string()
+                            )
+                        })
+                    {
+                        delta.exact &= remove_failure_was_side_effect_free(
+                            &path_uri,
+                            Some(&original_contents),
+                            fs,
+                            sandbox,
+                        )
+                        .await;
+                        return Err(error);
                     }
-                    std::fs::write(dest, new_contents)
-                        .with_context(|| format!("Failed to write file {}", dest.display()))?;
-                    std::fs::remove_file(path)
-                        .with_context(|| format!("Failed to remove original {}", path.display()))?;
-                    modified.push(dest.clone());
+                    delta.changes[dest_write_change_index] = AppliedPatchChange {
+                        path: path_uri,
+                        change: AppliedPatchFileChange::Update {
+                            move_path: Some(dest_uri),
+                            old_content: original_contents,
+                            overwritten_move_content,
+                            new_content: new_contents,
+                        },
+                    };
+                    modified.push(affected_path);
                 } else {
-                    std::fs::write(path, new_contents)
-                        .with_context(|| format!("Failed to write file {}", path.display()))?;
-                    modified.push(path.clone());
+                    try_write!(
+                        fs.write_file(&path_uri, new_contents.clone().into_bytes(), sandbox)
+                            .await
+                            .with_context(|| format!(
+                                "Failed to write file {}",
+                                path_uri.inferred_native_path_string()
+                            ))
+                    );
+                    delta.changes.push(AppliedPatchChange {
+                        path: path_uri,
+                        change: AppliedPatchFileChange::Update {
+                            move_path: None,
+                            old_content: original_contents,
+                            overwritten_move_content: None,
+                            new_content: new_contents,
+                        },
+                    });
+                    modified.push(affected_path);
                 }
             }
         }
@@ -627,6 +565,105 @@ fn apply_hunks_to_files(hunks: &[Hunk]) -> anyhow::Result<AffectedPaths> {
     })
 }
 
+async fn ensure_not_directory(
+    path: &PathUri,
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
+) -> io::Result<()> {
+    let metadata = fs.get_metadata(path, sandbox).await?;
+    if metadata.is_directory {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "path is a directory",
+        ));
+    }
+    Ok(())
+}
+
+async fn remove_failure_was_side_effect_free(
+    path: &PathUri,
+    expected_content: Option<&str>,
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
+) -> bool {
+    match expected_content {
+        Some(expected_content) => fs
+            .read_file_text(path, sandbox)
+            .await
+            .is_ok_and(|content| content == expected_content),
+        None => false,
+    }
+}
+
+async fn read_optional_file_text_for_delta(
+    path: &PathUri,
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
+    exact: &mut bool,
+) -> Option<String> {
+    note_existing_path_delta_support(path, fs, sandbox, exact).await;
+    match fs.read_file_text(path, sandbox).await {
+        Ok(content) => Some(content),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => None,
+        Err(_) => {
+            *exact = false;
+            None
+        }
+    }
+}
+
+async fn note_existing_path_delta_support(
+    path: &PathUri,
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
+    exact: &mut bool,
+) {
+    match fs.get_metadata(path, sandbox).await {
+        Ok(metadata) if metadata.is_file && !metadata.is_symlink => {}
+        Ok(_) => *exact = false,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => {}
+        Err(_) => *exact = false,
+    }
+}
+
+async fn write_file_with_missing_parent_retry(
+    fs: &dyn ExecutorFileSystem,
+    path: &PathUri,
+    contents: Vec<u8>,
+    sandbox: Option<&FileSystemSandboxContext>,
+) -> anyhow::Result<()> {
+    match fs.write_file(path, contents.clone(), sandbox).await {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            if let Some(parent) = path.parent() {
+                fs.create_directory(&parent, CreateDirectoryOptions { recursive: true }, sandbox)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "Failed to create parent directories for {}",
+                            path.inferred_native_path_string()
+                        )
+                    })?;
+            }
+            fs.write_file(path, contents, sandbox)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to write file {}",
+                        path.inferred_native_path_string()
+                    )
+                })?;
+            Ok(())
+        }
+        Err(err) => Err(err).with_context(|| {
+            format!(
+                "Failed to write file {}",
+                path.inferred_native_path_string()
+            )
+        }),
+    }
+}
+
 struct AppliedPatch {
     original_contents: String,
     new_contents: String,
@@ -634,19 +671,21 @@ struct AppliedPatch {
 
 /// Return *only* the new file contents (joined into a single `String`) after
 /// applying the chunks to the file at `path`.
-fn derive_new_contents_from_chunks(
-    path: &Path,
+async fn derive_new_contents_from_chunks(
+    path: &PathUri,
     chunks: &[UpdateFileChunk],
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
 ) -> std::result::Result<AppliedPatch, ApplyPatchError> {
-    let original_contents = match std::fs::read_to_string(path) {
-        Ok(contents) => contents,
-        Err(err) => {
-            return Err(ApplyPatchError::IoError(IoError {
-                context: format!("Failed to read file to update {}", path.display()),
-                source: err,
-            }));
-        }
-    };
+    let original_contents = fs.read_file_text(path, sandbox).await.map_err(|err| {
+        ApplyPatchError::IoError(IoError {
+            context: format!(
+                "Failed to read file to update {}",
+                path.inferred_native_path_string()
+            ),
+            source: err,
+        })
+    })?;
 
     let mut original_lines: Vec<String> = original_contents.split('\n').map(String::from).collect();
 
@@ -656,7 +695,8 @@ fn derive_new_contents_from_chunks(
         original_lines.pop();
     }
 
-    let replacements = compute_replacements(&original_lines, path, chunks)?;
+    let path_text = path.inferred_native_path_string();
+    let replacements = compute_replacements(&original_lines, &path_text, chunks)?;
     let new_lines = apply_replacements(original_lines, &replacements);
     let mut new_lines = new_lines;
     if !new_lines.last().is_some_and(String::is_empty) {
@@ -674,7 +714,7 @@ fn derive_new_contents_from_chunks(
 /// `(start_index, old_len, new_lines)`.
 fn compute_replacements(
     original_lines: &[String],
-    path: &Path,
+    path: &str,
     chunks: &[UpdateFileChunk],
 ) -> std::result::Result<Vec<(usize, usize, Vec<String>)>, ApplyPatchError> {
     let mut replacements: Vec<(usize, usize, Vec<String>)> = Vec::new();
@@ -688,14 +728,12 @@ fn compute_replacements(
                 original_lines,
                 std::slice::from_ref(ctx_line),
                 line_index,
-                false,
+                /*eof*/ false,
             ) {
                 line_index = idx + 1;
             } else {
                 return Err(ApplyPatchError::ComputeReplacements(format!(
-                    "Failed to find context '{}' in {}",
-                    ctx_line,
-                    path.display()
+                    "Failed to find context '{ctx_line}' in {path}"
                 )));
             }
         }
@@ -751,13 +789,13 @@ fn compute_replacements(
         } else {
             return Err(ApplyPatchError::ComputeReplacements(format!(
                 "Failed to find expected lines in {}:\n{}",
-                path.display(),
+                path,
                 chunk.old_lines.join("\n"),
             )));
         }
     }
 
-    replacements.sort_by(|(lhs_idx, _, _), (rhs_idx, _, _)| lhs_idx.cmp(rhs_idx));
+    replacements.sort_by_key(|(index, _, _)| *index);
 
     Ok(replacements)
 }
@@ -794,29 +832,35 @@ fn apply_replacements(
 #[derive(Debug, Eq, PartialEq)]
 pub struct ApplyPatchFileUpdate {
     unified_diff: String,
+    original_content: String,
     content: String,
 }
 
-pub fn unified_diff_from_chunks(
-    path: &Path,
+pub async fn unified_diff_from_chunks(
+    path: &PathUri,
     chunks: &[UpdateFileChunk],
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
 ) -> std::result::Result<ApplyPatchFileUpdate, ApplyPatchError> {
-    unified_diff_from_chunks_with_context(path, chunks, 1)
+    unified_diff_from_chunks_with_context(path, chunks, /*context*/ 1, fs, sandbox).await
 }
 
-pub fn unified_diff_from_chunks_with_context(
-    path: &Path,
+pub async fn unified_diff_from_chunks_with_context(
+    path: &PathUri,
     chunks: &[UpdateFileChunk],
     context: usize,
+    fs: &dyn ExecutorFileSystem,
+    sandbox: Option<&FileSystemSandboxContext>,
 ) -> std::result::Result<ApplyPatchFileUpdate, ApplyPatchError> {
     let AppliedPatch {
         original_contents,
         new_contents,
-    } = derive_new_contents_from_chunks(path, chunks)?;
+    } = derive_new_contents_from_chunks(path, chunks, fs, sandbox).await?;
     let text_diff = TextDiff::from_lines(&original_contents, &new_contents);
     let unified_diff = text_diff.unified_diff().context_radius(context).to_string();
     Ok(ApplyPatchFileUpdate {
         unified_diff,
+        original_content: original_contents,
         content: new_contents,
     })
 }
@@ -843,7 +887,7 @@ pub fn print_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use assert_matches::assert_matches;
+    use codex_exec_server::LOCAL_FS;
     use pretty_assertions::assert_eq;
     use std::fs;
     use std::string::ToString;
@@ -854,223 +898,8 @@ mod tests {
         format!("*** Begin Patch\n{body}\n*** End Patch")
     }
 
-    fn strs_to_strings(strs: &[&str]) -> Vec<String> {
-        strs.iter().map(ToString::to_string).collect()
-    }
-
-    // Test helpers to reduce repetition when building bash -lc heredoc scripts
-    fn args_bash(script: &str) -> Vec<String> {
-        strs_to_strings(&["bash", "-lc", script])
-    }
-
-    fn heredoc_script(prefix: &str) -> String {
-        format!(
-            "{prefix}apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: foo\n+hi\n*** End Patch\nPATCH"
-        )
-    }
-
-    fn heredoc_script_ps(prefix: &str, suffix: &str) -> String {
-        format!(
-            "{prefix}apply_patch <<'PATCH'\n*** Begin Patch\n*** Add File: foo\n+hi\n*** End Patch\nPATCH{suffix}"
-        )
-    }
-
-    fn expected_single_add() -> Vec<Hunk> {
-        vec![Hunk::AddFile {
-            path: PathBuf::from("foo"),
-            contents: "hi\n".to_string(),
-        }]
-    }
-
-    fn assert_match(script: &str, expected_workdir: Option<&str>) {
-        let args = args_bash(script);
-        match maybe_parse_apply_patch(&args) {
-            MaybeApplyPatch::Body(ApplyPatchArgs { hunks, workdir, .. }) => {
-                assert_eq!(workdir.as_deref(), expected_workdir);
-                assert_eq!(hunks, expected_single_add());
-            }
-            result => panic!("expected MaybeApplyPatch::Body got {result:?}"),
-        }
-    }
-
-    fn assert_not_match(script: &str) {
-        let args = args_bash(script);
-        assert_matches!(
-            maybe_parse_apply_patch(&args),
-            MaybeApplyPatch::NotApplyPatch
-        );
-    }
-
-    #[test]
-    fn test_implicit_patch_single_arg_is_error() {
-        let patch = "*** Begin Patch\n*** Add File: foo\n+hi\n*** End Patch".to_string();
-        let args = vec![patch];
-        let dir = tempdir().unwrap();
-        assert_matches!(
-            maybe_parse_apply_patch_verified(&args, dir.path()),
-            MaybeApplyPatchVerified::CorrectnessError(ApplyPatchError::ImplicitInvocation)
-        );
-    }
-
-    #[test]
-    fn test_implicit_patch_bash_script_is_error() {
-        let script = "*** Begin Patch\n*** Add File: foo\n+hi\n*** End Patch";
-        let args = args_bash(script);
-        let dir = tempdir().unwrap();
-        assert_matches!(
-            maybe_parse_apply_patch_verified(&args, dir.path()),
-            MaybeApplyPatchVerified::CorrectnessError(ApplyPatchError::ImplicitInvocation)
-        );
-    }
-
-    #[test]
-    fn test_literal() {
-        let args = strs_to_strings(&[
-            "apply_patch",
-            r#"*** Begin Patch
-*** Add File: foo
-+hi
-*** End Patch
-"#,
-        ]);
-
-        match maybe_parse_apply_patch(&args) {
-            MaybeApplyPatch::Body(ApplyPatchArgs { hunks, .. }) => {
-                assert_eq!(
-                    hunks,
-                    vec![Hunk::AddFile {
-                        path: PathBuf::from("foo"),
-                        contents: "hi\n".to_string()
-                    }]
-                );
-            }
-            result => panic!("expected MaybeApplyPatch::Body got {result:?}"),
-        }
-    }
-
-    #[test]
-    fn test_literal_applypatch() {
-        let args = strs_to_strings(&[
-            "applypatch",
-            r#"*** Begin Patch
-*** Add File: foo
-+hi
-*** End Patch
-"#,
-        ]);
-
-        match maybe_parse_apply_patch(&args) {
-            MaybeApplyPatch::Body(ApplyPatchArgs { hunks, .. }) => {
-                assert_eq!(
-                    hunks,
-                    vec![Hunk::AddFile {
-                        path: PathBuf::from("foo"),
-                        contents: "hi\n".to_string()
-                    }]
-                );
-            }
-            result => panic!("expected MaybeApplyPatch::Body got {result:?}"),
-        }
-    }
-
-    #[test]
-    fn test_heredoc() {
-        assert_match(&heredoc_script(""), None);
-    }
-
-    #[test]
-    fn test_heredoc_applypatch() {
-        let args = strs_to_strings(&[
-            "bash",
-            "-lc",
-            r#"applypatch <<'PATCH'
-*** Begin Patch
-*** Add File: foo
-+hi
-*** End Patch
-PATCH"#,
-        ]);
-
-        match maybe_parse_apply_patch(&args) {
-            MaybeApplyPatch::Body(ApplyPatchArgs { hunks, workdir, .. }) => {
-                assert_eq!(workdir, None);
-                assert_eq!(
-                    hunks,
-                    vec![Hunk::AddFile {
-                        path: PathBuf::from("foo"),
-                        contents: "hi\n".to_string()
-                    }]
-                );
-            }
-            result => panic!("expected MaybeApplyPatch::Body got {result:?}"),
-        }
-    }
-
-    #[test]
-    fn test_heredoc_with_leading_cd() {
-        assert_match(&heredoc_script("cd foo && "), Some("foo"));
-    }
-
-    #[test]
-    fn test_cd_with_semicolon_is_ignored() {
-        assert_not_match(&heredoc_script("cd foo; "));
-    }
-
-    #[test]
-    fn test_cd_or_apply_patch_is_ignored() {
-        assert_not_match(&heredoc_script("cd bar || "));
-    }
-
-    #[test]
-    fn test_cd_pipe_apply_patch_is_ignored() {
-        assert_not_match(&heredoc_script("cd bar | "));
-    }
-
-    #[test]
-    fn test_cd_single_quoted_path_with_spaces() {
-        assert_match(&heredoc_script("cd 'foo bar' && "), Some("foo bar"));
-    }
-
-    #[test]
-    fn test_cd_double_quoted_path_with_spaces() {
-        assert_match(&heredoc_script("cd \"foo bar\" && "), Some("foo bar"));
-    }
-
-    #[test]
-    fn test_echo_and_apply_patch_is_ignored() {
-        assert_not_match(&heredoc_script("echo foo && "));
-    }
-
-    #[test]
-    fn test_apply_patch_with_arg_is_ignored() {
-        let script = "apply_patch foo <<'PATCH'\n*** Begin Patch\n*** Add File: foo\n+hi\n*** End Patch\nPATCH";
-        assert_not_match(script);
-    }
-
-    #[test]
-    fn test_double_cd_then_apply_patch_is_ignored() {
-        assert_not_match(&heredoc_script("cd foo && cd bar && "));
-    }
-
-    #[test]
-    fn test_cd_two_args_is_ignored() {
-        assert_not_match(&heredoc_script("cd foo bar && "));
-    }
-
-    #[test]
-    fn test_cd_then_apply_patch_then_extra_is_ignored() {
-        let script = heredoc_script_ps("cd bar && ", " && echo done");
-        assert_not_match(&script);
-    }
-
-    #[test]
-    fn test_echo_then_cd_and_apply_patch_is_ignored() {
-        // Ensure preceding commands before the `cd && apply_patch <<...` sequence do not match.
-        assert_not_match(&heredoc_script("echo foo; cd bar && "));
-    }
-
-    #[test]
-    fn test_add_file_hunk_creates_file_with_contents() {
+    #[tokio::test]
+    async fn test_add_file_hunk_creates_file_with_contents() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("add.txt");
         let patch = wrap_patch(&format!(
@@ -1081,7 +910,16 @@ PATCH"#,
         ));
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        apply_patch(&patch, &mut stdout, &mut stderr).unwrap();
+        apply_patch(
+            &patch,
+            &PathUri::from_host_native_path(dir.path()).expect("absolute test path"),
+            &mut stdout,
+            &mut stderr,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
         // Verify expected stdout and stderr outputs.
         let stdout_str = String::from_utf8(stdout).unwrap();
         let stderr_str = String::from_utf8(stderr).unwrap();
@@ -1095,15 +933,96 @@ PATCH"#,
         assert_eq!(contents, "ab\ncd\n");
     }
 
-    #[test]
-    fn test_delete_file_hunk_removes_file() {
+    #[tokio::test]
+    async fn test_apply_patch_hunks_accept_relative_and_absolute_paths() {
+        let dir = tempdir().unwrap();
+        let cwd = PathUri::from_host_native_path(dir.path()).expect("absolute test path");
+        let relative_add = dir.path().join("relative-add.txt");
+        let absolute_add = dir.path().join("absolute-add.txt");
+        let relative_delete = dir.path().join("relative-delete.txt");
+        let absolute_delete = dir.path().join("absolute-delete.txt");
+        let relative_update = dir.path().join("relative-update.txt");
+        let absolute_update = dir.path().join("absolute-update.txt");
+        fs::write(&relative_delete, "delete relative\n").unwrap();
+        fs::write(&absolute_delete, "delete absolute\n").unwrap();
+        fs::write(&relative_update, "relative old\n").unwrap();
+        fs::write(&absolute_update, "absolute old\n").unwrap();
+
+        let patch = wrap_patch(&format!(
+            r#"*** Add File: relative-add.txt
++relative add
+*** Add File: {}
++absolute add
+*** Delete File: relative-delete.txt
+*** Delete File: {}
+*** Update File: relative-update.txt
+@@
+-relative old
++relative new
+*** Update File: {}
+@@
+-absolute old
++absolute new"#,
+            absolute_add.display(),
+            absolute_delete.display(),
+            absolute_update.display(),
+        ));
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        apply_patch(
+            &patch,
+            &cwd,
+            &mut stdout,
+            &mut stderr,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(fs::read_to_string(&relative_add).unwrap(), "relative add\n");
+        assert_eq!(fs::read_to_string(&absolute_add).unwrap(), "absolute add\n");
+        assert!(!relative_delete.exists());
+        assert!(!absolute_delete.exists());
+        assert_eq!(
+            fs::read_to_string(&relative_update).unwrap(),
+            "relative new\n"
+        );
+        assert_eq!(
+            fs::read_to_string(&absolute_update).unwrap(),
+            "absolute new\n"
+        );
+        assert_eq!(String::from_utf8(stderr).unwrap(), "");
+        assert_eq!(
+            String::from_utf8(stdout).unwrap(),
+            format!(
+                "Success. Updated the following files:\nA relative-add.txt\nA {}\nM relative-update.txt\nM {}\nD relative-delete.txt\nD {}\n",
+                absolute_add.display(),
+                absolute_update.display(),
+                absolute_delete.display(),
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn test_delete_file_hunk_removes_file() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("del.txt");
         fs::write(&path, "x").unwrap();
         let patch = wrap_patch(&format!("*** Delete File: {}", path.display()));
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        apply_patch(&patch, &mut stdout, &mut stderr).unwrap();
+        apply_patch(
+            &patch,
+            &PathUri::from_host_native_path(dir.path()).expect("absolute test path"),
+            &mut stdout,
+            &mut stderr,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
         let stdout_str = String::from_utf8(stdout).unwrap();
         let stderr_str = String::from_utf8(stderr).unwrap();
         let expected_out = format!(
@@ -1115,8 +1034,8 @@ PATCH"#,
         assert!(!path.exists());
     }
 
-    #[test]
-    fn test_update_file_hunk_modifies_content() {
+    #[tokio::test]
+    async fn test_update_file_hunk_modifies_content() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("update.txt");
         fs::write(&path, "foo\nbar\n").unwrap();
@@ -1130,7 +1049,16 @@ PATCH"#,
         ));
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        apply_patch(&patch, &mut stdout, &mut stderr).unwrap();
+        apply_patch(
+            &patch,
+            &PathUri::from_host_native_path(dir.path()).expect("absolute test path"),
+            &mut stdout,
+            &mut stderr,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
         // Validate modified file contents and expected stdout/stderr.
         let stdout_str = String::from_utf8(stdout).unwrap();
         let stderr_str = String::from_utf8(stderr).unwrap();
@@ -1144,8 +1072,8 @@ PATCH"#,
         assert_eq!(contents, "foo\nbaz\n");
     }
 
-    #[test]
-    fn test_update_file_hunk_can_move_file() {
+    #[tokio::test]
+    async fn test_update_file_hunk_can_move_file() {
         let dir = tempdir().unwrap();
         let src = dir.path().join("src.txt");
         let dest = dir.path().join("dst.txt");
@@ -1161,7 +1089,16 @@ PATCH"#,
         ));
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        apply_patch(&patch, &mut stdout, &mut stderr).unwrap();
+        apply_patch(
+            &patch,
+            &PathUri::from_host_native_path(dir.path()).expect("absolute test path"),
+            &mut stdout,
+            &mut stderr,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
         // Validate move semantics and expected stdout/stderr.
         let stdout_str = String::from_utf8(stdout).unwrap();
         let stderr_str = String::from_utf8(stderr).unwrap();
@@ -1176,10 +1113,65 @@ PATCH"#,
         assert_eq!(contents, "line2\n");
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_failed_move_returns_committed_destination_delta() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let source_dir = dir.path().join("locked");
+        let dest_dir = dir.path().join("out");
+        fs::create_dir(&source_dir).unwrap();
+        fs::create_dir(&dest_dir).unwrap();
+        let src = source_dir.join("src.txt");
+        let dest = dest_dir.join("dst.txt");
+        fs::write(&src, "line\n").unwrap();
+        fs::set_permissions(&source_dir, fs::Permissions::from_mode(0o555)).unwrap();
+
+        let patch = wrap_patch(
+            "*** Update File: locked/src.txt\n*** Move to: out/dst.txt\n@@\n-line\n+line2",
+        );
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let failure = apply_patch(
+            &patch,
+            &PathUri::from_host_native_path(dir.path()).expect("absolute test path"),
+            &mut stdout,
+            &mut stderr,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .expect_err("source removal should fail after destination write");
+
+        fs::set_permissions(&source_dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(
+            String::from_utf8(stderr)
+                .unwrap()
+                .contains(&format!("Failed to remove original {}", src.display()))
+        );
+        assert_eq!(
+            failure.delta(),
+            &AppliedPatchDelta::new(
+                vec![AppliedPatchChange {
+                    path: PathUri::from_host_native_path(&dest).expect("absolute destination path"),
+                    change: AppliedPatchFileChange::Add {
+                        content: "line2\n".to_string(),
+                        overwritten_content: None,
+                    },
+                }],
+                /*exact*/ true,
+            )
+        );
+        assert_eq!(fs::read_to_string(src).unwrap(), "line\n");
+        assert_eq!(fs::read_to_string(dest).unwrap(), "line2\n");
+    }
+
     /// Verify that a single `Update File` hunk with multiple change chunks can update different
     /// parts of a file and that the file is listed only once in the summary.
-    #[test]
-    fn test_multiple_update_chunks_apply_to_single_file() {
+    #[tokio::test]
+    async fn test_multiple_update_chunks_apply_to_single_file() {
         // Start with a file containing four lines.
         let dir = tempdir().unwrap();
         let path = dir.path().join("multi.txt");
@@ -1201,7 +1193,16 @@ PATCH"#,
         ));
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        apply_patch(&patch, &mut stdout, &mut stderr).unwrap();
+        apply_patch(
+            &patch,
+            &PathUri::from_host_native_path(dir.path()).expect("absolute test path"),
+            &mut stdout,
+            &mut stderr,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
         let stdout_str = String::from_utf8(stdout).unwrap();
         let stderr_str = String::from_utf8(stderr).unwrap();
         let expected_out = format!(
@@ -1218,8 +1219,8 @@ PATCH"#,
     /// replacements in separate chunks that appear in non‑adjacent parts of the
     /// file.  Verifies that all edits are applied and that the summary lists the
     /// file only once.
-    #[test]
-    fn test_update_file_hunk_interleaved_changes() {
+    #[tokio::test]
+    async fn test_update_file_hunk_interleaved_changes() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("interleaved.txt");
 
@@ -1250,7 +1251,16 @@ PATCH"#,
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        apply_patch(&patch, &mut stdout, &mut stderr).unwrap();
+        apply_patch(
+            &patch,
+            &PathUri::from_host_native_path(dir.path()).expect("absolute test path"),
+            &mut stdout,
+            &mut stderr,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
 
         let stdout_str = String::from_utf8(stdout).unwrap();
         let stderr_str = String::from_utf8(stderr).unwrap();
@@ -1266,8 +1276,8 @@ PATCH"#,
         assert_eq!(contents, "a\nB\nc\nd\nE\nf\ng\n");
     }
 
-    #[test]
-    fn test_pure_addition_chunk_followed_by_removal() {
+    #[tokio::test]
+    async fn test_pure_addition_chunk_followed_by_removal() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("panic.txt");
         fs::write(&path, "line1\nline2\nline3\n").unwrap();
@@ -1285,7 +1295,16 @@ PATCH"#,
         ));
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        apply_patch(&patch, &mut stdout, &mut stderr).unwrap();
+        apply_patch(
+            &patch,
+            &PathUri::from_host_native_path(dir.path()).expect("absolute test path"),
+            &mut stdout,
+            &mut stderr,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
         let contents = fs::read_to_string(path).unwrap();
         assert_eq!(
             contents,
@@ -1299,8 +1318,8 @@ PATCH"#,
     /// internal matcher failed requiring an exact byte-for-byte match.  The
     /// fuzzy-matching pass that normalises common punctuation should now bridge
     /// the gap.
-    #[test]
-    fn test_update_line_with_unicode_dash() {
+    #[tokio::test]
+    async fn test_update_line_with_unicode_dash() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("unicode.py");
 
@@ -1319,7 +1338,16 @@ PATCH"#,
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        apply_patch(&patch, &mut stdout, &mut stderr).unwrap();
+        apply_patch(
+            &patch,
+            &PathUri::from_host_native_path(dir.path()).expect("absolute test path"),
+            &mut stdout,
+            &mut stderr,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
 
         // File should now contain the replaced comment.
         let expected = "import asyncio  # HELLO\n";
@@ -1338,8 +1366,8 @@ PATCH"#,
         assert_eq!(String::from_utf8(stderr).unwrap(), "");
     }
 
-    #[test]
-    fn test_unified_diff() {
+    #[tokio::test]
+    async fn test_unified_diff() {
         // Start with a file containing four lines.
         let dir = tempdir().unwrap();
         let path = dir.path().join("multi.txt");
@@ -1362,7 +1390,15 @@ PATCH"#,
             [Hunk::UpdateFile { chunks, .. }] => chunks,
             _ => panic!("Expected a single UpdateFile hunk"),
         };
-        let diff = unified_diff_from_chunks(&path, update_file_chunks).unwrap();
+        let path_uri = PathUri::from_host_native_path(&path).expect("absolute test path");
+        let diff = unified_diff_from_chunks(
+            &path_uri,
+            update_file_chunks,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
         let expected_diff = r#"@@ -1,4 +1,4 @@
  foo
 -bar
@@ -1373,13 +1409,14 @@ PATCH"#,
 "#;
         let expected = ApplyPatchFileUpdate {
             unified_diff: expected_diff.to_string(),
+            original_content: "foo\nbar\nbaz\nqux\n".to_string(),
             content: "foo\nBAR\nbaz\nQUX\n".to_string(),
         };
         assert_eq!(expected, diff);
     }
 
-    #[test]
-    fn test_unified_diff_first_line_replacement() {
+    #[tokio::test]
+    async fn test_unified_diff_first_line_replacement() {
         // Replace the very first line of the file.
         let dir = tempdir().unwrap();
         let path = dir.path().join("first.txt");
@@ -1401,7 +1438,15 @@ PATCH"#,
             _ => panic!("Expected a single UpdateFile hunk"),
         };
 
-        let diff = unified_diff_from_chunks(&path, chunks).unwrap();
+        let resolved_path = PathUri::from_host_native_path(&path).expect("absolute test path");
+        let diff = unified_diff_from_chunks(
+            &resolved_path,
+            chunks,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
         let expected_diff = r#"@@ -1,2 +1,2 @@
 -foo
 +FOO
@@ -1409,13 +1454,14 @@ PATCH"#,
 "#;
         let expected = ApplyPatchFileUpdate {
             unified_diff: expected_diff.to_string(),
+            original_content: "foo\nbar\nbaz\n".to_string(),
             content: "FOO\nbar\nbaz\n".to_string(),
         };
         assert_eq!(expected, diff);
     }
 
-    #[test]
-    fn test_unified_diff_last_line_replacement() {
+    #[tokio::test]
+    async fn test_unified_diff_last_line_replacement() {
         // Replace the very last line of the file.
         let dir = tempdir().unwrap();
         let path = dir.path().join("last.txt");
@@ -1438,7 +1484,15 @@ PATCH"#,
             _ => panic!("Expected a single UpdateFile hunk"),
         };
 
-        let diff = unified_diff_from_chunks(&path, chunks).unwrap();
+        let resolved_path = PathUri::from_host_native_path(&path).expect("absolute test path");
+        let diff = unified_diff_from_chunks(
+            &resolved_path,
+            chunks,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
         let expected_diff = r#"@@ -2,2 +2,2 @@
  bar
 -baz
@@ -1446,13 +1500,14 @@ PATCH"#,
 "#;
         let expected = ApplyPatchFileUpdate {
             unified_diff: expected_diff.to_string(),
+            original_content: "foo\nbar\nbaz\n".to_string(),
             content: "foo\nbar\nBAZ\n".to_string(),
         };
         assert_eq!(expected, diff);
     }
 
-    #[test]
-    fn test_unified_diff_insert_at_eof() {
+    #[tokio::test]
+    async fn test_unified_diff_insert_at_eof() {
         // Insert a new line at end‑of‑file.
         let dir = tempdir().unwrap();
         let path = dir.path().join("insert.txt");
@@ -1473,20 +1528,25 @@ PATCH"#,
             _ => panic!("Expected a single UpdateFile hunk"),
         };
 
-        let diff = unified_diff_from_chunks(&path, chunks).unwrap();
+        let path_uri = PathUri::from_host_native_path(&path).expect("absolute test path");
+        let diff =
+            unified_diff_from_chunks(&path_uri, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
+                .await
+                .unwrap();
         let expected_diff = r#"@@ -3 +3,2 @@
  baz
 +quux
 "#;
         let expected = ApplyPatchFileUpdate {
             unified_diff: expected_diff.to_string(),
+            original_content: "foo\nbar\nbaz\n".to_string(),
             content: "foo\nbar\nbaz\nquux\n".to_string(),
         };
         assert_eq!(expected, diff);
     }
 
-    #[test]
-    fn test_unified_diff_interleaved_changes() {
+    #[tokio::test]
+    async fn test_unified_diff_interleaved_changes() {
         // Original file with six lines.
         let dir = tempdir().unwrap();
         let path = dir.path().join("interleaved.txt");
@@ -1519,7 +1579,11 @@ PATCH"#,
             _ => panic!("Expected a single UpdateFile hunk"),
         };
 
-        let diff = unified_diff_from_chunks(&path, chunks).unwrap();
+        let path_uri = PathUri::from_host_native_path(&path).expect("absolute test path");
+        let diff =
+            unified_diff_from_chunks(&path_uri, chunks, LOCAL_FS.as_ref(), /*sandbox*/ None)
+                .await
+                .unwrap();
 
         let expected_diff = r#"@@ -1,6 +1,7 @@
  a
@@ -1535,6 +1599,7 @@ PATCH"#,
 
         let expected = ApplyPatchFileUpdate {
             unified_diff: expected_diff.to_string(),
+            original_content: "a\nb\nc\nd\ne\nf\n".to_string(),
             content: "a\nB\nc\nd\nE\nf\ng\n".to_string(),
         };
 
@@ -1542,7 +1607,16 @@ PATCH"#,
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        apply_patch(&patch, &mut stdout, &mut stderr).unwrap();
+        apply_patch(
+            &patch,
+            &PathUri::from_host_native_path(dir.path()).expect("absolute test path"),
+            &mut stdout,
+            &mut stderr,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
         let contents = fs::read_to_string(path).unwrap();
         assert_eq!(
             contents,
@@ -1557,69 +1631,88 @@ g
         );
     }
 
-    #[test]
-    fn test_apply_patch_should_resolve_absolute_paths_in_cwd() {
-        let session_dir = tempdir().unwrap();
-        let relative_path = "source.txt";
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_apply_patch_fails_on_write_error() {
+        use std::os::unix::fs::PermissionsExt;
 
-        // Note that we need this file to exist for the patch to be "verified"
-        // and parsed correctly.
-        let session_file_path = session_dir.path().join(relative_path);
-        fs::write(&session_file_path, "session directory content\n").unwrap();
-
-        let argv = vec![
-            "apply_patch".to_string(),
-            r#"*** Begin Patch
-*** Update File: source.txt
-@@
--session directory content
-+updated session directory content
-*** End Patch"#
-                .to_string(),
-        ];
-
-        let result = maybe_parse_apply_patch_verified(&argv, session_dir.path());
-
-        // Verify the patch contents - as otherwise we may have pulled contents
-        // from the wrong file (as we're using relative paths)
-        assert_eq!(
-            result,
-            MaybeApplyPatchVerified::Body(ApplyPatchAction {
-                changes: HashMap::from([(
-                    session_dir.path().join(relative_path),
-                    ApplyPatchFileChange::Update {
-                        unified_diff: r#"@@ -1 +1 @@
--session directory content
-+updated session directory content
-"#
-                        .to_string(),
-                        move_path: None,
-                        new_content: "updated session directory content\n".to_string(),
-                    },
-                )]),
-                patch: argv[1].clone(),
-                cwd: session_dir.path().to_path_buf(),
-            })
-        );
-    }
-
-    #[test]
-    fn test_apply_patch_fails_on_write_error() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("readonly.txt");
-        fs::write(&path, "before\n").unwrap();
-        let mut perms = fs::metadata(&path).unwrap().permissions();
-        perms.set_readonly(true);
-        fs::set_permissions(&path, perms).unwrap();
+        let locked_dir = dir.path().join("locked");
+        fs::create_dir(&locked_dir).unwrap();
+        fs::set_permissions(&locked_dir, fs::Permissions::from_mode(0o555)).unwrap();
 
-        let patch = wrap_patch(&format!(
-            "*** Update File: {}\n@@\n-before\n+after\n*** End Patch",
-            path.display()
-        ));
+        let patch = wrap_patch("*** Add File: locked/new.txt\n+after");
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        let result = apply_patch(&patch, &mut stdout, &mut stderr);
-        assert!(result.is_err());
+        let result = apply_patch(
+            &patch,
+            &PathUri::from_host_native_path(dir.path()).expect("absolute test path"),
+            &mut stdout,
+            &mut stderr,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await;
+        let failure = result.expect_err("write should fail");
+
+        fs::set_permissions(&locked_dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(!failure.delta().is_exact());
+    }
+
+    #[tokio::test]
+    async fn test_unreadable_destinations_return_inexact_delta() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("binary.dat");
+        fs::write(dir.path().join("source.txt"), "before\n").unwrap();
+        let cwd = PathUri::from_host_native_path(dir.path()).expect("absolute test path");
+
+        for patch in [
+            wrap_patch("*** Add File: binary.dat\n+text"),
+            wrap_patch("*** Update File: source.txt\n*** Move to: binary.dat\n@@\n-before\n+after"),
+        ] {
+            fs::write(&path, [0xff, 0xfe, 0xfd]).unwrap();
+            let mut stdout = Vec::new();
+            let mut stderr = Vec::new();
+            let delta = apply_patch(
+                &patch,
+                &cwd,
+                &mut stdout,
+                &mut stderr,
+                LOCAL_FS.as_ref(),
+                /*sandbox*/ None,
+            )
+            .await
+            .unwrap();
+
+            assert!(!delta.is_exact());
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_delete_symlink_returns_inexact_delta() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("target.txt"), "target\n").unwrap();
+        symlink(dir.path().join("target.txt"), dir.path().join("link.txt")).unwrap();
+        let patch = wrap_patch("*** Delete File: link.txt");
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let delta = apply_patch(
+            &patch,
+            &PathUri::from_host_native_path(dir.path()).expect("absolute test path"),
+            &mut stdout,
+            &mut stderr,
+            LOCAL_FS.as_ref(),
+            /*sandbox*/ None,
+        )
+        .await
+        .unwrap();
+
+        assert!(!delta.is_exact());
     }
 }

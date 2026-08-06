@@ -1,36 +1,35 @@
 ---
 source: tui/tests/vt100_chatwidget_snapshot.rs
-assertion_line: 597
 expression: output
 ---
- ┌────────────────────────────────────────────────────────────────────────────┐
- │                                    Code                                    │
- └────────────────────────────────────────────────────────────────────────────┘
-   /limits - visualize weekly and hourly rate limits
-   /review - review your changes for potential issues
-   /auto - work autonomously on long tasks with Auto Drive Experimental
-   /cloud - browse, apply, and create cloud tasks NEW
+ +----------------------------------------------------------------------------+
+ |                                 Every Code                                 |
+ +----------------------------------------------------------------------------+
+ • Hello! How can I help you today?
+
+
+
+ • I can help with various tasks including:
+
+   - Writing code
+   - Reading files
+   - Running commands
+
 
  › Handle captcha gracefully
 
- ⚙ ┌───────────────────────────────────────────────────────────────────────────
-   │ Browser Session • https://example.com                                 06s│
-   └───────────────────────────────────────────────────────────────────────────
-     Active URL: https://example.com
-     Title: (pending)
+   +- Browser (headless): example.com
+   |
+   |   Actions
+   |    MM:SS  Opened   https://example.com
+   |    MM:SS  Typed    pizza
+   |    MM:SS  Pressed  Enter
+   |
+   |   Console: Encountering captcha block
+   |
+   +- [Ctrl+B] View · [Esc] Stop
 
-     Actions
-       00:00  Open URL https://example.com
-       00:03  Type “pizza”
-       00:05  browser key
-
-     Console
-       ⚠️   Encountering captcha block
-
-     Screenshot
-       (no screenshot yet)
-
- ┌────────────────────────────────────────────────────────────────────────────┐
- │ What can I code for you today?                                             │
- └────────────────────────────────────────────────────────────────────────────┘
-   Read Only  (Shift+Tab change)                                   Ctrl+H help
+ +----------------------------- ✶ Browsing... -----------------------------+
+ | What can I code for you today?                                             |
+ +----------------------------------------------------------------------------+
+ Read Only  (Shift+Tab change)                       Ctrl+G editor  •  API key

@@ -1,46 +1,39 @@
-use codex_core::CodexAuth;
-use codex_core::ConversationManager;
-use codex_core::protocol::EventMsg;
-use codex_core::protocol::Op;
-use codex_core::protocol_config_types::ReasoningEffort;
-use core_test_support::load_default_config_for_test;
+use codex_protocol::openai_models::ReasoningEffort;
+use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::Op;
+use core_test_support::responses::start_mock_server;
+use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
-use tempfile::TempDir;
 
 const CONFIG_TOML: &str = "config.toml";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn override_turn_context_does_not_persist_when_config_exists() {
-    let codex_home = TempDir::new().unwrap();
-    let config_path = codex_home.path().join(CONFIG_TOML);
+async fn thread_settings_update_does_not_persist_when_config_exists() {
+    let server = start_mock_server().await;
     let initial_contents = "model = \"gpt-4o\"\n";
-    tokio::fs::write(&config_path, initial_contents)
-        .await
-        .expect("seed config.toml");
+    let mut builder = test_codex()
+        .with_pre_build_hook(move |home| {
+            let config_path = home.join(CONFIG_TOML);
+            std::fs::write(config_path, initial_contents).expect("seed config.toml");
+        })
+        .with_config(|config| {
+            config.model = Some("gpt-4o".to_string());
+        });
+    let test = builder.build(&server).await.expect("create conversation");
+    let codex = test.codex.clone();
+    let config_path = test.home.path().join(CONFIG_TOML);
 
-    let mut config = load_default_config_for_test(&codex_home);
-    config.model = "gpt-4o".to_string();
-
-    let conversation_manager =
-        ConversationManager::with_auth(CodexAuth::from_api_key("Test API Key"));
-    let codex = conversation_manager
-        .new_conversation(config)
-        .await
-        .expect("create conversation")
-        .conversation;
-
-    codex
-        .submit(Op::OverrideTurnContext {
-            cwd: None,
-            approval_policy: None,
-            sandbox_policy: None,
+    core_test_support::submit_thread_settings(
+        &codex,
+        codex_protocol::protocol::ThreadSettingsOverrides {
             model: Some("o3".to_string()),
             effort: Some(Some(ReasoningEffort::High)),
-            summary: None,
-        })
-        .await
-        .expect("submit override");
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("submit override");
 
     codex.submit(Op::Shutdown).await.expect("request shutdown");
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::ShutdownComplete)).await;
@@ -52,35 +45,27 @@ async fn override_turn_context_does_not_persist_when_config_exists() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn override_turn_context_does_not_create_config_file() {
-    let codex_home = TempDir::new().unwrap();
-    let config_path = codex_home.path().join(CONFIG_TOML);
+async fn thread_settings_update_does_not_create_config_file() {
+    let server = start_mock_server().await;
+    let mut builder = test_codex();
+    let test = builder.build(&server).await.expect("create conversation");
+    let codex = test.codex.clone();
+    let config_path = test.home.path().join(CONFIG_TOML);
     assert!(
         !config_path.exists(),
         "test setup should start without config"
     );
 
-    let config = load_default_config_for_test(&codex_home);
-
-    let conversation_manager =
-        ConversationManager::with_auth(CodexAuth::from_api_key("Test API Key"));
-    let codex = conversation_manager
-        .new_conversation(config)
-        .await
-        .expect("create conversation")
-        .conversation;
-
-    codex
-        .submit(Op::OverrideTurnContext {
-            cwd: None,
-            approval_policy: None,
-            sandbox_policy: None,
+    core_test_support::submit_thread_settings(
+        &codex,
+        codex_protocol::protocol::ThreadSettingsOverrides {
             model: Some("o3".to_string()),
             effort: Some(Some(ReasoningEffort::Medium)),
-            summary: None,
-        })
-        .await
-        .expect("submit override");
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("submit override");
 
     codex.submit(Op::Shutdown).await.expect("request shutdown");
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::ShutdownComplete)).await;

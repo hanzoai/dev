@@ -5,8 +5,6 @@ import path from "node:path";
 import { codexExecSpy } from "./codexExecSpy";
 import { describe, expect, it } from "@jest/globals";
 
-import { Codex } from "../src/codex";
-
 import {
   assistantMessage,
   responseCompleted,
@@ -25,10 +23,9 @@ describe("Codex", () => {
       statusCode: 200,
       responseBodies: [sse(responseStarted(), assistantMessage("Hi!"), responseCompleted())],
     });
+    const { client, cleanup } = createMockClient(url);
 
     try {
-      const client = new Codex({ codexPathOverride: codexExecPath, baseUrl: url, apiKey: "test" });
-
       const thread = client.startThread();
       const result = await thread.run("Hello, world!");
 
@@ -42,6 +39,7 @@ describe("Codex", () => {
       expect(result.finalResponse).toBe("Hi!");
       expect(thread.id).toEqual(expect.any(String));
     } finally {
+      cleanup();
       await close();
     }
   });
@@ -62,10 +60,9 @@ describe("Codex", () => {
         ),
       ],
     });
+    const { client, cleanup } = createMockClient(url);
 
     try {
-      const client = new Codex({ codexPathOverride: codexExecPath, baseUrl: url, apiKey: "test" });
-
       const thread = client.startThread();
       const firstResult = await thread.run("first input");
       expect(firstResult.finalResponse).toBe("First response");
@@ -75,6 +72,7 @@ describe("Codex", () => {
 
       expect(requests.length).toBeGreaterThanOrEqual(2);
     } finally {
+      cleanup();
       await close();
     }
   });
@@ -95,10 +93,9 @@ describe("Codex", () => {
         ),
       ],
     });
+    const { client, cleanup } = createMockClient(url);
 
     try {
-      const client = new Codex({ codexPathOverride: codexExecPath, baseUrl: url, apiKey: "test" });
-
       const thread = client.startThread();
       const firstResult = await thread.run("first input");
       expect(firstResult.finalResponse).toBe("First response");
@@ -115,6 +112,7 @@ describe("Codex", () => {
 
       expect(payload.model).toBe("gpt-test-1");
     } finally {
+      cleanup();
       await close();
     }
   });
@@ -135,10 +133,9 @@ describe("Codex", () => {
         ),
       ],
     });
+    const { client, cleanup } = createMockClient(url);
 
     try {
-      const client = new Codex({ codexPathOverride: codexExecPath, baseUrl: url, apiKey: "test" });
-
       const originalThread = client.startThread();
       const firstResult = await originalThread.run("first input");
       expect(firstResult.finalResponse).toBe("First response");
@@ -151,6 +148,7 @@ describe("Codex", () => {
 
       expect(requests.length).toBeGreaterThanOrEqual(2);
     } finally {
+      cleanup();
       await close();
     }
   });
@@ -168,10 +166,9 @@ describe("Codex", () => {
     });
 
     const { args: spawnArgs, restore } = codexExecSpy();
+    const { client, cleanup } = createMockClient(url);
 
     try {
-      const client = new Codex({ codexPathOverride: codexExecPath, baseUrl: url, apiKey: "test" });
-
       const thread = client.startThread({
         model: "gpt-test-1",
         sandboxMode: "workspace-write",
@@ -191,6 +188,7 @@ describe("Codex", () => {
       expectPair(commandArgs, ["--model", "gpt-test-1"]);
 
     } finally {
+      cleanup();
       restore();
       await close();
     }
@@ -208,15 +206,13 @@ describe("Codex", () => {
     });
 
     const { args: spawnArgs, restore } = codexExecSpy();
+    const workingDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-working-dir-"));
+    const { client, cleanup } = createTestClient({
+      baseUrl: url,
+      apiKey: "test",
+    });
 
     try {
-      const workingDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-working-dir-"));
-      const client = new Codex({
-        codexPathOverride: codexExecPath,
-        baseUrl: url,
-        apiKey: "test",
-      });
-
       const thread = client.startThread({
         workingDirectory,
         skipGitRepoCheck: true,
@@ -226,6 +222,8 @@ describe("Codex", () => {
       const commandArgs = spawnArgs[0];
       expectPair(commandArgs, ["--cd", workingDirectory]);
     } finally {
+      cleanup();
+      fs.rmSync(workingDirectory, { recursive: true, force: true });
       restore();
       await close();
     }
@@ -242,15 +240,13 @@ describe("Codex", () => {
         ),
       ],
     });
+    const workingDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-working-dir-"));
+    const { client, cleanup } = createTestClient({
+      baseUrl: url,
+      apiKey: "test",
+    });
 
     try {
-      const workingDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-working-dir-"));
-      const client = new Codex({
-        codexPathOverride: codexExecPath,
-        baseUrl: url,
-        apiKey: "test",
-      });
-
       const thread = client.startThread({
         workingDirectory,
       });
@@ -258,6 +254,8 @@ describe("Codex", () => {
         /Not inside a trusted directory/,
       );
     } finally {
+      cleanup();
+      fs.rmSync(workingDirectory, { recursive: true, force: true });
       await close();
     }
   });
@@ -269,23 +267,48 @@ describe("Codex", () => {
         sse(responseFailed("rate limit exceeded")),
       ],
     });
+    const { client, cleanup } = createMockClient(url);
 
     try {
-      const client = new Codex({ codexPathOverride: codexExecPath, baseUrl: url, apiKey: "test" });
       const thread = client.startThread();
       await expect(thread.run("fail")).rejects.toThrow("stream disconnected before completion:");
     } finally {
+      cleanup();
       await close();
     }
   }, 10000); // TODO(pakrym): remove timeout
 });
+
+/**
+ * Given a list of args to `codex` and a `key`, collects all `--config`
+ * overrides for that key.
+ */
+function collectConfigValues(args: string[] | undefined, key: string): string[] {
+  if (!args) {
+    throw new Error("args is undefined");
+  }
+
+  const values: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] !== "--config") {
+      continue;
+    }
+
+    const override = args[i + 1];
+    if (override?.startsWith(`${key}=`)) {
+      values.push(override);
+    }
+  }
+  return values;
+}
+
 function expectPair(args: string[] | undefined, pair: [string, string]) {
   if (!args) {
-    throw new Error("Args is undefined");
+    throw new Error("args is undefined");
   }
-  const index = args.indexOf(pair[0]);
+  const index = args.findIndex((arg, i) => arg === pair[0] && args[i + 1] === pair[1]);
   if (index === -1) {
-    throw new Error(`Pair ${pair[0]} not found in args`);
+    throw new Error(`Pair ${pair[0]} ${pair[1]} not found in args`);
   }
   expect(args[index + 1]).toBe(pair[1]);
 }

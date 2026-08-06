@@ -246,6 +246,20 @@ impl TextArea {
                 code: KeyCode::Char(c),
                 ..
             } if matches!(c, '\n' | '\r') => self.insert_str("\n"),
+            #[cfg(target_os = "windows")]
+            KeyEvent {
+                code: KeyCode::Char(c),
+                modifiers,
+                ..
+            } if (modifiers == (KeyModifiers::CONTROL | KeyModifiers::ALT)
+                    || modifiers == (KeyModifiers::CONTROL
+                        | KeyModifiers::ALT
+                        | KeyModifiers::SHIFT))
+                && !c.is_ascii_control()
+                && !c.is_ascii_alphabetic() =>
+            {
+                self.insert_str(&c.to_string());
+            }
             KeyEvent {
                 code: KeyCode::Char(c),
                 // Insert plain characters (and Shift-modified). Do NOT insert when ALT is held,
@@ -335,11 +349,10 @@ impl TextArea {
             } => {
                 self.undo();
             }
-            KeyEvent {
-                code: KeyCode::Char('z'),
-                modifiers: KeyModifiers::SUPER,
-                ..
-            } => {
+            KeyEvent { code: KeyCode::Char('z'), modifiers, .. }
+                if modifiers.contains(KeyModifiers::SUPER)
+                    && !modifiers.intersects(KeyModifiers::ALT | KeyModifiers::SHIFT) =>
+            {
                 self.undo();
             }
             // macOS-like shortcuts (when terminals report the Command key as SUPER):
@@ -812,7 +825,7 @@ impl TextArea {
         {
             self.text[..first_non_ws]
                 .rfind(|c: char| c.is_whitespace())
-                .map(|i| i + 1)
+                .map(|i| i + self.text[i..].chars().next().unwrap().len_utf8())
                 .unwrap_or(0)
         } else {
             0
@@ -909,6 +922,96 @@ impl TextArea {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn altgr_control_alt_characters_insert_printables() {
+        let mut textarea = TextArea::new();
+        let cases = [
+            ('/', KeyModifiers::CONTROL | KeyModifiers::ALT),
+            ('@', KeyModifiers::CONTROL | KeyModifiers::ALT),
+            ('{', KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT),
+        ];
+
+        for (ch, modifiers) in cases {
+            textarea.set_text("");
+            textarea.set_cursor(0);
+            textarea.input(KeyEvent::new(KeyCode::Char(ch), modifiers));
+            assert_eq!(textarea.text(), ch.to_string(), "expected AltGr combination to insert {ch}");
+        }
+    }
+
+    #[test]
+    fn ctrl_alt_letter_shortcut_preserved() {
+        let mut textarea = TextArea::new();
+        textarea.set_text("word");
+        textarea.set_cursor(textarea.text().len());
+
+        textarea.input(KeyEvent::new(
+            KeyCode::Char('h'),
+            KeyModifiers::CONTROL | KeyModifiers::ALT,
+        ));
+
+        assert_eq!(textarea.text(), "", "Ctrl+Alt+H should still delete backward word");
+    }
+
+    #[test]
+    fn cmd_z_with_extra_control_bit_undoes() {
+        let mut textarea = TextArea::new();
+        textarea.insert_str("hello");
+        assert_eq!(textarea.text(), "hello");
+
+        textarea.input(KeyEvent::new(
+            KeyCode::Char('z'),
+            KeyModifiers::SUPER | KeyModifiers::CONTROL,
+        ));
+
+        assert_eq!(textarea.text(), "");
+        assert_eq!(textarea.cursor(), 0);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn ctrl_alt_symbol_shortcut_is_ignored_for_text_insertion() {
+        let mut textarea = TextArea::new();
+        textarea.set_text("");
+        textarea.set_cursor(0);
+
+        textarea.input(KeyEvent::new(
+            KeyCode::Char('@'),
+            KeyModifiers::CONTROL | KeyModifiers::ALT,
+        ));
+
+        assert!(
+            textarea.text().is_empty(),
+            "Ctrl+Alt symbol should not insert printable characters on non-Windows"
+        );
+    }
+
+    #[test]
+    fn alt_left_keeps_cursor_on_char_boundary_with_multibyte_space() {
+        let mut textarea = TextArea::new();
+        let text = "alpha\u{202f}beta".to_string();
+        textarea.set_text(&text);
+        textarea.set_cursor(text.len());
+
+        textarea.input(KeyEvent::new(KeyCode::Left, KeyModifiers::ALT));
+
+        let cursor = textarea.cursor();
+        assert!(
+            textarea.text().is_char_boundary(cursor),
+            "cursor should stay on a character boundary"
+        );
+        let ws_index = textarea.text().find('\u{202f}').expect("whitespace");
+        let expected = ws_index + '\u{202f}'.len_utf8();
+        assert_eq!(cursor, expected, "expected cursor to land after whitespace");
+    }
+}
+
 impl WidgetRef for &TextArea {
     fn render_ref(&self, area: Rect, buf: &mut Buffer) {
         let lines = self.wrapped_lines(area.width);
@@ -955,4 +1058,3 @@ impl TextArea {
         }
     }
 }
-

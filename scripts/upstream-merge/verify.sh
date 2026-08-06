@@ -59,14 +59,14 @@ fi
 # STEP 3: Static guards for fork-specific functionality
 # - Ensure browser/agent tools are still registered (not just handlers present)
 # - Ensure version handling remains via codex_version in default_client
-# - Ensure web_fetch and web_search tool presence is consistent with fork policy
+# - Ensure browser fetch action (legacy web_fetch) and web_search tool presence is consistent with fork policy
 {
   echo "[verify] STEP 3: static guards (tools + UA/version)"
 }
 guards_log=.github/auto/VERIFY_guards.log
 : > "$guards_log"
 
-# Guard A: Handlers-to-tools parity for our custom families (browser_*, agent_*, web_fetch)
+# Guard A: Handlers-to-tools parity for our custom families (browser, agent)
 # Extract handler names from handle_function_call and tool names from openai_tools in a quote-agnostic way
 handlers=$(rg -n '^[[:space:]]*"[a-z_][a-z0-9_]+"[[:space:]]*=>' codex-rs/core/src/codex.rs | sed -E 's/.*"([^"]+)".*/\1/' | sort -u)
 tools_defined=$( {
@@ -74,7 +74,7 @@ tools_defined=$( {
   rg -n 'name:[[:space:]]*"[^"]+"' codex-rs/core/src/agent_tool.rs || true;
 } | sed -E 's/.*"([^"]+)".*/\1/' | sort -u )
 
-need_check=$(printf "%s\n" "$handlers" | grep -E '^(browser_|agent_|web_fetch$)' || true)
+need_check=$(printf "%s\n" "$handlers" | grep -E '^(browser|agent)$' || true)
 while IFS= read -r h; do
   [ -n "$h" ] || continue
   if ! printf "%s\n" "$tools_defined" | grep -qx "$h"; then
@@ -83,9 +83,9 @@ while IFS= read -r h; do
   fi
 done <<< "$need_check"
 
-# Guard B: Get-openai-tools should reference at least one browser_* tool to expose family
-if ! rg -n 'browser_' codex-rs/core/src/openai_tools.rs >/dev/null 2>&1; then
-  printf "[guards] no 'browser_' tool references found in openai_tools.rs - tool family likely dropped\n" | tee -a "$guards_log"
+# Guard B: Get-openai-tools should reference the unified browser tool to expose family
+if ! rg -n '"browser"' codex-rs/core/src/openai_tools.rs >/dev/null 2>&1; then
+  printf "[guards] no 'browser' tool references found in openai_tools.rs - tool family likely dropped\n" | tee -a "$guards_log"
   status_guards="fail"
 fi
 # Guard C: default_client should reference codex_version::version for UA

@@ -9,7 +9,6 @@ use ratatui::layout::{Constraint, Layout, Rect};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HeightEvent {
     Resize,
-    HudToggle(bool),
     ComposerModeChange,
     HistoryFinalize,
     RunBegin,
@@ -85,7 +84,6 @@ impl HeightManager {
     pub(crate) fn record_event(&mut self, event: HeightEvent) {
         match event {
             HeightEvent::Resize
-            | HeightEvent::HudToggle(_)
             | HeightEvent::ComposerModeChange
             | HeightEvent::HistoryFinalize
             | HeightEvent::RunBegin

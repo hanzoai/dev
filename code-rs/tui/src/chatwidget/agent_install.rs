@@ -9,6 +9,7 @@ use code_core::config_types::ReasoningEffort;
 use code_core::debug_logger::DebugLogger;
 use code_core::protocol::SandboxPolicy;
 use code_core::{AuthManager, ModelClient, Prompt, ResponseEvent, TextFormat};
+use code_login::AuthMode;
 use code_protocol::models::{ContentItem, ResponseItem};
 use futures::StreamExt;
 use serde::Deserialize;
@@ -157,7 +158,10 @@ fn start_guided_terminal_session(
     config: Option<Config>,
     debug_enabled: bool,
 ) {
-    std::thread::spawn(move || {
+    let fail_tx = app_event_tx.clone();
+    if let Err(err) = std::thread::Builder::new()
+        .name("guided-terminal-session".to_string())
+        .spawn(move || {
         let runtime = match tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -217,7 +221,16 @@ fn start_guided_terminal_session(
                 message: msg,
             });
         }
-    });
+        })
+    {
+        let msg = format!("Failed to start guided terminal helper: {err}");
+        fail_tx.send(AppEvent::TerminalChunk {
+            id: terminal_id,
+            chunk: format!("{msg}\n").into_bytes(),
+            _is_stderr: true,
+        });
+        fail_tx.send(AppEvent::TerminalUpdateMessage { id: terminal_id, message: msg });
+    }
 }
 
 fn run_guided_loop(
@@ -237,9 +250,9 @@ fn run_guided_loop(
             .context("loading config")?,
     };
     let preferred_auth = if cfg.using_chatgpt_auth {
-        code_protocol::mcp_protocol::AuthMode::ChatGPT
+        AuthMode::ChatGPT
     } else {
-        code_protocol::mcp_protocol::AuthMode::ApiKey
+        AuthMode::ApiKey
     };
     let auth_mgr = AuthManager::shared_with_mode_and_originator(
         cfg.code_home.clone(),
@@ -569,6 +582,7 @@ fn run_guided_loop(
             strict: Some(true),
             schema: Some(schema.clone()),
         });
+        prompt.set_log_tag(format!("guided_terminal/{schema_name}"));
 
         let raw = request_decision(runtime, &client, &prompt).context("model stream failed")?;
         let (decision, raw_value) = parse_decision(&raw)?;
@@ -833,6 +847,8 @@ fn make_message(role: &str, text: String) -> ResponseItem {
         id: None,
         role: role.to_string(),
         content: vec![content],
+        end_turn: None,
+        phase: None,
     }
 }
 

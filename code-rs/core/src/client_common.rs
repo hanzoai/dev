@@ -1,3 +1,4 @@
+use crate::agent_defaults::model_guide_markdown;
 use crate::config_types::ReasoningEffort as ReasoningEffortConfig;
 use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use crate::config_types::TextVerbosity as TextVerbosityConfig;
@@ -7,29 +8,34 @@ use crate::model_family::ModelFamily;
 use crate::openai_tools::OpenAiTool;
 use crate::protocol::RateLimitSnapshotEvent;
 use crate::protocol::TokenUsage;
-use code_apply_patch::APPLY_PATCH_TOOL_INSTRUCTIONS;
+use crate::user_instructions::UserInstructions;
 use code_protocol::models::ContentItem;
+use code_protocol::models::FunctionCallOutputContentItem;
 use code_protocol::models::ResponseItem;
 use futures::Stream;
-use serde::Serialize;
+use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
 /// Additional prompt for Code. Can not edit Codex instructions.
-const ADDITIONAL_INSTRUCTIONS: &str = include_str!("../prompt_coder.md");
+const PROMPT_CODER_TEMPLATE: &str = include_str!("../prompt_coder.md");
+static BASE_MODEL_DESCRIPTIONS: Lazy<String> = Lazy::new(|| model_guide_markdown());
+static DEFAULT_DEVELOPER_PROMPT: Lazy<String> = Lazy::new(|| {
+    PROMPT_CODER_TEMPLATE.replace("{MODEL_DESCRIPTIONS}", &BASE_MODEL_DESCRIPTIONS)
+});
 
 /// wraps environment context message in a tag for the model to parse more easily.
 const ENVIRONMENT_CONTEXT_START: &str = "<environment_context>\n\n";
 const ENVIRONMENT_CONTEXT_END: &str = "\n\n</environment_context>";
 
-/// wraps user instructions message in a tag for the model to parse more easily.
-const USER_INSTRUCTIONS_START: &str = "<user_instructions>\n\n";
-const USER_INSTRUCTIONS_END: &str = "\n\n</user_instructions>";
 /// Review thread system prompt. Edit `core/src/review_prompt.md` to customize.
 #[allow(dead_code)]
 pub const REVIEW_PROMPT: &str = include_str!("../review_prompt.md");
@@ -64,6 +70,10 @@ pub struct Prompt {
     /// Whether to prepend the default developer instructions block.
     pub include_additional_instructions: bool,
 
+    /// Additional developer messages to insert immediately after the default
+    /// fork instructions but before any environment or user context.
+    pub prepend_developer_messages: Vec<String>,
+
     /// Optional `text.format` for structured outputs (used by side-channel requests).
     pub text_format: Option<TextFormat>,
 
@@ -74,6 +84,13 @@ pub struct Prompt {
     pub model_family_override: Option<ModelFamily>,
     /// Optional the output schema for the model's response.
     pub output_schema: Option<Value>,
+    /// Optional tag used to route debug logs into helper-specific directories.
+    pub log_tag: Option<String>,
+    /// Optional override for session/conversation identifiers used for caching.
+    pub session_id_override: Option<Uuid>,
+
+    /// Optional override for the model guide placeholder in the developer prompt.
+    pub model_descriptions: Option<String>,
 }
 
 impl Default for Prompt {
@@ -87,10 +104,14 @@ impl Default for Prompt {
             status_items: Vec::new(),
             base_instructions_override: None,
             include_additional_instructions: true,
+            prepend_developer_messages: Vec::new(),
             text_format: None,
             model_override: None,
             model_family_override: None,
             output_schema: None,
+            log_tag: None,
+            session_id_override: None,
+            model_descriptions: None,
         }
     }
 }
@@ -98,34 +119,40 @@ impl Default for Prompt {
 impl Prompt {
     pub(crate) fn get_full_instructions<'a>(&'a self, model: &'a ModelFamily) -> Cow<'a, str> {
         let effective_model = self.model_family_override.as_ref().unwrap_or(model);
-        let base = self
-            .base_instructions_override
-            .as_deref()
-            .unwrap_or(effective_model.base_instructions.deref());
-        let _sections: Vec<&str> = vec![base];
-        // When there are no custom instructions, add apply_patch_tool_instructions if:
-        // - the model needs special instructions (4.1)
-        // AND
-        // - there is no apply_patch tool present
-        let is_apply_patch_tool_present = self.tools.iter().any(|tool| match tool {
-            OpenAiTool::Function(f) => f.name == "apply_patch",
-            OpenAiTool::Freeform(f) => f.name == "apply_patch",
-            _ => false,
-        });
-        if self.base_instructions_override.is_none()
-            && effective_model.needs_special_apply_patch_instructions
-            && !is_apply_patch_tool_present
-        {
-            Cow::Owned(format!("{base}\n{APPLY_PATCH_TOOL_INSTRUCTIONS}"))
+        Cow::Borrowed(
+            self.base_instructions_override
+                .as_deref()
+                .unwrap_or(effective_model.base_instructions.deref()),
+        )
+    }
+
+    pub fn set_log_tag<S: Into<String>>(&mut self, tag: S) {
+        self.log_tag = Some(tag.into());
+    }
+
+    fn additional_instructions(&self) -> Cow<'_, str> {
+        if let Some(custom) = &self.model_descriptions {
+            Cow::Owned(PROMPT_CODER_TEMPLATE.replace("{MODEL_DESCRIPTIONS}", custom))
         } else {
-            Cow::Borrowed(base)
+            Cow::Borrowed(DEFAULT_DEVELOPER_PROMPT.deref())
         }
     }
 
-    fn get_formatted_user_instructions(&self) -> Option<String> {
-        self.user_instructions
+    fn get_formatted_user_instructions(&self) -> Option<ResponseItem> {
+        let instructions = self.user_instructions.as_ref()?;
+        let directory = self
+            .environment_context
             .as_ref()
-            .map(|ui| format!("{USER_INSTRUCTIONS_START}{ui}{USER_INSTRUCTIONS_END}"))
+            .and_then(|ctx| ctx.cwd.as_ref())
+            .map(|cwd| cwd.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        Some(
+            UserInstructions {
+                directory,
+                text: instructions.clone(),
+            }
+            .into(),
+        )
     }
 
     fn get_formatted_environment_context(&self) -> Option<String> {
@@ -139,13 +166,23 @@ impl Prompt {
         let mut input_with_instructions =
             Vec::with_capacity(self.input.len() + self.status_items.len() + 3);
         if self.include_additional_instructions {
+            let developer_text = self.additional_instructions().into_owned();
             input_with_instructions.push(ResponseItem::Message {
                 id: None,
                 role: "developer".to_string(),
-                content: vec![ContentItem::InputText {
-                    text: ADDITIONAL_INSTRUCTIONS.to_string(),
-                }],
-            });
+                content: vec![ContentItem::InputText { text: developer_text }], end_turn: None, phase: None});
+            for message in &self.prepend_developer_messages {
+                let trimmed = message.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                input_with_instructions.push(ResponseItem::Message {
+                    id: None,
+                    role: "developer".to_string(),
+                    content: vec![ContentItem::InputText {
+                        text: trimmed.to_string(),
+                    }], end_turn: None, phase: None});
+            }
             if let Some(ec) = self.get_formatted_environment_context() {
                 let has_environment_context = self.input.iter().any(|item| {
                     matches!(item, ResponseItem::Message { role, content, .. }
@@ -158,24 +195,16 @@ impl Prompt {
                     input_with_instructions.push(ResponseItem::Message {
                         id: None,
                         role: "user".to_string(),
-                        content: vec![ContentItem::InputText { text: ec }],
-                    });
+                        content: vec![ContentItem::InputText { text: ec }], end_turn: None, phase: None});
                 }
             }
             if let Some(ui) = self.get_formatted_user_instructions() {
                 let has_user_instructions = self.input.iter().any(|item| {
                     matches!(item, ResponseItem::Message { role, content, .. }
-                        if role == "user"
-                            && content.iter().any(|c| matches!(c,
-                                ContentItem::InputText { text } if text.contains(USER_INSTRUCTIONS_START)
-                            )))
+                        if role == "user" && UserInstructions::is_user_instructions(content))
                 });
                 if !has_user_instructions {
-                    input_with_instructions.push(ResponseItem::Message {
-                        id: None,
-                        role: "user".to_string(),
-                        content: vec![ContentItem::InputText { text: ui }],
-                    });
+                    input_with_instructions.push(ui);
                 }
             }
         }
@@ -207,23 +236,64 @@ impl Prompt {
         input_with_instructions
     }
 
+    pub(crate) fn get_formatted_input_for_request(
+        &self,
+        use_responses_lite: bool,
+    ) -> Vec<ResponseItem> {
+        let mut input = self.get_formatted_input();
+        if use_responses_lite {
+            strip_function_output_image_details(&mut input);
+        }
+        input
+    }
+
+    pub fn set_tools(&mut self, tools: Vec<OpenAiTool>) {
+        self.tools = tools;
+    }
+
     /// Creates a formatted user instructions message from a string
     #[allow(dead_code)]
     pub(crate) fn format_user_instructions_message(ui: &str) -> ResponseItem {
-        ResponseItem::Message {
-            id: None,
-            role: "user".to_string(),
-            content: vec![ContentItem::InputText {
-                text: format!("{USER_INSTRUCTIONS_START}{ui}{USER_INSTRUCTIONS_END}"),
-            }],
+        UserInstructions {
+            directory: String::new(),
+            text: ui.to_string(),
+        }
+        .into()
+    }
+}
+
+fn strip_function_output_image_details(items: &mut [ResponseItem]) {
+    for item in items {
+        match item {
+            ResponseItem::FunctionCallOutput { output, .. }
+            | ResponseItem::CustomToolCallOutput { output, .. } => {
+                if let Some(content_items) = output.content_items_mut() {
+                    for content_item in content_items {
+                        if let FunctionCallOutputContentItem::InputImage { detail, .. } =
+                            content_item
+                        {
+                            *detail = None;
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
 }
 
 #[derive(Debug)]
 pub enum ResponseEvent {
-    Created,
+    Created {
+        response_id: Option<String>,
+        response_model: Option<String>,
+    },
+    ResponseHeaders(serde_json::Value),
     OutputItemDone { item: ResponseItem, sequence_number: Option<u64>, output_index: Option<u32> },
+    /// Indicates that the server will include reasoning content on this stream.
+    ///
+    /// Some providers expose this as a handshake header on websocket streams.
+    ServerReasoningIncluded(bool),
     Completed {
         response_id: String,
         token_usage: Option<TokenUsage>,
@@ -257,6 +327,7 @@ pub enum ResponseEvent {
         query: Option<String>,
     },
     RateLimits(RateLimitSnapshotEvent),
+    ModelsEtag(String),
 }
 
 #[derive(Debug, Serialize)]
@@ -265,10 +336,18 @@ pub(crate) struct Reasoning {
     pub(crate) effort: Option<ReasoningEffortConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) summary: Option<ReasoningSummaryConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) context: Option<ReasoningContext>,
+}
+
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ReasoningContext {
+    AllTurns,
 }
 
 /// Text configuration for verbosity/format in OpenAI API responses.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Text {
     pub(crate) verbosity: OpenAiTextVerbosity,
     pub(crate) format: Option<TextFormat>,
@@ -281,11 +360,9 @@ impl serde::Serialize for Text {
     {
         use serde::ser::SerializeMap;
         let mut map = serializer.serialize_map(None)?;
+        map.serialize_entry("verbosity", &self.verbosity)?;
         if let Some(fmt) = &self.format {
-            // When a structured format is present, omit `verbosity` per API expectations.
             map.serialize_entry("format", fmt)?;
-        } else {
-            map.serialize_entry("verbosity", &self.verbosity)?;
         }
         map.end()
     }
@@ -312,7 +389,7 @@ impl From<TextVerbosityConfig> for OpenAiTextVerbosity {
 }
 
 /// Optional structured output format for `text.format` in the Responses API.
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct TextFormat {
     #[serde(rename = "type")]
     pub r#type: String, // e.g. "json_schema"
@@ -389,6 +466,70 @@ fn limit_screenshots_in_input(input: &mut Vec<ResponseItem>) {
     );
 }
 
+const SPARK_IMAGE_PLACEHOLDER: &str =
+    "[image omitted: selected -spark model does not support image inputs]";
+
+/// Replace `input_image` payloads with text placeholders for models that are
+/// known not to accept image inputs.
+pub(crate) fn replace_image_payloads_for_model(input: &mut Vec<ResponseItem>, model_slug: &str) {
+    if !model_slug.to_ascii_lowercase().contains("-spark") {
+        return;
+    }
+
+    for item in input.iter_mut() {
+        match item {
+            ResponseItem::Message { content, .. } => {
+                for content_item in content.iter_mut() {
+                    if matches!(content_item, ContentItem::InputImage { .. }) {
+                        *content_item = ContentItem::InputText {
+                            text: SPARK_IMAGE_PLACEHOLDER.to_string(),
+                        };
+                    }
+                }
+            }
+            ResponseItem::FunctionCallOutput { output, .. } => {
+                if let Some(content_items) = output.content_items_mut() {
+                    for output_item in content_items.iter_mut() {
+                        if matches!(output_item, FunctionCallOutputContentItem::InputImage { .. }) {
+                            *output_item = FunctionCallOutputContentItem::InputText {
+                                text: SPARK_IMAGE_PLACEHOLDER.to_string(),
+                            };
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Convert upstream `image_generation_call` output items into standard user
+/// `input_image` messages when we replay stateless history.
+pub(crate) fn rewrite_image_generation_calls_for_input(input: &mut Vec<ResponseItem>) {
+    let original_items = std::mem::take(input);
+    *input = original_items
+        .into_iter()
+        .map(|item| match item {
+            ResponseItem::ImageGenerationCall { result, .. } => {
+                let image_url = if result.starts_with("data:") {
+                    result
+                } else {
+                    format!("data:image/png;base64,{result}")
+                };
+
+                ResponseItem::Message {
+                    id: None,
+                    role: "user".to_string(),
+                    content: vec![ContentItem::InputImage { image_url }],
+                    end_turn: None,
+                    phase: None,
+                }
+            }
+            _ => item,
+        })
+        .collect();
+}
+
 /// Request object that is serialized as JSON and POST'ed when using the
 /// Responses API.
 #[derive(Debug, Serialize)]
@@ -399,7 +540,8 @@ pub(crate) struct ResponsesApiRequest<'a> {
     // we code defensively to avoid this case, but perhaps we should use a
     // separate enum for serialization.
     pub(crate) input: &'a Vec<ResponseItem>,
-    pub(crate) tools: &'a [serde_json::Value],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) tools: Option<&'a [serde_json::Value]>,
     pub(crate) tool_choice: &'static str,
     pub(crate) parallel_tool_calls: bool,
     pub(crate) reasoning: Option<Reasoning>,
@@ -410,7 +552,11 @@ pub(crate) struct ResponsesApiRequest<'a> {
     pub(crate) stream: bool,
     pub(crate) include: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) service_tier: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) prompt_cache_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) client_metadata: Option<BTreeMap<String, String>>,
 }
 
 pub(crate) fn create_reasoning_param_for_request(
@@ -422,9 +568,23 @@ pub(crate) fn create_reasoning_param_for_request(
         return None;
     }
 
+    let summary = match summary {
+        ReasoningSummaryConfig::Auto => model_family.default_reasoning_summary,
+        other => other,
+    };
+
+    let summary = if summary == ReasoningSummaryConfig::None {
+        None
+    } else {
+        Some(summary)
+    };
+
     Some(Reasoning {
         effort,
-        summary: Some(summary),
+        summary,
+        context: model_family
+            .use_responses_lite
+            .then_some(ReasoningContext::AllTurns),
     })
 }
 
@@ -445,9 +605,105 @@ impl Stream for ResponseStream {
 #[cfg(test)]
 mod tests {
     use crate::model_family::find_family_for_model;
+    use code_apply_patch::APPLY_PATCH_TOOL_INSTRUCTIONS;
     use pretty_assertions::assert_eq;
 
     use super::*;
+
+    #[test]
+    fn replace_image_payloads_for_spark_model_rewrites_images() {
+        let mut input = vec![
+            ResponseItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![
+                    ContentItem::InputText {
+                        text: "Please inspect this".to_string(),
+                    },
+                    ContentItem::InputImage {
+                        image_url: "data:image/png;base64,AAA".to_string(),
+                    },
+                ],
+                end_turn: None,
+                phase: None,
+            },
+            ResponseItem::FunctionCallOutput {
+                call_id: "call_1".to_string(),
+                output: code_protocol::models::FunctionCallOutputPayload::from_content_items(vec![
+                    FunctionCallOutputContentItem::InputImage {
+                        image_url: "data:image/png;base64,BBB".to_string(),
+                        detail: None,
+                    },
+                ]),
+            },
+        ];
+
+        replace_image_payloads_for_model(&mut input, "gpt-5.3-codex-spark");
+
+        assert!(matches!(
+            &input[0],
+            ResponseItem::Message { content, .. }
+                if matches!(
+                    content.get(1),
+                    Some(ContentItem::InputText { text }) if text == SPARK_IMAGE_PLACEHOLDER
+                )
+        ));
+
+        assert!(matches!(
+            &input[1],
+            ResponseItem::FunctionCallOutput { output, .. }
+                if matches!(
+                    output.content_items().and_then(|items| items.first()),
+                    Some(FunctionCallOutputContentItem::InputText { text })
+                        if text == SPARK_IMAGE_PLACEHOLDER
+                )
+        ));
+    }
+
+    #[test]
+    fn replace_image_payloads_for_non_spark_model_keeps_images() {
+        let mut input = vec![ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputImage {
+                image_url: "data:image/png;base64,AAA".to_string(),
+            }],
+            end_turn: None,
+            phase: None,
+        }];
+
+        replace_image_payloads_for_model(&mut input, "gpt-5.3-codex");
+
+        assert!(matches!(
+            &input[0],
+            ResponseItem::Message { content, .. }
+                if matches!(content.first(), Some(ContentItem::InputImage { .. }))
+        ));
+    }
+
+    #[test]
+    fn rewrite_image_generation_calls_for_input_converts_to_user_image_message() {
+        let mut input = vec![ResponseItem::ImageGenerationCall {
+            id: "ig_1".to_string(),
+            status: "completed".to_string(),
+            revised_prompt: None,
+            result: "Zm9v".to_string(),
+        }];
+
+        rewrite_image_generation_calls_for_input(&mut input);
+
+        assert_eq!(input.len(), 1);
+        assert!(matches!(
+            &input[0],
+            ResponseItem::Message { role, content, .. }
+                if role == "user"
+                    && matches!(
+                        content.first(),
+                        Some(ContentItem::InputImage { image_url })
+                            if image_url == "data:image/png;base64,Zm9v"
+                    )
+        ));
+    }
 
     struct InstructionsTestCase {
         pub slug: &'static str,
@@ -472,8 +728,8 @@ mod tests {
                 expects_apply_patch_instructions: true,
             },
             InstructionsTestCase {
-                slug: "gpt-5",
-                expects_apply_patch_instructions: true,
+                slug: "gpt-5.1",
+                expects_apply_patch_instructions: false,
             },
             InstructionsTestCase {
                 slug: "codex-mini-latest",
@@ -484,24 +740,74 @@ mod tests {
                 expects_apply_patch_instructions: false,
             },
             InstructionsTestCase {
-                slug: "gpt-5-codex",
+                slug: "gpt-5.1-codex",
                 expects_apply_patch_instructions: false,
             },
         ];
         for test_case in test_cases {
             let model_family = find_family_for_model(test_case.slug).expect("known model slug");
-            let expected = if test_case.expects_apply_patch_instructions {
-                format!(
-                    "{}\n{}",
-                    model_family.clone().base_instructions,
-                    APPLY_PATCH_TOOL_INSTRUCTIONS
-                )
-            } else {
-                model_family.clone().base_instructions
-            };
-
             let full = prompt.get_full_instructions(&model_family);
-            assert_eq!(full, expected);
+            assert_eq!(full, model_family.base_instructions);
+            if test_case.expects_apply_patch_instructions {
+                assert!(
+                    full.contains(APPLY_PATCH_TOOL_INSTRUCTIONS),
+                    "expected apply_patch instructions for {}",
+                    test_case.slug
+                );
+            } else {
+                assert!(
+                    !full.contains(APPLY_PATCH_TOOL_INSTRUCTIONS),
+                    "did not expect apply_patch instructions for {}",
+                    test_case.slug
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn prepend_developer_messages_precedes_environment_context() {
+        use std::path::PathBuf;
+
+        let mut prompt = Prompt::default();
+        prompt.environment_context = Some(EnvironmentContext::new(
+            Some(PathBuf::from("/workspace")),
+            None,
+            None,
+            None,
+        ));
+        let coordinator_text = "Coordinator guidance";
+        prompt
+            .prepend_developer_messages
+            .push(coordinator_text.to_string());
+
+        let formatted = prompt.get_formatted_input();
+        assert!(formatted.len() >= 3);
+
+        let second = &formatted[1];
+        match second {
+            ResponseItem::Message { role, content, .. } => {
+                assert_eq!(role, "developer");
+                match content.first() {
+                    Some(ContentItem::InputText { text }) => {
+                        assert_eq!(text, coordinator_text);
+                    }
+                    other => panic!("unexpected content: {other:?}"),
+                }
+            }
+            other => panic!("unexpected second item: {other:?}"),
+        }
+
+        let third = &formatted[2];
+        match third {
+            ResponseItem::Message { role, content, .. } => {
+                assert_eq!(role, "user");
+                let text = match content.first() {
+                    Some(ContentItem::InputText { text }) => text,
+                    other => panic!("unexpected environment content: {other:?}"),
+                };
+                assert!(text.contains("<environment_context>"));
+            }
+            other => panic!("unexpected third item: {other:?}"),
         }
     }
 
@@ -510,17 +816,19 @@ mod tests {
         let input: Vec<ResponseItem> = vec![];
         let tools: Vec<serde_json::Value> = vec![];
         let req = ResponsesApiRequest {
-            model: "gpt-5",
+            model: "gpt-5.1",
             instructions: "i",
             input: &input,
-            tools: &tools,
+            tools: Some(&tools),
             tool_choice: "auto",
             parallel_tool_calls: false,
             reasoning: None,
             store: false,
             stream: true,
             include: vec![],
+            service_tier: None,
             prompt_cache_key: None,
+            client_metadata: None,
             text: Some(Text { verbosity: OpenAiTextVerbosity::Low, format: None }),
         };
 
@@ -545,17 +853,19 @@ mod tests {
             "required": ["answer"],
         });
         let req = ResponsesApiRequest {
-            model: "gpt-5",
+            model: "gpt-5.1",
             instructions: "i",
             input: &input,
-            tools: &tools,
+            tools: Some(&tools),
             tool_choice: "auto",
             parallel_tool_calls: false,
             reasoning: None,
             store: false,
             stream: true,
             include: vec![],
+            service_tier: None,
             prompt_cache_key: None,
+            client_metadata: None,
             text: Some(Text {
                 verbosity: OpenAiTextVerbosity::Medium,
                 format: Some(TextFormat {
@@ -569,7 +879,10 @@ mod tests {
 
         let v = serde_json::to_value(&req).expect("json");
         let text = v.get("text").expect("text field");
-        assert!(text.get("verbosity").is_none());
+        assert_eq!(
+            text.get("verbosity").and_then(|v| v.as_str()),
+            Some("medium")
+        );
         let format = text.get("format").expect("format field");
 
         assert_eq!(
@@ -589,21 +902,56 @@ mod tests {
         let input: Vec<ResponseItem> = vec![];
         let tools: Vec<serde_json::Value> = vec![];
         let req = ResponsesApiRequest {
-            model: "gpt-5",
+            model: "gpt-5.1",
             instructions: "i",
             input: &input,
-            tools: &tools,
+            tools: Some(&tools),
             tool_choice: "auto",
             parallel_tool_calls: false,
             reasoning: None,
             store: false,
             stream: true,
             include: vec![],
+            service_tier: None,
             prompt_cache_key: None,
+            client_metadata: None,
             text: None,
         };
 
         let v = serde_json::to_value(&req).expect("json");
         assert!(v.get("text").is_none());
+    }
+
+    #[test]
+    fn serializes_client_metadata_when_set() {
+        let input: Vec<ResponseItem> = vec![];
+        let tools: Vec<serde_json::Value> = vec![];
+        let req = ResponsesApiRequest {
+            model: "gpt-5.1",
+            instructions: "i",
+            input: &input,
+            tools: Some(&tools),
+            tool_choice: "auto",
+            parallel_tool_calls: false,
+            reasoning: None,
+            store: false,
+            stream: true,
+            include: vec![],
+            service_tier: None,
+            prompt_cache_key: None,
+            client_metadata: Some(BTreeMap::from([(
+                "x-codex-window-id".to_string(),
+                "session-1:0".to_string(),
+            )])),
+            text: None,
+        };
+
+        let v = serde_json::to_value(&req).expect("json");
+        assert_eq!(
+            v.get("client_metadata")
+                .and_then(|metadata| metadata.get("x-codex-window-id"))
+                .and_then(|window_id| window_id.as_str()),
+            Some("session-1:0")
+        );
     }
 }

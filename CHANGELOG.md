@@ -3,6 +3,1108 @@
 > [!TIP]
 > We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
 
+## [Unreleased]
+
+- (none)
+
+## [0.6.169] - 2026-08-05
+
+- Core: disable storage for Responses Lite requests and preserve namespace tool serialization. (0724cfbf, 83fdc2e5, b87bf703)
+- Release: use Azure Key Vault for macOS notarization workflows. (0c07c7ee)
+- Release: add Fence auditing to the blob size workflow. (e1f39b5f)
+
+## [0.6.168] - 2026-08-04
+
+- MCP: canonicalize legacy session headers for conformance compatibility. (b0d6dca9)
+- Dependencies: remediate brace-expansion security alerts in package metadata. (22666e8f)
+
+## [0.6.166] - 2026-08-03
+
+- Core: backport upstream model message catalog parity for model instructions and plugin usage metadata. (1f31374)
+
+## [0.6.165] - 2026-08-02
+
+- Core: refresh upstream parity through the latest upstream/main merge. (b96c750a, 4bf479d)
+- Release: adopt remote workflow updates while preserving fork release metadata. (bdb36770)
+
+## [0.6.164] - 2026-08-01
+
+- Docs: document OmniRoute provider setup in the configuration guide. (48c8b41c, 8fbc8dab)
+- Release: refresh CLI package metadata for v0.6.164. (48c8b41c)
+
+## [0.6.162] - 2026-07-31
+
+- Release: refresh CLI package metadata for v0.6.162. (0f44eddf)
+- Release: keep npm package entries aligned for the published release. (0f44eddf)
+
+## [0.6.160] - 2026-07-30
+
+- Dependencies: patch npm security overrides to pick up fixed transitive packages. (4976a942)
+- Release: refresh package metadata and lockfile for the updated dependency overrides. (4976a942)
+
+## [0.6.158] - 2026-07-29
+
+- SDK: update the Python datamodel code generator metadata. (22a65760)
+- Release: refresh CLI and SDK package metadata for v0.6.158. (22a65760)
+
+## [0.6.156] - 2026-07-28
+
+- Core: refresh upstream parity for v0.6.156. (cbca1b32, bde3df6e)
+- SDK: update generated app-server protocol artifacts and client RPC coverage. (cbca1b32)
+- MCP: use configured HTTP clients for all OAuth requests. (709283b4)
+- Core: honor the configured SQLite home in log storage and centralize connection creation. (3418498f, 50a7328f)
+- Release: advance the latest alpha CLI channel only after publishing completes. (dd6b8803)
+
+## [0.6.155] - 2026-07-27
+
+- Release: allow alpha hotfix versions in R2 release publishing. (3d519bf6)
+- Core: refresh upstream parity for v0.6.155. (d04174d4, 78278289)
+
+## [0.6.154] - 2026-07-26
+
+- MCP: add a server recursion limit to prevent runaway nested requests. (743d90d5)
+- Core: refresh upstream parity while preserving fork release behavior. (c447db55)
+
+## [0.6.153] - 2026-07-25
+
+- Release: preserve JustEvery packaging state while merging upstream/main. (30420ad9)
+- Core: refresh the codex-rs mirror to upstream/main. (af2dc7e1)
+
+## [0.6.152] - 2026-07-24
+
+- Core: backport plan parity for account token data and protocol responses. (cd284b9f)
+- App Server: expose plan metadata across session, fork, resume, and account schemas. (cd284b9f)
+
+## [0.6.151] - 2026-07-23
+
+- MCP: set a default streamable HTTP user agent for server connections. (ef631d7e)
+- Install: integrate upstream standalone installer updates, including releases.openai.com resolution. (4736e619, 39a2438d)
+
+## [0.6.150] - 2026-07-22
+
+- Core: backport upstream Responses and review prompt parity. (69e15f3d)
+- Release: publish release metadata, stable installer aliases, and Rust artifacts to Cloudflare R2 channels. (a148e0b5, 667b6bba, cc875d61)
+- Install: add an optional releases.openai.com installer source. (765675a1)
+- Core: preserve audio across history and tool outputs. (6f785632)
+
+## [0.6.149] - 2026-07-17
+
+- Core: confirm usage-limit resets before redeeming limit credits. (a50e8223)
+- Release: add an npm publication recovery workflow for failed release publishes. (3b12db1c, 6151c7ae)
+
+## [0.6.148] - 2026-07-16
+
+- TUI: stop the composer animation ticker when the app event channel closes. (6a2b15b4, 30f287c6)
+- Protocol: track prompt cache write token usage across protocol events and SDK types. (774ffaab, 2edad72d)
+- Dependencies: update serde_with to 3.21.0. (c469efc0)
+
+## [0.6.147] - 2026-07-15
+
+- Core: migrate GPT-5.4 defaults to GPT-5.6 across presets, config validation, and agent defaults. (e6fa8394)
+- TUI: surface GPT-5.6 defaults in chat model labels and slash-command flows. (e6fa8394)
+- SDK: integrate upstream protocol updates and Python SDK release artifacts. (471b7e93, 3f74f002)
+
+## [0.6.146] - 2026-07-14
+
+- Release: refresh upstream history for v0.6.146. (2efa1741)
+- Release: adopt remote workflow updates while preserving release metadata changes. (6ef3bfec)
+
+## [0.6.145] - 2026-07-13
+
+- Core: migrate legacy theme strings in configuration to the current theme format. (ab3ec88a)
+
+## [0.6.143] - 2026-07-08
+
+- Core: backport upstream auth and web search parity across config, protocol, and streaming flows. (0260d05f)
+- CLI: default code-mode to hosted mode for new sessions. (9c671592)
+- CLI: detect installs managed by pnpm when checking managed upgrade paths. (e212cc95)
+- TUI: update onboarding and account labels for refreshed auth modes. (0260d05f)
+
+## [0.6.142] - 2026-07-07
+
+- Core: backport upstream protocol parity updates for app-server and model metadata compatibility. (f38d5f24)
+- App Server: add login account brand schema support across v2 protocol types. (f38d5f24)
+
+## [0.6.141] - 2026-07-06
+
+- Core: backport the rate-limit reset credit schema for account limit responses. (9c0c72a3)
+- App Server: expose reset credit details in rate limit protocol types. (9c0c72a3)
+
+## [0.6.140] - 2026-07-05
+
+- Core: install the rustls crypto provider across Code binaries for reliable TLS startup. (f991d88a)
+- CLI: initialize TLS consistently from a shared rustls provider utility. (f991d88a)
+
+## [0.6.138] - 2026-07-04
+
+- Install: reuse GitHub release metadata when resolving release assets. (319d0305)
+- Release: remove unused git-cliff configuration from the release metadata path. (98d28aab)
+- Release: refresh upstream history and the codex-rs mirror. (e632d40a, 0ec6b820)
+
+## [0.6.137] - 2026-07-03
+
+- Release: include release metadata for v0.6.137. (d434463d)
+- Release: refresh upstream history and the codex-rs mirror. (4ab36e8d, a5d1b113)
+
+## [0.6.136] - 2026-07-02
+
+- Core: address quick-xml security advisories through the upstream refresh. (958b8f3a, 0ccb676d)
+- Release: refresh upstream history for v0.6.136. (958b8f3a)
+
+## [0.6.135] - 2026-07-01
+
+- Release: refresh upstream history for v0.6.135. (52c4e51a)
+- Release: refresh the codex-rs mirror to upstream/main. (29be5a1f)
+
+## [0.6.134] - 2026-06-30
+
+- Docs: fix README grammar for clearer command guidance. (073762b7, 1b312434)
+- Release: refresh upstream history for v0.6.134. (6505a30b)
+
+## [0.6.133] - 2026-06-29
+
+- Core: backport upstream model metadata parity for improved model selection. (cfc7b53f)
+- Core: accept legacy default service tier values in configuration. (a709ae97)
+- Tools: preserve custom tool namespaces across streamed responses. (291b2c3c)
+- Dependencies: update OpenTelemetry SDK to resolve alert 120. (f0875be1)
+
+## [0.6.132] - 2026-06-24
+
+- CI: fail jobs when generated changes dirty the worktree. (93c79046)
+- Docs: expand remote executor integration testing guidance. (31e428a1)
+- Testing: improve cross-platform app-server coverage with Wine and target-OS branching. (b17f30eb, 9a79536e)
+- Release: refresh upstream history while preserving JustEvery workflows. (a43f633e, 5ec23059)
+
+## [0.6.131] - 2026-06-23
+
+- Core: backport upstream Responses Lite parity for improved API compatibility. (f9fe914a)
+- Release: record upstream history and refresh the codex-rs mirror for v0.6.131. (ab76d43e, d8a72a29)
+
+## [0.6.130] - 2026-06-23
+
+- Core: default Responses storage off when ZDR is enabled. (b101785c)
+- Docs: document the Responses storage default for ZDR configurations. (b101785c)
+
+## [0.6.129] - 2026-06-22
+
+- Core: disable storage for chat completions to avoid retaining request data. (8d425d0a)
+- Release: allow more time for release notes generation during publish. (0bf658e1)
+
+## [0.6.128] - 2026-06-22
+
+- App Server: accept ChatGPT accounts without email to preserve account parity. (758385b8, 5a67d898)
+- Release: refresh upstream history and the codex-rs mirror for v0.6.128. (da7f2134, 8212d5ef)
+
+## [0.6.127] - 2026-06-21
+
+- Core: honor stored Responses prompts when continuing sessions. (d1620890)
+- Release: generate release notes from the checked-out code during publish. (793b8fee)
+
+## [0.6.126] - 2026-06-20
+
+- Release: refresh upstream history and the codex-rs mirror for v0.6.126. (7b4f0f4b, 558ab96e)
+- Docs: carry forward the v0.6.125 changelog metadata for publish continuity. (ee4d9e30)
+
+## [0.6.125] - 2026-06-19
+
+- Core: backport Responses item id serialization for more compatible resumed response items. (3b77f6e7)
+- App Server: document and preserve raw response item compatibility across protocol schemas. (3b77f6e7, 7951397e)
+- Core: load and log AGENTS.md paths more consistently across foreign environments. (dce67390, 195c936f)
+
+## [0.6.124] - 2026-06-18
+
+- Release: refresh upstream history and the codex-rs mirror for v0.6.124. (738ee6f6, fe509857)
+
+## [0.6.123] - 2026-06-18
+
+- Release: refresh upstream history and the codex-rs mirror for v0.6.123. (eb559462, 830926fd)
+- Docs: expand Rust path migration guidance for Codex contributors. (285eff6c)
+- Install: support checksum parsing on older awk implementations. (f22d15b)
+- Build: refresh the Bazel macOS SDK pin for continued macOS builds. (243243ab)
+
+## [0.6.122] - 2026-06-17
+
+- Core: bound repeated tool cycles so sessions recover instead of looping indefinitely. (da10a8e8)
+- Core: stop replaying cancelled tool turns after interruption. (7b2f8008)
+- Core: reject malformed tool batches to keep streaming state consistent. (046919c4)
+
+## [0.6.121] - 2026-06-17
+
+- Tools: scope command approvals by environment so decisions stay tied to the active session context. (f1cb4b62)
+- Release: refresh upstream history and the codex-rs protocol mirror for v0.6.121. (0fde67e1, 01d6b4e4)
+
+## [0.6.120] - 2026-06-17
+
+- Dependencies: patch Babel core to resolve the related Dependabot alert. (dac7668c)
+- Dependencies: patch js-yaml to resolve the related Dependabot alert. (dac7668c)
+
+## [0.6.119] - 2026-06-16
+
+- Core: add Noise relay transport support for exec-server remote connections. (428cd441)
+- App Server: expose rate-limit reset credits to clients. (bef99f86)
+- Testing: expand Bazel code-mode coverage and Wine-backed Windows executor support. (009a2bb9, 1fe89de5)
+- Docs: record Rust path migration invariants and clarify app path-type guidance. (33d50234, 322b83de)
+- Release: refresh upstream history and the codex-rs mirror for v0.6.119. (a027a40b, 6852f07b)
+
+## [0.6.118] - 2026-06-15
+
+- Core: route Gemini Pro agents through Antigravity for the intended provider path. (ad45a6b2)
+- Docs: align Gemini Pro agent guidance with Antigravity routing. (ad45a6b2)
+
+## [0.6.117] - 2026-06-15
+
+- Tools: support dynamic tool namespaces for generated tool schemas. (dd934723)
+- App Server: activate selected executor plugin MCPs when starting sessions. (c8c78b63)
+- Docs: add path-type guidance for Rust path-bearing types. (71633f8b)
+
+## [0.6.116] - 2026-06-14
+
+- Core: honor remote environment cwd and shell settings in exec-server. (efbd00f2)
+- Core: pin bundled SQLite to the fixed WAL-reset build for steadier local storage. (73c58011)
+- Testing: add PowerShell coverage to the Wine harness for stronger Windows compatibility checks. (42dec90b)
+- Release: keep fork workflow and packaging choices aligned through the upstream refresh. (e93880ca)
+
+## [0.6.115] - 2026-06-13
+
+- Core: backport compact turn-state parity for more consistent session behavior. (87f1809c)
+- Release: package Windows ARM64 artifacts on x64 release runners. (17586d80)
+- Release: stage npm packages and Windows archives, symbols, and compression in parallel. (1460b509, 51483bb5, eb46984a, 5c48e319)
+- Testing: add hermetic Wine support and exec-server coverage for Windows compatibility. (5c8136f4, 9d938a46)
+
+## [0.6.114] - 2026-06-12
+
+- Dependencies: pin esbuild to address Dependabot alert 117. (d100b2f2)
+- Release: carry forward the v0.6.113 changelog metadata for publish continuity. (4b99525a)
+
+## [0.6.113] - 2026-06-12
+
+- Tools: support auto-resolving request-user-input prompts for automated runs. (c179f99b)
+- Release: refresh upstream fork history, codex-rs mirror data, and remote workflow changes. (97bcb153, f329fca8, a00d17cd)
+
+## [0.6.112] - 2026-06-11
+
+- Core: dispatch function apply_patch calls through the dedicated tool path. (f41e1c3e)
+- Windows: route apply_patch through the dedicated tool path by default. (94d5f200)
+
+## [0.6.110] - 2026-06-09
+
+- Tools: preserve composed MCP schemas so generated tool definitions keep nested input shapes. (f2b9f21d)
+- PR Watch: ignore pending review comments while monitoring PR feedback. (a770e5b8)
+
+## [0.6.109] - 2026-06-08
+
+- Models: include the window id in Responses metadata so requests stay tied to the active window. (7edc64e0)
+- Release: restore symbol artifacts with line tables for more useful release diagnostics. (6d0e313e)
+- CI: template custom runner names by repository for steadier workflow execution. (2375cb64)
+
+## [0.6.108] - 2026-06-07
+
+- Release: refresh V8 build metadata and Bazel patches for rusty_v8 149.2.0. (43c2b00, b89ce9a)
+- CI: route BuildBuddy secrets through the Bazel environment for steadier remote builds. (2ee3358)
+
+## [0.6.107] - 2026-06-06
+
+- Models: send the Responses Lite transport header on streaming and compact requests. (7344aa90)
+
+## [0.6.106] - 2026-06-05
+
+- Models: honor Responses Lite metadata when selecting remote model behavior. (180829ab)
+- Release: improve Bazel and BuildBuddy workflow stability for release and CI runs. (1d9c9c9f, 4be1a16)
+- Release: add CI configuration push guidance and clean up Rust release workflow maintenance. (e695ec8e, 78eba34b)
+
+## [0.6.105] - 2026-06-05
+
+- Release: parallelize release note generation to reduce publish latency. (1b3c3f82)
+- Release: streamline the release workflow for steadier metadata preparation. (1b3c3f82)
+
+## [0.6.104] - 2026-06-05
+
+- Models: accept custom and model-advertised reasoning efforts with ordered TUI shortcuts. (8ac304c2, f6e52965, d1f6b465)
+- Plugins/App Server: expose remote MCP servers, marketplace source JSON, and `-c` config overrides. (769c231a, cdc1d592, 881cf191)
+- TUI: support F13-F24 keymaps, clarify shortcut overlays, and restore output-free cancelled prompts. (2f0726ad, 4e540b10, c0ea566b)
+- Core: preserve logical AGENTS.md paths and environment-backed instruction loading. (e64b469b, 59ca3420)
+- Runtime: improve standalone image path hints, rollout compression, and release build performance. (12e8764a, a8a60712, f97d5c32)
+
+## [0.6.103] - 2026-06-04
+
+- Hooks: add user prompt submit and stop project lifecycle hooks. (e5905129)
+- Core: enrich hook payloads with session, turn, transcript, and model metadata while preserving hook output order. (e5905129, 31254116)
+
+## [0.6.102] - 2026-06-04
+
+- Core: prevent strict providers from rejecting developer or custom chat roles. (d2bfa1ae)
+- Models: apply chat-role normalization only to providers that require it. (3320bb08)
+
+## [0.6.101] - 2026-05-31
+
+- Models: update default agent routing, accept upstream tool-mode metadata, and fix Bedrock GPT service tiers. (f1d069bf, efc01e06, 96693212)
+- CLI/Threads: add archive commands and keep resumed prompt history scoped to the session. (3e7baa00, 36cd3662, 56958f25)
+- Plugins/Skills: improve connector and install suggestions, and add runtime extra skill roots. (e929bb5c, 8e5f5616, f0a839ea)
+- Sandbox/Exec: preserve deny-read protections, tighten Windows requirements, and clean up filesystem helpers. (6e101421, a5a94ee5, 451b3864, a717e4ef)
+- TUI/Tools: fix Vim editing, render multiline hook output, show web search activity, and finalize image generation natively. (f2e7b462, 251b2412, 96f1347f, 10b03990)
+
+## [0.6.100] - 2026-05-29
+
+- TUI: render markdown tables and web links more cleanly, add vim text objects, and make turn interruption keybinds configurable. (6b4b15a1, 26c95021, 7a264978, 8d398d3c, 2d1ad374)
+- Auth: refresh ChatGPT tokens before expiry and improve Google preset login handling so long-running sessions stay signed in. (15d85ea3, e5afe5bf, 76937a5b)
+- Remote/App Server: migrate remote control to server tokens, resume threads with their turns page, and add `codex app-server --stdio`. (912d7d4f, 2a1158b8, b90ec463)
+- Sandbox/Security: add named permission profiles in the TUI, block repository-configured code execution in `/diff`, and tighten Unix socket and websocket checks. (f6fd7530, 2e0c4f49, bf72be59, a027135b)
+- CLI: add standalone websearch, allow API-key auth for remote exec-server registration, and make standalone installs and updates work noninteractively. (a22706df, c57dee98, 8ed38fe3, 5314f550)
+
+## [0.6.99] - 2026-05-23
+
+- Install: unify npm and standalone releases around packaged archives, and bundle the zsh runtime for macOS x64 builds. (110b30d5, e389e01f, c7bcb90f, 0febb110, ed47f1ab, cfa16fcc)
+- CLI/Permissions: standardize on `--profile`, add profile-aware `codex sandbox`, and surface managed permission profiles more consistently. (8a511d58, 36a71a88, fcff0d6c, ed80e5f5, fe7c069f)
+- TUI/Goals: enable goals by default, improve `/goal` flows, and fix startup issues around working directories and Windows terminal setup. (0e9d2221, b132fec0, 27c4c67b, acd851e8)
+- Plugins: tabulate `plugin list`, add marketplace workflows, and fix plugin bundle installs plus shared icon assets. (3075061b, 74a1b46a, dc255b0d, 7d47056e, 247e22a9)
+- Remote Control: improve daemon UX, reconnect dropped sessions more reliably, and cap reconnect backoff after failures. (6a331a66, 512f8f80, de80fa6e, 03e6c5f6, 58be470d)
+
+## [0.6.98] - 2026-05-08
+
+- TUI: add upstream-compatible slash commands, a redesigned session picker, raw scrollback mode, and broader key/input polish. (4b469854, 3b2ebb36, 5e0a4adb, 48402be6)
+- Threads: return session IDs from thread and fork flows, paginate thread history, and keep live thread snapshots in sync. (a9862351, 06e5dfa4, 0d0835dd, eb0462f2)
+- Plugins: expand plugin sharing with access controls, discoverability settings, marketplace source filters, and richer plugin details. (5119680f, ae153432, 11106016, 40e28284)
+- Auth/Environments: enable AWS login credentials for Bedrock and route tools through selected environments more consistently. (9cbd4c03, 07b69519, 1bfc3d97, 9669756b, 78421fac)
+- Linux sandbox: bundle standalone `bwrap` builds and harden fallback/startup handling to improve reliability on Linux. (26f355b6, a736cb55, 22326e26, 8b95d546, 5b80f87c)
+
+## [0.6.97] - 2026-05-01
+
+- CLI/TUI: add configurable keymaps, a Vim composer mode, and a dedicated `codex update` command for faster keyboard-driven workflows. (5e737372, b6f81257, b985768d)
+- Hooks: add a `/hooks` browser, persist hook enablement state, and fix migrated hook path rewriting so hook management is easier and more reliable. (93d53f65, 8f3c06cc, 8774229a, d92c909e)
+- Plugins: track local paths for shared plugins, add remote plugin skill reads, sync cached installed bundles, and surface admin-disabled remote plugin status. (48791920, 96d2ea90, 73cd8319, 2686873e, bb60b78c)
+- Sandbox: add explicit sandbox permission profiles and CLI config controls, and ignore dangerous project-level config keys by default. (6ed04406, 55979251, 9ddb267e)
+- TUI: color the status line from the active theme, format multi-day goal durations clearly, and trim extended history persistence to keep large sessions responsive. (a93c89f4, d898cc8f, 5de7992e)
+
+## [0.6.96] - 2026-04-26
+
+- Goals: add persistent thread goals with `/goal` controls, status UI, pause and unpause actions, token budgets, and automatic continuation across app-server, core, and TUI flows. (0ee737ce, 6c874f9b, 32ace07a, 41676286, f1c963d7)
+- TUI: keep slash command popup columns stable while scrolling so command descriptions stop shifting horizontally. (0c785598)
+- App Server: restore the persisted model provider on thread resume so resumed encrypted conversations stay on the correct endpoint. (bce74c70)
+- Updates: wait for npm registry readiness before prompting npm or Bun installs to upgrade. (4e30281a)
+- Core: bypass managed network proxying for explicitly escalated commands and fix Bedrock GPT-5.4 reasoning levels to avoid provider-side failures. (9aaa5d93, d19de6d1)
+
+## [0.6.95] - 2026-04-25
+
+- Models: add GPT-5.5 support and refresh model schema plus GPT agent defaults for more reliable model selection. (bd64cb7d, cea03ccf)
+- ChatGPT: align ChatGPT plan and service-tier behavior, and route backend auth through Codex auth plumbing for more consistent account handling. (dd4f2635, e5b7e04b)
+- Permissions: ship stable Auto Review controls, stricter approval flows, and persistent permission-profile state across TUI, protocol, and app-server sessions. (5e71da14, c6ab6018, 46142c3c, 6ca038bb, 5c239ad7)
+- TUI/Exec: fix interrupt and `/review` exit wedges, keep command output visible until streams fully close, and reduce turn interruption hangs. (3f8c06e4, 491a3058, 11806faf)
+- Plugins: expand remote plugin support with list/read/install flows, marketplace upgrade plumbing, and workspace-level plugin disable controls. (a978e411, 33cc135c, 0d6a90cd, bcc1caa9)
+
+## [0.6.94] - 2026-04-22
+
+- TUI: add `/side` conversations and improve resume context with clearer parent thread status and titles. (95dafbc7, 0dc503ba, b8e78e88, fa8943fe, 43a69c50)
+- TUI: let you change reasoning level temporarily, show bash mode, and queue slash or shell input while commands run. (e502f0b5, ef071cf8, b7fec543, 917a85b0)
+- Plugins: refresh `/plugins` with a tabbed marketplace, inline enablement toggles, and broader manifest/source support. (f017a238, 06f8ec54, 37161bc7, 0e111e08, 26d9894a, cce60023)
+- Core: handle image generation outputs with higher-detail resizing defaults and add a built-in Amazon Bedrock provider. (58cb8a63, 53b15703, 120bbf46, cefcfe43)
+- Sandbox: improve Windows exec support and make permission globs and profile intersections behave more reliably. (8612714a, 799e5041, f8562bd4, 0d0abe83)
+
+## [0.6.93] - 2026-04-17
+
+- TUI/Core: add task lifecycle visibility routing so task progress is surfaced consistently. (63ea56db)
+- Auth: atomically persist auth files to prevent partial writes and corrupted credentials. (9891471e)
+- Core: route FedRAMP auth and model metadata for correct environment-specific model behavior. (06a11b66)
+- Shell/Exec: normalize raw shell script handling and preserve scripts plus crash traces in exec output. (bfd6bd70, ba3e507e)
+- App Server: sync response item schema fixtures to keep protocol integrations stable. (ac03b67a)
+
+## [0.6.92] - 2026-04-05
+
+- TUI: enable Wayland clipboard image paste so screenshot paste works reliably on Linux Wayland sessions. (fbe95ad8)
+- Core: align model/provider behavior by syncing remote model parity and updating Copilot/GPT-5.4 mini agent flags. (eff1ef4f, 93ad10cd)
+- Remote: forward `--cd` consistently across remote start/resume/fork/list flows so session directory targeting works as expected. (0ab8eda3)
+- Core/TUI: fix MCP tool listing for hyphenated server names and prevent stale `/copy` output after commentary-only turns. (a3b3e7a6, cc8fd0ff)
+- Platform: improve macOS stability by preventing sandbox HTTP-client panics and filtering malloc diagnostics from composer input. (1cc87019, a71fc47c)
+
+## [0.6.91] - 2026-04-03
+
+- Core: support command-backed provider auth and dynamic bearer token sources for more flexible login flows. (6dc620cb, 20f43c1e, 00719688, ea650a91)
+- TUI: fix zellij redraw/composer rendering plus resume picker and review-follow-up stale state issues for smoother sessions. (0bd31dc3, cb8dc18a, c0f2fed6, 57b98bc4)
+- App Server: fix `/status` accuracy by showing fork source correctly and preventing stale rate-limit data in active sessions. (9bb7f0a6, ae057e0b)
+- Windows: improve shell startup reliability with PowerShell fallback paths and longer startup timeouts on slower runners. (93380a6f, 5d64e58a, 30ee9e76)
+- Core: reduce `codex-core` compile times substantially by moving key execution paths to native async handlers. (3c7f013f, 7a3eec6f)
+
+## [0.6.90] - 2026-03-31
+
+- CI: remove legacy Rust CI workflows to streamline repository automation and reduce maintenance overhead. (6966db8b)
+- CI: simplify workflow policy/docs after retiring Rust CI jobs, making release checks more predictable. (6966db8b)
+
+## [0.6.89] - 2026-03-31
+
+- CI: increase hosted-runner time budget for argument lint jobs to reduce timeout-related release failures. (46e59276)
+- CI: improve release pipeline stability by giving slower lint runs more time before cancellation. (46e59276)
+
+## [0.6.87] - 2026-03-30
+
+- CI: switch `rust-ci-full` Windows jobs to hosted GitHub runners to reduce runner pool dependency in release validation. (bb2e39be)
+- CI: move Linux and Windows target matrices in `rust-ci-full` to hosted runners, improving cross-platform build reliability in restricted environments. (bb2e39be)
+
+## [0.6.86] - 2026-03-30
+
+- Auth: suppress stale tokens after refresh failures and avoid duplicate refresh attempts for more reliable sign-in. (5b172c2, 2c67a27)
+- CLI: add stdin piping support for `codex exec` to improve shell composition workflows. (71923f4)
+- TUI: polish app-server UX with plugin menu cleanup, skills picker scrolling fixes, and ghost subagent entry fixes. (f24c55f, 46b653e, 38e648c)
+- MCP: improve startup reliability with increased startup timeout and fixes for startup warning regressions. (3807807, 54d3ad1)
+- Sandbox: harden Windows and Linux sandbox behavior with network proxy support and safer `bwrap` resolution. (81fa047, b6050b4, ec089fd)
+
+## [0.6.85] - 2026-03-24
+
+- TUI/App Server: open ChatGPT login in the local browser, cancel active login on Ctrl+C, and always restore terminal state on early exit. (1b863776, c023e9d9, 989e5139)
+- Plugins: improve `/plugins` UX with clearer labels/wording, better ordering, cleaner disabled rows, and less OAuth URL console noise during install. (66edc347, 2d5a3bfe, 3ba0e85e, 363b3739, b364faf4, 4b91a7b3)
+- Plugin Listing: surface marketplace loading errors, stop filtering plugin/list results, and refresh mentions after install/uninstall. (621862a7, c8506071, 0f90a346)
+- Auth: use access-token expiration consistently for proactive refresh and prevent repeated refresh storms after permanent token failures. (7dc2cd2e, b8dde290, 88694e84)
+- Core/App Server: add back-pressure and batching to `command/exec` and complete codex exec migration to the app server for more stable execution under load. (d61c03ca, 45f68843)
+
+## [0.6.84] - 2026-03-24
+
+- Models: add `gpt-5.4-mini` support and simplify auth refresh handling for smoother model access. (124314eb, f55f5c25)
+- TUI: refresh curated model choices and suppress clean auto-review notices to reduce chat noise. (12b37afd)
+- Plugins: add install/uninstall flows in the TUI and better plugin labeling/filtering in listings. (b5d0a551, 54801634)
+- Multi-agent: ship structured agent communication/output and custom watcher support for v2 runs. (37ac0c09, 191fd9fd, 52724491)
+- Core: improve command/runtime stability with safer PATH construction, vendored bubblewrap fallback, and unified realtime stop handling. (84fb180e, d1088158, 7b92a906)
+
+## [0.6.83] - 2026-03-23
+
+- CI: fall back to local Bazel execution when the BuildBuddy API key is unavailable, keeping release jobs running in restricted environments. (7fd302e2)
+- Release Workflows: apply the BuildBuddy fallback path to both `rusty-v8-release` and `v8-canary` for consistent publish reliability. (7fd302e2)
+
+## [0.6.82] - 2026-03-23
+
+- CI: fall back to local Bazel execution when the BuildBuddy API key is unavailable, preventing release pipeline failures in restricted environments. (c6eddcc3)
+- Release Workflows: apply the BuildBuddy fallback path to both `rusty-v8-release` and `v8-canary` jobs for consistent publish reliability. (c6eddcc3)
+
+## [0.6.80] - 2026-03-23
+
+- TUI/App Server: complete the app-server-backed TUI migration with restored composer history and remote resume/fork history. (db89b73a, 334164a6, 78e8ee45)
+- Plugins: add the first `/plugins` TUI menu and expand featured/product-scoped plugin install and sync flows. (f7201e5a, 825d0937, db5781a0, b1570d6c)
+- Approvals/Sandbox: introduce `request_permissions`, persist its decisions across turns, and improve Linux sandbox defaults and split-filesystem handling. (e6b93841, d241dc59, 04892b4c, dcc4d7b6)
+- Multi-agent: switch agent identifiers to path-like IDs and add graph-style network visibility for agent runs. (79ad7b24, 70cdb177)
+- Core/Realtime: reduce startup hangs and stabilize realtime/websocket session shutdown and error delivery. (6ea04103, 98be562f, c8446d7c)
+
+## [0.6.77] - 2026-03-07
+
+- Core/Context: default session context mode to `auto` for better out-of-the-box context selection. (9a24bc71)
+- Auto Context: enrich 1M-judge risk signals to improve context quality and decision reliability. (fde66502)
+- TUI/Context: persist explicit disabled state for 1M mode so settings stay consistent across sessions. (c99bb77d)
+
+## [0.6.75] - 2026-03-06
+
+- Models: add GPT-5.4 fast mode support and enable fast mode by default for quicker turns. (50821896, 394e5386)
+- Memories: add a settings pane with safer compaction fallback and improved workspace-write support. (be4e7f3c, f72ab43f)
+- Artifacts: expand artifact workflows with package manager bindings plus spreadsheet and presentation generation. (f304b2ef, 0cc68354, 8c5e50ef, 4874b929)
+- JS REPL: support local ESM imports, persist bindings after failed cells, and only allow `data:` image URLs. (ff0341dc, 657841e7, cfbbbb1d)
+- TUI/Core: show session speed in the header and surface diagnostics earlier in the workflow. (1ce1712a, 9fcbbeb5)
+
+## [0.6.74] - 2026-02-27
+
+- TUI/Auto Review: stop duplicating background review notes as `[developer]` history messages to keep transcript noise down. (114e4003)
+- TUI/Auto Review: keep review findings routed through the dedicated Auto Review notice while still forwarding hidden context to the coordinator. (114e4003)
+
+## [0.6.73] - 2026-02-27
+
+- TUI/Auto Review: parse embedded JSON review results from mixed runner output so summaries stay focused on findings. (8cc2ba18)
+- TUI/Auto Review: truncate plain-text fallback summaries to prevent raw log dumps in chat history. (8cc2ba18)
+
+## [0.6.72] - 2026-02-27
+
+- Agents/App Server: add external agent config migration API with import depth guards to safely bring configs forward. (1a8bd1ac)
+- TUI/Auto Review: dispatch idle review findings back to the model so automated review cycles continue reliably. (e57a1e0f)
+
+## [0.6.71] - 2026-02-26
+
+- Core/Realtime: prefer websocket v2, add fallback behavior, and improve timeout handling for more resilient sessions. (7e53c578, d5909f3b, 4fedef88, 9d7013ea)
+- TUI: add `/copy`, improve clear controls (`/clear` and Ctrl-L), and expand multi-agent progress and picker UX. (ee1520e7, ca556fa3, a606e858, dcab4012, 5a30cd3f)
+- Security/Approvals: persist network approval policy and tighten zsh-fork approval and sandbox enforcement paths. (c3048ff9, 14116ade, a6a5976c, 648a420c, 59398125)
+- JS REPL: lower Node minimum requirement, gate incompatible runtimes at startup, and improve error recovery in nested tool calls. (7326c097, 40ab71a9, 125fbec3, 63c2ac96)
+
+## [0.6.70] - 2026-02-16
+
+- Core/Search: persist and restore tool selection after search. (02abd9a8)
+- Core/Search: warn when falling back to default metadata and keep selection. (81a2a7eb, 060a320e)
+- Auto Drive: add configurable CLI routing entries. (2be7be99)
+- Linux Sandbox: allow GPU device paths in landlock. (d827c2d8)
+
+## [0.6.69] - 2026-02-15
+
+- TUI/Approvals: show structured network approval prompts with host/protocol context. (31646701, b527ee28, 2bced810)
+- Models: gate gpt-5.3-codex-spark behind pro-only auth capabilities. (d165389f)
+- Core/Auto Drive: add fallback routing when spark hits overflow or usage limits. (7973a790, 2a4c39fd)
+- TUI: preserve remote image attachments across resume and backtrack flows. (26a7cd21)
+
+## [0.6.68] - 2026-02-14
+
+- Auto Drive: add per-turn model routing and rename decision schema. (fb17527)
+- Auto Drive: enforce finish evidence with paste fallback. (46d537e)
+- Auto Drive: require strict decision fields without allOf and align coordinator schema. (e4559ac4, 873604d6)
+- Auto Drive: decouple auto review and cap long-session growth. (60727b0)
+
+## [0.6.67] - 2026-02-13
+
+- Skills: discover .agents and admin roots and remove deep-scan caps. (eff5ad73, 4b1faf08)
+- TUI: improve /model navigation and /resume popup visibility. (3248c705, adc2240d, 33b521b7, 99425efe)
+- App Server: surface JSON-RPC errors to avoid masked auth failures. (8d97b5c2)
+- Sandbox: add slash command to grant read access to inaccessible directories. (5c3ca739)
+
+## [0.6.66] - 2026-02-12
+
+- App Server: add websocket transport and protocol updates. (3ebd8b72)
+- Core/Websocket: bound ingress buffering and unblock spark exec/close readers. (6b6fab16, 1458e477)
+- TUI/Model: surface gpt-5.3-codex-spark in /model. (7d6b5915)
+- Core/JS REPL: add host helpers and exec end events. (466be55a)
+
+## [0.6.65] - 2026-02-11
+
+- CLI/Env: stop traversing parent .env files at startup. (04c45da1)
+- CLI/Env: exclude more provider keys from project dotenv. (3127a576)
+
+## [0.6.64] - 2026-02-11
+
+- TUI: normalize agent alias slugs in summary counts. (b8449aeb)
+- Core: default Codex to gpt-5.3 and align CLI checks. (9807d30d)
+
+## [0.6.63] - 2026-02-11
+
+- Core: support multiple rate limits. (fdd0cd1d)
+- Core/Protocol: add websocket preference and rate-limit metadata; serialize rate-limit ids as nullable. (c6cf7ff9, 807615dc)
+- Core/Websocket: avoid resending output items and tighten incrementality checks. (44731479, 0639c338)
+- TUI: queue rollback trims in app-event order and keep history recall cursor at line end. (8b46c0ce, e704f488)
+- Exec Policy: reject empty command lists and honor never-prompt approval policy. (cc8c2933, 693bac18)
+
+## [0.6.62] - 2026-02-11
+
+- App Server: add app-server support for client connections. (b86fcd5d)
+- App Server: wire the Linux sandbox executable into config. (6032603f)
+- Model Routing: surface reroute warnings and status models. (6dc748e8)
+- Core/Agents: resolve Claude from home fallback paths. (c560d6ac)
+
+## [0.6.61] - 2026-02-10
+
+- Core: align auth token schema and websocket errors. (12612630)
+- Sandbox: enforce proxy-aware network routing in sandbox. (3391e5ea)
+- Skills: add SkillPolicy metadata with allow_implicit_invocation support. (91704c56)
+- App Server: use chatgpt_account_id/chatgpt_plan_type for external auth. (53741013)
+
+## [0.6.60] - 2026-02-07
+
+- Core/Version: enforce minimum wire-compatible version and derive it from the announcement tip. (a058583f, e52d8212)
+- Core/Version: strip punctuation when scanning minimum semver for wire compatibility. (56445598)
+- Core/Provider: clamp the OpenAI version header for stability. (95bf1d51)
+
+## [0.6.59] - 2026-02-06
+
+- Models: add gpt-5.3-codex and bump Claude Opus to 4.6. (3b45488a)
+- TUI: add sortable resume picker with created/updated toggle. (22545bf2)
+- TUI: add /statusline command for interactive status line configuration. (b0e5a630)
+- App Server: add websocket transport support and send beta header. (8473096e, dbe47ea0)
+
+## [0.6.58] - 2026-02-05
+
+- Core: add configurable log_dir for logs. (cddfd1e6)
+- App Server/Core: allow text + image content items for dynamic tool outputs. (5ea107a0)
+- Skills: support live updates to skills. (7bcc5523)
+- Linux Sandbox: add bubblewrap support for isolation. (ae4de43c, f956cc2a)
+
+## [0.6.57] - 2026-02-02
+
+- TUI/GH: show gh_run_wait summary output after completion. (816aae9c)
+- TUI/GH: trim redundant title lines in gh_run_wait previews for cleaner display. (816aae9c)
+
+## [0.6.56] - 2026-02-02
+
+- Auto Drive: stop cleanly on usage limit without resetting state. (66abab5f)
+- Core/Agent: honor requested agent models during runs. (e1eafd17)
+
+## [0.6.55] - 2026-02-02
+
+- TUI/Plan: enable Plan mode with streamed plan items and clearer prompts. (30ed29a7, ec4a2d07, 3dd9a37e)
+- Skills: load skills from .agents/skills with clearer lookup guidance. (39a6a840, aab3705c)
+- CLI/Logs: show runtime metrics in console and include output in /ps. (8660ad6c, a270a28a)
+- File Search: support multi-root walks and keep search rooted to the active session CWD. (d59685f6, 13e85b15, b8156706)
+
+## [0.6.54] - 2026-01-29
+
+- TUI/GH: live-update gh_run_wait progress with richer summaries. (76d56c63, 999fd1d2)
+- Core/Compact: harden auto-compact flow for safer recovery. (654d0bba)
+
+## [0.6.53] - 2026-01-27
+
+- Core/Tools: add dynamic tool injection and wire the dynamic tool pipeline. (d594693d, 8a81f9f8)
+- MCP/Auth: allow MCP server scopes config as OAuth fallback. (bdc4742b)
+- App Server: add thread read, archived listing, and unarchive support. (80240b3b, 733cb684, 62266b13)
+- TUI: add /personality selector and /permissions flow. (031bafd1, 038b78c9)
+- Core/Collab: reduce high CPU usage during collaboration runs. (375a5ef0)
+
+## [0.6.52] - 2026-01-26
+
+- Browser: bound DOMContentLoaded waits to avoid hangs during navigation. (1e1da83d)
+- Browser: bound load waits with readyState polling fallback. (1e1da83d)
+
+## [0.6.51] - 2026-01-26
+
+- Core/TUI: add session nicknames to label runs. (30d5e045)
+- TUI/Editor: open external editor with Ctrl+G. (d3a315c9)
+- TUI/Scroll: keep viewport stable and prevent scroll jumps during streaming. (f198c33f, d07f6f63)
+- MCP/Exec: show per-server tool status and handle list-tools responses. (b26e4d6f, d042f7ce)
+
+## [0.6.50] - 2026-01-22
+
+- Core/Models: default to gpt-5.2-codex with personality templating and request-user-input support. (7aad17a5, 95bcf62e)
+- Core/Config: add layered config.toml support for app-server reads and merges. (2ca9a565)
+- TUI: add request-user-input overlay with interactive picker and reliable pending/answer routing. (5f55ed66, c7123257, 35f18684, b972185d)
+- Core/Runtime: preserve interrupted turns to prevent repeats and avoid touching thread mtime on resume. (b236f1c9, b0049ab6)
+- Sandbox/Paths: harden tilde expansion and Windows sandbox audit paths for safer writable roots. (8179312f, c73a11d5, f2de9201)
+
+## [0.6.49] - 2026-01-17
+
+- CLI/Fork: /fork now clones the current session and surfaces the source session id in /status. (e893e83e, c26fe645)
+- Auth: add device code login for headless environments to simplify setup. (13159006)
+- TUI/Auto-review: persist review baselines across sessions to avoid repeated prompts. (8aba6b6f)
+- Core: align tool output caps with model policy to prevent unexpected truncation. (63dcaeda)
+- API: allow listing threads ordered by created_at or updated_at for predictable pagination. (f1653dd4)
+
+## [0.6.48] - 2026-01-14
+
+- Browser: stabilize /browser command handling and diff rendering for reliable runs. (bfd15335)
+- Browser: honor proxy discovery when finding CDP targets so automation works behind proxies. (bfd15335)
+
+## [0.6.47] - 2026-01-13
+
+- Core/Websocket: reuse connections and add append support to cut reconnect churn. (d75626a, e726a82)
+- MCP: hot reload servers with static callbacks for smoother development. (3e91a95c, d5562983)
+- CLI: add --url with OAuth-friendly defaults and prompt Windows users on unsafe commands. (145974c4, ddae70bd)
+- TUI: keep scrollback tails visible and show in-flight coalesced tool calls. (7c1e7747, 602ddfee, 273ba32d, 12779c7c)
+- Exec/Auto: honor reasoning effort and dedupe reasoning output during auto runs. (bc81e7c2, 00fbc71a)
+
+## [0.6.46] - 2026-01-11
+
+- TUI/Stream: preserve commit ticks while debouncing to keep command ordering intact. (365bf7a)
+- TUI/Render: resync buffers after WouldBlock errors so redraws recover cleanly. (7ef6a6c)
+
+## [0.6.45] - 2026-01-09
+
+- TUI/Render: clear after WouldBlock redraws to resync the terminal and remove stale tail lines. (a354fdf8)
+- TUI/Render: improve redraw stability under terminal backpressure so frames recover cleanly. (a354fdf8)
+
+## [0.6.44] - 2026-01-08
+
+- TUI/Render: reset skip flags when filling backgrounds so reused buffer cells redraw correctly. (035abd0d)
+- TUI/Render: ensure background fill without characters also clears skip to prevent lingering artifacts. (035abd0d)
+
+## [0.6.43] - 2026-01-08
+
+- TUI/Images: guard dropped images and clipped views so broken files fall back to placeholders. (b76b2455)
+- TUI/Images: avoid partial rendering on graphic protocols to prevent cursor corruption while scrolling. (b76b2455)
+
+## [0.6.42] - 2026-01-08
+
+- TUI/Images: persist pasted or dropped images from temp locations into session storage so they stay available when sending. (00cbdfc)
+- TUI/Composer: keep image placeholders verbatim when building messages so inline markers align with attachments. (00cbdfc)
+
+## [0.6.41] - 2026-01-08
+
+- TUI/History: show exec and MCP cards immediately and drop spacer after collapsed reasoning before exec. (3c68afba, fcb48a71)
+- Exec: send prompt and images in one turn to keep runs aligned. (f23e562f)
+- TUI/Queue: dispatch queued input immediately so interactions start without delay. (b00b6ce3)
+- TUI/Render: preserve WouldBlock kind in draw errors for accurate diagnostics. (5faf4411)
+
+## [0.6.40] - 2026-01-07
+
+- TUI/Image: initialize picker state for image cards so selection works reliably. (63e53af9)
+- Core: gate cgroup helpers on Linux to avoid non-Linux builds invoking them. (7369620a)
+
+## [0.6.39] - 2026-01-07
+
+- TUI/Auto-drive: add navigation telemetry and forward aligned compacted history for new browser runs. (94eb8d23, d6d52b7f, aaac24f7)
+- TUI2/Markdown: stream logical lines so transcripts reflow correctly on resize and copy/paste. (c92dbea7)
+- TUI: render view-image paths relative to the working directory for non-git projects. (4c3d2a5b)
+- TUI2/Transcript: add an auto-hiding scrollbar, anchor the copy pill at the viewport bottom, and cache rendering to cut redraws. (8f10d3bf, 56782130, 90f37e85)
+
+## [0.6.38] - 2026-01-06
+
+- Docs/Config: clarify `--model` applies to the active provider and call out OpenAI-compatible requirements for custom providers. (fa6c482)
+- Docs/Config: add a proxy example for routing OpenAI-style requests to other vendors. (fa6c482)
+
+## [0.6.37] - 2026-01-06
+
+- TUI/Image: render view image cards so attached visuals show inline. (658ddfb)
+- TUI/Browser: scope console logs to each browser card to avoid spillover. (e1d8f12)
+- TUI/Resume: prevent footer underflow in resume layouts. (deef15a)
+- TUI/Composer: guard composer height to keep the input stable. (041dff4)
+- Core/Config: allow tool output size override to honor config limits. (c3782ba)
+
+## [0.6.36] - 2026-01-05
+
+- TUI: prioritize task cancellation on Esc before agent input to make stopping runs reliable. (76e3dd8)
+- Tests: reduce linux sandbox and TUI timeout flakes for steadier CI runs. (9d5dbfc)
+
+## [0.6.35] - 2026-01-05
+
+- Core/Agent: keep packaged code executable available for read-only agents to avoid missing-binary failures. (d1557c5)
+- Core/Agent: fall back to local dev build when the running binary disappears to keep agent commands working. (d1557c5)
+
+## [0.6.34] - 2026-01-05
+
+- Core/Auth: auto-switch to another account when usage limits hit to keep runs moving. (590f46be)
+- UX: show notices when accounts auto-switch due to rate limits so users stay informed. (590f46be)
+
+## [0.6.33] - 2026-01-05
+
+- TUI: keep cancelable agents prioritized when Esc is pressed. (195c768)
+- TUI: prompt to init git before git-dependent actions run. (6d693c3f)
+- Logging: overhaul debug log handling for clearer diagnostics. (afba3b9c)
+
+## [0.6.32] - 2026-01-04
+
+- TUI: prevent Esc undo priming from sticking and stabilize word-motion shortcuts. (d90b0f9)
+- TUI: refactor Esc handling into a dedicated module for clearer behavior. (d90b0f9)
+
+## [0.6.31] - 2026-01-04
+
+- Core/Config: add missing test imports to keep config checks stable. (97672cc7)
+- TUI/Logging: throttle frame timer spam to reduce noisy redraw logs. (3eeef61c)
+- Core/TUI: split large modules to improve stability and maintainability. (5c9d9743)
+
+## [0.6.30] - 2026-01-04
+
+- TUI/Auto Drive: avoid full render rebuilds to cut redraw overhead during runs. (6db1e0b)
+- TUI/History: cache patch summary layout to reduce churn and flicker. (845d63e)
+- TUI/Logs: throttle thread spawn errors to prevent repeated warnings. (e91ce8c)
+
+## [0.6.29] - 2026-01-02
+
+- TUI/Markdown: wrap wide code graphemes to avoid overflow in rendered blocks. (8519507)
+- TUI/Markdown: flush wrapped code rows so virtualized views stay aligned. (b4d8264)
+
+## [0.6.27] - 2026-01-02
+
+- Auto-review: skip re-reviews when files are unchanged to cut noise. (0dddef81)
+- Core/GH: auto-resolve gh_run_wait defaults for smoother release checks. (a865bee5)
+
+## [0.6.26] - 2026-01-01
+
+- Image view: render local image attachments in transcripts and tools. (71a68a2)
+- Core/Tools: align image_view tool coverage to match supported sources. (fcb3afb)
+
+## [0.6.25] - 2026-01-01
+
+- CLI/GH: use GitHub run URLs when waiting on Actions to avoid stale links. (a7f6402a)
+- CLI/GH: show wait details while following GitHub Actions runs for clarity. (a7f6402a)
+
+## [0.6.24] - 2026-01-01
+
+- TUI: keep virtualization frozen for tail-only views to avoid redraw churn. (77f37f33)
+- TUI: defer virtualization sync until the view is ready to prevent flicker. (6c11ec70)
+- Core/GH: allow gh_run_wait to target specific repos for release monitoring. (a83514b4)
+
+## [0.6.23] - 2025-12-31
+
+- TUI: align welcome layout height with width to keep the intro balanced. (36aef09f)
+- TUI: stabilize welcome intro sizing across resolutions to avoid jitter. (6b4cebed, 117863e2)
+
+## [0.6.22] - 2025-12-31
+
+- Agents: wake on batch completion to avoid stalled automation runs. (0c461689)
+- Core: refresh codex-rs mirror to upstream main to stay aligned with engine updates. (92641d9f)
+- Deps: bump tokio, tracing-subscriber, toml_edit, regex-lite in codex-rs for stability. (a48904de, 4313e0a7, ce3ff299, 13c42a07)
+
+## [0.6.20] - 2025-12-30
+
+- Auto Drive: keep retrying after errors so runs recover instead of stopping early. (7f6c12e8)
+- Auto Drive: schedule restarts without depending on Tokio to avoid stalled recoveries. (bae785e9)
+
+## [0.6.19] - 2025-12-29
+
+- Agents: default built-in slugs to code-gpt-5.2-codex for faster, higher-quality automation. (8afe9b8c)
+- Agents: expand GPT-5 alias coverage and docs so configs map cleanly to the new defaults. (8afe9b8c)
+
+## [0.6.18] - 2025-12-28
+
+- TUI: add `/skills` slash command to list available skills inline. (7087feb)
+- Exec: handle missing wait output to keep execution results consistent. (d1cc1a2)
+- Auto Drive: stop runs after fatal errors to avoid hanging sessions. (a481b54)
+
+## [0.6.17] - 2025-12-28
+
+- TUI2: improve transcript selection with multi-click, drag start, copy shortcut, and corruption fixes when copying offscreen text. (0130a2fa, 28285493, 414fbe0d, 310f2114, 7d0c5c7b)
+- Auto Drive: keep agent runs alive and clamp overlays to avoid misaligned prompts. (eafae4bc, 7b28c36b)
+- Config: honor /etc/codex/config.toml, in-repo config sources, and project_root_markers for workspace detection. (e27d9bd8, 8ff16a77, 314937fb)
+- Exec/CLI: limit unified exec output size and improve ripgrep download diagnostics for clearer failures. (fb24c47b, f2b740c9)
+- Performance: cache history render requests and cap redraw scheduling to 60fps to reduce TUI CPU usage. (72b6650f, 96a65ff0)
+
+## [0.6.16] - 2025-12-25
+
+- Auto Drive: tighten timeboxed coordinator guidance so runs lead with authoritative verifiers and outcome-only directives. (d3efecb)
+- CLI: expand timeboxed exec guidance to force early acceptance checks and proof before finishing. (d3efecb)
+
+## [0.6.15] - 2025-12-24
+
+- Exec: add timeboxed auto-exec guidance to keep runs bounded. (8dbfdbba)
+- Auto Drive: tighten time budget guidance and drop unused seed to reduce noise. (376fc8ff, 736e6cf0)
+
+## [0.6.14] - 2025-12-23
+
+- TUI: clear stale mid-turn output when starting a new task so history stays accurate. (dd610fe2)
+- TUI: clear exec spinners when a TaskComplete event is missing to avoid stuck indicators. (e047feb4)
+- Core/Auth: switch the active account based on session context to honor workspace permissions. (ac958448)
+- Browser: restart the navigation handler after repeated errors to restore browsing. (940dcc44)
+- Auto-review: defer baseline capture to keep automated review diffs stable. (6818c0b5)
+
+## [0.6.13] - 2025-12-22
+
+- TUI: add account switching and skills settings in the core UI. (bcf7614a)
+- TUI2: normalize wheel and trackpad scrolling for consistent transcript navigation. (63942b88)
+- Auto-drive: improve ansi16 styling, contrast, and ghost snapshot timing for clearer prompts. (ffac25b4, 82ce5915, 6e333af8, 70e1b9f6)
+- Auto-drive: respect retry budgets and loop hints to avoid runaway retries. (f5c56198)
+- Stability: prevent panics on alpha builds. (aa83d7da)
+
+## [0.6.12] - 2025-12-20
+
+- TUI: coalesce transcript redraws, keep spinners live, and shorten status directory labels so streams stay smooth. (1d4463ba, 734dd0ee, e6794b7b)
+- Exec: reduce long-session stalls and collapse waiting time in unified exec so commands finish faster. (5cfb8309, 6c76d177)
+- CLI: add `/ps` and apply terminal-aware scroll scaling for clearer process visibility. (4fb0b547, df46ea48)
+- Config/Skills: backport requirements updates, add ExternalSandbox policy, and support `/etc/codex/requirements.toml` for tighter governance. (f2750fd6, 3429de21, 2f048f20)
+
+## [0.6.10] - 2025-12-18
+
+- TUI: keep bulk command processing responsive during heavy redraw bursts. (9cf56083)
+- Performance: prevent redraw loops from starving queued work so outputs stay timely. (9cf56083)
+
+## [0.6.9] - 2025-12-18
+
+- TUI/cards: set ANSI-16 card backgrounds for consistent styling. (820991e9)
+- TUI/status: restore the Every Code header title in the status view. (455ed636)
+
+## [0.6.8] - 2025-12-18
+
+- Agents: default frontline automation to gemini-3-flash for faster runs. (bfc41e28)
+- TUI/Auto Drive: normalize footer hint spacing so prompts align cleanly. (8da0bda7)
+
+## [0.6.7] - 2025-12-17
+
+- Core/TUI: add remote model support and harden exec memory handling for safer runs. (db385786)
+- Auto Drive: summarize the last session on completion so users get a quick recap. (86f691d)
+- Exec: add a max-seconds budget with countdown nudges and clean up log paths for killed children. (0c323447, f1835d5)
+- Reliability: auto-retry turns after usage limits and avoid cloning large histories during retention cleanup. (220414d, b91e303)
+
+## [0.6.6] - 2025-12-15
+
+- TUI: show Every Code title and stabilize header rendering so status bar and snapshots stay consistent. (1f77f7ac, a8b8beeb)
+- Skills: reimplement loading via SkillsManager and add skills/list op for more reliable discovery. (5d77d4db)
+- Config: clean config loading/API, expand safe commands, and refresh disk status using latest values for MCP servers. (92098d36, 49bf49c2, 163a7e31)
+- Windows: locate pwsh.exe/powershell.exe reliably and parse PowerShell output with PowerShell for sturdier scripts. (4312cae0, 90094903)
+- MCP/TUI: restore startup progress messages and show xhigh reasoning warnings for gpt-5.2 to keep users informed. (c978b6e2, 9287be76)
+
+## [0.6.4] - 2025-12-13
+
+- TUI: default hidden-preface injections to silent and allow silent submissions to reduce demo noise. (b1ae6f4, a086a46)
+- CLI demo: add a --demo developer message injection flag for scripted demos. (6b2e61b)
+- TUI: dim mid-turn assistant output and improve plan/cursor contrast in dark mode for clearer streams. (b688046, 1b8c8fd)
+- Exec: add a grace delay before shutdown when auto-review is enabled to avoid abrupt stops. (c6d6f49)
+- TUI: hide the directory label in demo mode for cleaner status displays. (c03b3e9)
+
+## [0.6.3] - 2025-12-12
+
+- Build: prevent concurrent tmp-bin races in build-fast to keep artifacts isolated. (e3ae904)
+- TUI history: handle background wait call_id to avoid orphaned exec entries. (c4c4ed6)
+- Onboarding: align trust directory prompt styling with the rest of the flow. (9de6df6)
+
+## [0.6.2] - 2025-12-12
+
+- Models: add a guided gpt-5.2 upgrade flow so users can move to the latest model smoothly. (ee9fc1f)
+- TUI history: keep mid-turn answers ordered, hide stray gutters, and collapse duplicate reasoning streams for cleaner transcripts. (89e485d, 0991bf2, fe40d37, d79442a)
+- Exec: guard process spawns, pair early exec ends with begins, and keep live output flowing while capping previews to avoid hangs. (1e66674, 66e650c, d1a36f0, e780d82)
+- TUI: allow user input to interrupt wait-only execs and force redraws after backpressure stalls for more responsive UI. (bcbcb95e, 5780d0d)
+- Snapshots: warn when snapshots run long and add a shell command snapshot path. (b2280d6, 29381ba)
+
+## [0.6.1] - 2025-12-10
+
+- Auto Review: Harden locks, fallback worktrees, zero-count status, and pending-fix isolation so automated reviews stay reliable. (44234af, a62eaa3, 609432e, ae4b4ec)
+- Models: Introduce ModelsManager across app server and TUI, add a remote models flag, and cache disk-loaded presets with TTL/ETag for faster selection. (00cc00e, 8da91d1, 53a486f, 222a491)
+- Shell & Exec: Detect mutating commands, snapshot shell state, and clear lingering execs so automation captures side effects cleanly. (da983c1, 7836aed, cf15065)
+- TUI UX: Add vim-style pager keys, Ctrl+N/P list shortcuts, tighter shell output limits, and aligned auto-review footers for smoother navigation. (9df70a0, 4a3e9ed, 3395ebd, 9e2b68b)
+
+## [0.5.15] - 2025-11-28
+
+- CLI: bump npm metadata to 0.5.15 so fresh installs pull the latest binaries. (0e5d3f9)
+- CI: enforce running ./pre-release.sh before pushes to main to keep release checks green. (3af8354)
+
+## [0.5.14] - 2025-11-28
+
+- Core/Bridge: surface code-bridge events directly in sessions so runs show live bridge activity. (ca8f0efa)
+- TUI: keep composer popups aligned after history navigation and wrap the agent list inside the command editor for better readability. (bb4a43cf, b890eac3)
+- Auto Drive: stabilize the intro placeholder and ensure exec completions render in order so automation transcripts stay coherent. (7a652b74, d9e5ddbd)
+- Core/Compact: prune orphan tool outputs before compaction to shrink bloated histories and speed up resumes. (8ba5f744)
+
+## [0.5.13] - 2025-11-27
+
+- CLI: bump the npm package and platform binaries to 0.5.13 so installs grab the latest build. (285c8ca7)
+- CI: add a placeholder rust-ci workflow so required checks stay green during migration. (6d6ee6cf)
+
+## [0.5.12] - 2025-11-27
+
+- CLI: bump npm metadata to 0.5.12 so fresh installs pull the latest binaries. (9f79140)
+- CI: drop the redundant CodeQL workflow to stop conflicting security scans. (ff71e00)
+
+## [0.5.10] - 2025-11-27
+
+- CLI: bump the npm package metadata to 0.5.10 so installs pick up the latest build. (16b47ef)
+- CI: add a Ruby-free CodeQL workflow to keep security scanning enabled without extra dependencies. (ae6a8d3)
+
+## [0.5.8] - 2025-11-26
+
+- Docs: publish the new CLAUDE guidance and move working references into docs/working for quicker updates. (da89924b)
+- CLI: bump the npm package metadata to 0.5.8 so installs pick up the latest build. (44c59ddd)
+
+## [0.5.7] - 2025-11-26
+
+- Core/Exec: decode shell output with detected encodings so Unicode logs stay readable across platforms. (4aaba9b1, ae000766)
+- Auto Drive: force read-only agents when no git repo exists to avoid accidental writes during automation. (13226204)
+- App Server: emit token usage, compaction, and turn diff events plus thread metadata to improve monitoring. (401f94ca, caf2749d, 9ba27cfa, 157a16ce)
+- Shell MCP: declare capabilities, add login support, and publish the npm package to keep tool integrations healthy. (c6f68c9d, e8ef6d3c, af63e6ec)
+
+## [0.5.5] - 2025-11-25
+
+- Auto Drive: restore 600-char CLI prompts, enforce sane bounds, add fallback to the current binary, and append test guidance to each goal for smoother automation handoffs. (24a0dd4c, 3651bc85, 15745f0a, f8f5c5b4)
+- TUI/Prompts: add a full management section with save/reload, slash access, and alias autocomplete so custom prompts stay at your fingertips. (814fa485, 8d9e08c8, 079046e2)
+- Streaming: show reconnecting spinners, log retry causes, and classify more transient errors so network hiccups stay visible without noise. (64a98b6b, 47e3cc76, 936cca8f)
+- Agents: retier frontline options, upgrade opus/gemini defaults, and tighten descriptions to highlight the recommended models. (fa58356c, 58c83225, 884d008f)
+
+## [0.5.4] - 2025-11-24
+
+- Core/Agent: pass reasoning effort overrides through config so automation consistently honors requested budgets. (d6a7666b)
+- Compact: trim chat history when context overflows and automatically retry to keep long sessions running. (2014c10d)
+
+## [0.5.3] - 2025-11-24
+
+- Auto Drive: add CLI aliases for automation runs and force headless sessions into full-auto so release flows stay hands-free. (288b1d94, 0bb2f8dd)
+- TUI: keep tab characters intact during paste bursts and block stray Enter submits from per-key pastes for reliable composer input. (92625277, 019adc32)
+- Connectivity: harden CLI/TUI retry paths so transient network drops automatically reconnect active sessions. (f0cb7afd, a7e4d25a)
+- Config: honor CODE_HOME and CODEX_HOME entries from .env and retry without reasoning summaries when providers reject them. (5970ac52, 16ead0ec)
+
+## [0.5.2] - 2025-11-22
+
+- Agents: default automation flows to gpt-5.1-codex-max and add gemini-3-pro as an option for higher-capacity runs. (f0f99f2e)
+- Models: clamp reasoning effort to supported bands so prompts no longer fail with invalid request errors. (6a7cac9d)
+
+## [0.5.0] - 2025-11-21
+
+- Rebrand the project to **Every Code** while keeping the `code` CLI name and refreshed docs.
+- Auto Drive resilience: compaction and diagnostics, retry/backoff with observer telemetry, resume safety, and clearer cards/status.
+- Default presets upgraded to gpt-5.1 with added codex-mini variants for lighter runs.
+- UX polish: unified settings overlay refinements, /review uncommitted preset, strict streaming order, slash navigation hotkeys, and backtrack improvements.
+- Notifications enabled by default plus clearer browser/exec logging and richer resume/session catalogs.
+- Platform hardening: Nix offline builds, Windows AltGr + PATHEXT fixes, BSD keyring gating, responses proxy tightening, and sandbox/process safeguards.
+- MCP & integrations: sturdier MCP client tooling, streamable HTTP support, improved Zed/ACP guidance, and a hardened responses API proxy.
+
+## [0.4.21] - 2025-11-20
+
+- Auto Drive: let runs choose a model and clamp verbosity so diagnostics stay predictable. (61209e0)
+- Models: add gpt-5.1-codex-max default with one-time migration prompt so upgrades stay smooth. (8a97572, 6d67b8b, 64ae9aa)
+- Core: wire execpolicy2 through core/exec-server and add shell fallbacks so commands keep running under the new policy. (65c13f1, 056c8f8, b00a7cf)
+- TUI: add branch-aware filtering to `codex resume` so large workspaces find the right session faster. (526eb3f)
+- Platform: enable remote compaction by default and schedule auto jobs to keep transcripts lean. (cac0a6a, 75f38f1)
+
+## [0.4.20] - 2025-11-18
+
+- Core: serialize `shell_command` tool invocations so concurrent steps no longer trample each other during runs. (497fb4a1)
+- Models: ignore empty Claude `finish_reason` fields so streamed answers no longer truncate mid-response. (de1768d3)
+- Windows: treat AltGr chords as literal text and resolve MCP script-based tools via PATHEXT so international keyboards and script servers work again. (702238f0, f828cd28)
+- Core: overhaul compaction/truncation paths to remove double-truncation panics and keep summaries concise on long sessions. (94dfb211, 0b28e72b, 3f1c4b9a)
+- Platform: gate keyring backends per target and add BSD hardening so FreeBSD/OpenBSD builds succeed out of the box. (5860481b)
+
+## [0.4.19] - 2025-11-17
+
+- Nix: vendor all git-sourced crates so offline builds no longer depend on network access. (079f833)
+- Build: point the Nix derivation at the repo root to keep codex-rs workspace dependencies available. (079f833)
+
+## [0.4.17] - 2025-11-17
+
+- TUI: add an uncommitted preset to /review so you can diff local edits without staging. (dda8d2d)
+- Resume: make the session picker async and add /push for fast handoff into publish. (a3be266)
+- Resume: ignore system status snippets so regenerated plans stay focused on user messages. (e08999a)
+- Resume: count user input coming from rollouts to keep token and action history accurate. (479edd1)
+- Resume: unify the session catalog across views so saved sessions appear consistently. (0b26627)
+
+## [0.4.16] - 2025-11-15
+
+- TUI: enable desktop notifications by default so background job updates surface immediately. (799364de)
+- TUI: refine unified exec with clearer UI and explicit workdir overrides for commands launched from history. (63c8c01f, f01f2ec9)
+- Onboarding: handle "Don't Trust" directory selections gracefully so setup cannot get stuck in untrusted folders. (89ecc00b)
+- SDK: add CLI environment override and AbortSignal support for better automation integrations. (93665000, 439bc5db)
+
+## [0.4.15] - 2025-11-14
+
+- Core: migrate default CLI, TUI, and Auto Drive models to gpt-5.1 so new sessions use the upgraded stack. (698c53f)
+- Prompts: align the gpt-5.1 system instructions with Codex guidance to keep responses consistent. (e0ec79c)
+- TUI Login: add device-code fallback and ensure ChatGPT auth links wrap cleanly on narrow terminals. (5279dd8, 2e47735, 322396c)
+
+## [0.4.14] - 2025-11-13
+
+- Settings: let reviewers choose the model used for /review from the settings overlay. (2134f3e)
+- TUI: keep the final scrollback line visible after a command completes so transcripts stay readable. (f6f7a75)
+- TUI: simplify the /merge handoff so follow-up flows resume without manual cleanup. (7d8684e)
+- TUI: keep multiline slash commands intact when dispatching plan or solve sequences. (8d9398d)
+- Stability: recover gracefully when the working directory vanishes mid-run instead of crashing. (97b956f)
+
+## [0.4.11] - 2025-11-07
+
+- Model: add gpt-5-codex-mini presets for quick access to lighter variants. (febfa7e)
+- Compaction: add per-message summaries, checkpoint warnings, and prompt overrides to keep long transcripts clear. (b21190f, 8dd3c30, 58cf74d)
+- Client: normalize retry-after handling, show resume times, and stop retrying fatal quota errors so recoveries are predictable. (0c82670, 0e0e85c, d996507)
+- CLI: enable CTRL-n and CTRL-p to navigate slash commands, files, and history without leaving the keyboard. (e30f651)
+- SDK: add network_access and web_search toggles to the TypeScript client for richer tool control. (c76528c)
+
+## [0.4.9] - 2025-11-03
+
+- CLI: rerun the bootstrap step when postinstall scripts are skipped so upgrades stay healthy. (8d842b8)
+- Auto Drive: salvage user-turn JSON to keep transcripts recoverable after crashes. (38caf29)
+- Homebrew: track the latest release so tap installs follow new versions immediately. (222d2e6)
+
+## [0.4.8] - 2025-11-03
+
+- Auto Drive: Surface coordinator schema details when retries fail so validation issues are actionable. (cbc31dad)
+- TUI/Auto Drive: Resume the decision pipeline after diagnostics follow-ups so runs wrap up correctly. (1714bbd8)
+
+## [0.4.7] - 2025-10-30
+
+- TUI/Auto Drive: Keep router answers visible in the transcript so automation context stays complete. (cf17fc1)
+- TUI/Auto Drive: Persist diagnostics follow-up prompts when resuming runs to avoid lost context. (d1e634d)
+
+## [0.4.6] - 2025-10-30
+
+- Build: keep release notes version in sync during `build-fast` to stop false release failures. (862851d)
+- Build: drop the release notes gate so `build-fast` runs cleanly in CI. (b0bfd1f)
+- CLI: publish the v0.4.6 package metadata for all platform bundles. (ceccd4b)
+
+## [0.4.4] - 2025-10-29
+
+- TUI: Interrupts in-flight runs when `/new` starts a fresh chat so responses never bleed between sessions. (0421f643)
+- TUI/MCP: Keeps the selected MCP row visible while scrolling large server lists. (4c114758)
+- Agents: Refreshes the Enabled toggle UX and persists state immediately in history. (56a0b37d)
+- Config: Surfaces legacy `~/.codex/prompts` directories so custom prompts load automatically. (0be4f19c)
+- Rollout: Sorts session history by latest activity to make resume picks faster. (9f6481a1)
+
+## [0.4.2] - 2025-10-27
+
+- Auto Drive: add compaction, token metrics, and durable transcripts so long runs stay stable. (0071313, 57b398f, cd880a5)
+- TUI/Auto Drive: celebrate completion with a dedicated state to clarify run outcomes. (2130ed2)
+- TUI: route browser status logs through the tail helper so log panes update live. (4630825)
+
+## [0.4.1] - 2025-10-27
+
+- Auto Drive: show in-progress summaries in the card so runs surface status while they execute. (c7991ed)
+- Auto Drive: refresh gradients and status colors to clarify automation progress states. (ed0c895)
+- TUI: restore the CLI send prompt label and stabilize vt100 rendering. (b1c04d0)
+- Core/Debug: capture outgoing headers and order usage logs for clearer traces. (80497db)
+
+## [0.4.0] - 2025-10-26
+
+- Auto Drive: graduate the orchestrator into the new `code-auto-drive-core` crate, coordinate multi-agent runs end to end, and add self-checks plus elapsed-time tracking for every action.
+- Automation workflow: rely on Auto Drive for long-lived `/auto` sessions — plan a run, hand it off, and return to completed work while the orchestrator pauses, resumes, and recovers automatically.
+- Settings overlay: consolidate every `/settings` pane into a two-level overlay so limits, themes, and automation toggles sit in one place with quick navigation.
+- TUI cards: introduce card-based history entries for Agents, Browser sessions, Web Search, and Auto Drive with grouped actions and overlays for deep detail.
+- Performance: tighten CPU and memory usage discovered in heavy automation scenarios to keep scrolling and rendering smooth.
+- Agents: let `/plan`, `/code`, and related commands target specific CLIs (e.g., `gemini-3-flash`, `claude-sonnet-4.5`) with future expansion handled from the new settings hub.
+
 ## [0.2.188] - 2025-10-06
 
 - MCP: Validate stdio tool commands on PATH and surface clearer spawn errors during setup. (3a51d30)
@@ -297,7 +1399,6 @@
 
 ## [0.2.137] - 2025-09-12
 
-- Dev: add `scripts/test-responses.js` to probe Responses API with ChatGPT/API key auth; includes schema/tools/store tests. (79c69f96)
 - Proxy: default Responses v1; fail-fast on 5xx; add STRICT_HEADERS and RESPONSES_BETA override. (acfaeb7d, 1ddedb8b)
 
 ## [0.2.133] - 2025-09-12

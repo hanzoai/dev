@@ -112,10 +112,11 @@ impl Session {
         }
         drop(active);
         let event = Event {
-            id: sub_id,
+            id: sub_id.clone(),
             msg: EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }),
         };
         self.send_event(event).await;
+        self.reconcile_running_execs(&sub_id).await;
     }
 
     async fn register_new_active_task(&self, sub_id: String, task: RunningTask) {
@@ -143,7 +144,9 @@ impl Session {
         task: RunningTask,
         reason: TurnAbortReason,
     ) {
+        self.mark_running_exec_as_cancelled(&sub_id);
         if task.handle.is_finished() {
+            self.finalize_cancelled_execs(&sub_id).await;
             return;
         }
 
@@ -159,6 +162,8 @@ impl Session {
             msg: EventMsg::TurnAborted(TurnAbortedEvent { reason }),
         };
         self.send_event(event).await;
+
+        self.finalize_cancelled_execs(&sub_id).await;
     }
 }
 

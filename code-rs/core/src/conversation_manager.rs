@@ -46,6 +46,10 @@ impl ConversationManager {
         }
     }
 
+    pub fn auth_manager(&self) -> Arc<AuthManager> {
+        Arc::clone(&self.auth_manager)
+    }
+
     /// Construct with a dummy AuthManager containing the provided CodexAuth.
     /// Used for integration tests: should not be used by ordinary business logic.
     pub fn with_auth(auth: CodexAuth) -> Self {
@@ -176,7 +180,7 @@ impl ConversationManager {
             crate::rollout::recorder::RolloutRecorderParams::new(
                 convo_id,
                 instructions,
-                self.session_source,
+                self.session_source.clone(),
             ),
         )
         .await
@@ -254,8 +258,7 @@ mod tests {
             role: "user".to_string(),
             content: vec![ContentItem::OutputText {
                 text: text.to_string(),
-            }],
-        }
+            }], end_turn: None, phase: None}
     }
     fn assistant_msg(text: &str) -> ResponseItem {
         ResponseItem::Message {
@@ -263,8 +266,7 @@ mod tests {
             role: "assistant".to_string(),
             content: vec![ContentItem::OutputText {
                 text: text.to_string(),
-            }],
-        }
+            }], end_turn: None, phase: None}
     }
 
     #[test]
@@ -276,7 +278,7 @@ mod tests {
             user_msg("u2"),
             assistant_msg("a3"),
             ResponseItem::Reasoning {
-                id: "r1".to_string(),
+                id: Some("r1".to_string()),
                 summary: vec![ReasoningItemReasoningSummary::SummaryText {
                     text: "s".to_string(),
                 }],
@@ -286,6 +288,7 @@ mod tests {
             ResponseItem::FunctionCall {
                 id: None,
                 name: "tool".to_string(),
+                namespace: None,
                 arguments: "{}".to_string(),
                 call_id: "c1".to_string(),
             },

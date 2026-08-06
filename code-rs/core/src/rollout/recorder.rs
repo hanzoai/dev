@@ -7,6 +7,8 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use code_protocol::ConversationId;
+use code_protocol::ThreadId;
+use code_protocol::models::BaseInstructions;
 use code_protocol::models::{ContentItem, ResponseItem};
 use code_protocol::protocol::EventMsg as ProtoEventMsg;
 use code_protocol::protocol::SessionSource;
@@ -87,6 +89,14 @@ enum RolloutCmd {
     Shutdown { ack: oneshot::Sender<()> },
 }
 
+/// Tracks context needed to update the session catalog after writes.
+struct CatalogUpdateState {
+    code_home: PathBuf,
+    session_id: ThreadId,
+    rollout_path: PathBuf,
+    last_timestamp: String,
+}
+
 impl RolloutRecorderParams {
     pub fn new(
         conversation_id: ConversationId,
@@ -143,13 +153,18 @@ impl RolloutRecorder {
                     tokio::fs::File::from_std(file),
                     path,
                     Some(SessionMeta {
-                        id: session_id,
+                        id: ThreadId::from_string(&session_id.to_string()).map_err(|e| {
+                            IoError::other(format!("failed to convert session ID: {e}"))
+                        })?,
+                        forked_from_id: None,
                         timestamp,
                         cwd: config.cwd.clone(),
                         originator: DEFAULT_ORIGINATOR.to_string(),
                         cli_version: env!("CARGO_PKG_VERSION").to_string(),
-                        instructions,
                         source,
+                        model_provider: None,
+                        base_instructions: instructions.map(|text| BaseInstructions { text }),
+                        dynamic_tools: None,
                     }),
                 )
             }
@@ -167,6 +182,13 @@ impl RolloutRecorder {
         let cwd = config.cwd.clone();
         let snapshot_path = rollout_path.with_extension("snapshot.json");
 
+        let catalog_state = meta.as_ref().map(|meta| CatalogUpdateState {
+            code_home: config.code_home.clone(),
+            session_id: meta.id,
+            rollout_path: rollout_path.clone(),
+            last_timestamp: meta.timestamp.clone(),
+        });
+
         // A reasonably-sized bounded channel. If the buffer fills up the send
         // future will yield, which is fine – we only need to ensure we do not
         // perform *blocking* I/O on the caller's thread.
@@ -175,7 +197,14 @@ impl RolloutRecorder {
         // Spawn a Tokio task that owns the file handle and performs async
         // writes. Using `tokio::fs::File` keeps everything on the async I/O
         // driver instead of blocking the runtime.
-        tokio::task::spawn(rollout_writer(file, rx, meta, cwd, snapshot_path));
+        tokio::task::spawn(rollout_writer(
+            file,
+            rx,
+            meta,
+            cwd,
+            snapshot_path,
+            catalog_state,
+        ));
 
         Ok(Self { tx, rollout_path })
     }
@@ -298,7 +327,7 @@ impl RolloutRecorder {
         }
 
         let mut items: Vec<RolloutItem> = Vec::new();
-        let mut conversation_id: Option<ConversationId> = None;
+        let mut conversation_id: Option<ThreadId> = None;
         for line in text.lines() {
             if line.trim().is_empty() {
                 continue;
@@ -342,12 +371,14 @@ impl RolloutRecorder {
                                 items.push(RolloutItem::ResponseItem(ResponseItem::Message {
                                     id: Some(ev.id.clone()),
                                     role: "user".to_string(),
-                                    content,
-                                }));
+                                    content, end_turn: None, phase: None}));
                             }
                             ProtoEventMsg::AgentMessage(_) => items.push(RolloutItem::Event(ev)),
                             _ => items.push(RolloutItem::Event(ev)),
                         }
+                    }
+                    RolloutItem::EventMsg(ev_msg) => {
+                        items.push(RolloutItem::EventMsg(ev_msg));
                     }
                     RolloutItem::Compacted(compacted) => {
                         items.push(RolloutItem::Compacted(compacted));
@@ -458,6 +489,7 @@ async fn rollout_writer(
     mut meta: Option<SessionMeta>,
     cwd: std::path::PathBuf,
     snapshot_path: PathBuf,
+    mut catalog_state: Option<CatalogUpdateState>,
 ) -> std::io::Result<()> {
     let mut writer = JsonlWriter { file };
 
@@ -470,9 +502,23 @@ async fn rollout_writer(
         };
 
         // Write the SessionMeta as the first item in the file, wrapped in a rollout line
-        writer
+        let (timestamp, _) = writer
             .write_rollout_item(RolloutItem::SessionMeta(session_meta_line))
             .await?;
+
+        if let Some(ref mut state) = catalog_state {
+            state.last_timestamp = timestamp;
+            if let Err(err) = super::catalog::update_catalog_entry(
+                &state.code_home,
+                &state.rollout_path,
+                state.session_id.into(),
+                &state.last_timestamp,
+            )
+            .await
+            {
+                warn!("failed to update session catalog after meta write: {err}");
+            }
+        }
     }
 
     // Process rollout commands
@@ -481,7 +527,23 @@ async fn rollout_writer(
             RolloutCmd::AddItems(items) => {
                 for item in items {
                     if should_persist_rollout_item(&item) {
-                        writer.write_rollout_item(item).await?;
+                        let (timestamp, _) = writer.write_rollout_item(item).await?;
+                        if let Some(ref mut state) = catalog_state {
+                            state.last_timestamp = timestamp;
+                        }
+                    }
+                }
+
+                if let Some(ref state) = catalog_state {
+                    if let Err(err) = super::catalog::update_catalog_entry(
+                        &state.code_home,
+                        &state.rollout_path,
+                        state.session_id.into(),
+                        &state.last_timestamp,
+                    )
+                    .await
+                    {
+                        warn!("failed to update session catalog after AddItems: {err}");
                     }
                 }
             }
@@ -510,7 +572,10 @@ struct JsonlWriter {
 }
 
 impl JsonlWriter {
-    async fn write_rollout_item(&mut self, rollout_item: RolloutItem) -> std::io::Result<()> {
+    async fn write_rollout_item(
+        &mut self,
+        rollout_item: RolloutItem,
+    ) -> std::io::Result<(String, ())> {
         let timestamp_format: &[FormatItem] = format_description!(
             "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
         );
@@ -519,10 +584,11 @@ impl JsonlWriter {
             .map_err(|e| IoError::other(format!("failed to format timestamp: {e}")))?;
 
         let line = RolloutLine {
-            timestamp,
+            timestamp: timestamp.clone(),
             item: rollout_item,
         };
-        self.write_line(&line).await
+        self.write_line(&line).await?;
+        Ok((timestamp, ()))
     }
     async fn write_line(&mut self, item: &impl serde::Serialize) -> std::io::Result<()> {
         let mut json = serde_json::to_string(item)?;

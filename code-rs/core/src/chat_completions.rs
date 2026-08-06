@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -7,6 +8,8 @@ use futures::Stream;
 use futures::StreamExt;
 use futures::TryStreamExt;
 use reqwest::StatusCode;
+use reqwest::header::HeaderMap;
+use serde_json::Value;
 use serde_json::json;
 use std::pin::Pin;
 use std::task::Context;
@@ -21,6 +24,8 @@ use crate::ModelProviderInfo;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
 use crate::client_common::ResponseStream;
+use crate::client_common::replace_image_payloads_for_model;
+use crate::client_common::rewrite_image_generation_calls_for_input;
 use crate::debug_logger::DebugLogger;
 use crate::error::CodexErr;
 use crate::error::Result;
@@ -30,7 +35,6 @@ use crate::model_family::ModelFamily;
 use crate::openai_tools::create_tools_json_for_chat_completions_api;
 use crate::util::backoff;
 use std::sync::{Arc, Mutex};
-use code_app_server_protocol::AuthMode;
 use code_protocol::models::ContentItem;
 use code_protocol::models::ReasoningItemContent;
 use code_protocol::models::ResponseItem;
@@ -42,9 +46,11 @@ pub(crate) async fn stream_chat_completions(
     model_slug: &str,
     client: &reqwest::Client,
     provider: &ModelProviderInfo,
+    responses_originator_header: &str,
     debug_logger: &Arc<Mutex<DebugLogger>>,
     auth_manager: Option<Arc<AuthManager>>,
     otel_event_manager: Option<OtelEventManager>,
+    log_tag: Option<&str>,
 ) -> Result<ResponseStream> {
     if prompt.output_schema.is_some() {
         return Err(CodexErr::UnsupportedOperation(
@@ -58,7 +64,9 @@ pub(crate) async fn stream_chat_completions(
     let full_instructions = prompt.get_full_instructions(model_family);
     messages.push(json!({"role": "system", "content": full_instructions}));
 
-    let input = prompt.get_formatted_input();
+    let mut input = prompt.get_formatted_input();
+    rewrite_image_generation_calls_for_input(&mut input);
+    replace_image_payloads_for_model(&mut input, model_slug);
 
     // Pre-scan: map Reasoning blocks to the adjacent assistant anchor after the last user.
     // - If the last emitted message is a user message, drop all reasoning.
@@ -73,14 +81,25 @@ pub(crate) async fn stream_chat_completions(
     for item in &input {
         match item {
             ResponseItem::Message { role, .. } => last_emitted_role = Some(role.as_str()),
-            ResponseItem::FunctionCall { .. } | ResponseItem::LocalShellCall { .. } => {
+            ResponseItem::FunctionCall { .. }
+            | ResponseItem::ToolSearchCall { .. }
+            | ResponseItem::LocalShellCall { .. } => {
                 last_emitted_role = Some("assistant")
             }
-            ResponseItem::FunctionCallOutput { .. } => last_emitted_role = Some("tool"),
-            ResponseItem::Reasoning { .. } | ResponseItem::Other => {}
+            ResponseItem::FunctionCallOutput { .. } | ResponseItem::ToolSearchOutput { .. } => {
+                last_emitted_role = Some("tool")
+            }
+            ResponseItem::CompactionSummary { .. } | ResponseItem::ContextCompaction { .. } => {
+                last_emitted_role = Some("assistant")
+            }
+            ResponseItem::AdditionalTools { .. }
+            | ResponseItem::Reasoning { .. }
+            | ResponseItem::Other => {}
             ResponseItem::CustomToolCall { .. } => {}
             ResponseItem::CustomToolCallOutput { .. } => {}
             ResponseItem::WebSearchCall { .. } => {}
+            ResponseItem::ImageGenerationCall { .. } => {}
+            ResponseItem::GhostSnapshot { .. } => {}
         }
     }
 
@@ -137,7 +156,9 @@ pub(crate) async fn stream_chat_completions(
                 // Otherwise, attach to immediate next assistant anchor (tool-calls or assistant message)
                 if !attached && idx + 1 < input.len() {
                     match &input[idx + 1] {
-                        ResponseItem::FunctionCall { .. } | ResponseItem::LocalShellCall { .. } => {
+                        ResponseItem::FunctionCall { .. }
+                        | ResponseItem::ToolSearchCall { .. }
+                        | ResponseItem::LocalShellCall { .. } => {
                             reasoning_by_anchor_index
                                 .entry(idx + 1)
                                 .and_modify(|v| v.push_str(&text))
@@ -204,30 +225,45 @@ pub(crate) async fn stream_chat_completions(
                     messages.push(json!({"role": role, "content": text}));
                 }
             }
+            ResponseItem::CompactionSummary { .. } | ResponseItem::ContextCompaction { .. } => {
+                // Compaction summaries are only meaningful to the Responses API; omit them
+                // when translating to Chat Completions.
+                continue;
+            }
             ResponseItem::FunctionCall {
                 name,
                 arguments,
                 call_id,
                 ..
             } => {
-                let mut msg = json!({
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [{
-                        "id": call_id,
-                        "type": "function",
-                        "function": {
-                            "name": name,
-                            "arguments": arguments,
-                        }
-                    }]
-                });
-                if let Some(reasoning) = reasoning_by_anchor_index.get(&idx) {
-                    if let Some(obj) = msg.as_object_mut() {
-                        obj.insert("reasoning".to_string(), json!(reasoning));
+                let reasoning = reasoning_by_anchor_index.get(&idx).map(String::as_str);
+                let tool_call = json!({
+                    "id": call_id,
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "arguments": arguments,
                     }
-                }
-                messages.push(msg);
+                });
+                push_tool_call_message(&mut messages, tool_call, reasoning);
+            }
+            ResponseItem::ToolSearchCall {
+                call_id,
+                status,
+                execution,
+                arguments,
+                ..
+            } => {
+                let reasoning = reasoning_by_anchor_index.get(&idx).map(String::as_str);
+                let tool_call = json!({
+                    "id": call_id.clone().unwrap_or_default(),
+                    "type": "tool_search_call",
+                    "call_id": call_id,
+                    "status": status,
+                    "execution": execution,
+                    "arguments": arguments,
+                });
+                push_tool_call_message(&mut messages, tool_call, reasoning);
             }
             ResponseItem::LocalShellCall {
                 id,
@@ -236,59 +272,74 @@ pub(crate) async fn stream_chat_completions(
                 action,
             } => {
                 // Confirm with API team.
-                let mut msg = json!({
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [{
-                        "id": id.clone().unwrap_or_else(|| "".to_string()),
-                        "type": "local_shell_call",
-                        "status": status,
-                        "action": action,
-                    }]
+                let reasoning = reasoning_by_anchor_index.get(&idx).map(String::as_str);
+                let tool_call = json!({
+                    "id": id.clone().unwrap_or_default(),
+                    "type": "local_shell_call",
+                    "status": status,
+                    "action": action,
                 });
-                if let Some(reasoning) = reasoning_by_anchor_index.get(&idx) {
-                    if let Some(obj) = msg.as_object_mut() {
-                        obj.insert("reasoning".to_string(), json!(reasoning));
-                    }
-                }
-                messages.push(msg);
+                push_tool_call_message(&mut messages, tool_call, reasoning);
             }
             ResponseItem::FunctionCallOutput { call_id, output } => {
                 messages.push(json!({
                     "role": "tool",
                     "tool_call_id": call_id,
-                    "content": output.content,
+                    "content": output.to_string(),
+                }));
+            }
+            ResponseItem::ToolSearchOutput {
+                call_id,
+                status,
+                execution,
+                tools,
+            } => {
+                messages.push(json!({
+                    "role": "tool",
+                    "tool_call_id": call_id.clone().unwrap_or_default(),
+                    "content": serde_json::json!({
+                        "status": status,
+                        "execution": execution,
+                        "tools": tools,
+                    })
+                    .to_string(),
                 }));
             }
             ResponseItem::CustomToolCall {
                 id,
                 call_id: _,
                 name,
+                namespace: _,
                 input,
                 status: _,
             } => {
-                messages.push(json!({
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [{
-                        "id": id,
-                        "type": "custom",
-                        "custom": {
-                            "name": name,
-                            "input": input,
-                        }
-                    }]
-                }));
+                let reasoning = reasoning_by_anchor_index.get(&idx).map(String::as_str);
+                let tool_call = json!({
+                    "id": id,
+                    "type": "custom",
+                    "custom": {
+                        "name": name,
+                        "input": input,
+                    }
+                });
+                push_tool_call_message(&mut messages, tool_call, reasoning);
             }
-            ResponseItem::CustomToolCallOutput { call_id, output } => {
+            ResponseItem::CustomToolCallOutput {
+                call_id,
+                output,
+                ..
+            } => {
                 messages.push(json!({
                     "role": "tool",
                     "tool_call_id": call_id,
                     "content": output,
                 }));
             }
-            ResponseItem::Reasoning { .. }
+            ResponseItem::AdditionalTools { .. }
+            | ResponseItem::Reasoning { .. }
             | ResponseItem::WebSearchCall { .. }
+            | ResponseItem::ImageGenerationCall { .. }
+            | ResponseItem::GhostSnapshot { .. }
             | ResponseItem::Other => {
                 // Omit these items from the conversation history.
                 continue;
@@ -297,12 +348,7 @@ pub(crate) async fn stream_chat_completions(
     }
 
     let tools_json = create_tools_json_for_chat_completions_api(&prompt.tools)?;
-    let mut payload = json!({
-        "model": model_slug,
-        "messages": messages,
-        "stream": true,
-        "tools": tools_json,
-    });
+    let mut payload = create_chat_completions_payload(model_slug, messages, tools_json);
 
     if let Some(openrouter_cfg) = provider.openrouter_config() {
         if let Some(obj) = payload.as_object_mut() {
@@ -336,6 +382,15 @@ pub(crate) async fn stream_chat_completions(
         }
     }
 
+    // Some OpenAI-compatible providers (DeepSeek, Moonshot/Kimi, certain Groq
+    // wrappers, etc.) strictly validate the Chat Completions `role` enum and
+    // reject custom values such as "developer" with a 400. Normalize only for
+    // those strict-compatible endpoints; OpenAI's Chat Completions API accepts
+    // `developer` as a first-class instruction role for newer models.
+    if !provider.is_public_openai_chat_endpoint() {
+        sanitize_message_roles_for_strict_chat_providers(&mut payload);
+    }
+
     let endpoint = provider.get_full_url(&None);
     debug!(
         "POST to {}: {}",
@@ -343,36 +398,52 @@ pub(crate) async fn stream_chat_completions(
         serde_json::to_string_pretty(&payload).unwrap_or_default()
     );
 
-    // Start logging the request and get a request_id to track the response
-    let request_id = if let Ok(logger) = debug_logger.lock() {
-        logger
-            .start_request_log(&endpoint, &payload)
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-
     let mut attempt = 0;
     let max_retries = provider.request_max_retries();
+    let mut request_id = String::new();
     loop {
         attempt += 1;
 
-        let auth = auth_manager.as_ref().and_then(|m| m.auth());
-        let mut req_builder = provider.create_request_builder(client, &auth).await?;
+        let base_auth = auth_manager.as_ref().and_then(|m| m.auth());
+        let auth = provider.effective_auth(&base_auth).await?;
+        let mut req_builder = provider.create_request_builder_with_auth(client, &auth).await?;
+        req_builder = req_builder.headers(crate::default_client::requested_model_headers(
+            Some(responses_originator_header),
+            model_slug,
+        ));
 
         if let Some(auth) = auth.as_ref() {
-            if auth.mode == AuthMode::ChatGPT {
+            if auth.mode.is_chatgpt() {
                 if let Some(account_id) = auth.get_account_id() {
                     req_builder = req_builder.header("chatgpt-account-id", account_id);
                 }
             }
         }
 
-        let res = req_builder
+        req_builder = req_builder
             .header(reqwest::header::ACCEPT, "text/event-stream")
-            .json(&payload)
-            .send()
-            .await;
+            .json(&payload);
+
+        if request_id.is_empty() {
+            let endpoint_for_log = provider.get_full_url(&auth);
+            let header_snapshot = req_builder
+                .try_clone()
+                .and_then(|builder| builder.build().ok())
+                .map(|req| header_map_to_json(req.headers()));
+
+            if let Ok(logger) = debug_logger.lock() {
+                request_id = logger
+                    .start_request_log(
+                        &endpoint_for_log,
+                        &payload,
+                        header_snapshot.as_ref(),
+                        log_tag,
+                    )
+                    .unwrap_or_default();
+            }
+        }
+
+        let res = req_builder.send().await;
 
         match res {
             Ok(resp) if resp.status().is_success() => {
@@ -403,6 +474,19 @@ pub(crate) async fn stream_chat_completions(
             }
             Ok(res) => {
                 let status = res.status();
+                if status == StatusCode::UNAUTHORIZED && provider.has_command_auth() {
+                    provider.invalidate_cached_auth_token();
+                    if attempt > max_retries {
+                        return Err(CodexErr::RetryLimit(RetryLimitReachedError {
+                            status,
+                            request_id: None,
+                            retryable: true,
+                        }));
+                    }
+                    let delay = backoff(attempt);
+                    tokio::time::sleep(delay).await;
+                    continue;
+                }
                 if !(status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()) {
                     let body = (res.text().await).unwrap_or_default();
                     if let Ok(logger) = debug_logger.lock() {
@@ -427,6 +511,7 @@ pub(crate) async fn stream_chat_completions(
                     return Err(CodexErr::RetryLimit(RetryLimitReachedError {
                         status,
                         request_id: None,
+                        retryable: status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS,
                     }));
                 }
 
@@ -442,8 +527,8 @@ pub(crate) async fn stream_chat_completions(
                 tokio::time::sleep(delay).await;
             }
             Err(e) => {
+                let is_connectivity = e.is_connect() || e.is_timeout() || e.is_request();
                 if attempt > max_retries {
-                    // Log network error
                     if let Ok(logger) = debug_logger.lock() {
                         let _ = logger.append_response_event(
                             &request_id,
@@ -454,6 +539,14 @@ pub(crate) async fn stream_chat_completions(
                         );
                         let _ = logger.end_request_log(&request_id);
                     }
+                    if is_connectivity {
+                        let req_id = (!request_id.is_empty()).then(|| request_id.clone());
+                        return Err(CodexErr::Stream(
+                            format!("[transport] network unavailable: {e}"),
+                            None,
+                            req_id,
+                        ));
+                    }
                     return Err(e.into());
                 }
                 let delay = backoff(attempt);
@@ -461,6 +554,55 @@ pub(crate) async fn stream_chat_completions(
             }
         }
     }
+}
+
+fn push_tool_call_message(messages: &mut Vec<Value>, tool_call: Value, reasoning: Option<&str>) {
+    // Chat Completions requires that tool calls are grouped into a single assistant message
+    // (with `tool_calls: [...]`) followed by tool role responses.
+    if let Some(Value::Object(obj)) = messages.last_mut()
+        && obj.get("role").and_then(Value::as_str) == Some("assistant")
+        && obj.get("content").is_some_and(Value::is_null)
+        && let Some(tool_calls) = obj.get_mut("tool_calls").and_then(Value::as_array_mut)
+    {
+        tool_calls.push(tool_call);
+        if let Some(reasoning) = reasoning {
+            if let Some(Value::String(existing)) = obj.get_mut("reasoning") {
+                if !existing.is_empty() {
+                    existing.push('\n');
+                }
+                existing.push_str(reasoning);
+            } else {
+                obj.insert("reasoning".to_string(), Value::String(reasoning.to_string()));
+            }
+        }
+        return;
+    }
+
+    let mut msg = json!({
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [tool_call],
+    });
+    if let Some(reasoning) = reasoning
+        && let Some(obj) = msg.as_object_mut()
+    {
+        obj.insert("reasoning".to_string(), json!(reasoning));
+    }
+    messages.push(msg);
+}
+
+fn create_chat_completions_payload(
+    model_slug: &str,
+    messages: Vec<Value>,
+    tools_json: Vec<Value>,
+) -> Value {
+    json!({
+        "model": model_slug,
+        "messages": messages,
+        "stream": true,
+        "store": false,
+        "tools": tools_json,
+    })
 }
 
 /// Lightweight SSE processor for the Chat Completions streaming format. The
@@ -495,6 +637,65 @@ async fn process_chat_sse<S>(
     let mut assistant_text = String::new();
     let mut reasoning_text = String::new();
     let mut current_item_id: Option<String> = None;
+    let mut current_response_id: Option<String> = None;
+    let mut current_response_model: Option<String> = None;
+    let mut created_emitted = false;
+
+    async fn flush_and_complete(
+        tx_event: &mpsc::Sender<Result<ResponseEvent>>,
+        assistant_text: &mut String,
+        reasoning_text: &mut String,
+        current_item_id: &Option<String>,
+        response_id: Option<&str>,
+        debug_logger: &Arc<Mutex<DebugLogger>>,
+        request_id: &str,
+    ) {
+        // Emit any finalized items before closing so downstream consumers receive
+        // terminal events for both assistant content and raw reasoning.
+        if !assistant_text.is_empty() {
+            let item = ResponseItem::Message {
+                role: "assistant".to_string(),
+                content: vec![ContentItem::OutputText {
+                    text: std::mem::take(assistant_text),
+                }],
+                id: current_item_id.clone(), end_turn: None, phase: None};
+            let _ = tx_event
+                .send(Ok(ResponseEvent::OutputItemDone {
+                    item,
+                    sequence_number: None,
+                    output_index: None,
+                }))
+                .await;
+        }
+
+        if !reasoning_text.is_empty() {
+            let item = ResponseItem::Reasoning {
+                id: current_item_id.clone(),
+                summary: Vec::new(),
+                content: Some(vec![ReasoningItemContent::ReasoningText {
+                    text: std::mem::take(reasoning_text),
+                }]),
+                encrypted_content: None,
+            };
+            let _ = tx_event
+                .send(Ok(ResponseEvent::OutputItemDone {
+                    item,
+                    sequence_number: None,
+                    output_index: None,
+                }))
+                .await;
+        }
+
+        let _ = tx_event
+            .send(Ok(ResponseEvent::Completed {
+                response_id: response_id.unwrap_or_default().to_string(),
+                token_usage: None,
+            }))
+            .await;
+        if let Ok(logger) = debug_logger.lock() {
+            let _ = logger.end_request_log(request_id);
+        }
+    }
 
     loop {
         let next_event = if let Some(manager) = otel_event_manager.as_ref() {
@@ -509,7 +710,11 @@ async fn process_chat_sse<S>(
             Ok(Some(Ok(ev))) => ev,
             Ok(Some(Err(e))) => {
                 let _ = tx_event
-                    .send(Err(CodexErr::Stream(e.to_string(), None)))
+                    .send(Err(CodexErr::Stream(
+                        format!("[transport] {e}"),
+                        None,
+                        Some(request_id.clone()),
+                    )))
                     .await;
                 return;
             }
@@ -526,70 +731,53 @@ async fn process_chat_sse<S>(
                         }),
                     );
                 }
-                let _ = tx_event
-                    .send(Ok(ResponseEvent::Completed {
-                        response_id: String::new(),
-                        token_usage: None,
-                    }))
-                    .await;
-                if let Ok(logger) = debug_logger.lock() {
-                    let _ = logger.end_request_log(&request_id);
-                }
+                flush_and_complete(
+                    &tx_event,
+                    &mut assistant_text,
+                    &mut reasoning_text,
+                    &current_item_id,
+                    current_response_id.as_deref(),
+                    &debug_logger,
+                    &request_id,
+                )
+                .await;
                 return;
             }
             Err(_) => {
                 let _ = tx_event
                     .send(Err(CodexErr::Stream(
-                        "idle timeout waiting for SSE".into(),
+                        "[idle] timeout waiting for SSE".into(),
                         None,
+                        Some(request_id.clone()),
                     )))
                     .await;
                 return;
             }
         };
 
+        let data = sse.data.trim();
+
+        if data.is_empty() {
+            continue;
+        }
+
         // OpenAI Chat streaming sends a literal string "[DONE]" when finished.
-        if sse.data.trim() == "[DONE]" {
-            // Emit any finalized items before closing so downstream consumers receive
-            // terminal events for both assistant content and raw reasoning.
-            if !assistant_text.is_empty() {
-                let item = ResponseItem::Message {
-                    role: "assistant".to_string(),
-                    content: vec![ContentItem::OutputText {
-                        text: std::mem::take(&mut assistant_text),
-                    }],
-                    id: current_item_id.clone(),
-                };
-                let _ = tx_event.send(Ok(ResponseEvent::OutputItemDone { item, sequence_number: None, output_index: None })).await;
-            }
-
-            if !reasoning_text.is_empty() {
-                let item = ResponseItem::Reasoning {
-                    id: current_item_id.clone().unwrap_or_else(String::new),
-                    summary: Vec::new(),
-                    content: Some(vec![ReasoningItemContent::ReasoningText {
-                        text: std::mem::take(&mut reasoning_text),
-                    }]),
-                    encrypted_content: None,
-                };
-                let _ = tx_event.send(Ok(ResponseEvent::OutputItemDone { item, sequence_number: None, output_index: None })).await;
-            }
-
-            let _ = tx_event
-                .send(Ok(ResponseEvent::Completed {
-                    response_id: String::new(),
-                    token_usage: None,
-                }))
-                .await;
-            // Mark the request log as complete
-            if let Ok(logger) = debug_logger.lock() {
-                let _ = logger.end_request_log(&request_id);
-            }
+        if data == "[DONE]" || data == "DONE" {
+            flush_and_complete(
+                &tx_event,
+                &mut assistant_text,
+                &mut reasoning_text,
+                &current_item_id,
+                current_response_id.as_deref(),
+                &debug_logger,
+                &request_id,
+            )
+            .await;
             return;
         }
 
         // Parse JSON chunk
-        let chunk: serde_json::Value = match serde_json::from_str(&sse.data) {
+        let chunk: serde_json::Value = match serde_json::from_str(data) {
             Ok(v) => v,
             Err(e) => {
                 // Surface parse errors to logs and debug logger for diagnostics, then skip
@@ -615,6 +803,30 @@ async fn process_chat_sse<S>(
         // Log the SSE chunk to debug log
         if let Ok(logger) = debug_logger.lock() {
             let _ = logger.append_response_event(&request_id, "sse_event", &chunk);
+        }
+
+        if current_response_id.is_none() {
+            current_response_id = chunk
+                .get("id")
+                .and_then(|id| id.as_str())
+                .map(ToString::to_string);
+        }
+        if current_response_model.is_none() {
+            current_response_model = chunk
+                .get("model")
+                .and_then(|model| model.as_str())
+                .map(ToString::to_string);
+        }
+        if !created_emitted
+            && (current_response_id.is_some() || current_response_model.is_some())
+        {
+            let _ = tx_event
+                .send(Ok(ResponseEvent::Created {
+                    response_id: current_response_id.clone(),
+                    response_model: current_response_model.clone(),
+                }))
+                .await;
+            created_emitted = true;
         }
 
         // Extract item_id if present at the top level or in choice
@@ -766,7 +978,7 @@ async fn process_chat_sse<S>(
                         // the reasoning stream before any exec/tool events begin.
                         if !reasoning_text.is_empty() {
                             let item = ResponseItem::Reasoning {
-                                id: current_item_id.clone().unwrap_or_else(String::new),
+                                id: current_item_id.clone(),
                                 summary: Vec::new(),
                                 content: Some(vec![ReasoningItemContent::ReasoningText {
                                     text: std::mem::take(&mut reasoning_text),
@@ -780,6 +992,7 @@ async fn process_chat_sse<S>(
                         let item = ResponseItem::FunctionCall {
                             id: current_item_id.clone(),
                             name: fn_call_state.name.clone().unwrap_or_else(|| "".to_string()),
+                            namespace: None,
                             arguments: fn_call_state.arguments.clone(),
                             call_id: fn_call_state.call_id.clone().unwrap_or_else(String::new),
                         };
@@ -795,14 +1008,13 @@ async fn process_chat_sse<S>(
                                 content: vec![ContentItem::OutputText {
                                     text: std::mem::take(&mut assistant_text),
                                 }],
-                                id: current_item_id.clone(),
-                            };
+                                id: current_item_id.clone(), end_turn: None, phase: None};
                             let _ = tx_event.send(Ok(ResponseEvent::OutputItemDone { item, sequence_number: None, output_index: None })).await;
                         }
                         // Also emit a terminal Reasoning item so UIs can finalize raw reasoning.
                         if !reasoning_text.is_empty() {
                             let item = ResponseItem::Reasoning {
-                                id: current_item_id.clone().unwrap_or_else(String::new),
+                                id: current_item_id.clone(),
                                 summary: Vec::new(),
                                 content: Some(vec![ReasoningItemContent::ReasoningText {
                                     text: std::mem::take(&mut reasoning_text),
@@ -916,7 +1128,7 @@ where
 
                     // Also capture item_id from Reasoning items
                     if let ResponseItem::Reasoning { id, .. } = &item {
-                        if !id.is_empty() {
+                        if let Some(id) = id.as_ref().filter(|id| !id.is_empty()) {
                             this.cumulative_item_id = Some(id.clone());
                         }
                     }
@@ -926,6 +1138,15 @@ where
                 }
                 Poll::Ready(Some(Ok(ResponseEvent::RateLimits(snapshot)))) => {
                     return Poll::Ready(Some(Ok(ResponseEvent::RateLimits(snapshot))));
+                }
+                Poll::Ready(Some(Ok(ResponseEvent::ServerReasoningIncluded(included)))) => {
+                    return Poll::Ready(Some(Ok(ResponseEvent::ServerReasoningIncluded(included))));
+                }
+                Poll::Ready(Some(Ok(ResponseEvent::ModelsEtag(etag)))) => {
+                    return Poll::Ready(Some(Ok(ResponseEvent::ModelsEtag(etag))));
+                }
+                Poll::Ready(Some(Ok(ResponseEvent::ResponseHeaders(headers)))) => {
+                    return Poll::Ready(Some(Ok(ResponseEvent::ResponseHeaders(headers))));
                 }
                 Poll::Ready(Some(Ok(ResponseEvent::Completed {
                     response_id,
@@ -938,7 +1159,7 @@ where
                         && matches!(this.mode, AggregateMode::AggregatedOnly)
                     {
                         let aggregated_reasoning = ResponseItem::Reasoning {
-                            id: this.cumulative_item_id.clone().unwrap_or_else(String::new),
+                            id: this.cumulative_item_id.clone(),
                             summary: Vec::new(),
                             content: Some(vec![
                                 ReasoningItemContent::ReasoningText {
@@ -963,8 +1184,7 @@ where
                             role: "assistant".to_string(),
                             content: vec![code_protocol::models::ContentItem::OutputText {
                                 text: std::mem::take(&mut this.cumulative),
-                            }],
-                        };
+                            }], end_turn: None, phase: None};
                         this.pending
                             .push_back(ResponseEvent::OutputItemDone { item: aggregated_message, sequence_number: None, output_index: None });
                         emitted_any = true;
@@ -988,10 +1208,16 @@ where
                         token_usage,
                     })));
                 }
-                Poll::Ready(Some(Ok(ResponseEvent::Created))) => {
-                    // These events are exclusive to the Responses API and
-                    // will never appear in a Chat Completions stream.
-                    continue;
+                Poll::Ready(Some(Ok(ResponseEvent::Created {
+                    response_id,
+                    response_model,
+                }))) => {
+                    // Preserve response metadata so downstream consumers can
+                    // surface effective model routing details uniformly.
+                    return Poll::Ready(Some(Ok(ResponseEvent::Created {
+                        response_id,
+                        response_model,
+                    })));
                 }
                 Poll::Ready(Some(Ok(ResponseEvent::OutputTextDelta { delta, item_id, sequence_number, .. }))) => {
                     // Always accumulate deltas so we can emit a final OutputItemDone at Completed.
@@ -1094,5 +1320,152 @@ impl<S> AggregatedChatStream<S> {
 
     pub(crate) fn streaming_mode(inner: S) -> Self {
         Self::new(inner, AggregateMode::Streaming)
+    }
+}
+
+fn header_map_to_json(headers: &HeaderMap) -> serde_json::Value {
+    let mut ordered: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (name, value) in headers.iter() {
+        let entry = ordered.entry(name.as_str().to_string()).or_default();
+        entry.push(value.to_str().unwrap_or_default().to_string());
+    }
+
+    serde_json::to_value(ordered).unwrap_or(serde_json::Value::Null)
+}
+
+/// Normalize outgoing Chat Completions message roles to the string role set
+/// accepted by strict OpenAI-compatible providers (`system`, `user`,
+/// `assistant`, `tool`).
+///
+/// OpenAI Chat Completions accepts `developer`, but many self-hosted or
+/// third-party gateways validate the role against a strict serde enum and
+/// return a 400 for unknown string variants. Custom string roles are rewritten
+/// to `system`, which preserves the instructional intent while leaving message
+/// `content` untouched. Missing or non-string roles are left unchanged so
+/// malformed payloads fail visibly instead of being silently repaired.
+fn sanitize_message_roles_for_strict_chat_providers(payload: &mut serde_json::Value) {
+    if let Some(messages) = payload.get_mut("messages").and_then(|v| v.as_array_mut()) {
+        for message in messages.iter_mut() {
+            if let Some(obj) = message.as_object_mut() {
+                match obj.get("role").and_then(|r| r.as_str()) {
+                    Some("system" | "user" | "assistant" | "tool") | None => {}
+                    Some(_) => {
+                        obj.insert(
+                            "role".to_string(),
+                            serde_json::Value::String("system".to_string()),
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::create_chat_completions_payload;
+    use super::sanitize_message_roles_for_strict_chat_providers;
+    use serde_json::json;
+
+    #[test]
+    fn chat_completions_payload_disables_openai_storage() {
+        let payload = create_chat_completions_payload(
+            "gpt-4.1",
+            vec![json!({"role": "user", "content": "what is 2+2?"})],
+            Vec::new(),
+        );
+
+        assert_eq!(payload["store"], false);
+
+        let body = serde_json::to_string(&payload).unwrap();
+        assert!(
+            body.contains("\"store\":false"),
+            "serialized payload should explicitly disable storage: {body}"
+        );
+    }
+
+    #[test]
+    fn normalizes_developer_role_to_system_before_strict_provider_serialization() {
+        let mut payload = json!({
+            "model": "kimi-k2",
+            "messages": [
+                {"role": "developer", "content": "instructions"},
+                {"role": "user", "content": "hello"},
+            ],
+        });
+
+        sanitize_message_roles_for_strict_chat_providers(&mut payload);
+
+        let messages = payload["messages"].as_array().unwrap();
+        // The rejected variant is rewritten...
+        assert_eq!(messages[0]["role"], "system");
+        // ...but the content (the actual instruction) is preserved.
+        assert_eq!(messages[0]["content"], "instructions");
+        // Standard roles are left untouched.
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(messages[1]["content"], "hello");
+
+        // The serialized body that hits the wire must not carry the variant
+        // that strict providers reject with a 400.
+        let body = serde_json::to_string(&payload).unwrap();
+        assert!(
+            !body.contains("\"role\":\"developer\""),
+            "serialized payload still contains the rejected role: {body}"
+        );
+    }
+
+    #[test]
+    fn rewrites_unknown_string_roles_but_keeps_standard_ones() {
+        let mut payload = json!({
+            "messages": [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "u"},
+                {"role": "assistant", "content": "a"},
+                {"role": "tool", "tool_call_id": "1", "content": "t"},
+                {"role": "agent", "content": "custom"},
+            ],
+        });
+
+        sanitize_message_roles_for_strict_chat_providers(&mut payload);
+
+        let roles: Vec<&str> = payload["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["role"].as_str().expect("role should be a string"))
+            .collect();
+        assert_eq!(
+            roles,
+            vec!["system", "user", "assistant", "tool", "system"]
+        );
+    }
+
+    #[test]
+    fn payload_without_messages_is_left_unchanged() {
+        let mut payload = json!({"model": "x"});
+        sanitize_message_roles_for_strict_chat_providers(&mut payload);
+        assert_eq!(payload, json!({"model": "x"}));
+    }
+
+    #[test]
+    fn malformed_roles_are_left_unchanged() {
+        let mut payload = json!({
+            "messages": [
+                {"role": 42, "content": "numeric role"},
+                {"content": "missing role"},
+            ],
+        });
+
+        sanitize_message_roles_for_strict_chat_providers(&mut payload);
+
+        assert_eq!(
+            payload,
+            json!({
+                "messages": [
+                    {"role": 42, "content": "numeric role"},
+                    {"content": "missing role"},
+                ],
+            })
+        );
     }
 }

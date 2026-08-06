@@ -1,7 +1,34 @@
 ---
-source: tui/src/chatwidget/tests.rs
-expression: term.backend().vt100().screen().contents()
+source: tui/src/chatwidget/tests/status_and_layout.rs
+expression: normalize_snapshot_paths(term.backend().vt100().screen().contents())
 ---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 • I’m going to search the repo for where “Change Approved” is rendered to update
   that view.
 
@@ -13,3 +40,5 @@ expression: term.backend().vt100().screen().contents()
 
 
 › Summarize recent commits
+
+  tab to queue message                                       100% context left

@@ -1,168 +1,256 @@
-use crate::protocol::AgentMessageEvent;
-use crate::protocol::AgentReasoningEvent;
-use crate::protocol::AgentReasoningRawContentEvent;
-use crate::protocol::EventMsg;
-use crate::protocol::InputMessageKind;
-use crate::protocol::UserMessageEvent;
-use crate::protocol::WebSearchEndEvent;
+use codex_protocol::items::AgentMessageContent;
+use codex_protocol::items::AgentMessageItem;
+use codex_protocol::items::ReasoningItem;
+use codex_protocol::items::TurnItem;
+use codex_protocol::items::UserMessageItem;
+use codex_protocol::items::WebSearchItem;
 use codex_protocol::models::ContentItem;
+use codex_protocol::models::MessagePhase;
 use codex_protocol::models::ReasoningItemContent;
 use codex_protocol::models::ReasoningItemReasoningSummary;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::models::WebSearchAction;
+use codex_protocol::models::is_audio_close_tag_text;
+use codex_protocol::models::is_audio_open_tag_text;
+use codex_protocol::models::is_image_close_tag_text;
+use codex_protocol::models::is_image_open_tag_text;
+use codex_protocol::models::is_local_audio_close_tag_text;
+use codex_protocol::models::is_local_audio_open_tag_text;
+use codex_protocol::models::is_local_image_close_tag_text;
+use codex_protocol::models::is_local_image_open_tag_text;
+use codex_protocol::protocol::APPS_INSTRUCTIONS_OPEN_TAG;
+use codex_protocol::protocol::COLLABORATION_MODE_OPEN_TAG;
+use codex_protocol::protocol::CONTEXT_WINDOW_GUIDANCE_OPEN_TAG;
+use codex_protocol::protocol::CONTEXT_WINDOW_OPEN_TAG;
+use codex_protocol::protocol::ENVIRONMENTS_INSTRUCTIONS_OPEN_TAG;
+use codex_protocol::protocol::MULTI_AGENT_MODE_OPEN_TAG;
+use codex_protocol::protocol::PLUGINS_INSTRUCTIONS_OPEN_TAG;
+use codex_protocol::protocol::REALTIME_CONVERSATION_OPEN_TAG;
+use codex_protocol::protocol::SKILLS_INSTRUCTIONS_OPEN_TAG;
+use codex_protocol::protocol::TOOLS_OPEN_TAG;
+use codex_protocol::user_input::UserInput;
+use tracing::warn;
+use uuid::Uuid;
 
-/// Convert a `ResponseItem` into zero or more `EventMsg` values that the UI can render.
+use crate::context::APPROVED_COMMAND_PREFIX_SAVED_MESSAGE_PREFIX;
+use crate::context::is_contextual_user_fragment;
+use crate::context::parse_visible_hook_prompt_message;
+use crate::web_search::web_search_action_detail;
+
+const CONTEXTUAL_DEVELOPER_PREFIXES: &[&str] = &[
+    "<permissions instructions>",
+    APPROVED_COMMAND_PREFIX_SAVED_MESSAGE_PREFIX,
+    "<model_switch>",
+    APPS_INSTRUCTIONS_OPEN_TAG,
+    COLLABORATION_MODE_OPEN_TAG,
+    MULTI_AGENT_MODE_OPEN_TAG,
+    ENVIRONMENTS_INSTRUCTIONS_OPEN_TAG,
+    "<git_attribution>",
+    PLUGINS_INSTRUCTIONS_OPEN_TAG,
+    REALTIME_CONVERSATION_OPEN_TAG,
+    SKILLS_INSTRUCTIONS_OPEN_TAG,
+    TOOLS_OPEN_TAG,
+    "<personality_spec>",
+    // Keep recognizing token-budget wrappers persisted by older versions.
+    "<token_budget>",
+    CONTEXT_WINDOW_OPEN_TAG,
+    CONTEXT_WINDOW_GUIDANCE_OPEN_TAG,
+    "<rollout_budget>",
+];
+
+pub(crate) fn is_contextual_user_message_content(message: &[ContentItem]) -> bool {
+    message.iter().any(is_contextual_user_fragment)
+}
+
+/// Returns true when a developer message contains any rollback-trimmable contextual fragment.
 ///
-/// When `show_raw_agent_reasoning` is false, raw reasoning content events are omitted.
-pub(crate) fn map_response_item_to_event_messages(
-    item: &ResponseItem,
-    show_raw_agent_reasoning: bool,
-) -> Vec<EventMsg> {
-    match item {
-        ResponseItem::Message { role, content, .. } => {
-            // Do not surface system messages as user events.
-            if role == "system" {
-                return Vec::new();
-            }
+/// `build_initial_context` can bundle these fragments together with persistent developer text in a
+/// single developer message, so callers that care about invalidating a stored reference baseline
+/// should pair this with `has_non_contextual_dev_message_content`.
+pub(crate) fn is_contextual_dev_message_content(message: &[ContentItem]) -> bool {
+    message.iter().any(is_contextual_dev_fragment)
+}
 
-            let mut events: Vec<EventMsg> = Vec::new();
-            let mut message_parts: Vec<String> = Vec::new();
-            let mut images: Vec<String> = Vec::new();
-            let mut kind: Option<InputMessageKind> = None;
+/// Returns true when a developer message contains any fragment that is not part of the
+/// rollback-trimmable contextual prefix set.
+pub(crate) fn has_non_contextual_dev_message_content(message: &[ContentItem]) -> bool {
+    message
+        .iter()
+        .any(|content_item| !is_contextual_dev_fragment(content_item))
+}
 
-            for content_item in content.iter() {
-                match content_item {
-                    ContentItem::InputText { text } => {
-                        if kind.is_none() {
-                            let trimmed = text.trim_start();
-                            kind = if trimmed.starts_with("<environment_context>") {
-                                Some(InputMessageKind::EnvironmentContext)
-                            } else if trimmed.starts_with("<user_instructions>") {
-                                Some(InputMessageKind::UserInstructions)
-                            } else {
-                                Some(InputMessageKind::Plain)
-                            };
-                        }
-                        message_parts.push(text.clone());
-                    }
-                    ContentItem::InputImage { image_url } => {
-                        images.push(image_url.clone());
-                    }
-                    ContentItem::OutputText { text } => {
-                        events.push(EventMsg::AgentMessage(AgentMessageEvent {
-                            message: text.clone(),
-                        }));
-                    }
+fn is_contextual_dev_fragment(content_item: &ContentItem) -> bool {
+    let ContentItem::InputText { text } = content_item else {
+        return false;
+    };
+
+    let trimmed = text.trim_start();
+    CONTEXTUAL_DEVELOPER_PREFIXES.iter().any(|prefix| {
+        trimmed
+            .get(..prefix.len())
+            .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix))
+    })
+}
+
+fn parse_user_message(message: &[ContentItem]) -> Option<UserMessageItem> {
+    if is_contextual_user_message_content(message) {
+        return None;
+    }
+
+    let mut content: Vec<UserInput> = Vec::new();
+
+    for (idx, content_item) in message.iter().enumerate() {
+        match content_item {
+            ContentItem::InputText { text } => {
+                let is_image_label = ((is_local_image_open_tag_text(text)
+                    || is_image_open_tag_text(text))
+                    && matches!(message.get(idx + 1), Some(ContentItem::InputImage { .. })))
+                    || (idx > 0
+                        && (is_local_image_close_tag_text(text) || is_image_close_tag_text(text))
+                        && matches!(message.get(idx - 1), Some(ContentItem::InputImage { .. })));
+                let is_audio_label = ((is_local_audio_open_tag_text(text)
+                    || is_audio_open_tag_text(text))
+                    && matches!(message.get(idx + 1), Some(ContentItem::InputAudio { .. })))
+                    || (idx > 0
+                        && (is_local_audio_close_tag_text(text) || is_audio_close_tag_text(text))
+                        && matches!(message.get(idx - 1), Some(ContentItem::InputAudio { .. })));
+                if is_image_label || is_audio_label {
+                    continue;
                 }
-            }
-
-            if !message_parts.is_empty() || !images.is_empty() {
-                let message = if message_parts.is_empty() {
-                    String::new()
-                } else {
-                    message_parts.join("")
-                };
-                let images = if images.is_empty() {
-                    None
-                } else {
-                    Some(images)
-                };
-
-                events.push(EventMsg::UserMessage(UserMessageEvent {
-                    message,
-                    kind,
-                    images,
-                }));
-            }
-
-            events
-        }
-
-        ResponseItem::Reasoning {
-            summary, content, ..
-        } => {
-            let mut events = Vec::new();
-            for ReasoningItemReasoningSummary::SummaryText { text } in summary {
-                events.push(EventMsg::AgentReasoning(AgentReasoningEvent {
+                content.push(UserInput::Text {
                     text: text.clone(),
-                }));
+                    // Model input content does not carry UI element ranges.
+                    text_elements: Vec::new(),
+                });
             }
-            if let Some(items) = content.as_ref().filter(|_| show_raw_agent_reasoning) {
-                for c in items {
-                    let text = match c {
-                        ReasoningItemContent::ReasoningText { text }
-                        | ReasoningItemContent::Text { text } => text,
-                    };
-                    events.push(EventMsg::AgentReasoningRawContent(
-                        AgentReasoningRawContentEvent { text: text.clone() },
-                    ));
-                }
+            ContentItem::InputImage { image_url, detail } => {
+                content.push(UserInput::Image {
+                    image_url: image_url.clone(),
+                    detail: *detail,
+                });
             }
-            events
+            ContentItem::InputAudio { audio_url } => {
+                content.push(UserInput::Audio {
+                    audio_url: audio_url.clone(),
+                });
+            }
+            ContentItem::OutputText { text } => {
+                warn!("Output text in user message: {}", text);
+            }
         }
+    }
 
-        ResponseItem::WebSearchCall { id, action, .. } => match action {
-            WebSearchAction::Search { query } => {
-                let call_id = id.clone().unwrap_or_else(|| "".to_string());
-                vec![EventMsg::WebSearchEnd(WebSearchEndEvent {
-                    call_id,
-                    query: query.clone(),
-                })]
+    Some(UserMessageItem::new(&content))
+}
+
+fn parse_agent_message(
+    id: Option<&str>,
+    message: &[ContentItem],
+    phase: Option<MessagePhase>,
+) -> AgentMessageItem {
+    let mut content: Vec<AgentMessageContent> = Vec::new();
+    for content_item in message.iter() {
+        match content_item {
+            ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+                content.push(AgentMessageContent::Text { text: text.clone() });
             }
-            WebSearchAction::Other => Vec::new(),
-        },
+            _ => {
+                warn!(
+                    "Unexpected content item in agent message: {:?}",
+                    content_item
+                );
+            }
+        }
+    }
+    let id = id
+        .map(str::to_string)
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    AgentMessageItem {
+        id,
+        content,
+        phase,
+        memory_citation: None,
+    }
+}
 
-        // Variants that require side effects are handled by higher layers and do not emit events here.
-        ResponseItem::FunctionCall { .. }
-        | ResponseItem::FunctionCallOutput { .. }
-        | ResponseItem::LocalShellCall { .. }
-        | ResponseItem::CustomToolCall { .. }
-        | ResponseItem::CustomToolCallOutput { .. }
-        | ResponseItem::Other => Vec::new(),
+pub fn parse_turn_item(item: &ResponseItem) -> Option<TurnItem> {
+    match item {
+        ResponseItem::Message {
+            role,
+            content,
+            id,
+            phase,
+            ..
+        } => match role.as_str() {
+            "user" => parse_visible_hook_prompt_message(id.as_deref(), content)
+                .map(TurnItem::HookPrompt)
+                .or_else(|| parse_user_message(content).map(TurnItem::UserMessage)),
+            "assistant" => Some(TurnItem::AgentMessage(parse_agent_message(
+                id.as_deref(),
+                content,
+                phase.clone(),
+            ))),
+            "system" => None,
+            _ => None,
+        },
+        ResponseItem::Reasoning {
+            id,
+            summary,
+            content,
+            ..
+        } => {
+            let summary_text = summary
+                .iter()
+                .map(|entry| match entry {
+                    ReasoningItemReasoningSummary::SummaryText { text } => text.clone(),
+                })
+                .collect();
+            let raw_content = content
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|entry| match entry {
+                    ReasoningItemContent::ReasoningText { text }
+                    | ReasoningItemContent::Text { text } => text,
+                })
+                .collect();
+            Some(TurnItem::Reasoning(ReasoningItem {
+                id: id.as_deref().unwrap_or_default().to_string(),
+                summary_text,
+                raw_content,
+            }))
+        }
+        ResponseItem::WebSearchCall { id, action, .. } => {
+            let (action, query) = match action {
+                Some(action) => (action.clone(), web_search_action_detail(action)),
+                None => (WebSearchAction::Other, String::new()),
+            };
+            Some(TurnItem::WebSearch(WebSearchItem {
+                id: id.as_deref().unwrap_or_default().to_string(),
+                query,
+                action,
+                results: None,
+            }))
+        }
+        ResponseItem::ImageGenerationCall {
+            id,
+            status,
+            revised_prompt,
+            result,
+            ..
+        } => Some(TurnItem::ImageGeneration(
+            codex_protocol::items::ImageGenerationItem {
+                id: id.as_deref()?.to_string(),
+                status: status.clone(),
+                revised_prompt: revised_prompt.clone(),
+                result: result.clone(),
+                saved_path: None,
+            },
+        )),
+        _ => None,
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::map_response_item_to_event_messages;
-    use crate::protocol::EventMsg;
-    use crate::protocol::InputMessageKind;
-    use assert_matches::assert_matches;
-    use codex_protocol::models::ContentItem;
-    use codex_protocol::models::ResponseItem;
-    use pretty_assertions::assert_eq;
-
-    #[test]
-    fn maps_user_message_with_text_and_two_images() {
-        let img1 = "https://example.com/one.png".to_string();
-        let img2 = "https://example.com/two.jpg".to_string();
-
-        let item = ResponseItem::Message {
-            id: None,
-            role: "user".to_string(),
-            content: vec![
-                ContentItem::InputText {
-                    text: "Hello world".to_string(),
-                },
-                ContentItem::InputImage {
-                    image_url: img1.clone(),
-                },
-                ContentItem::InputImage {
-                    image_url: img2.clone(),
-                },
-            ],
-        };
-
-        let events = map_response_item_to_event_messages(&item, false);
-        assert_eq!(events.len(), 1, "expected a single user message event");
-
-        match &events[0] {
-            EventMsg::UserMessage(user) => {
-                assert_eq!(user.message, "Hello world");
-                assert_matches!(user.kind, Some(InputMessageKind::Plain));
-                assert_eq!(user.images, Some(vec![img1, img2]));
-            }
-            other => panic!("expected UserMessage, got {other:?}"),
-        }
-    }
-}
+#[path = "event_mapping_tests.rs"]
+mod tests;

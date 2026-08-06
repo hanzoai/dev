@@ -2,29 +2,32 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
 
-use codex_core::protocol::Event;
-use mcp_types::JSONRPC_VERSION;
-use mcp_types::JSONRPCError;
-use mcp_types::JSONRPCErrorError;
-use mcp_types::JSONRPCMessage;
-use mcp_types::JSONRPCNotification;
-use mcp_types::JSONRPCRequest;
-use mcp_types::JSONRPCResponse;
-use mcp_types::RequestId;
-use mcp_types::Result;
+use codex_protocol::ThreadId;
+use codex_protocol::protocol::Event;
+use rmcp::model::CustomNotification;
+use rmcp::model::CustomRequest;
+use rmcp::model::ErrorData;
+use rmcp::model::JsonRpcError;
+use rmcp::model::JsonRpcMessage;
+use rmcp::model::JsonRpcNotification;
+use rmcp::model::JsonRpcRequest;
+use rmcp::model::JsonRpcResponse;
+use rmcp::model::JsonRpcVersion2_0;
+use rmcp::model::RequestId;
 use serde::Serialize;
+use serde_json::Value;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tracing::warn;
 
-use crate::error_code::INTERNAL_ERROR_CODE;
+pub(crate) type OutgoingJsonRpcMessage = JsonRpcMessage<CustomRequest, Value, CustomNotification>;
 
 /// Sends messages to the client and manages request callbacks.
 pub(crate) struct OutgoingMessageSender {
     next_request_id: AtomicI64,
     sender: mpsc::UnboundedSender<OutgoingMessage>,
-    request_id_to_callback: Mutex<HashMap<RequestId, oneshot::Sender<Result>>>,
+    request_id_to_callback: Mutex<HashMap<RequestId, oneshot::Sender<Value>>>,
 }
 
 impl OutgoingMessageSender {
@@ -40,8 +43,8 @@ impl OutgoingMessageSender {
         &self,
         method: &str,
         params: Option<serde_json::Value>,
-    ) -> oneshot::Receiver<Result> {
-        let id = RequestId::Integer(self.next_request_id.fetch_add(1, Ordering::Relaxed));
+    ) -> oneshot::Receiver<Value> {
+        let id = RequestId::Number(self.next_request_id.fetch_add(1, Ordering::Relaxed));
         let outgoing_message_id = id.clone();
         let (tx_approve, rx_approve) = oneshot::channel();
         {
@@ -58,7 +61,7 @@ impl OutgoingMessageSender {
         rx_approve
     }
 
-    pub(crate) async fn notify_client_response(&self, id: RequestId, result: Result) {
+    pub(crate) async fn notify_client_response(&self, id: RequestId, result: Value) {
         let entry = {
             let mut request_id_to_callback = self.request_id_to_callback.lock().await;
             request_id_to_callback.remove_entry(&id)
@@ -76,30 +79,36 @@ impl OutgoingMessageSender {
         }
     }
 
-    pub(crate) async fn send_response<T: Serialize>(&self, id: RequestId, response: T) {
-        match serde_json::to_value(response) {
-            Ok(result) => {
-                let outgoing_message = OutgoingMessage::Response(OutgoingResponse { id, result });
-                let _ = self.sender.send(outgoing_message);
-            }
+    pub(crate) fn send_response<T: Serialize>(&self, id: RequestId, response: T) {
+        let mut result = match serde_json::to_value(response) {
+            Ok(result) => result,
             Err(err) => {
                 self.send_error(
                     id,
-                    JSONRPCErrorError {
-                        code: INTERNAL_ERROR_CODE,
-                        message: format!("failed to serialize response: {err}"),
-                        data: None,
-                    },
-                )
-                .await;
+                    ErrorData::internal_error(format!("failed to serialize response: {err}"), None),
+                );
+                return;
             }
+        };
+
+        // rmcp result constructors include the modern discriminator by default.
+        // This legacy server serializes responses directly, bypassing rmcp's
+        // protocol-aware response handling, so preserve the historical wire shape:
+        // https://github.com/modelcontextprotocol/rust-sdk/issues/1036
+        if let Value::Object(object) = &mut result
+            && object.get("resultType").and_then(Value::as_str) == Some("complete")
+        {
+            object.remove("resultType");
         }
+
+        let outgoing_message = OutgoingMessage::Response(OutgoingResponse { id, result });
+        let _ = self.sender.send(outgoing_message);
     }
 
     /// This is used with the MCP server, but not the more general JSON-RPC app
     /// server. Prefer [`OutgoingMessageSender::send_server_notification`] where
     /// possible.
-    pub(crate) async fn send_event_as_notification(
+    pub(crate) fn send_event_as_notification(
         &self,
         event: &Event,
         meta: Option<OutgoingNotificationMeta>,
@@ -119,17 +128,16 @@ impl OutgoingMessageSender {
 
         self.send_notification(OutgoingNotification {
             method: "codex/event".to_string(),
-            params: Some(params.clone()),
-        })
-        .await;
+            params: Some(params),
+        });
     }
 
-    pub(crate) async fn send_notification(&self, notification: OutgoingNotification) {
+    pub(crate) fn send_notification(&self, notification: OutgoingNotification) {
         let outgoing_message = OutgoingMessage::Notification(notification);
         let _ = self.sender.send(outgoing_message);
     }
 
-    pub(crate) async fn send_error(&self, id: RequestId, error: JSONRPCErrorError) {
+    pub(crate) fn send_error(&self, id: RequestId, error: ErrorData) {
         let outgoing_message = OutgoingMessage::Error(OutgoingError { id, error });
         let _ = self.sender.send(outgoing_message);
     }
@@ -143,35 +151,33 @@ pub(crate) enum OutgoingMessage {
     Error(OutgoingError),
 }
 
-impl From<OutgoingMessage> for JSONRPCMessage {
+impl From<OutgoingMessage> for OutgoingJsonRpcMessage {
     fn from(val: OutgoingMessage) -> Self {
         use OutgoingMessage::*;
         match val {
             Request(OutgoingRequest { id, method, params }) => {
-                JSONRPCMessage::Request(JSONRPCRequest {
-                    jsonrpc: JSONRPC_VERSION.into(),
+                JsonRpcMessage::Request(JsonRpcRequest {
+                    jsonrpc: JsonRpcVersion2_0,
                     id,
-                    method,
-                    params,
+                    request: CustomRequest::new(method, params),
                 })
             }
             Notification(OutgoingNotification { method, params }) => {
-                JSONRPCMessage::Notification(JSONRPCNotification {
-                    jsonrpc: JSONRPC_VERSION.into(),
-                    method,
-                    params,
+                JsonRpcMessage::Notification(JsonRpcNotification {
+                    jsonrpc: JsonRpcVersion2_0,
+                    notification: CustomNotification::new(method, params),
                 })
             }
             Response(OutgoingResponse { id, result }) => {
-                JSONRPCMessage::Response(JSONRPCResponse {
-                    jsonrpc: JSONRPC_VERSION.into(),
+                JsonRpcMessage::Response(JsonRpcResponse {
+                    jsonrpc: JsonRpcVersion2_0,
                     id,
                     result,
                 })
             }
-            Error(OutgoingError { id, error }) => JSONRPCMessage::Error(JSONRPCError {
-                jsonrpc: JSONRPC_VERSION.into(),
-                id,
+            Error(OutgoingError { id, error }) => JsonRpcMessage::Error(JsonRpcError {
+                jsonrpc: JsonRpcVersion2_0,
+                id: Some(id),
                 error,
             }),
         }
@@ -202,69 +208,141 @@ pub(crate) struct OutgoingNotificationParams {
     pub event: serde_json::Value,
 }
 
-// Additional mcp-specific data to be added to a [`codex_core::protocol::Event`] as notification.params._meta
+// Additional mcp-specific data to be added to a [`codex_protocol::protocol::Event`] as notification.params._meta
 // MCP Spec: https://modelcontextprotocol.io/specification/2025-06-18/basic#meta
 // Typescript Schema: https://github.com/modelcontextprotocol/modelcontextprotocol/blob/0695a497eb50a804fc0e88c18a93a21a675d6b3e/schema/2025-06-18/schema.ts
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct OutgoingNotificationMeta {
     pub request_id: Option<RequestId>,
-}
 
-impl OutgoingNotificationMeta {
-    pub(crate) fn new(request_id: Option<RequestId>) -> Self {
-        Self { request_id }
-    }
+    /// Because multiple threads may be multiplexed over a single MCP connection,
+    /// include the `threadId` in the notification meta.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<ThreadId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct OutgoingResponse {
     pub id: RequestId,
-    pub result: Result,
+    pub result: Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct OutgoingError {
-    pub error: JSONRPCErrorError,
+    pub error: ErrorData,
     pub id: RequestId,
 }
 
 #[cfg(test)]
 mod tests {
+
     use anyhow::Result;
-    use codex_core::protocol::EventMsg;
-    use codex_core::protocol::SessionConfiguredEvent;
-    use codex_protocol::ConversationId;
-    use codex_protocol::config_types::ReasoningEffort;
+    use codex_protocol::ThreadId;
+    use codex_protocol::models::PermissionProfile;
+    use codex_protocol::openai_models::ReasoningEffort;
+    use codex_protocol::protocol::AskForApproval;
+    use codex_protocol::protocol::EventMsg;
+    use codex_protocol::protocol::SessionConfiguredEvent;
+    use codex_utils_absolute_path::test_support::PathBufExt;
+    use codex_utils_absolute_path::test_support::test_path_buf;
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use tempfile::NamedTempFile;
 
     use super::*;
 
+    #[test]
+    fn outgoing_request_serializes_as_jsonrpc_request() {
+        let msg: OutgoingJsonRpcMessage = OutgoingMessage::Request(OutgoingRequest {
+            id: RequestId::Number(1),
+            method: "elicitation/create".to_string(),
+            params: Some(json!({ "k": "v" })),
+        })
+        .into();
+
+        let value = serde_json::to_value(msg).expect("message should serialize");
+        let obj = value.as_object().expect("json object");
+
+        assert_eq!(obj.get("jsonrpc"), Some(&json!("2.0")));
+        assert_eq!(obj.get("id"), Some(&json!(1)));
+        assert_eq!(obj.get("method"), Some(&json!("elicitation/create")));
+        assert_eq!(obj.get("params"), Some(&json!({ "k": "v" })));
+        assert!(
+            obj.get("request").is_none(),
+            "rmcp request must flatten to JSON-RPC method/params"
+        );
+    }
+
+    #[test]
+    fn outgoing_notification_serializes_as_jsonrpc_notification() {
+        let msg: OutgoingJsonRpcMessage = OutgoingMessage::Notification(OutgoingNotification {
+            method: "notifications/initialized".to_string(),
+            params: None,
+        })
+        .into();
+
+        let value = serde_json::to_value(msg).expect("message should serialize");
+        let obj = value.as_object().expect("json object");
+
+        assert_eq!(obj.get("jsonrpc"), Some(&json!("2.0")));
+        assert_eq!(obj.get("method"), Some(&json!("notifications/initialized")));
+        assert_eq!(obj.get("params"), Some(&serde_json::Value::Null));
+        assert!(
+            obj.get("notification").is_none(),
+            "rmcp notification must flatten to JSON-RPC method/params"
+        );
+    }
+
+    #[tokio::test]
+    async fn outgoing_tool_response_preserves_legacy_wire_format() {
+        let (outgoing_tx, mut outgoing_rx) = mpsc::unbounded_channel::<OutgoingMessage>();
+        let outgoing_message_sender = OutgoingMessageSender::new(outgoing_tx);
+
+        outgoing_message_sender.send_response(
+            RequestId::Number(1),
+            rmcp::model::CallToolResult::success(Vec::new()),
+        );
+
+        let Some(OutgoingMessage::Response(response)) = outgoing_rx.recv().await else {
+            panic!("expected a tool-call response");
+        };
+        assert_eq!(response.id, RequestId::Number(1));
+        assert_eq!(response.result, json!({ "content": [], "isError": false }));
+    }
+
     #[tokio::test]
     async fn test_send_event_as_notification() -> Result<()> {
         let (outgoing_tx, mut outgoing_rx) = mpsc::unbounded_channel::<OutgoingMessage>();
         let outgoing_message_sender = OutgoingMessageSender::new(outgoing_tx);
 
-        let conversation_id = ConversationId::new();
+        let thread_id = ThreadId::new();
         let rollout_file = NamedTempFile::new()?;
         let event = Event {
             id: "1".to_string(),
             msg: EventMsg::SessionConfigured(SessionConfiguredEvent {
-                session_id: conversation_id,
+                session_id: codex_protocol::SessionId::new(),
+                thread_id,
+                forked_from_id: None,
+                parent_thread_id: None,
+                thread_source: None,
+                thread_name: None,
                 model: "gpt-4o".to_string(),
+                model_provider_id: "test-provider".to_string(),
+                service_tier: None,
+                approval_policy: AskForApproval::Never,
+                approvals_reviewer: codex_protocol::config_types::ApprovalsReviewer::User,
+                permission_profile: PermissionProfile::read_only(),
+                active_permission_profile: None,
+                cwd: test_path_buf("/home/user/project").abs(),
                 reasoning_effort: Some(ReasoningEffort::default()),
-                history_log_id: 1,
-                history_entry_count: 1000,
                 initial_messages: None,
-                rollout_path: rollout_file.path().to_path_buf(),
+                network_proxy: None,
+                rollout_path: Some(rollout_file.path().to_path_buf()),
             }),
         };
 
-        outgoing_message_sender
-            .send_event_as_notification(&event, None)
-            .await;
+        outgoing_message_sender.send_event_as_notification(&event, /*meta*/ None);
 
         let result = outgoing_rx.recv().await.unwrap();
         let OutgoingMessage::Notification(OutgoingNotification { method, params }) = result else {
@@ -284,28 +362,38 @@ mod tests {
         let (outgoing_tx, mut outgoing_rx) = mpsc::unbounded_channel::<OutgoingMessage>();
         let outgoing_message_sender = OutgoingMessageSender::new(outgoing_tx);
 
-        let conversation_id = ConversationId::new();
+        let thread_id = ThreadId::new();
         let rollout_file = NamedTempFile::new()?;
         let session_configured_event = SessionConfiguredEvent {
-            session_id: conversation_id,
+            session_id: codex_protocol::SessionId::new(),
+            thread_id,
+            forked_from_id: None,
+            parent_thread_id: None,
+            thread_source: None,
+            thread_name: None,
             model: "gpt-4o".to_string(),
+            model_provider_id: "test-provider".to_string(),
+            service_tier: None,
+            approval_policy: AskForApproval::Never,
+            approvals_reviewer: codex_protocol::config_types::ApprovalsReviewer::User,
+            permission_profile: PermissionProfile::read_only(),
+            active_permission_profile: None,
+            cwd: test_path_buf("/home/user/project").abs(),
             reasoning_effort: Some(ReasoningEffort::default()),
-            history_log_id: 1,
-            history_entry_count: 1000,
             initial_messages: None,
-            rollout_path: rollout_file.path().to_path_buf(),
+            network_proxy: None,
+            rollout_path: Some(rollout_file.path().to_path_buf()),
         };
         let event = Event {
             id: "1".to_string(),
             msg: EventMsg::SessionConfigured(session_configured_event.clone()),
         };
         let meta = OutgoingNotificationMeta {
-            request_id: Some(RequestId::String("123".to_string())),
+            request_id: Some(RequestId::String("123".into())),
+            thread_id: None,
         };
 
-        outgoing_message_sender
-            .send_event_as_notification(&event, Some(meta))
-            .await;
+        outgoing_message_sender.send_event_as_notification(&event, Some(meta));
 
         let result = outgoing_rx.recv().await.unwrap();
         let OutgoingMessage::Notification(OutgoingNotification { method, params }) = result else {
@@ -318,12 +406,83 @@ mod tests {
             },
             "id": "1",
             "msg": {
-                "session_id": session_configured_event.session_id,
-                "model": session_configured_event.model,
-                "reasoning_effort": session_configured_event.reasoning_effort,
-                "history_log_id": session_configured_event.history_log_id,
-                "history_entry_count": session_configured_event.history_entry_count,
                 "type": "session_configured",
+                "session_id": session_configured_event.session_id,
+                "thread_id": session_configured_event.thread_id,
+                "model": "gpt-4o",
+                "model_provider_id": "test-provider",
+                "approval_policy": "never",
+                "approvals_reviewer": "user",
+                "permission_profile": session_configured_event.permission_profile,
+                "cwd": test_path_buf("/home/user/project"),
+                "reasoning_effort": session_configured_event.reasoning_effort,
+                "rollout_path": rollout_file.path().to_path_buf(),
+            }
+        });
+        assert_eq!(params.unwrap(), expected_params);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_send_event_as_notification_with_meta_and_thread_id() -> Result<()> {
+        let (outgoing_tx, mut outgoing_rx) = mpsc::unbounded_channel::<OutgoingMessage>();
+        let outgoing_message_sender = OutgoingMessageSender::new(outgoing_tx);
+
+        let thread_id = ThreadId::new();
+        let rollout_file = NamedTempFile::new()?;
+        let session_configured_event = SessionConfiguredEvent {
+            session_id: codex_protocol::SessionId::new(),
+            thread_id,
+            forked_from_id: None,
+            parent_thread_id: None,
+            thread_source: None,
+            thread_name: None,
+            model: "gpt-4o".to_string(),
+            model_provider_id: "test-provider".to_string(),
+            service_tier: None,
+            approval_policy: AskForApproval::Never,
+            approvals_reviewer: codex_protocol::config_types::ApprovalsReviewer::User,
+            permission_profile: PermissionProfile::read_only(),
+            active_permission_profile: None,
+            cwd: test_path_buf("/home/user/project").abs(),
+            reasoning_effort: Some(ReasoningEffort::default()),
+            initial_messages: None,
+            network_proxy: None,
+            rollout_path: Some(rollout_file.path().to_path_buf()),
+        };
+        let event = Event {
+            id: "1".to_string(),
+            msg: EventMsg::SessionConfigured(session_configured_event.clone()),
+        };
+        let meta = OutgoingNotificationMeta {
+            request_id: Some(RequestId::String("123".into())),
+            thread_id: Some(thread_id),
+        };
+
+        outgoing_message_sender.send_event_as_notification(&event, Some(meta));
+
+        let result = outgoing_rx.recv().await.unwrap();
+        let OutgoingMessage::Notification(OutgoingNotification { method, params }) = result else {
+            panic!("expected Notification for first message");
+        };
+        assert_eq!(method, "codex/event");
+        let expected_params = json!({
+            "_meta": {
+                "requestId": "123",
+                "threadId": thread_id.to_string(),
+            },
+            "id": "1",
+            "msg": {
+                "type": "session_configured",
+                "session_id": session_configured_event.session_id,
+                "thread_id": session_configured_event.thread_id,
+                "model": "gpt-4o",
+                "model_provider_id": "test-provider",
+                "approval_policy": "never",
+                "approvals_reviewer": "user",
+                "permission_profile": session_configured_event.permission_profile,
+                "cwd": test_path_buf("/home/user/project"),
+                "reasoning_effort": session_configured_event.reasoning_effort,
                 "rollout_path": rollout_file.path().to_path_buf(),
             }
         });

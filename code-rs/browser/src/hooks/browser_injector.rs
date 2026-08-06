@@ -25,6 +25,15 @@ impl BrowserInjector {
             return Ok(None);
         }
 
+        if let Some((elapsed, timeout)) = self.manager.idle_elapsed_past_timeout().await {
+            info!(
+                "Skipping pre-LLM screenshot; browser idle for {:?} (timeout {:?})",
+                elapsed,
+                timeout
+            );
+            return Ok(None);
+        }
+
         debug!("Browser enabled, capturing pre-LLM screenshot");
 
         let page = match self.manager.get_or_create_page().await {
@@ -47,7 +56,7 @@ impl BrowserInjector {
         };
 
         let screenshots = page.screenshot(mode).await?;
-        let ttl_ms = 300000;
+        let ttl_ms = 86_400_000; // keep screenshots for 24 hours
         let images = self
             .asset_manager
             .store_screenshots(screenshots, ttl_ms)

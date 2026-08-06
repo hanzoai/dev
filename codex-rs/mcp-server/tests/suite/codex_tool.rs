@@ -3,36 +3,42 @@ use std::env;
 use std::path::Path;
 use std::path::PathBuf;
 
-use codex_core::protocol::FileChange;
-use codex_core::protocol::ReviewDecision;
+use app_test_support::ChatGptAuthFixture;
+use app_test_support::write_chatgpt_auth;
+use codex_config::types::AuthCredentialsStoreMode;
 use codex_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use codex_mcp_server::CodexToolCallParam;
 use codex_mcp_server::ExecApprovalElicitRequestParams;
 use codex_mcp_server::ExecApprovalResponse;
 use codex_mcp_server::PatchApprovalElicitRequestParams;
 use codex_mcp_server::PatchApprovalResponse;
-use mcp_types::ElicitRequest;
-use mcp_types::ElicitRequestParamsRequestedSchema;
-use mcp_types::JSONRPC_VERSION;
-use mcp_types::JSONRPCRequest;
-use mcp_types::JSONRPCResponse;
-use mcp_types::ModelContextProtocolRequest;
-use mcp_types::RequestId;
+use codex_protocol::protocol::FileChange;
+use codex_protocol::protocol::ReviewDecision;
+use codex_shell_command::parse_command;
 use pretty_assertions::assert_eq;
+use rmcp::model::JsonRpcResponse;
+use rmcp::model::JsonRpcVersion2_0;
+use rmcp::model::RequestId;
 use serde_json::json;
 use tempfile::TempDir;
 use tokio::time::timeout;
+use wiremock::Mock;
 use wiremock::MockServer;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
+use wiremock::matchers::path;
 
 use core_test_support::skip_if_no_network;
 use mcp_test_support::McpProcess;
 use mcp_test_support::create_apply_patch_sse_response;
 use mcp_test_support::create_final_assistant_message_sse_response;
-use mcp_test_support::create_mock_chat_completions_server;
-use mcp_test_support::create_shell_sse_response;
+use mcp_test_support::create_mock_responses_server;
+use mcp_test_support::create_shell_command_sse_response;
+use mcp_test_support::format_with_current_shell;
 
-// Allow ample time on slower CI or under load to avoid flakes.
-const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+// Windows CI can spend tens of seconds in session startup before the first
+// mock model request is sent.
+const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Test that a shell command that is not on the "trusted" list triggers an
 /// elicitation request to the MCP and that sending the approval runs the
@@ -48,45 +54,58 @@ async fn test_shell_command_approval_triggers_elicitation() {
 
     // Apparently `#[tokio::test]` must return `()`, so we create a helper
     // function that returns `Result` so we can use `?` in favor of `unwrap`.
-    if let Err(err) = shell_command_approval_triggers_elicitation().await {
-        panic!("failure: {err}");
-    }
+    shell_command_approval_triggers_elicitation()
+        .await
+        .expect("shell command approval should trigger elicitation");
 }
 
 async fn shell_command_approval_triggers_elicitation() -> anyhow::Result<()> {
     // Use a simple, untrusted command that creates a file so we can
     // observe a side-effect.
-    //
-    // Cross‑platform approach: run a tiny Python snippet to touch the file
-    // using `python3 -c ...` on all platforms.
     let workdir_for_shell_function_call = TempDir::new()?;
     let created_filename = "created_by_shell_tool.txt";
     let created_file = workdir_for_shell_function_call
         .path()
         .join(created_filename);
 
-    let shell_command = vec![
-        "python3".to_string(),
-        "-c".to_string(),
-        format!("import pathlib; pathlib.Path('{created_filename}').touch()"),
-    ];
+    let (shell_command, timeout_ms) = if cfg!(windows) {
+        (
+            vec![
+                "New-Item".to_string(),
+                "-ItemType".to_string(),
+                "File".to_string(),
+                "-Path".to_string(),
+                created_filename.to_string(),
+                "-Force".to_string(),
+            ],
+            // `powershell.exe` startup can be slow on loaded Windows CI workers
+            10_000,
+        )
+    } else {
+        (
+            vec!["touch".to_string(), created_filename.to_string()],
+            5_000,
+        )
+    };
+    let expected_shell_command =
+        format_with_current_shell(&shlex::try_join(shell_command.iter().map(String::as_str))?);
 
     let McpHandle {
         process: mut mcp_process,
         server: _server,
         dir: _dir,
     } = create_mcp_process(vec![
-        create_shell_sse_response(
+        create_shell_command_sse_response(
             shell_command.clone(),
             Some(workdir_for_shell_function_call.path()),
-            Some(5_000),
+            Some(timeout_ms),
             "call1234",
         )?,
         create_final_assistant_message_sse_response("File created!")?,
     ])
     .await?;
 
-    // Send a "codex" tool request, which should hit the completions endpoint.
+    // Send a "codex" tool request, which should hit the responses endpoint.
     // In turn, it should reply with a tool call, which the MCP should forward
     // as an elicitation.
     let codex_request_id = mcp_process
@@ -101,21 +120,27 @@ async fn shell_command_approval_triggers_elicitation() -> anyhow::Result<()> {
     )
     .await??;
 
+    assert_eq!(elicitation_request.jsonrpc, JsonRpcVersion2_0);
+    assert_eq!(elicitation_request.request.method, "elicitation/create");
+
     let elicitation_request_id = elicitation_request.id.clone();
     let params = serde_json::from_value::<ExecApprovalElicitRequestParams>(
         elicitation_request
+            .request
             .params
             .clone()
             .ok_or_else(|| anyhow::anyhow!("elicitation_request.params must be set"))?,
     )?;
-    let expected_elicitation_request = create_expected_elicitation_request(
-        elicitation_request_id.clone(),
-        shell_command.clone(),
-        workdir_for_shell_function_call.path(),
-        codex_request_id.to_string(),
-        params.codex_event_id.clone(),
-    )?;
-    assert_eq!(expected_elicitation_request, elicitation_request);
+    assert_eq!(
+        elicitation_request.request.params,
+        Some(create_expected_elicitation_request_params(
+            expected_shell_command,
+            workdir_for_shell_function_call.path(),
+            codex_request_id.to_string(),
+            params.codex_event_id.clone(),
+            params.thread_id,
+        )?)
+    );
 
     // Accept the `git init` request by responding to the elicitation.
     mcp_process
@@ -128,7 +153,6 @@ async fn shell_command_approval_triggers_elicitation() -> anyhow::Result<()> {
         .await?;
 
     // Verify task_complete notification arrives before the tool call completes.
-    #[expect(clippy::expect_used)]
     let _task_complete = timeout(
         DEFAULT_READ_TIMEOUT,
         mcp_process.read_stream_until_legacy_task_complete_notification(),
@@ -140,20 +164,24 @@ async fn shell_command_approval_triggers_elicitation() -> anyhow::Result<()> {
     // Verify the original `codex` tool call completes and that the file was created.
     let codex_response = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp_process.read_stream_until_response_message(RequestId::Integer(codex_request_id)),
+        mcp_process.read_stream_until_response_message(RequestId::Number(codex_request_id)),
     )
     .await??;
     assert_eq!(
-        JSONRPCResponse {
-            jsonrpc: JSONRPC_VERSION.into(),
-            id: RequestId::Integer(codex_request_id),
+        JsonRpcResponse {
+            jsonrpc: JsonRpcVersion2_0,
+            id: RequestId::Number(codex_request_id),
             result: json!({
                 "content": [
                     {
                         "text": "File created!",
                         "type": "text"
                     }
-                ]
+                ],
+                "structuredContent": {
+                    "threadId": params.thread_id,
+                    "content": "File created!"
+                }
             }),
         },
         codex_response
@@ -164,37 +192,32 @@ async fn shell_command_approval_triggers_elicitation() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn create_expected_elicitation_request(
-    elicitation_request_id: RequestId,
+fn create_expected_elicitation_request_params(
     command: Vec<String>,
     workdir: &Path,
     codex_mcp_tool_call_id: String,
     codex_event_id: String,
-) -> anyhow::Result<JSONRPCRequest> {
+    thread_id: codex_protocol::ThreadId,
+) -> anyhow::Result<serde_json::Value> {
     let expected_message = format!(
         "Allow Codex to run `{}` in `{}`?",
         shlex::try_join(command.iter().map(std::convert::AsRef::as_ref))?,
         workdir.to_string_lossy()
     );
-    Ok(JSONRPCRequest {
-        jsonrpc: JSONRPC_VERSION.into(),
-        id: elicitation_request_id,
-        method: ElicitRequest::METHOD.to_string(),
-        params: Some(serde_json::to_value(&ExecApprovalElicitRequestParams {
-            message: expected_message,
-            requested_schema: ElicitRequestParamsRequestedSchema {
-                r#type: "object".to_string(),
-                properties: json!({}),
-                required: None,
-            },
-            codex_elicitation: "exec-approval".to_string(),
-            codex_mcp_tool_call_id,
-            codex_event_id,
-            codex_command: command,
-            codex_cwd: workdir.to_path_buf(),
-            codex_call_id: "call1234".to_string(),
-        })?),
-    })
+    let codex_parsed_cmd = parse_command::parse_command(&command);
+    let params_json = serde_json::to_value(ExecApprovalElicitRequestParams {
+        message: expected_message,
+        requested_schema: json!({"type":"object","properties":{}}),
+        thread_id,
+        codex_elicitation: "exec-approval".to_string(),
+        codex_mcp_tool_call_id,
+        codex_event_id,
+        codex_command: command,
+        codex_cwd: workdir.to_path_buf(),
+        codex_call_id: "call1234".to_string(),
+        codex_parsed_cmd,
+    })?;
+    Ok(params_json)
 }
 
 /// Test that patch approval triggers an elicitation request to the MCP and that
@@ -208,12 +231,18 @@ async fn test_patch_approval_triggers_elicitation() {
         return;
     }
 
-    if let Err(err) = patch_approval_triggers_elicitation().await {
-        panic!("failure: {err}");
-    }
+    patch_approval_triggers_elicitation()
+        .await
+        .expect("patch approval should trigger elicitation");
 }
 
 async fn patch_approval_triggers_elicitation() -> anyhow::Result<()> {
+    if cfg!(windows) {
+        // powershell apply_patch shell calls are not parsed into apply patch approvals
+
+        return Ok(());
+    }
+
     let cwd = TempDir::new()?;
     let test_file = cwd.path().join("destination_file.txt");
     std::fs::write(&test_file, "original content\n")?;
@@ -238,6 +267,11 @@ async fn patch_approval_triggers_elicitation() -> anyhow::Result<()> {
         .send_codex_tool_call(CodexToolCallParam {
             cwd: Some(cwd.path().to_string_lossy().to_string()),
             prompt: "please modify the test file".to_string(),
+            // This test exercises patch approval elicitation, not local sandbox setup.
+            config: Some(HashMap::from([(
+                "sandbox_mode".to_string(),
+                json!("danger-full-access"),
+            )])),
             ..Default::default()
         })
         .await?;
@@ -247,7 +281,17 @@ async fn patch_approval_triggers_elicitation() -> anyhow::Result<()> {
     )
     .await??;
 
-    let elicitation_request_id = RequestId::Integer(0);
+    assert_eq!(elicitation_request.jsonrpc, JsonRpcVersion2_0);
+    assert_eq!(elicitation_request.request.method, "elicitation/create");
+
+    let elicitation_request_id = elicitation_request.id.clone();
+    let params = serde_json::from_value::<PatchApprovalElicitRequestParams>(
+        elicitation_request
+            .request
+            .params
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("elicitation_request.params must be set"))?,
+    )?;
 
     let mut expected_changes = HashMap::new();
     expected_changes.insert(
@@ -258,15 +302,17 @@ async fn patch_approval_triggers_elicitation() -> anyhow::Result<()> {
         },
     );
 
-    let expected_elicitation_request = create_expected_patch_approval_elicitation_request(
-        elicitation_request_id.clone(),
-        expected_changes,
-        None, // No grant_root expected
-        None, // No reason expected
-        codex_request_id.to_string(),
-        "1".to_string(),
-    )?;
-    assert_eq!(expected_elicitation_request, elicitation_request);
+    assert_eq!(
+        elicitation_request.request.params,
+        Some(create_expected_patch_approval_elicitation_request_params(
+            expected_changes,
+            /*grant_root*/ None, // No grant_root expected
+            /*reason*/ None,
+            codex_request_id.to_string(),
+            params.codex_event_id.clone(),
+            params.thread_id,
+        )?)
+    );
 
     // Accept the patch approval request by responding to the elicitation
     mcp_process
@@ -281,20 +327,24 @@ async fn patch_approval_triggers_elicitation() -> anyhow::Result<()> {
     // Verify the original `codex` tool call completes
     let codex_response = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp_process.read_stream_until_response_message(RequestId::Integer(codex_request_id)),
+        mcp_process.read_stream_until_response_message(RequestId::Number(codex_request_id)),
     )
     .await??;
     assert_eq!(
-        JSONRPCResponse {
-            jsonrpc: JSONRPC_VERSION.into(),
-            id: RequestId::Integer(codex_request_id),
+        JsonRpcResponse {
+            jsonrpc: JsonRpcVersion2_0,
+            id: RequestId::Number(codex_request_id),
             result: json!({
                 "content": [
                     {
                         "text": "Patch has been applied successfully!",
                         "type": "text"
                     }
-                ]
+                ],
+                "structuredContent": {
+                    "threadId": params.thread_id,
+                    "content": "Patch has been applied successfully!"
+                }
             }),
         },
         codex_response
@@ -312,98 +362,256 @@ async fn test_codex_tool_passes_base_instructions() {
 
     // Apparently `#[tokio::test]` must return `()`, so we create a helper
     // function that returns `Result` so we can use `?` in favor of `unwrap`.
-    if let Err(err) = codex_tool_passes_base_instructions().await {
-        panic!("failure: {err}");
-    }
+    codex_tool_passes_base_instructions()
+        .await
+        .expect("codex tool should pass base instructions");
 }
 
 async fn codex_tool_passes_base_instructions() -> anyhow::Result<()> {
     #![expect(clippy::unwrap_used)]
 
     let server =
-        create_mock_chat_completions_server(vec![create_final_assistant_message_sse_response(
-            "Enjoy!",
-        )?])
-        .await;
+        create_mock_responses_server(vec![create_final_assistant_message_sse_response("Enjoy!")?])
+            .await;
+    let caller_server = MockServer::start().await;
 
     // Run `codex mcp` with a specific config.toml.
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), &server.uri())?;
-    let mut mcp_process = McpProcess::new(codex_home.path()).await?;
+    let skill_dir = codex_home.path().join("skills").join("demo");
+    std::fs::create_dir_all(&skill_dir)?;
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: demo\ndescription: Demo skill.\n---\n# Demo\n\nUse this skill.\n",
+    )?;
+    write_chatgpt_auth(
+        codex_home.path(),
+        ChatGptAuthFixture::new("chatgpt-token").account_id("workspace-123"),
+        AuthCredentialsStoreMode::File,
+    )?;
+    Mock::given(method("GET"))
+        .and(path("/backend-api/wham/settings/user"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "commit_attribution_enabled": true,
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let mut mcp_process = McpProcess::new_with_env(
+        codex_home.path(),
+        &[("OPENAI_API_KEY", None), ("CODEX_ACCESS_TOKEN", None)],
+    )
+    .await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp_process.initialize()).await??;
 
-    // Send a "codex" tool request, which should hit the completions endpoint.
+    // Send a "codex" tool request, which should hit the responses endpoint.
     let codex_request_id = mcp_process
         .send_codex_tool_call(CodexToolCallParam {
             prompt: "How are you?".to_string(),
+            config: Some(HashMap::from([(
+                "chatgpt_base_url".to_string(),
+                json!(format!("{}/backend-api", caller_server.uri())),
+            )])),
             base_instructions: Some("You are a helpful assistant.".to_string()),
+            developer_instructions: Some("Foreshadow upcoming tool calls.".to_string()),
             ..Default::default()
         })
         .await?;
 
     let codex_response = timeout(
         DEFAULT_READ_TIMEOUT,
-        mcp_process.read_stream_until_response_message(RequestId::Integer(codex_request_id)),
+        mcp_process.read_stream_until_response_message(RequestId::Number(codex_request_id)),
     )
     .await??;
+    assert_eq!(codex_response.jsonrpc, JsonRpcVersion2_0);
+    assert_eq!(codex_response.id, RequestId::Number(codex_request_id));
     assert_eq!(
-        JSONRPCResponse {
-            jsonrpc: JSONRPC_VERSION.into(),
-            id: RequestId::Integer(codex_request_id),
-            result: json!({
-                "content": [
-                    {
-                        "text": "Enjoy!",
-                        "type": "text"
-                    }
-                ]
-            }),
-        },
-        codex_response
+        codex_response.result,
+        json!({
+            "content": [
+                {
+                    "text": "Enjoy!",
+                    "type": "text"
+                }
+            ],
+            "structuredContent": {
+                "threadId": codex_response
+                    .result
+                    .get("structuredContent")
+                    .and_then(|v| v.get("threadId"))
+                    .and_then(serde_json::Value::as_str)
+                    .expect("codex tool response should include structuredContent.threadId"),
+                "content": "Enjoy!"
+            }
+        })
     );
 
     let requests = server.received_requests().await.unwrap();
-    let request = requests[0].body_json::<serde_json::Value>().unwrap();
-    let instructions = request["messages"][0]["content"].as_str().unwrap();
+    let request = requests
+        .iter()
+        .find(|request| request.url.path() == "/v1/responses")
+        .expect("mock model request should be recorded")
+        .body_json::<serde_json::Value>()?;
+    let instructions = request["instructions"]
+        .as_str()
+        .expect("responses request should include instructions");
     assert!(instructions.starts_with("You are a helpful assistant."));
+    let developer_messages: Vec<&serde_json::Value> = request["input"]
+        .as_array()
+        .expect("responses request should include input items")
+        .iter()
+        .filter(|msg| msg.get("role").and_then(|role| role.as_str()) == Some("developer"))
+        .collect();
+    let developer_contents: Vec<&str> = developer_messages
+        .iter()
+        .filter_map(|msg| msg.get("content").and_then(serde_json::Value::as_array))
+        .flat_map(|content| content.iter())
+        .filter(|span| span.get("type").and_then(serde_json::Value::as_str) == Some("input_text"))
+        .filter_map(|span| span.get("text").and_then(serde_json::Value::as_str))
+        .collect();
+    let developer_text = developer_contents.join("\n");
+    assert_eq!(
+        developer_text
+            .matches("Co-authored-by: Codex <noreply@openai.com>")
+            .count(),
+        1
+    );
+    assert_eq!(
+        developer_text
+            .matches("Generated with [Codex](https://openai.com/codex/).")
+            .count(),
+        1
+    );
+    assert_eq!(
+        developer_text.matches("- demo: Demo skill.").count(),
+        1,
+        "host skill catalog should be included exactly once"
+    );
+    assert!(
+        developer_contents
+            .iter()
+            .any(|content| content.contains("`sandbox_mode`")),
+        "expected permissions developer message, got {developer_contents:?}"
+    );
+    assert!(
+        developer_contents.contains(&"Foreshadow upcoming tool calls."),
+        "expected developer instructions in developer messages, got {developer_contents:?}"
+    );
+    let caller_requests = caller_server.received_requests().await.unwrap();
+    assert!(
+        caller_requests
+            .iter()
+            .all(|request| request.url.path() != "/backend-api/wham/settings/user"),
+        "attribution settings must use the process-level base URL"
+    );
 
     Ok(())
 }
 
-fn create_expected_patch_approval_elicitation_request(
-    elicitation_request_id: RequestId,
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_codex_tool_forwards_skills_extension_warnings() {
+    skip_if_no_network!();
+
+    codex_tool_forwards_skills_extension_warnings()
+        .await
+        .expect("codex tool should forward skills extension warnings");
+}
+
+async fn codex_tool_forwards_skills_extension_warnings() -> anyhow::Result<()> {
+    let server =
+        create_mock_responses_server(vec![create_final_assistant_message_sse_response("Enjoy!")?])
+            .await;
+    let codex_home = TempDir::new()?;
+    create_config_toml(codex_home.path(), &server.uri())?;
+    let skills_dir = codex_home.path().join("skills");
+    for index in 0..200 {
+        let name = format!("skill-{index:03}");
+        let skill_dir = skills_dir.join(&name);
+        std::fs::create_dir_all(&skill_dir)?;
+        let description = format!("Skill {index}: {}", "x".repeat(200));
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            format!(
+                "---\nname: {name}\ndescription: {description}\n---\n# {name}\n\nUse this skill.\n"
+            ),
+        )?;
+    }
+    let mut mcp_process = McpProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp_process.initialize()).await??;
+
+    let codex_request_id = mcp_process
+        .send_codex_tool_call(CodexToolCallParam {
+            prompt: "How are you?".to_string(),
+            ..Default::default()
+        })
+        .await?;
+
+    let warning = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp_process.read_stream_until_codex_event_matching("warning", |params| {
+            params["msg"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("skills context budget"))
+        }),
+    )
+    .await??;
+    let warning_json = serde_json::to_value(&warning)?;
+    let params = warning
+        .notification
+        .params
+        .ok_or_else(|| anyhow::anyhow!("warning notification should include params"))?;
+    assert_eq!(
+        warning_json["params"]["_meta"]["requestId"],
+        codex_request_id
+    );
+    assert_eq!(warning_json["params"]["id"], codex_request_id.to_string());
+    assert!(
+        warning_json["params"]["_meta"]["threadId"]
+            .as_str()
+            .is_some_and(|thread_id| !thread_id.is_empty())
+    );
+    assert_eq!(params["msg"]["type"], "warning");
+    assert!(
+        params["msg"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("skills context budget"))
+    );
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp_process.read_stream_until_response_message(RequestId::Number(codex_request_id)),
+    )
+    .await??;
+
+    Ok(())
+}
+
+fn create_expected_patch_approval_elicitation_request_params(
     changes: HashMap<PathBuf, FileChange>,
     grant_root: Option<PathBuf>,
     reason: Option<String>,
     codex_mcp_tool_call_id: String,
     codex_event_id: String,
-) -> anyhow::Result<JSONRPCRequest> {
+    thread_id: codex_protocol::ThreadId,
+) -> anyhow::Result<serde_json::Value> {
     let mut message_lines = Vec::new();
     if let Some(r) = &reason {
         message_lines.push(r.clone());
     }
     message_lines.push("Allow Codex to apply proposed code changes?".to_string());
+    let params_json = serde_json::to_value(PatchApprovalElicitRequestParams {
+        message: message_lines.join("\n"),
+        requested_schema: json!({"type":"object","properties":{}}),
+        thread_id,
+        codex_elicitation: "patch-approval".to_string(),
+        codex_mcp_tool_call_id,
+        codex_event_id,
+        codex_reason: reason,
+        codex_grant_root: grant_root,
+        codex_changes: changes,
+        codex_call_id: "call1234".to_string(),
+    })?;
 
-    Ok(JSONRPCRequest {
-        jsonrpc: JSONRPC_VERSION.into(),
-        id: elicitation_request_id,
-        method: ElicitRequest::METHOD.to_string(),
-        params: Some(serde_json::to_value(&PatchApprovalElicitRequestParams {
-            message: message_lines.join("\n"),
-            requested_schema: ElicitRequestParamsRequestedSchema {
-                r#type: "object".to_string(),
-                properties: json!({}),
-                required: None,
-            },
-            codex_elicitation: "patch-approval".to_string(),
-            codex_mcp_tool_call_id,
-            codex_event_id,
-            codex_reason: reason,
-            codex_grant_root: grant_root,
-            codex_changes: changes,
-            codex_call_id: "call1234".to_string(),
-        })?),
-    })
+    Ok(params_json)
 }
 
 /// This handle is used to ensure that the MockServer and TempDir are not dropped while
@@ -419,7 +627,7 @@ pub struct McpHandle {
 }
 
 async fn create_mcp_process(responses: Vec<String>) -> anyhow::Result<McpHandle> {
-    let server = create_mock_chat_completions_server(responses).await;
+    let server = create_mock_responses_server(responses).await;
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), &server.uri())?;
     let mut mcp_process = McpProcess::new(codex_home.path()).await?;
@@ -442,16 +650,20 @@ fn create_config_toml(codex_home: &Path, server_uri: &str) -> std::io::Result<()
             r#"
 model = "mock-model"
 approval_policy = "untrusted"
-sandbox_policy = "read-only"
+sandbox_policy = "workspace-write"
 
 model_provider = "mock_provider"
+chatgpt_base_url = "{server_uri}/backend-api"
+cli_auth_credentials_store = "file"
 
 [model_providers.mock_provider]
 name = "Mock provider for test"
 base_url = "{server_uri}/v1"
-wire_api = "chat"
+wire_api = "responses"
 request_max_retries = 0
 stream_max_retries = 0
+
+[features]
 "#
         ),
     )

@@ -2,9 +2,9 @@
 name = "codex-utils-readiness"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
-async-trait = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
@@ -15,3 +15,6 @@ tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 
 [lints]
 workspace = true
+
+[lib]
+doctest = false

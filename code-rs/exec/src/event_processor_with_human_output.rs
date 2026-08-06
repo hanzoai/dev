@@ -25,11 +25,12 @@ use code_protocol::protocol::TurnAbortReason;
 use code_core::protocol::TurnDiffEvent;
 use code_core::protocol::WebSearchBeginEvent;
 use code_core::protocol::WebSearchCompleteEvent;
-use code_protocol::num_format::format_with_separators;
+use code_protocol::num_format::format_with_separators_u64;
 use owo_colors::OwoColorize;
 use owo_colors::Style;
 use shlex::try_join;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -55,6 +56,7 @@ pub(crate) struct EventProcessorWithHumanOutput {
 
     magenta: Style,
     red: Style,
+    yellow: Style,
     green: Style,
     cyan: Style,
 
@@ -63,8 +65,15 @@ pub(crate) struct EventProcessorWithHumanOutput {
     show_raw_agent_reasoning: bool,
     answer_started: bool,
     reasoning_started: bool,
+    reasoning_streams_started: HashSet<String>,
     raw_reasoning_started: bool,
     last_message_path: Option<PathBuf>,
+    last_turn_diff: Option<String>,
+
+    /// If true, stop after the first TaskComplete event (default exec mode).
+    /// Auto Drive sessions keep running across multiple turns, so they leave
+    /// this false and handle shutdown themselves.
+    stop_on_task_complete: bool,
 }
 
 impl EventProcessorWithHumanOutput {
@@ -72,6 +81,7 @@ impl EventProcessorWithHumanOutput {
         with_ansi: bool,
         config: &Config,
         last_message_path: Option<PathBuf>,
+        stop_on_task_complete: bool,
     ) -> Self {
         let call_id_to_command = HashMap::new();
         let call_id_to_patch = HashMap::new();
@@ -85,14 +95,18 @@ impl EventProcessorWithHumanOutput {
                 dimmed: Style::new().dimmed(),
                 magenta: Style::new().magenta(),
                 red: Style::new().red(),
+                yellow: Style::new().yellow(),
                 green: Style::new().green(),
                 cyan: Style::new().cyan(),
                 show_agent_reasoning: !config.hide_agent_reasoning,
                 show_raw_agent_reasoning: config.show_raw_agent_reasoning,
                 answer_started: false,
                 reasoning_started: false,
+                reasoning_streams_started: HashSet::new(),
                 raw_reasoning_started: false,
                 last_message_path,
+                last_turn_diff: None,
+                stop_on_task_complete,
             }
         } else {
             Self {
@@ -103,17 +117,22 @@ impl EventProcessorWithHumanOutput {
                 dimmed: Style::new(),
                 magenta: Style::new(),
                 red: Style::new(),
+                yellow: Style::new(),
                 green: Style::new(),
                 cyan: Style::new(),
                 show_agent_reasoning: !config.hide_agent_reasoning,
                 show_raw_agent_reasoning: config.show_raw_agent_reasoning,
                 answer_started: false,
                 reasoning_started: false,
+                reasoning_streams_started: HashSet::new(),
                 raw_reasoning_started: false,
                 last_message_path,
+                last_turn_diff: None,
+                stop_on_task_complete,
             }
         }
     }
+
 }
 
 struct ExecCommandBegin {
@@ -143,6 +162,15 @@ impl EventProcessor for EventProcessorWithHumanOutput {
     fn print_config_summary(&mut self, config: &Config, prompt: &str) {
         ts_println!(self, "Hanzo Dev v{}\n--------", code_version::version());
 
+        // Show which binary is being used to execute sub-agents so users can
+        // confirm path mismatches when testing new builds.
+        let exe_path = std::env::current_exe()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "<unknown>".to_string());
+        ts_println!(self, "binary: {}", exe_path);
+
+        println!("--------");
+
         let entries = create_config_summary_entries(config);
 
         for (key, value) in entries {
@@ -163,36 +191,73 @@ impl EventProcessor for EventProcessorWithHumanOutput {
     }
 
     fn process_event(&mut self, event: Event) -> CodexStatus {
-        let Event { id: _, msg, .. } = event;
+        let Event { id, msg, .. } = event;
         match msg {
             EventMsg::Error(ErrorEvent { message }) => {
                 let prefix = "ERROR:".style(self.red);
                 ts_println!(self, "{prefix} {message}");
             }
+            EventMsg::Warning(code_core::protocol::WarningEvent { message }) => {
+                let prefix = "WARNING:".style(self.yellow);
+                ts_println!(self, "{prefix} {message}");
+            }
             EventMsg::BackgroundEvent(BackgroundEventEvent { message }) => {
                 ts_println!(self, "{}", message.style(self.dimmed));
             }
+            EventMsg::RequestUserInput(ev) => {
+                let question_count = ev.questions.len();
+                ts_println!(
+                    self,
+                    "Model requested user input ({question_count} question(s)); interactive prompts are not supported in this runner.",
+                );
+            }
+            EventMsg::DynamicToolCallRequest(ev) => {
+                let tool = &ev.tool;
+                let call_id = &ev.call_id;
+                ts_println!(
+                    self,
+                    "Dynamic tool call requested for {tool} (call_id: {call_id}); dynamic tools are not supported in this runner.",
+                );
+            }
+            EventMsg::EnvironmentContextFull(_)
+            | EventMsg::EnvironmentContextDelta(_)
+            | EventMsg::BrowserSnapshot(_)
+            | EventMsg::ListCustomPromptsResponse(_)
+            | EventMsg::ListSkillsResponse(_)
+            | EventMsg::McpListToolsResponse(_)
+            | EventMsg::TaskLifecycle(_)
+            | EventMsg::ViewImageToolCall(_) => {
+                // Environment context events are consumed by the TUI; the CLI runner
+                // does not surface them alongside the human-readable transcript.
+            }
             EventMsg::TaskStarted => {
-                // Ignore.
+                // Reset per-turn diff cache so we only print new diffs once.
+                self.last_turn_diff = None;
+                self.reasoning_started = false;
+                self.reasoning_streams_started.clear();
             }
             EventMsg::TaskComplete(TaskCompleteEvent { last_agent_message }) => {
                 if let Some(output_file) = self.last_message_path.as_deref() {
                     handle_last_message(last_agent_message.as_deref(), output_file);
                 }
-                return CodexStatus::InitiateShutdown;
+                if self.stop_on_task_complete {
+                    return CodexStatus::InitiateShutdown;
+                }
+                return CodexStatus::Running;
             }
             EventMsg::TokenCount(ev) => {
                 if let Some(usage_info) = ev.info {
                     ts_println!(
                         self,
                         "tokens used: {}",
-                        format_with_separators(usage_info.total_token_usage.blended_total())
+                        format_with_separators_u64(usage_info.total_token_usage.blended_total())
                     );
                 }
             }
+            EventMsg::AutoContextCheck(_) => {}
             EventMsg::AgentMessageDelta(AgentMessageDeltaEvent { delta }) => {
                 if !self.answer_started {
-                    ts_println!(self, "{}\n", "codex".style(self.italic).style(self.magenta));
+                    ts_println!(self, "{}\n", "dev".style(self.italic).style(self.magenta));
                     self.answer_started = true;
                 }
                 print!("{delta}");
@@ -211,6 +276,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     );
                     self.reasoning_started = true;
                 }
+                self.reasoning_streams_started.insert(id.clone());
                 print!("{delta}");
                 #[expect(clippy::expect_used)]
                 std::io::stdout().flush().expect("could not flush stdout");
@@ -256,7 +322,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     ts_println!(
                         self,
                         "{}\n{}",
-                        "codex".style(self.italic).style(self.magenta),
+                        "dev".style(self.italic).style(self.magenta),
                         message,
                     );
                 } else {
@@ -492,6 +558,11 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 }
             }
             EventMsg::TurnDiff(TurnDiffEvent { unified_diff }) => {
+                if self.last_turn_diff.as_deref() == Some(&unified_diff) {
+                    // Suppress duplicate turn diffs; they are sometimes streamed multiple times.
+                    return CodexStatus::Running;
+                }
+                self.last_turn_diff = Some(unified_diff.clone());
                 ts_println!(self, "{}", "turn diff:".style(self.magenta));
                 println!("{unified_diff}");
             }
@@ -503,16 +574,26 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             }
             EventMsg::AgentReasoning(agent_reasoning_event) => {
                 if self.show_agent_reasoning {
-                    if !self.reasoning_started {
+                    if self.reasoning_streams_started.remove(&id) {
+                        println!();
+                        if self.reasoning_streams_started.is_empty() {
+                            self.reasoning_started = false;
+                        }
+                    } else if !self.reasoning_started {
                         ts_println!(
                             self,
                             "{}\n{}",
-                            "codex".style(self.italic).style(self.magenta),
+                            "dev".style(self.italic).style(self.magenta),
                             agent_reasoning_event.text,
                         );
                     } else {
                         println!();
-                        self.reasoning_started = false;
+                        ts_println!(
+                            self,
+                            "{}\n{}",
+                            "dev".style(self.italic).style(self.magenta),
+                            agent_reasoning_event.text,
+                        );
                     }
                 }
             }
@@ -522,7 +603,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 ts_println!(
                     self,
                     "{} {}",
-                    "codex session".style(self.magenta).style(self.bold),
+                    "dev session".style(self.magenta).style(self.bold),
                     conversation_id.to_string().style(self.dimmed)
                 );
 
@@ -530,7 +611,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 println!();
             }
             EventMsg::PlanUpdate(plan_update_event) => {
-                let UpdatePlanArgs { name, plan } = plan_update_event;
+                let UpdatePlanArgs { name, plan, .. } = plan_update_event;
                 ts_println!(self, "name: {name:?}");
                 ts_println!(self, "plan: {plan:?}");
             }
@@ -560,6 +641,9 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                         }
                     }
                 }
+            }
+            EventMsg::CustomToolCallUpdate(_) => {
+                // Currently ignored in exec output.
             }
             EventMsg::CustomToolCallEnd(event) => {
                 let status = if event.result.is_ok() {
@@ -605,8 +689,74 @@ impl EventProcessor for EventProcessorWithHumanOutput {
             EventMsg::ShutdownComplete => return CodexStatus::Shutdown,
             EventMsg::ConversationPath(_) => {}
             EventMsg::UserMessage(_) => {}
-            EventMsg::EnteredReviewMode(_) => {}
-            EventMsg::ExitedReviewMode(_) => {}
+            EventMsg::EnteredReviewMode(request) => {
+                ts_println!(
+                    self,
+                    "{} {}",
+                    "review".style(self.magenta),
+                    "started".style(self.bold),
+                );
+                if let Some(hint) = request.user_facing_hint.as_deref() {
+                    let trimmed = hint.trim();
+                    if !trimmed.is_empty() {
+                        println!("{}", trimmed.style(self.dimmed));
+                    }
+                }
+            }
+            EventMsg::ExitedReviewMode(event) => {
+                ts_println!(
+                    self,
+                    "{} {}",
+                    "review".style(self.magenta),
+                    "finished".style(self.bold),
+                );
+                if let Some(snapshot) = &event.snapshot {
+                    if let Some(branch) = &snapshot.branch {
+                        println!("{} {}", "branch:".style(self.dimmed), branch);
+                    }
+                    if let Some(path) = &snapshot.worktree_path {
+                        println!("{} {}", "worktree:".style(self.dimmed), path.display());
+                    }
+                    if let Some(commit) = &snapshot.snapshot_commit {
+                        let short = commit.chars().take(12).collect::<String>();
+                        println!("{} {}", "snapshot:".style(self.dimmed), short);
+                    }
+                }
+                match &event.review_output {
+                    Some(output) => {
+                        if !output.overall_explanation.trim().is_empty() {
+                            println!("{}", output.overall_explanation.trim());
+                        }
+
+                        if output.findings.is_empty() {
+                            println!("{}", "no findings reported".style(self.dimmed));
+                        } else {
+                            for (idx, finding) in output.findings.iter().enumerate() {
+                                println!(
+                                    "{} {}",
+                                    format!("#{}", idx + 1).style(self.bold),
+                                    finding.title.trim(),
+                                );
+                                if !finding.body.trim().is_empty() {
+                                    for line in finding.body.lines() {
+                                        println!("  {}", line.trim());
+                                    }
+                                }
+                            }
+                        }
+
+                        if output.overall_confidence_score > 0.0 {
+                            println!(
+                                "confidence: {:.1}",
+                                output.overall_confidence_score,
+                            );
+                        }
+                    }
+                    None => println!("{}", "review ended without results".style(self.dimmed)),
+                }
+            }
+            EventMsg::CompactionCheckpointWarning(_) => {}
+            EventMsg::ImageGenerationBegin(_) | EventMsg::ImageGenerationEnd(_) => {}
         }
         CodexStatus::Running
     }
@@ -644,5 +794,81 @@ fn format_mcp_invocation(invocation: &McpInvocation) -> String {
         format!("{fq_tool_name}()")
     } else {
         format!("{fq_tool_name}({args_str})")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use code_core::protocol::AgentReasoningEvent;
+
+    #[test]
+    fn reasoning_streams_do_not_reset_mid_stream() {
+        let mut proc = EventProcessorWithHumanOutput {
+            call_id_to_command: HashMap::new(),
+            call_id_to_patch: HashMap::new(),
+            bold: Style::new(),
+            italic: Style::new(),
+            dimmed: Style::new(),
+            magenta: Style::new(),
+            red: Style::new(),
+            green: Style::new(),
+            yellow: Style::new(),
+            cyan: Style::new(),
+            show_agent_reasoning: true,
+            show_raw_agent_reasoning: false,
+            answer_started: false,
+            reasoning_started: false,
+            reasoning_streams_started: HashSet::new(),
+            raw_reasoning_started: false,
+            last_message_path: None,
+            last_turn_diff: None,
+            stop_on_task_complete: false,
+        };
+
+        // Two separate reasoning streams interleave deltas before either one finalizes.
+        proc.process_event(Event {
+            id: "stream-a".to_string(),
+            event_seq: 0,
+            msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent {
+                delta: "A".to_string(),
+            }),
+            order: None,
+        });
+        proc.process_event(Event {
+            id: "stream-b".to_string(),
+            event_seq: 1,
+            msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent {
+                delta: "B".to_string(),
+            }),
+            order: None,
+        });
+        assert!(proc.reasoning_started);
+        assert_eq!(proc.reasoning_streams_started.len(), 2);
+
+        // Finalizing one stream should not reset the global reasoning state while
+        // another stream is still active.
+        proc.process_event(Event {
+            id: "stream-a".to_string(),
+            event_seq: 2,
+            msg: EventMsg::AgentReasoning(AgentReasoningEvent {
+                text: "A".to_string(),
+            }),
+            order: None,
+        });
+        assert!(proc.reasoning_started);
+        assert_eq!(proc.reasoning_streams_started.len(), 1);
+        assert!(proc.reasoning_streams_started.contains("stream-b"));
+
+        proc.process_event(Event {
+            id: "stream-b".to_string(),
+            event_seq: 3,
+            msg: EventMsg::AgentReasoning(AgentReasoningEvent {
+                text: "B".to_string(),
+            }),
+            order: None,
+        });
+        assert!(!proc.reasoning_started);
+        assert!(proc.reasoning_streams_started.is_empty());
     }
 }

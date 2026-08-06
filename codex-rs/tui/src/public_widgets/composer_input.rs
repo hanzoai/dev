@@ -7,13 +7,13 @@
 use crossterm::event::KeyEvent;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::widgets::WidgetRef;
 use std::time::Duration;
 
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::ChatComposer;
 use crate::bottom_pane::InputResult;
+use crate::render::renderable::Renderable;
 
 /// Action returned from feeding a key event into the ComposerInput.
 pub enum ComposerAction {
@@ -37,7 +37,13 @@ impl ComposerInput {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let sender = AppEventSender::new(tx.clone());
         // `enhanced_keys_supported=true` enables Shift+Enter newline hint/behavior.
-        let inner = ChatComposer::new(true, sender, true, "Compose new task".to_string(), false);
+        let inner = ChatComposer::new(
+            /*has_input_focus*/ true,
+            sender,
+            /*enhanced_keys_supported*/ true,
+            "Compose new task".to_string(),
+            /*disable_paste_burst*/ false,
+        );
         Self { inner, _tx: tx, rx }
     }
 
@@ -48,13 +54,14 @@ impl ComposerInput {
 
     /// Clear the input text.
     pub fn clear(&mut self) {
-        self.inner.set_text_content(String::new());
+        self.inner
+            .set_text_content(String::new(), Vec::new(), Vec::new());
     }
 
     /// Feed a key event into the composer and return a high-level action.
     pub fn input(&mut self, key: KeyEvent) -> ComposerAction {
         let action = match self.inner.handle_key_event(key).0 {
-            InputResult::Submitted(text) => ComposerAction::Submitted(text),
+            InputResult::Submitted { text, .. } => ComposerAction::Submitted(text),
             _ => ComposerAction::None,
         };
         self.drain_app_events();
@@ -79,7 +86,7 @@ impl ComposerInput {
 
     /// Clear any previously set custom hint items and restore the default hints.
     pub fn clear_hint_items(&mut self) {
-        self.inner.set_footer_hint_override(None);
+        self.inner.set_footer_hint_override(/*items*/ None);
     }
 
     /// Desired height (in rows) for a given width.
@@ -94,7 +101,7 @@ impl ComposerInput {
 
     /// Render the input into the provided buffer at `area`.
     pub fn render_ref(&self, area: Rect, buf: &mut Buffer) {
-        WidgetRef::render_ref(&self.inner, area, buf);
+        self.inner.render(area, buf);
     }
 
     /// Return true if a paste-burst detection is currently active.

@@ -17,12 +17,12 @@ Both the `--config` flag and the `config.toml` file support the following option
 The model that Codex should use.
 
 ```toml
-model = "o3"  # overrides the default of "gpt-5"
+model = "o3"  # overrides the default of "gpt-5.1"
 ```
 
 ## model_providers
 
-This option lets you override and amend the default set of model providers bundled with Codex. This value is a map where the key is the value to use with `model_provider` to select the corresponding provider.
+This option lets you override and amend the default set of model providers bundled with Codex. This value is a map where the key is the value to use with `model_provider` to select the corresponding provider. Providers must expose an OpenAI-compatible HTTP API (Chat Completions or Responses); native Anthropic/Gemini APIs are not supported directly without a proxy.
 
 For example, if you wanted to add a provider that uses the OpenAI 4o model via the chat completions API, then you could add the following configuration:
 
@@ -234,11 +234,11 @@ Users can specify config values at multiple levels. Order of precedence is as fo
 1. custom command-line argument, e.g., `--model o3`
 2. as part of a profile, where the `--profile` is specified via a CLI (or in the config file itself)
 3. as an entry in `config.toml`, e.g., `model = "o3"`
-4. the default value that comes with Codex CLI (i.e., Codex CLI defaults to `gpt-5`)
+4. the default value that comes with Codex CLI (i.e., Codex CLI defaults to `gpt-5.1`)
 
 ## model_reasoning_effort
 
-If the selected model is known to support reasoning (for example: `o3`, `o4-mini`, `codex-*`, `gpt-5`), reasoning is enabled by default when using the Responses API. As explained in the [OpenAI Platform documentation](https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning), this can be set to:
+If the selected model is known to support reasoning (for example: `o3`, `o4-mini`, `codex-*`, `gpt-5.1`), reasoning is enabled by default when using the Responses API. As explained in the [OpenAI Platform documentation](https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning), this can be set to:
 
 - `"minimal"` (fastest)
 - `"low"`
@@ -274,7 +274,7 @@ When set, Codex includes a `text` object in the request payload with the configu
 Example:
 
 ```toml
-model = "gpt-5"
+model = "gpt-5.1"
 model_verbosity = "low"
 ```
 
@@ -379,6 +379,153 @@ args = ["-y", "mcp-server"]
 env = { "API_KEY" = "value" }
 ```
 
+## agents
+
+Agents are external CLI programs that Code can invoke to handle subtasks. Code includes built-in support for several agents (Claude, Gemini, Qwen, etc.) and allows you to configure custom agents as well.
+
+Each agent is configured using an `[[agents]]` section in your `config.toml`. Here's the basic structure:
+
+```toml
+[[agents]]
+name = "claude"           # Agent identifier (required)
+command = "claude"        # Command to execute (required)
+enabled = true            # Enable/disable this agent (default: true)
+read-only = false         # Restrict to read-only operations (default: false)
+description = "Claude AI assistant"  # Description shown in UI
+args = ["--dangerously-skip-permissions"]  # Default arguments
+env = { API_KEY = "value" }  # Environment variables
+```
+
+### Configuring agent commands
+
+The `command` field specifies how to invoke the agent. Code supports three approaches:
+
+**1. Command name (PATH lookup):**
+```toml
+[[agents]]
+name = "claude"
+command = "claude"  # Code will search for "claude" in your PATH
+```
+
+**2. Absolute path (recommended for Windows):**
+```toml
+[[agents]]
+name = "gemini"
+command = "C:\\Users\\YourUser\\AppData\\Roaming\\npm\\gemini.cmd"
+```
+
+**3. Relative path:**
+```toml
+[[agents]]
+name = "custom"
+command = "./bin/custom-agent"  # Relative to working directory
+```
+
+### Windows considerations
+
+On Windows, agent command discovery follows these rules:
+
+1. Code checks the `PATHEXT` environment variable for valid executable extensions (`.exe`, `.cmd`, `.bat`, `.com`)
+2. If using PATH lookup, ensure the agent's directory is in your `PATH` environment variable
+3. For npm-installed agents, the typical location is `C:\Users\YourUser\AppData\Roaming\npm\`
+4. **Recommended:** Use absolute paths to avoid PATH issues:
+
+```toml
+[[agents]]
+name = "coder"
+command = "C:\\Users\\YourUser\\AppData\\Roaming\\npm\\coder.cmd"
+enabled = true
+
+[[agents]]
+name = "claude"
+command = "C:\\Users\\YourUser\\AppData\\Roaming\\npm\\claude.cmd"
+enabled = true
+```
+
+### Per-agent arguments
+
+You can specify different arguments for read-only vs. write modes:
+
+```toml
+[[agents]]
+name = "custom-agent"
+command = "custom-agent"
+args = ["--base-arg"]           # Always included
+args_read_only = ["--read-only"]  # Added in read-only mode
+args_write = ["--allow-writes"]   # Added in write mode
+```
+
+### Environment variables
+
+Agents inherit your current environment and can have custom variables:
+
+```toml
+[[agents]]
+name = "gemini"
+command = "gemini"
+env = { GEMINI_API_KEY = "your-key-here" }
+```
+
+Code automatically mirrors common API key environment variables for convenience:
+- `GOOGLE_API_KEY` ↔ `GEMINI_API_KEY`
+- `CLAUDE_API_KEY` ↔ `ANTHROPIC_API_KEY`
+- `QWEN_API_KEY` ↔ `DASHSCOPE_API_KEY`
+
+### Built-in agents
+
+Code includes built-in support for these agents:
+
+- **code/codex** - Built-in Code CLI agents (use current executable)
+- **claude** - Claude AI assistant (requires `claude` CLI)
+- **gemini** - Google Gemini (requires `gemini` CLI)
+- **qwen** - Qwen AI assistant (requires `qwen` CLI)
+- **cloud** - Cloud-based agents (optional, gated by `CODE_ENABLE_CLOUD_AGENT_MODEL`)
+
+### Custom agent example
+
+```toml
+[[agents]]
+name = "custom-llm"
+command = "/usr/local/bin/custom-llm"
+enabled = true
+read-only = false
+description = "Custom LLM implementation"
+args = ["--config", "/path/to/config.json"]
+env = { MODEL_PATH = "/models/custom.bin", TEMP = "0.7" }
+```
+
+### Troubleshooting
+
+**Agent not found errors:**
+
+If you see errors like `Agent 'xyz' could not be found`, try these steps:
+
+1. **Verify installation:** Check if the command exists
+   - Unix/Linux/macOS: `which claude`
+   - Windows: `where claude`
+
+2. **Check PATH:** Ensure the agent's directory is in your PATH
+   - Unix/Linux/macOS: `echo $PATH`
+   - Windows: `echo %PATH%` (cmd) or `$env:PATH` (PowerShell)
+
+3. **Use absolute paths:** Especially on Windows, specify the full path:
+   ```toml
+   [[agents]]
+   name = "claude"
+   command = "C:\\Users\\YourUser\\AppData\\Roaming\\npm\\claude.cmd"
+   ```
+
+4. **Windows file extensions:** Ensure your command includes the proper extension (`.cmd`, `.exe`, `.bat`)
+
+**Git not found in agents:**
+
+If subagents can't detect Git, ensure:
+1. Git is in your PATH
+2. You're running Code from a Git repository
+3. The `.git` directory is accessible
+
+For more details, see the [FAQ](https://github.com/just-every/code/blob/main/docs/faq.md).
+
 ## disable_response_storage
 
 Currently, customers whose accounts are set to use Zero Data Retention (ZDR) must set `disable_response_storage` to `true` so that Codex uses an alternative to the Responses API that works with ZDR:
@@ -395,8 +542,8 @@ Codex spawns subprocesses (e.g. when executing a `local_shell` tool-call suggest
 [shell_environment_policy]
 # inherit can be "all" (default), "core", or "none"
 inherit = "core"
-# set to true to *skip* the filter for `"*KEY*"` and `"*TOKEN*"`
-ignore_default_excludes = false
+# set to false to *re-enable* the filter for `"*KEY*"`, `"*SECRET*"`, and `"*TOKEN*"` (defaults to true)
+ignore_default_excludes = true
 # exclude patterns (case-insensitive globs)
 exclude = ["AWS_*", "AZURE_*"]
 # force-set / override values
@@ -408,7 +555,7 @@ include_only = ["PATH", "HOME"]
 | Field                     | Type                       | Default | Description                                                                                                                                     |
 | ------------------------- | -------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `inherit`                 | string                     | `all`   | Starting template for the environment:<br>`all` (clone full parent env), `core` (`HOME`, `PATH`, `USER`, …), or `none` (start empty).           |
-| `ignore_default_excludes` | boolean                    | `false` | When `false`, Codex removes any var whose **name** contains `KEY`, `SECRET`, or `TOKEN` (case-insensitive) before other rules run.              |
+| `ignore_default_excludes` | boolean                    | `true`  | When `false`, Codex removes any var whose **name** contains `KEY`, `SECRET`, or `TOKEN` (case-insensitive) before other rules run; defaults to `true` so this filter is disabled by default.              |
 | `exclude`                 | array&lt;string&gt;        | `[]`    | Case-insensitive glob patterns to drop after the default filter.<br>Examples: `"AWS_*"`, `"AZURE_*"`.                                           |
 | `set`                     | table&lt;string,string&gt; | `{}`    | Explicit key/value overrides or additions – always win over inherited values.                                                                   |
 | `include_only`            | array&lt;string&gt;        | `[]`    | If non-empty, a whitelist of patterns; only variables that match _one_ pattern survive the final step. (Generally used with `inherit = "all"`.) |
@@ -567,6 +714,10 @@ In general, Codex knows the context window for the most common OpenAI models, bu
 ## model_max_output_tokens
 
 This is analogous to `model_context_window`, but for the maximum number of output tokens for the model.
+
+## tool_output_max_bytes
+
+Maximum number of bytes of tool output (including shell command output and file reads) to include in a model request. Defaults to 32 KiB. Increase this if you need to send larger outputs to the model (note the exec capture cap remains 32 MiB per stream).
 
 ## project_doc_max_bytes
 

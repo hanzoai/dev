@@ -17,6 +17,14 @@ impl ConversationHistory {
         self.items.clone()
     }
 
+    /// Drains and returns the contents of the transcript.
+    ///
+    /// This avoids cloning large history items (e.g., base64 screenshots) when
+    /// callers need to re-apply retention policies.
+    pub(crate) fn take_contents(&mut self) -> Vec<ResponseItem> {
+        std::mem::take(&mut self.items)
+    }
+
     /// `items` is ordered from oldest to newest.
     pub(crate) fn record_items<I>(&mut self, items: I)
     where
@@ -32,20 +40,47 @@ impl ConversationHistory {
         }
     }
 
+    /// Replace the entire history with a new set of items.
+    /// Filtering is intentionally skipped here so compaction can preserve any
+    /// non-standard items (e.g., bridge summaries) exactly as computed.
+    pub(crate) fn replace(&mut self, items: Vec<ResponseItem>) {
+        self.items = items;
+    }
+
+    /// Replace the entire history, filtering out any items that should not be
+    /// re-sent to the model.
+    pub(crate) fn replace_filtered(&mut self, items: Vec<ResponseItem>) {
+        self.items.clear();
+        self.items.reserve(items.len());
+        for item in items {
+            if !is_api_message(&item) {
+                continue;
+            }
+            self.items.push(item);
+        }
+    }
+
 }
 
 /// Anything that is not a system message or "reasoning" message is considered
 /// an API message.
 fn is_api_message(message: &ResponseItem) -> bool {
     match message {
+        ResponseItem::AdditionalTools { .. } => false,
         ResponseItem::Message { role, .. } => role.as_str() != "system",
         ResponseItem::FunctionCallOutput { .. }
         | ResponseItem::FunctionCall { .. }
+        | ResponseItem::ToolSearchCall { .. }
+        | ResponseItem::ToolSearchOutput { .. }
         | ResponseItem::CustomToolCall { .. }
         | ResponseItem::CustomToolCallOutput { .. }
         | ResponseItem::LocalShellCall { .. }
+        | ResponseItem::CompactionSummary { .. }
+        | ResponseItem::ContextCompaction { .. }
+        | ResponseItem::GhostSnapshot { .. }
         | ResponseItem::Reasoning { .. }
-        | ResponseItem::WebSearchCall { .. } => true,
+        | ResponseItem::WebSearchCall { .. }
+        | ResponseItem::ImageGenerationCall { .. } => true,
         ResponseItem::Other => false,
     }
 }
@@ -61,8 +96,7 @@ mod tests {
             role: "assistant".to_string(),
             content: vec![ContentItem::OutputText {
                 text: text.to_string(),
-            }],
-        }
+            }], end_turn: None, phase: None}
     }
 
     fn user_msg(text: &str) -> ResponseItem {
@@ -71,8 +105,7 @@ mod tests {
             role: "user".to_string(),
             content: vec![ContentItem::OutputText {
                 text: text.to_string(),
-            }],
-        }
+            }], end_turn: None, phase: None}
     }
 
     #[test]
@@ -84,8 +117,7 @@ mod tests {
             role: "system".to_string(),
             content: vec![ContentItem::OutputText {
                 text: "ignored".to_string(),
-            }],
-        };
+            }], end_turn: None, phase: None};
         h.record_items([&system, &ResponseItem::Other]);
 
         // User and assistant should be retained.
@@ -103,14 +135,14 @@ mod tests {
                     content: vec![ContentItem::OutputText {
                         text: "hi".to_string()
                     }]
-                },
+                , end_turn: None, phase: None},
                 ResponseItem::Message {
                     id: None,
                     role: "assistant".to_string(),
                     content: vec![ContentItem::OutputText {
                         text: "hello".to_string()
                     }]
-                }
+                , end_turn: None, phase: None}
             ]
         );
     }

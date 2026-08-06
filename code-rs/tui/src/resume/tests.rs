@@ -7,7 +7,7 @@ use std::path::Path;
 use tempfile::TempDir;
 use uuid::Uuid;
 
-use code_protocol::ConversationId;
+use code_protocol::ThreadId;
 use code_protocol::protocol::{
     EventMsg as ProtoEventMsg,
     RecordedEvent,
@@ -24,13 +24,16 @@ fn write_event_only_session(path: &Path, cwd: &Path) {
     let mut writer = BufWriter::new(file);
 
     let session_meta = SessionMeta {
-        id: ConversationId::from(Uuid::from_u128(0xDEAD_BEEF_u128)),
+        id: ThreadId::from_string(&Uuid::from_u128(0xDEAD_BEEF_u128).to_string()).unwrap(),
         timestamp: "2025-10-06T12:00:00.000Z".to_string(),
         cwd: cwd.to_path_buf(),
         originator: "resume-test".to_string(),
         cli_version: "0.0.0-test".to_string(),
-        instructions: None,
         source: SessionSource::Cli,
+        model_provider: None,
+        base_instructions: None,
+        dynamic_tools: None,
+        forked_from_id: None,
     };
 
     let meta_line = RolloutLine {
@@ -49,8 +52,9 @@ fn write_event_only_session(path: &Path, cwd: &Path) {
         order: None,
         msg: ProtoEventMsg::UserMessage(UserMessageEvent {
             message: "restore me".to_string(),
-            kind: None,
             images: None,
+            local_images: vec![],
+            text_elements: vec![],
         }),
     };
     let event_line = RolloutLine {
@@ -79,12 +83,10 @@ fn event_only_sessions_are_dropped_by_resume_discovery() {
     let rollout_path = sessions_dir.join("rollout-2025-10-06T12-00-00-00000000-0000-0000-0000-000000000042.jsonl");
     write_event_only_session(&rollout_path, &project_cwd);
 
-    let results = super::discovery::list_sessions_for_cwd(&project_cwd, code_home);
+    let results = super::discovery::list_sessions_for_cwd(&project_cwd, code_home, None);
 
     assert!(
-        !results.is_empty(),
-        "expected resume discovery to surface sessions that only contain Event-based user messages. \
-         An empty result demonstrates the regression where event-only transcripts are filtered out, \
-         making '/resume' miss recent conversations."
+        results.is_empty(),
+        "event-only sessions should be excluded from the resume picker"
     );
 }

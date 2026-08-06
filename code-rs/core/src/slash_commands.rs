@@ -1,24 +1,62 @@
-use crate::agent_defaults::DEFAULT_AGENT_NAMES;
+use crate::agent_defaults::agent_model_spec;
+use crate::agent_defaults::enabled_agent_model_specs;
 use crate::config_types::AgentConfig;
 use crate::config_types::SubagentCommandConfig;
+use crate::external_agent_command_exists;
 
 // NOTE: These are the prompt formatters for the prompt‑expanding slash commands
 // (/plan, /solve, /code). If you add or change a slash command, please update
 // the user documentation in `docs/slash-commands.md` so the list stays in sync
 // with the UI and behavior.
 
+fn command_exists(cmd: &str) -> bool {
+    external_agent_command_exists(cmd)
+}
+
 /// Get the list of enabled agent names from the configuration
 pub fn get_enabled_agents(agents: &[AgentConfig]) -> Vec<String> {
+    fn command_for_check(command: &str) -> &str {
+        command.split_whitespace().next().unwrap_or(command)
+    }
+
+    fn agent_is_runnable(agent: &AgentConfig) -> bool {
+        let spec = agent_model_spec(&agent.name).or_else(|| agent_model_spec(&agent.command));
+        if let Some(spec) = spec {
+            if matches!(spec.family, "code" | "codex" | "cloud") {
+                return true;
+            }
+        }
+
+        let cmd = agent.command.trim();
+        let cmd = if cmd.is_empty() { agent.name.trim() } else { cmd };
+        let cmd = command_for_check(cmd);
+        if !cmd.is_empty() && command_exists(cmd) {
+            return true;
+        }
+
+        if let Some(spec) = spec {
+            return command_exists(spec.cli);
+        }
+
+        false
+    }
+
     agents
         .iter()
-        .filter(|agent| agent.enabled)
+        .filter(|agent| agent.enabled && agent_is_runnable(agent))
         .map(|agent| agent.name.clone())
         .collect()
 }
 
 /// Get default models if no agents are configured
 fn get_default_models() -> Vec<String> {
-    DEFAULT_AGENT_NAMES.iter().map(|name| (*name).to_string()).collect()
+    enabled_agent_model_specs()
+        .into_iter()
+        .filter(|spec| {
+            matches!(spec.family, "code" | "codex" | "cloud") || command_exists(spec.cli)
+        })
+        .map(|spec| spec.slug.to_string())
+        .collect()
 }
 
 /// Resolution result for a subagent command.
@@ -79,7 +117,7 @@ pub fn default_instructions_for(name: &str) -> Option<String> {
 
 1. If you do not fully understand the task, research it briefly. Do not attempt to code or solve it, just understand the task in the context of the current code base.
 2. Provide full context to the agents so they can work on the task themselves. You do not need to guide them on how to write the code - focus on describing the current task and desired outcome.
-3. Start agents with read-only: false - each agents will work in a separate worktree and can:
+3. Start agents with write: true - each agent will work in a separate worktree and can:
 - Read and analyze existing code
 - Create new files
 - Modify existing files
@@ -130,11 +168,12 @@ pub fn format_subagent_command(
         .or_else(|| default_instructions_for(name))
         .unwrap_or_default();
 
+    let write_flag = !read_only;
     let prompt = format!(
-        "Please perform /{name} using the <tools>, <instructions> and <task> below.\n<tools>\n    To perform /{name} you must use `agent_run` to start a batch of agents with:\n    - `models`: an array containing [{models}]\n    - `read_only`: {ro}\n    Provide a comprehensive description of the task and context. You may need to briefly research the code base first and to give the agents a head start of where to look. You can include one or two key files but also allow the models to look up the files they need themselves. Using `agent_run` will start all agents at once and return a `batch_id`.\n\n    Each agent uses a different LLM which allows you to gather diverse results.\n    Monitor progress using `agent_wait` with `batch_id` and `return_all: true` to wait for all agents to complete.\n    If an agent fails or times out, you can ignore it and continue with the other results. \n    Use `agent_result` to get the results, or inspect the worktree directly if `read_only` is false.\n</tools>\n<instructions>\n    Instructions for /{name}:\n    {instructions}\n</instructions>\n<task>\n    Task for /{name}:\n    {task}\n</task>",
+        "Please perform /{name} using the <tools>, <instructions> and <task> below.\n<tools>\n    To perform /{name} you must use `agent {{\"action\":\"create\",\"create\":{{\"models\":[{models}],\"write\":{write_flag}}}}}` to start a batch of agents.\n    Provide a comprehensive description of the task and context. You may need to briefly research the code base first and to give the agents a head start of where to look. You can include one or two key files but also allow the models to look up the files they need themselves. Using the create action starts all agents at once and returns a `batch_id`.\n\n    Each agent uses a different LLM which allows you to gather diverse results.\n    Monitor progress using `agent {{\"action\":\"wait\",\"wait\":{{\"batch_id\":\"<batch_id>\",\"return_all\":true}}}}` to wait for all agents to complete.\n    If an agent fails or times out, you can ignore it and continue with the other results.\n    Use `agent {{\"action\":\"result\",\"result\":{{\"agent_id\":\"<agent_id>\"}}}}` to fetch detailed output, or inspect the worktree directly when `write` is true.\n</tools>\n<instructions>\n    Instructions for /{name}:\n    {instructions}\n</instructions>\n<task>\n    Task for /{name}:\n    {task}\n</task>",
         name = name,
         models = models_str,
-        ro = read_only,
+        write_flag = write_flag,
         instructions = instr_text,
         task = task,
     );
@@ -228,6 +267,105 @@ pub fn handle_slash_command(input: &str, agents: Option<&[AgentConfig]>) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
+    use std::sync::{LazyLock, Mutex};
+    use tempfile::tempdir;
+
+    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    fn restore_var(name: &str, value: Option<OsString>) {
+        match value {
+            Some(v) => unsafe { std::env::set_var(name, v) },
+            None => unsafe { std::env::remove_var(name) },
+        }
+    }
+
+    #[test]
+    fn default_models_skip_missing_agent_clis() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let orig_path = std::env::var_os("PATH");
+        let orig_home = std::env::var_os("HOME");
+        let orig_claude_config_dir = std::env::var_os("CLAUDE_CONFIG_DIR");
+        let fake_home = tempdir().expect("temp home");
+
+        unsafe {
+            std::env::set_var("PATH", "");
+            std::env::set_var("HOME", fake_home.path());
+            std::env::remove_var("CLAUDE_CONFIG_DIR");
+        }
+
+        let defaults = get_default_models();
+        assert!(defaults.iter().any(|v| v == "code-gpt-5.5"));
+        assert!(defaults.iter().any(|v| v == "code-gpt-5.6-terra"));
+        assert!(!defaults.iter().any(|v| v == "qwen-3-coder"));
+        assert!(!defaults.iter().any(|v| v == "gemini-3-flash"));
+        assert!(!defaults.iter().any(|v| v == "claude-sonnet-4.5"));
+
+        restore_var("PATH", orig_path);
+        restore_var("HOME", orig_home);
+        restore_var("CLAUDE_CONFIG_DIR", orig_claude_config_dir);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn default_models_include_claude_when_home_fallback_exists() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let orig_path = std::env::var_os("PATH");
+        let orig_home = std::env::var_os("HOME");
+        let orig_claude_config_dir = std::env::var_os("CLAUDE_CONFIG_DIR");
+
+        let fake_home = tempdir().expect("temp home");
+        let claude_dir = fake_home.path().join(".claude").join("local");
+        std::fs::create_dir_all(&claude_dir).expect("create fallback dir");
+        let claude_path = claude_dir.join("claude");
+        std::fs::write(&claude_path, "#!/bin/sh\nexit 0\n").expect("write fallback binary");
+        let mut perms = std::fs::metadata(&claude_path)
+            .expect("stat fallback binary")
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&claude_path, perms).expect("chmod fallback binary");
+
+        unsafe {
+            std::env::set_var("PATH", "");
+            std::env::set_var("HOME", fake_home.path());
+            std::env::remove_var("CLAUDE_CONFIG_DIR");
+        }
+
+        let defaults = get_default_models();
+        assert!(defaults.iter().any(|v| v == "claude-sonnet-4.6"));
+
+        restore_var("PATH", orig_path);
+        restore_var("HOME", orig_home);
+        restore_var("CLAUDE_CONFIG_DIR", orig_claude_config_dir);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn default_models_include_github_copilot_when_binary_exists() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let orig_path = std::env::var_os("PATH");
+        let fake_bin_dir = tempdir().expect("temp bin dir");
+        let copilot_path = fake_bin_dir.path().join("copilot");
+        std::fs::write(&copilot_path, "#!/bin/sh\nexit 0\n").expect("write fake copilot");
+        let mut perms = std::fs::metadata(&copilot_path)
+            .expect("stat fake copilot")
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&copilot_path, perms).expect("chmod fake copilot");
+
+        unsafe {
+            std::env::set_var("PATH", fake_bin_dir.path());
+        }
+
+        let defaults = get_default_models();
+        assert!(defaults.iter().any(|v| v == "github-copilot"));
+
+        restore_var("PATH", orig_path);
+    }
 
     #[test]
     fn test_slash_command_parsing() {
@@ -236,8 +374,10 @@ mod tests {
         assert!(result.is_some());
         let plan_prompt = result.unwrap();
         assert!(plan_prompt.contains("final, comprehensive plan"));
-        // Default agents list should include cloud when no [[agents]] configured
-        assert!(plan_prompt.to_ascii_lowercase().contains("cloud"));
+        // Default agents list should include non-Codex providers when no [[agents]] configured
+        assert!(plan_prompt.contains("code-gpt-5.5"));
+        assert!(plan_prompt.contains("code-gpt-5.6-terra"));
+        assert!(!plan_prompt.contains("cloud-gpt-5.1-codex-max"));
 
         // Test /solve command
         let result = handle_slash_command("/solve fix the bug in authentication", None);
@@ -269,8 +409,8 @@ mod tests {
         // Create test agent configurations
         let agents = vec![
             AgentConfig {
-                name: "test-claude".to_string(),
-                command: "claude".to_string(),
+                name: "code-gpt-5.6-terra".to_string(),
+                command: "code".to_string(),
                 args: vec![],
                 read_only: false,
                 enabled: true,
@@ -298,7 +438,7 @@ mod tests {
         let result = handle_slash_command("/plan test task", Some(&agents));
         assert!(result.is_some());
         let prompt = result.unwrap();
-        assert!(prompt.contains("test-claude"));
-        assert!(!prompt.contains("test-gemini")); // Should not include disabled agent
+        assert!(prompt.contains("code-gpt-5.6-terra"));
+        assert!(!prompt.contains("test-gemini"));
     }
 }

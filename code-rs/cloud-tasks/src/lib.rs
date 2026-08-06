@@ -12,11 +12,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
+use unicode_segmentation::UnicodeSegmentation;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 use code_tui::public_widgets::composer_input::ComposerAction;
+use util::append_debug_log;
 use util::append_error_log;
+use util::append_info_log;
+use util::log_path_hint;
 use util::set_user_agent_suffix;
 
 struct ApplyJob {
@@ -191,7 +195,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
         } else {
             "codex-api"
         };
-        append_error_log(format!("startup: base_url={base_url} path_style={style}"));
+        append_info_log(format!("startup: base_url={base_url} path_style={style}"));
 
         // Require ChatGPT login (SWIC). Exit with a clear message if missing.
         let _token = match code_core::config::find_code_home()
@@ -208,7 +212,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
             Some(auth) => {
                 // Log account context for debugging workspace selection.
                 if let Some(acc) = auth.get_account_id() {
-                    append_error_log(format!("auth: mode=ChatGPT account_id={acc}"));
+                    append_info_log(format!("auth: mode=ChatGPT account_id={acc}"));
                 }
                 match auth.get_token().await {
                     Ok(t) if !t.is_empty() => {
@@ -218,8 +222,12 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                             .get_account_id()
                             .or_else(|| util::extract_chatgpt_account_id(&t))
                         {
-                            append_error_log(format!("auth: set ChatGPT-Account-Id header: {acc}"));
+                            append_info_log(format!("auth: set ChatGPT-Account-Id header: {acc}"));
                             http = http.with_chatgpt_account_id(acc);
+                        }
+                        if auth.is_fedramp_account() {
+                            append_info_log("auth: set X-OpenAI-Fedramp header: true".to_string());
+                            http = http.with_fedramp_routing_header();
                         }
                         t
                     }
@@ -281,7 +289,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
             .as_deref(),
         Some("1") | Some("true") | Some("TRUE")
     );
-    append_error_log(format!(
+    append_info_log(format!(
         "startup: wham_force_internal={} ua={}",
         force_internal,
         code_core::default_client::get_code_user_agent(None)
@@ -431,7 +439,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                         app::AppEvent::TasksLoaded { env, result } => {
                             // Only apply results for the current filter to avoid races.
                             if env.as_deref() != app.env_filter.as_deref() {
-                                append_error_log(format!(
+                                append_debug_log(format!(
                                     "refresh.drop: env={} current={}",
                                     env.clone().unwrap_or_else(|| "<all>".to_string()),
                                     app.env_filter.clone().unwrap_or_else(|| "<all>".to_string())
@@ -441,7 +449,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                             app.refresh_inflight = false;
                             match result {
                                 Ok(tasks) => {
-                                    append_error_log(format!(
+                                    append_debug_log(format!(
                                         "refresh.apply: env={} count={}",
                                         env.clone().unwrap_or_else(|| "<all>".to_string()),
                                         tasks.len()
@@ -461,7 +469,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                         app::AppEvent::NewTaskSubmitted(result) => {
                             match result {
                                 Ok(created) => {
-                                    append_error_log(format!("new-task: created id={}", created.id.0));
+                                    append_info_log(format!("new-task: created id={}", created.id.0));
                                     app.status = format!("Submitted as {}", created.id.0);
                                     app.new_task = None;
                                     // Refresh tasks in background for current filter
@@ -481,7 +489,12 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                                 Err(msg) => {
                                     append_error_log(format!("new-task: submit failed: {msg}"));
                                     if let Some(page) = app.new_task.as_mut() { page.submitting = false; }
-                                    app.status = format!("Submit failed: {msg}. See error.log for details.");
+                                    if let Some(log_hint) = log_path_hint() {
+                                        app.status =
+                                            format!("Submit failed: {msg}. See {log_hint} for details.");
+                                    } else {
+                                        app.status = format!("Submit failed: {msg}.");
+                                    }
                                     needs_redraw = true;
                                     let _ = frame_tx.send(Instant::now());
                                 }
@@ -522,7 +535,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                             if let Ok(sel) = result {
                                 // Only apply if user hasn't set a filter yet or it's different.
                                 if app.env_filter.as_deref() != Some(sel.id.as_str()) {
-                                    append_error_log(format!(
+                                    append_info_log(format!(
                                         "env.select: autodetected id={} label={}",
                                         sel.id,
                                         sel.label.clone().unwrap_or_else(|| "<none>".to_string())
@@ -908,7 +921,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                                         if let Some(page) = app.new_task.as_mut() {
                                             page.best_of_n = new_value;
                                         }
-                                        append_error_log(format!("best-of.select: attempts={new_value}"));
+                                        append_info_log(format!("best-of.select: attempts={new_value}"));
                                         app.status = format!(
                                             "Best-of updated to {new_value} attempt{}",
                                             if new_value == 1 { "" } else { "s" }
@@ -969,7 +982,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                                     } else if let ComposerAction::Submitted(text) = page.composer.input(key) {
                                             // Submit only if we have an env id
                                             if let Some(env) = page.env_id.clone() {
-                                                append_error_log(format!(
+                                                append_debug_log(format!(
                                                     "new-task: submit env={} size={}",
                                                     env,
                                                     text.chars().count()
@@ -1202,7 +1215,16 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                                     if let Some(m) = app.env_modal.as_mut() { m.query.push(ch); }
                                     needs_redraw = true;
                                 }
-                                KeyCode::Backspace => { if let Some(m) = app.env_modal.as_mut() { m.query.pop(); } needs_redraw = true; }
+                                KeyCode::Backspace => {
+                                    if let Some(m) = app.env_modal.as_mut() {
+                                        if let Some((idx, _)) = m.query.grapheme_indices(true).last() {
+                                            m.query.truncate(idx);
+                                        } else {
+                                            m.query.clear();
+                                        }
+                                    }
+                                    needs_redraw = true;
+                                }
                                 KeyCode::Down | KeyCode::Char('j') => { if let Some(m) = app.env_modal.as_mut() { m.selected = m.selected.saturating_add(1); } needs_redraw = true; }
                                 KeyCode::Up | KeyCode::Char('k') => { if let Some(m) = app.env_modal.as_mut() { m.selected = m.selected.saturating_sub(1); } needs_redraw = true; }
                                 KeyCode::Home => { if let Some(m) = app.env_modal.as_mut() { m.selected = 0; } needs_redraw = true; }
@@ -1232,11 +1254,11 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                                         }).collect();
                                         // Keep original order (already sorted) — no need to re-sort
                                         let idx = state.selected;
-                                        if idx == 0 { app.env_filter = None; append_error_log("env.select: All"); }
+                                        if idx == 0 { app.env_filter = None; append_info_log("env.select: All"); }
                                         else {
                                             let env_idx = idx.saturating_sub(1);
                                             if let Some(row) = filtered.get(env_idx) {
-                                                append_error_log(format!(
+                                                append_info_log(format!(
                                                     "env.select: id={} label={}",
                                                     row.id,
                                                     row.label.clone().unwrap_or_else(|| "<none>".to_string())
@@ -1283,7 +1305,7 @@ pub async fn run_main(cli: Cli, _code_linux_sandbox_exe: Option<PathBuf>) -> any
                                 // Ensure 'r' does not refresh tasks when the env modal is open.
                                 KeyCode::Char('r') | KeyCode::Char('R') => {
                                     if app.env_modal.is_some() { break 0; }
-                                    append_error_log(format!(
+                                    append_debug_log(format!(
                                         "refresh.request: env={}",
                                         app.env_filter.clone().unwrap_or_else(|| "<all>".to_string())
                                     ));

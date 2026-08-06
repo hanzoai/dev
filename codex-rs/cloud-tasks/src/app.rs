@@ -1,4 +1,5 @@
 use std::time::Duration;
+use std::time::Instant;
 
 // Environment filter data models for the TUI
 #[derive(Clone, Debug, Default)]
@@ -42,15 +43,13 @@ use crate::scrollable_diff::ScrollableDiff;
 use codex_cloud_tasks_client::CloudBackend;
 use codex_cloud_tasks_client::TaskId;
 use codex_cloud_tasks_client::TaskSummary;
-use throbber_widgets_tui::ThrobberState;
-
 #[derive(Default)]
 pub struct App {
     pub tasks: Vec<TaskSummary>,
     pub selected: usize,
     pub status: String,
     pub diff_overlay: Option<DiffOverlay>,
-    pub throbber: ThrobberState,
+    pub spinner_start: Option<Instant>,
     pub refresh_inflight: bool,
     pub details_inflight: bool,
     // Environment filter state
@@ -82,7 +81,7 @@ impl App {
             selected: 0,
             status: "Press r to refresh".to_string(),
             diff_overlay: None,
-            throbber: ThrobberState::default(),
+            spinner_start: None,
             refresh_inflight: false,
             details_inflight: false,
             env_filter: None,
@@ -124,9 +123,13 @@ pub async fn load_tasks(
     env: Option<&str>,
 ) -> anyhow::Result<Vec<TaskSummary>> {
     // In later milestones, add a small debounce, spinner, and error display.
-    let tasks = tokio::time::timeout(Duration::from_secs(5), backend.list_tasks(env)).await??;
+    let tasks = tokio::time::timeout(
+        Duration::from_secs(5),
+        backend.list_tasks(env, Some(20), /*cursor*/ None),
+    )
+    .await??;
     // Hide review-only tasks from the main list.
-    let filtered: Vec<TaskSummary> = tasks.into_iter().filter(|t| !t.is_review).collect();
+    let filtered: Vec<TaskSummary> = tasks.tasks.into_iter().filter(|t| !t.is_review).collect();
     Ok(filtered)
 }
 
@@ -351,18 +354,21 @@ pub enum AppEvent {
 mod tests {
     use super::*;
     use chrono::Utc;
+    use codex_cloud_tasks_client::CloudBackendFuture;
+    use codex_cloud_tasks_client::CloudTaskError;
 
     struct FakeBackend {
         // maps env key to titles
         by_env: std::collections::HashMap<Option<String>, Vec<&'static str>>,
     }
 
-    #[async_trait::async_trait]
-    impl codex_cloud_tasks_client::CloudBackend for FakeBackend {
+    impl FakeBackend {
         async fn list_tasks(
             &self,
             env: Option<&str>,
-        ) -> codex_cloud_tasks_client::Result<Vec<TaskSummary>> {
+            limit: Option<i64>,
+            cursor: Option<&str>,
+        ) -> Result<codex_cloud_tasks_client::TaskListPage, CloudTaskError> {
             let key = env.map(str::to_string);
             let titles = self
                 .by_env
@@ -383,28 +389,34 @@ mod tests {
                     attempt_total: Some(1),
                 });
             }
-            Ok(out)
+            let max = limit.unwrap_or(i64::MAX);
+            let max = max.min(20);
+            let mut limited = Vec::new();
+            for task in out {
+                if (limited.len() as i64) >= max {
+                    break;
+                }
+                limited.push(task);
+            }
+            Ok(codex_cloud_tasks_client::TaskListPage {
+                tasks: limited,
+                cursor: cursor.map(str::to_string),
+            })
         }
 
-        async fn get_task_diff(
-            &self,
-            _id: TaskId,
-        ) -> codex_cloud_tasks_client::Result<Option<String>> {
-            Err(codex_cloud_tasks_client::CloudTaskError::Unimplemented(
-                "not used in test",
-            ))
+        async fn get_task_summary(&self, id: TaskId) -> Result<TaskSummary, CloudTaskError> {
+            self.list_tasks(/*env*/ None, /*limit*/ None, /*cursor*/ None)
+                .await?
+                .tasks
+                .into_iter()
+                .find(|t| t.id == id)
+                .ok_or_else(|| CloudTaskError::Msg(format!("Task {} not found", id.0)))
         }
 
-        async fn get_task_messages(
-            &self,
-            _id: TaskId,
-        ) -> codex_cloud_tasks_client::Result<Vec<String>> {
-            Ok(vec![])
-        }
         async fn get_task_text(
             &self,
             _id: TaskId,
-        ) -> codex_cloud_tasks_client::Result<codex_cloud_tasks_client::TaskText> {
+        ) -> Result<codex_cloud_tasks_client::TaskText, CloudTaskError> {
             Ok(codex_cloud_tasks_client::TaskText {
                 prompt: Some("Example prompt".to_string()),
                 messages: Vec::new(),
@@ -414,46 +426,86 @@ mod tests {
                 attempt_status: codex_cloud_tasks_client::AttemptStatus::Completed,
             })
         }
+    }
 
-        async fn list_sibling_attempts(
+    impl codex_cloud_tasks_client::CloudBackend for FakeBackend {
+        fn list_tasks<'a>(
+            &'a self,
+            env: Option<&'a str>,
+            limit: Option<i64>,
+            cursor: Option<&'a str>,
+        ) -> CloudBackendFuture<'a, codex_cloud_tasks_client::TaskListPage> {
+            Box::pin(FakeBackend::list_tasks(self, env, limit, cursor))
+        }
+
+        fn get_task_summary(&self, id: TaskId) -> CloudBackendFuture<'_, TaskSummary> {
+            Box::pin(FakeBackend::get_task_summary(self, id))
+        }
+
+        fn get_task_diff(&self, _id: TaskId) -> CloudBackendFuture<'_, Option<String>> {
+            Box::pin(async {
+                Err(codex_cloud_tasks_client::CloudTaskError::Unimplemented(
+                    "not used in test",
+                ))
+            })
+        }
+
+        fn get_task_messages(&self, _id: TaskId) -> CloudBackendFuture<'_, Vec<String>> {
+            Box::pin(async { Ok(vec![]) })
+        }
+
+        fn get_task_text(
+            &self,
+            id: TaskId,
+        ) -> CloudBackendFuture<'_, codex_cloud_tasks_client::TaskText> {
+            Box::pin(FakeBackend::get_task_text(self, id))
+        }
+
+        fn list_sibling_attempts(
             &self,
             _task: TaskId,
             _turn_id: String,
-        ) -> codex_cloud_tasks_client::Result<Vec<codex_cloud_tasks_client::TurnAttempt>> {
-            Ok(Vec::new())
+        ) -> CloudBackendFuture<'_, Vec<codex_cloud_tasks_client::TurnAttempt>> {
+            Box::pin(async { Ok(Vec::new()) })
         }
 
-        async fn apply_task(
+        fn apply_task(
             &self,
             _id: TaskId,
             _diff_override: Option<String>,
-        ) -> codex_cloud_tasks_client::Result<codex_cloud_tasks_client::ApplyOutcome> {
-            Err(codex_cloud_tasks_client::CloudTaskError::Unimplemented(
-                "not used in test",
-            ))
+        ) -> CloudBackendFuture<'_, codex_cloud_tasks_client::ApplyOutcome> {
+            Box::pin(async {
+                Err(codex_cloud_tasks_client::CloudTaskError::Unimplemented(
+                    "not used in test",
+                ))
+            })
         }
 
-        async fn apply_task_preflight(
+        fn apply_task_preflight(
             &self,
             _id: TaskId,
             _diff_override: Option<String>,
-        ) -> codex_cloud_tasks_client::Result<codex_cloud_tasks_client::ApplyOutcome> {
-            Err(codex_cloud_tasks_client::CloudTaskError::Unimplemented(
-                "not used in test",
-            ))
+        ) -> CloudBackendFuture<'_, codex_cloud_tasks_client::ApplyOutcome> {
+            Box::pin(async {
+                Err(codex_cloud_tasks_client::CloudTaskError::Unimplemented(
+                    "not used in test",
+                ))
+            })
         }
 
-        async fn create_task(
-            &self,
-            _env_id: &str,
-            _prompt: &str,
-            _git_ref: &str,
+        fn create_task<'a>(
+            &'a self,
+            _env_id: &'a str,
+            _prompt: &'a str,
+            _git_ref: &'a str,
             _qa_mode: bool,
             _best_of_n: usize,
-        ) -> codex_cloud_tasks_client::Result<codex_cloud_tasks_client::CreatedTask> {
-            Err(codex_cloud_tasks_client::CloudTaskError::Unimplemented(
-                "not used in test",
-            ))
+        ) -> CloudBackendFuture<'a, codex_cloud_tasks_client::CreatedTask> {
+            Box::pin(async {
+                Err(codex_cloud_tasks_client::CloudTaskError::Unimplemented(
+                    "not used in test",
+                ))
+            })
         }
     }
 
@@ -467,7 +519,7 @@ mod tests {
         let backend = FakeBackend { by_env };
 
         // Act + Assert
-        let root = load_tasks(&backend, None).await.unwrap();
+        let root = load_tasks(&backend, /*env*/ None).await.unwrap();
         assert_eq!(root.len(), 2);
         assert_eq!(root[0].title, "root-1");
 

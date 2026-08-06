@@ -1,11 +1,12 @@
 use crate::bash::try_parse_bash;
 use crate::bash::try_parse_word_only_commands_sequence;
+use crate::util::extract_shell_script;
+use crate::util::is_shell_like_executable;
 use serde::Deserialize;
 use serde::Serialize;
 use shlex::split as shlex_split;
 use shlex::try_join as shlex_try_join;
-use std::path::Path;
-
+use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub enum ParsedCommand {
     Read {
@@ -35,7 +36,11 @@ impl From<ParsedCommand> for code_protocol::parse_command::ParsedCommand {
     fn from(v: ParsedCommand) -> Self {
         use code_protocol::parse_command::ParsedCommand as P;
         match v {
-            ParsedCommand::Read { cmd, name } => P::Read { cmd, name },
+            ParsedCommand::Read { cmd, name } => P::Read {
+                cmd,
+                name: name.clone(),
+                path: PathBuf::from(name),
+            },
             ParsedCommand::ListFiles { cmd, path } => P::ListFiles { cmd, path },
             ParsedCommand::Search { cmd, query, path } => P::Search { cmd, query, path },
             ParsedCommand::ReadCommand { cmd } => P::ReadCommand { cmd },
@@ -49,16 +54,15 @@ fn shlex_join(tokens: &[String]) -> String {
         .unwrap_or_else(|_| "<command included NUL byte>".to_string())
 }
 
-fn is_bash_executable(cmd: &str) -> bool {
-    let trimmed = cmd.trim_matches('"').trim_matches('\'');
-    if trimmed.eq_ignore_ascii_case("bash") || trimmed.eq_ignore_ascii_case("bash.exe") {
-        return true;
+fn simple_space_join(tokens: &[String]) -> Option<String> {
+    if tokens.iter().any(|t| t.chars().any(char::is_whitespace)) {
+        return None;
     }
-    Path::new(trimmed)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .map(|name| name.eq_ignore_ascii_case("bash") || name.eq_ignore_ascii_case("bash.exe"))
-        .unwrap_or(false)
+    Some(tokens.join(" "))
+}
+
+fn is_shell_executable(cmd: &str) -> bool {
+    is_shell_like_executable(cmd)
 }
 
 /// DO NOT REVIEW THIS CODE BY HAND
@@ -114,6 +118,16 @@ mod tests {
     }
 
     #[test]
+    fn raw_shell_script_git_status_is_read_command() {
+        assert_parsed(
+            &vec_str(&["git status"]),
+            vec![ParsedCommand::ReadCommand {
+                cmd: "git status".to_string(),
+            }],
+        );
+    }
+
+    #[test]
     fn handles_git_pipe_wc() {
         let inner = "git status | wc -l";
         assert_parsed(
@@ -125,11 +139,63 @@ mod tests {
     }
 
     #[test]
+    fn sh_lc_sed_is_read_command() {
+        let inner = "sed -n '10,20p' code-rs/tui/src/chatwidget.rs";
+        assert_parsed(
+            &vec_str(&["sh", "-lc", inner]),
+            vec![ParsedCommand::Read {
+                cmd: inner.to_string(),
+                name: "chatwidget.rs".to_string(),
+            }],
+        );
+    }
+
+    #[test]
     fn git_diff_staged_is_read_command() {
         assert_parsed(
             &vec_str(&["git", "--no-pager", "diff", "--staged", "--stat"]),
             vec![ParsedCommand::ReadCommand {
                 cmd: "git --no-pager diff --staged --stat".to_string(),
+            }],
+        );
+    }
+
+    #[test]
+    fn git_branch_listing_is_read_command() {
+        assert_parsed(
+            &vec_str(&["git", "branch"]),
+            vec![ParsedCommand::ReadCommand {
+                cmd: "git branch".to_string(),
+            }],
+        );
+    }
+
+    #[test]
+    fn git_branch_list_with_pattern_is_read_command() {
+        assert_parsed(
+            &vec_str(&["git", "branch", "--list", "feature/*"]),
+            vec![ParsedCommand::ReadCommand {
+                cmd: "git branch --list feature/*".to_string(),
+            }],
+        );
+    }
+
+    #[test]
+    fn git_branch_list_with_spaced_pattern_keeps_quotes() {
+        assert_parsed(
+            &vec_str(&["git", "branch", "--list", "feature name/*"]),
+            vec![ParsedCommand::ReadCommand {
+                cmd: "git branch --list 'feature name/*'".to_string(),
+            }],
+        );
+    }
+
+    #[test]
+    fn git_branch_create_is_not_read_only() {
+        assert_parsed(
+            &vec_str(&["git", "branch", "new-branch"]),
+            vec![ParsedCommand::Unknown {
+                cmd: "git branch new-branch".to_string(),
             }],
         );
     }
@@ -994,7 +1060,7 @@ mod tests {
 }
 
 pub fn parse_command_impl(command: &[String]) -> Vec<ParsedCommand> {
-    if let Some(commands) = parse_bash_lc_commands(command) {
+    if let Some(commands) = parse_shell_script_commands(command) {
         return commands;
     }
 
@@ -1119,7 +1185,7 @@ fn normalize_tokens(cmd: &[String]) -> Vec<String> {
             // Do not re-shlex already-tokenized input; just drop the prefix.
             rest.to_vec()
         }
-        [bash, flag, script] if is_bash_executable(bash) && (flag == "-c" || flag == "-lc") => {
+        [bash, flag, script] if is_shell_executable(bash) && (flag == "-c" || flag == "-lc") => {
             shlex_split(script)
                 .unwrap_or_else(|| vec!["bash".to_string(), flag.clone(), script.clone()])
         }
@@ -1396,20 +1462,28 @@ fn parse_git_grep_query_and_path(args: &[String]) -> (Option<String>, Option<Str
     (query, path)
 }
 
-fn parse_bash_lc_commands(original: &[String]) -> Option<Vec<ParsedCommand>> {
-    let [bash, flag, script] = original else {
-        return None;
+fn parse_shell_script_commands(original: &[String]) -> Option<Vec<ParsedCommand>> {
+    let shell_flag = match original {
+        [script] => {
+            return parse_shell_script_text(script, None);
+        }
+        [bash, flag, _] if is_shell_executable(bash) && matches!(flag.as_str(), "-lc" | "-c") => {
+            Some(flag.as_str())
+        }
+        _ => None,
     };
-    if !is_bash_executable(bash) || flag != "-lc" {
-        return None;
-    }
+    let (_, script) = extract_shell_script(original)?;
+    parse_shell_script_text(script, shell_flag)
+}
+
+fn parse_shell_script_text(script: &str, shell_flag: Option<&str>) -> Option<Vec<ParsedCommand>> {
     if let Some(tree) = try_parse_bash(script) {
         if let Some(all_commands) = try_parse_word_only_commands_sequence(&tree, script) {
             if all_commands.is_empty() {
                 return None;
             }
             let script_tokens = shlex_split(script)
-                .unwrap_or_else(|| vec!["bash".to_string(), flag.clone(), script.clone()]);
+                .unwrap_or_else(|| fallback_shell_script_tokens(script, shell_flag));
             // Strip small formatting helpers (e.g., head/tail/awk/wc/etc) so we
             // bias toward the primary command when pipelines are present.
             let had_multiple_commands = all_commands.len() > 1;
@@ -1453,7 +1527,7 @@ fn parse_bash_lc_commands(original: &[String]) -> Option<Vec<ParsedCommand>> {
                                 });
                                 if has_pipe && has_sed_n {
                                     ParsedCommand::Read {
-                                        cmd: script.clone(),
+                                        cmd: script.to_string(),
                                         name,
                                     }
                                 } else {
@@ -1506,7 +1580,32 @@ fn parse_bash_lc_commands(original: &[String]) -> Option<Vec<ParsedCommand>> {
             return Some(commands);
         }
     }
-    None
+
+    let tokens = shlex_split(script).unwrap_or_else(|| vec![script.to_string()]);
+    let normalized = normalize_tokens(&tokens);
+    let parts = if contains_connectors(&normalized) {
+        split_on_connectors(&normalized)
+    } else {
+        vec![normalized.clone()]
+    };
+
+    let mut commands: Vec<ParsedCommand> = parts
+        .iter()
+        .map(|segment| summarize_main_tokens(segment))
+        .collect();
+
+    while let Some(next) = simplify_once(&commands) {
+        commands = next;
+    }
+
+    Some(commands)
+}
+
+fn fallback_shell_script_tokens(script: &str, shell_flag: Option<&str>) -> Vec<String> {
+    match shell_flag {
+        Some(flag) => vec!["bash".to_string(), flag.to_string(), script.to_string()],
+        None => vec![script.to_string()],
+    }
 }
 
 /// Return true if this looks like a small formatting helper in a pipeline.
@@ -1593,6 +1692,7 @@ fn git_command_is_read_only(subcmd: &str, args: &[String]) -> bool {
             .all(|arg| !(arg == "-o" || arg == "--output" || arg.starts_with("--output="))),
         "log" => true,
         "show" => true,
+        "branch" => git_branch_is_read_only(args),
         "rev-parse" => true,
         "rev-list" => true,
         "describe" => true,
@@ -1600,6 +1700,101 @@ fn git_command_is_read_only(subcmd: &str, args: &[String]) -> bool {
         "ls-tree" => true,
         _ => false,
     }
+}
+
+fn git_branch_is_read_only(args: &[String]) -> bool {
+    if args.is_empty() {
+        return true;
+    }
+
+    const MUTATING_LONG_FLAGS: &[&str] = &[
+        "--delete",
+        "--move",
+        "--copy",
+        "--create-reflog",
+        "--force",
+        "--set-upstream-to",
+        "--set-upstream",
+        "--unset-upstream",
+        "--track",
+        "--edit-description",
+    ];
+    const SAFE_VALUE_FLAGS: &[&str] = &[
+        "--contains",
+        "--merged",
+        "--no-merged",
+        "--points-at",
+        "--format",
+        "--sort",
+        "--color",
+        "--column",
+    ];
+    const SAFE_SHORT_FLAGS: &[char] = &['a', 'r', 'v', 'q', 'l'];
+    const MUTATING_SHORT_FLAGS: &[char] = &['d', 'D', 'm', 'M', 'c', 'C', 'f', 'F', 'b', 'B', 't', 'u'];
+
+    let mut expect_value = false;
+    let mut allow_patterns = false;
+
+    for arg in args {
+        if expect_value {
+            expect_value = false;
+            continue;
+        }
+
+        if let Some(stripped) = arg.strip_prefix("--") {
+            let (flag, has_value) = if let Some((head, _)) = stripped.split_once('=') {
+                (format!("--{head}"), true)
+            } else {
+                (format!("--{stripped}"), false)
+            };
+
+            if MUTATING_LONG_FLAGS.contains(&flag.as_str()) {
+                return false;
+            }
+
+            if SAFE_VALUE_FLAGS.contains(&flag.as_str()) {
+                if !has_value {
+                    expect_value = true;
+                }
+                continue;
+            }
+
+            if flag == "--list" {
+                allow_patterns = true;
+                continue;
+            }
+
+            // Other long options (including --all/--remotes) are display-only.
+            continue;
+        }
+
+        if arg.starts_with('-') {
+            let mut chars = arg.chars();
+            chars.next(); // skip '-'
+            for ch in chars {
+                if MUTATING_SHORT_FLAGS.contains(&ch) {
+                    return false;
+                }
+                if !SAFE_SHORT_FLAGS.contains(&ch) {
+                    // Unknown short flag; default to denying writes.
+                    return false;
+                }
+                if ch == 'l' {
+                    allow_patterns = true;
+                }
+            }
+            continue;
+        }
+
+        if allow_patterns {
+            continue;
+        }
+
+        // If we reach here the command is attempting to create/modify a branch.
+        return false;
+    }
+
+    true
 }
 
 fn summarize_main_tokens(main_cmd: &[String]) -> ParsedCommand {
@@ -1628,7 +1823,11 @@ fn summarize_main_tokens(main_cmd: &[String]) -> ParsedCommand {
             }
         }
         Some((head, tail)) if head == "git" => {
-            let cmd = shlex_join(main_cmd);
+            let cmd = if main_cmd.get(1).map(|s| s.as_str()) == Some("branch") {
+                simple_space_join(main_cmd).unwrap_or_else(|| shlex_join(main_cmd))
+            } else {
+                shlex_join(main_cmd)
+            };
             if let Some(idx) = git_subcommand_index(tail) {
                 let sub = tail[idx].as_str();
                 let rest = &tail[idx + 1..];

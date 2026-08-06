@@ -34,6 +34,16 @@ pub(crate) enum TaskKind {
     Compact,
 }
 
+impl TaskKind {
+    pub(crate) fn header_value(self) -> &'static str {
+        match self {
+            TaskKind::Regular => "standard",
+            TaskKind::Review => "review",
+            TaskKind::Compact => "compact",
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct RunningTask {
     pub(crate) handle: AbortHandle,

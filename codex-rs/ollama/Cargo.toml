@@ -1,11 +1,13 @@
 [package]
-edition = "2024"
 name = "codex-ollama"
-version = { workspace = true }
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 
 [lib]
 name = "codex_ollama"
 path = "src/lib.rs"
+doctest = false
 
 [lints]
 workspace = true
@@ -14,8 +16,11 @@ workspace = true
 async-stream = { workspace = true }
 bytes = { workspace = true }
 codex-core = { workspace = true }
+codex-http-client = { workspace = true }
+codex-model-provider-info = { workspace = true }
 futures = { workspace = true }
-reqwest = { workspace = true, features = ["json", "stream"] }
+memchr = { workspace = true }
+semver = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = [
     "io-std",
@@ -29,3 +34,4 @@ wiremock = { workspace = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
+pretty_assertions = { workspace = true }

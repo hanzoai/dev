@@ -29,6 +29,8 @@ use ratatui::crossterm::terminal::disable_raw_mode;
 use ratatui::crossterm::terminal::enable_raw_mode;
 use crossterm::terminal::supports_keyboard_enhancement;
 use ratatui_image::picker::Picker;
+#[cfg(unix)]
+use std::os::fd::AsRawFd;
 
 /// A type alias for the terminal type used in this application
 pub type Tui = Terminal<CrosstermBackend<BufWriter<Stdout>>>;
@@ -104,12 +106,11 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
     let terminal_info = query_terminal_info();
 
     enable_raw_mode()?;
-    // Enable keyboard enhancement flags only when supported. On some Windows 10
-    // consoles/environments, attempting to push these flags can interfere with
-    // input delivery (reported as a freeze where keypresses don’t register).
-    // We already normalize key kinds when enhancement is unsupported elsewhere,
-    // so it’s safe to skip enabling here.
-    if supports_keyboard_enhancement().unwrap_or(false) {
+    // Enable keyboard enhancement flags only when supported *and* the current
+    // terminal environment is known to handle them reliably. Some Windows
+    // terminal stacks (including WSL/ConPTY-derived PTYs) can report support
+    // but still deliver broken input when these flags are enabled.
+    if supports_keyboard_enhancement().unwrap_or(false) && should_enable_keyboard_enhancement() {
         let _ = execute!(
             stdout(),
             PushKeyboardEnhancementFlags(
@@ -119,7 +120,7 @@ pub fn init(config: &Config) -> Result<(Tui, TerminalInfo)> {
             )
         );
     } else {
-        tracing::info!("Keyboard enhancement flags not supported; skipping enable.");
+        tracing::info!("Keyboard enhancement flags unsupported or disabled; skipping enable.");
     }
     set_panic_hook();
 
@@ -217,26 +218,7 @@ fn query_terminal_info() -> TerminalInfo {
 }
 
 fn set_panic_hook() {
-    // Chain to any previously installed hook so users still get rich reports.
-    let prev = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |panic_info| {
-        // Always attempt to restore the terminal state before printing the panic.
-        // This is crucial on Windows and when background threads panic — otherwise
-        // raw mode, mouse/focus reporting, and the alt screen can be left enabled,
-        // causing sequences like "[A", "[B", or "[I" to appear and making Ctrl+C
-        // ineffective. Ignore any restore error as we're already failing.
-        let _ = restore();
-
-        // Delegate to the previous hook (color-eyre or default) to render details.
-        prev(panic_info);
-
-        // Ensure the process terminates. Without exiting here, a panic in a
-        // background thread (e.g., streaming/agent worker) would leave the main
-        // UI thread running after we've torn down the terminal, which manifests
-        // as the "CLI bugs out" behavior described in issue #80.
-        // Exiting avoids that half‑alive state and returns control to the shell.
-        std::process::exit(1);
-    }));
+    crate::install_unified_panic_hook();
 }
 
 /// Restore the terminal to its original state
@@ -246,7 +228,7 @@ pub fn restore() -> Result<()> {
     // Belt-and-suspenders: on terminals that do not maintain a clean stack,
     // explicitly set enhancement flags to empty, then pop again. This avoids
     // leaving kitty/xterm enhanced keyboard protocols active after exit.
-    if supports_keyboard_enhancement().unwrap_or(false) {
+    if supports_keyboard_enhancement().unwrap_or(false) && should_enable_keyboard_enhancement() {
         let _ = execute!(stdout(), PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::empty()));
         let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
     }
@@ -278,7 +260,7 @@ pub fn leave_alt_screen_only() -> Result<()> {
     // Pop keyboard enhancement flags so keys like Enter/Arrows don't emit
     // enhanced escape sequences (e.g., kitty/xterm modifyOtherKeys) into the buffer.
     let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
-    if supports_keyboard_enhancement().unwrap_or(false) {
+    if supports_keyboard_enhancement().unwrap_or(false) && should_enable_keyboard_enhancement() {
         let _ = execute!(stdout(), PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::empty()));
         let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
     }
@@ -290,7 +272,7 @@ pub fn leave_alt_screen_only() -> Result<()> {
 /// Restores title and colors and performs a full clear to ensure a clean frame.
 pub fn enter_alt_screen_only(theme_fg: ratatui::style::Color, theme_bg: ratatui::style::Color) -> Result<()> {
     // Re-enable enhanced keyboard and focus/paste signaling for full TUI fidelity.
-    if supports_keyboard_enhancement().unwrap_or(false) {
+    if supports_keyboard_enhancement().unwrap_or(false) && should_enable_keyboard_enhancement() {
         let _ = execute!(
             stdout(),
             PushKeyboardEnhancementFlags(
@@ -335,6 +317,31 @@ fn disable_alternate_scroll_mode() -> Result<()> {
     handle.write_all(b"\x1b[?1007l")?;
     handle.flush()?;
     Ok(())
+}
+
+/// Best-effort readiness check to avoid blocking writes when the terminal/PTY
+/// consumer is paused (e.g., when the display sleeps). Falls back to writable
+/// on poll errors or non-Unix platforms.
+#[cfg(unix)]
+pub fn stdout_ready_for_writes() -> bool {
+    use libc::{poll, pollfd, POLLOUT};
+
+    let fd = std::io::stdout().as_raw_fd();
+    let mut fds = pollfd {
+        fd,
+        events: POLLOUT,
+        revents: 0,
+    };
+    let rc = unsafe { poll(&mut fds, 1, 0) };
+    if rc < 0 {
+        return true;
+    }
+    fds.revents & POLLOUT != 0
+}
+
+#[cfg(not(unix))]
+pub fn stdout_ready_for_writes() -> bool {
+    true
 }
 
 fn should_enable_alternate_scroll_mode() -> bool {
@@ -388,4 +395,73 @@ fn should_enable_focus_change() -> bool {
 
     // Default: enabled for modern terminals (xterm-256color, iTerm2, Alacritty, kitty, tmux, etc.)
     true
+}
+
+pub(crate) fn should_enable_keyboard_enhancement() -> bool {
+    // Hard overrides first
+    if env::var("CODE_DISABLE_KBD_ENHANCEMENT")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    if env::var("CODE_ENABLE_KBD_ENHANCEMENT")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    // Windows Terminal + ConPTY/WSL stacks are a frequent source of flaky input
+    // when keyboard enhancement flags are enabled.
+    if env::var("WT_SESSION").is_ok() {
+        return false;
+    }
+
+    // Git Bash / MSYS2 frequently struggles with these sequences.
+    if env::var("MSYSTEM").is_ok() {
+        return false;
+    }
+
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_enable_keyboard_enhancement;
+
+    #[test]
+    fn keyboard_enhancement_respects_env_overrides() {
+        let prev_wt_session = std::env::var("WT_SESSION").ok();
+        let prev_enable = std::env::var("CODE_ENABLE_KBD_ENHANCEMENT").ok();
+        let prev_disable = std::env::var("CODE_DISABLE_KBD_ENHANCEMENT").ok();
+
+        unsafe {
+            std::env::set_var("WT_SESSION", "1");
+            std::env::remove_var("CODE_ENABLE_KBD_ENHANCEMENT");
+            std::env::remove_var("CODE_DISABLE_KBD_ENHANCEMENT");
+        }
+        assert!(!should_enable_keyboard_enhancement());
+
+        unsafe {
+            std::env::set_var("CODE_ENABLE_KBD_ENHANCEMENT", "1");
+        }
+        assert!(should_enable_keyboard_enhancement());
+
+        unsafe {
+            std::env::set_var("CODE_DISABLE_KBD_ENHANCEMENT", "1");
+        }
+        assert!(!should_enable_keyboard_enhancement());
+
+        restore_env("WT_SESSION", prev_wt_session);
+        restore_env("CODE_ENABLE_KBD_ENHANCEMENT", prev_enable);
+        restore_env("CODE_DISABLE_KBD_ENHANCEMENT", prev_disable);
+    }
+
+    fn restore_env(key: &str, value: Option<String>) {
+        match value {
+            Some(value) => unsafe { std::env::set_var(key, value) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+    }
 }

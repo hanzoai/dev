@@ -1,12 +1,13 @@
 //! Exec and tool call lifecycle helpers for `ChatWidget`.
 
-use super::{running_tools, ChatWidget};
+use super::{running_tools, web_search_sessions, ChatWidget};
 use crate::app_event::AppEvent;
 use crate::height_manager::HeightEvent;
 use crate::history::state::{
     ExecAction,
     ExecRecord,
     ExecStatus,
+    ExecStreamChunk,
     ExecWaitNote,
     ExploreRecord,
     HistoryDomainEvent,
@@ -27,6 +28,7 @@ use crate::history_cell::CommandOutput;
 use crate::history_cell::{self, HistoryCell};
 use code_core::parse_command::ParsedCommand;
 use code_core::protocol::{ExecCommandBeginEvent, ExecCommandEndEvent, OrderMeta};
+use std::path::PathBuf;
 use std::time::SystemTime;
 
 fn find_trailing_explore_agg(chat: &ChatWidget<'_>) -> Option<usize> {
@@ -54,6 +56,187 @@ fn find_trailing_explore_agg(chat: &ChatWidget<'_>) -> Option<usize> {
         break;
     }
     None
+}
+
+fn stream_chunks_to_text(chunks: &[ExecStreamChunk]) -> String {
+    if chunks.is_empty() {
+        return String::new();
+    }
+    let mut ordered: Vec<&ExecStreamChunk> = chunks.iter().collect();
+    ordered.sort_by_key(|chunk| chunk.offset);
+    let mut combined = String::new();
+    for chunk in ordered {
+        combined.push_str(&chunk.content);
+    }
+    combined
+}
+
+fn stream_chunks_tail_to_text(chunks: &[ExecStreamChunk], max_bytes: usize) -> String {
+    if chunks.is_empty() || max_bytes == 0 {
+        return String::new();
+    }
+
+    let mut ordered: Vec<&ExecStreamChunk> = chunks.iter().collect();
+    ordered.sort_by_key(|chunk| chunk.offset);
+
+    let mut pieces: Vec<String> = Vec::new();
+    let mut total_bytes: usize = 0;
+    for chunk in ordered.into_iter().rev() {
+        if total_bytes >= max_bytes {
+            break;
+        }
+        let remaining = max_bytes - total_bytes;
+        let content = chunk.content.as_str();
+        if content.len() <= remaining {
+            pieces.push(content.to_string());
+            total_bytes = total_bytes.saturating_add(content.len());
+            continue;
+        }
+
+        let mut start = content.len().saturating_sub(remaining);
+        while start < content.len() && !content.is_char_boundary(start) {
+            start = start.saturating_add(1);
+        }
+        pieces.push(content[start..].to_string());
+        break;
+    }
+
+    pieces.reverse();
+    pieces.concat()
+}
+
+fn explore_status_from_exec(action: ExecAction, record: &ExecRecord) -> history_cell::ExploreEntryStatus {
+    match record.status {
+        ExecStatus::Running => history_cell::ExploreEntryStatus::Running,
+        ExecStatus::Success => history_cell::ExploreEntryStatus::Success,
+        ExecStatus::Error => match (record.exit_code, action) {
+            (Some(1), ExecAction::Search | ExecAction::List) => history_cell::ExploreEntryStatus::NotFound,
+            _ => history_cell::ExploreEntryStatus::Error {
+                exit_code: record.exit_code,
+            },
+        },
+    }
+}
+
+fn promote_exec_cell_to_explore(chat: &mut ChatWidget<'_>, idx: usize) -> bool {
+    if idx >= chat.history_cells.len() {
+        return false;
+    }
+
+    let (segments, action) = match history_record_for_cell(chat, idx) {
+        Some(HistoryRecord::Exec(exec_record)) => {
+            let action = exec_record.action;
+            (vec![exec_record], action)
+        }
+        Some(HistoryRecord::MergedExec(merged)) => {
+            let action = merged.action;
+            (merged.segments, action)
+        }
+        _ => return false,
+    };
+
+    if !matches!(
+        action,
+        ExecAction::Read | ExecAction::Search | ExecAction::List
+    ) {
+        return false;
+    }
+
+    let session_root = chat.config.cwd.clone();
+
+    let mut target_idx = chat.exec.running_explore_agg_index.and_then(|candidate| {
+        if candidate < chat.history_cells.len()
+            && chat.history_cells[candidate]
+                .as_any()
+                .downcast_ref::<history_cell::ExploreAggregationCell>()
+                .is_some()
+        {
+            Some(candidate)
+        } else {
+            None
+        }
+    });
+
+    if target_idx.is_none() {
+        target_idx = find_trailing_explore_agg(chat);
+    }
+
+    let push_segments = |record: &mut ExploreRecord| -> bool {
+        let mut added_any = false;
+        for segment in &segments {
+            if segment.parsed.is_empty() {
+                continue;
+            }
+            let status = explore_status_from_exec(segment.action, segment);
+            let cwd_buf: PathBuf = segment
+                .working_dir
+                .clone()
+                .unwrap_or_else(|| chat.config.cwd.clone());
+            if history_cell::explore_record_push_from_parsed(
+                record,
+                &segment.parsed,
+                status,
+                cwd_buf.as_path(),
+                session_root.as_path(),
+                &segment.command,
+            )
+            .is_some()
+            {
+                added_any = true;
+            }
+        }
+        added_any
+    };
+
+    if let Some(agg_idx) = target_idx {
+        let Some(mut record) = chat.history_cells.get(agg_idx).and_then(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::ExploreAggregationCell>()
+                .map(|existing| existing.record().clone())
+        }) else {
+            return false;
+        };
+
+        if !push_segments(&mut record) {
+            return false;
+        }
+
+        let replacement = history_cell::ExploreAggregationCell::from_record(record.clone());
+        chat.history_replace_with_record(
+            agg_idx,
+            Box::new(replacement),
+            HistoryDomainRecord::Explore(record),
+        );
+
+        if agg_idx != idx {
+            chat.history_remove_at(idx);
+        }
+
+        chat.bottom_pane.set_has_chat_history(true);
+        chat.autoscroll_if_near_bottom();
+        chat.exec.running_explore_agg_index = None;
+        return true;
+    }
+
+    let mut record = ExploreRecord {
+        id: HistoryId::ZERO,
+        entries: Vec::new(),
+    };
+
+    if !push_segments(&mut record) {
+        return false;
+    }
+
+    let cell = history_cell::ExploreAggregationCell::from_record(record.clone());
+    chat.history_replace_with_record(
+        idx,
+        Box::new(cell),
+        HistoryDomainRecord::Explore(record),
+    );
+    chat.bottom_pane.set_has_chat_history(true);
+    chat.autoscroll_if_near_bottom();
+    chat.exec.running_explore_agg_index = None;
+    true
 }
 
 fn update_explore_entry_status(
@@ -335,49 +518,7 @@ pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
         chat.request_redraw();
     }
 
-    if !chat.tools_state.running_web_search.is_empty() {
-        let entries: Vec<(super::ToolCallId, (usize, Option<String>))> = chat
-            .tools_state
-            .running_web_search
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        for (call_id, (idx, query_opt)) in entries {
-            let mut target_idx = None;
-            if idx < chat.history_cells.len() {
-                let is_ws = chat.history_cells[idx]
-                    .as_any()
-                    .downcast_ref::<history_cell::RunningToolCallCell>()
-                    .is_some_and(|rt| rt.has_title("Web Search..."));
-                if is_ws {
-                    target_idx = Some(idx);
-                }
-            }
-            if target_idx.is_none() {
-                for i in (0..chat.history_cells.len()).rev() {
-                    if let Some(rt) = chat.history_cells[i]
-                        .as_any()
-                        .downcast_ref::<history_cell::RunningToolCallCell>()
-                    {
-                        if rt.has_title("Web Search...") {
-                            target_idx = Some(i);
-                            break;
-                        }
-                    }
-                }
-            }
-            if let Some(i) = target_idx {
-                if let Some(rt) = chat.history_cells[i]
-                    .as_any()
-                    .downcast_ref::<history_cell::RunningToolCallCell>()
-                {
-                    let completed = rt.finalize_web_search(false, query_opt);
-                    chat.history_replace_at(i, Box::new(completed));
-                }
-            }
-            chat.tools_state.running_web_search.remove(&call_id);
-        }
-    }
+    web_search_sessions::finalize_all_failed(chat, "Search cancelled by user.");
 
     if !chat.tools_state.running_wait_tools.is_empty() {
         chat.tools_state.running_wait_tools.clear();
@@ -397,38 +538,140 @@ pub(super) fn finalize_all_running_as_interrupted(chat: &mut ChatWidget<'_>) {
 }
 
 pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
-    let running: Vec<(super::ExecCallId, Option<usize>, Option<(usize, usize)>)> = chat
+    const STALE_MSG: &str = "Running in background after turn end.";
+    const STREAM_TAIL_MAX_BYTES: usize = 64 * 1024;
+
+    // Drain running execs so we can mark them stale and stop the spinner.
+    let mut agg_was_updated = false;
+    let running_keys: Vec<super::ExecCallId> = chat
         .exec
         .running_commands
-        .iter()
-        .map(|(k, v)| (k.clone(), v.history_index, v.explore_entry))
+        .keys()
+        .cloned()
         .collect();
-    let mut remove_after_finalize: Vec<super::ExecCallId> = Vec::new();
-    let mut agg_was_updated = false;
-    for (call_id, maybe_idx, explore_entry) in &running {
-        // Keep streaming Exec cells alive so background commands continue to surface output.
-        if maybe_idx.is_some() {
-            continue;
-        }
 
-        if let Some((agg_idx, entry_idx)) = explore_entry {
-            let updated = update_explore_entry_status(
-                chat,
-                Some(*agg_idx),
-                *entry_idx,
-                history_cell::ExploreEntryStatus::Success,
-            )
-            .is_some();
-            agg_was_updated |= updated;
-        }
+    for call_id in running_keys {
+        if let Some(running) = chat.exec.running_commands.remove(&call_id) {
+            // Update any explore aggregation entry tied to this exec.
+            if let Some((agg_idx, entry_idx)) = running.explore_entry {
+                let updated = update_explore_entry_status(
+                    chat,
+                    Some(agg_idx),
+                    entry_idx,
+                    history_cell::ExploreEntryStatus::Success,
+                )
+                .is_some();
+                agg_was_updated |= updated;
+            }
 
-        remove_after_finalize.push(call_id.clone());
+            let exit_code = 0;
+            let now = SystemTime::now();
+            let wait_notes_pairs = running.wait_notes.clone();
+            let wait_notes_record = exec_wait_notes_from_pairs(&wait_notes_pairs);
+
+            let history_id = running
+                .history_id
+                .or_else(|| chat.history_state.history_id_for_exec_call(call_id.as_ref()))
+                .or_else(|| {
+                    running
+                        .history_index
+                        .and_then(|idx| chat.history_cell_ids.get(idx).and_then(|h| *h))
+                });
+
+            let stderr_prefix = if running.stderr_offset > 0 { "\n" } else { "" };
+            let stderr_tail_event = Some(format!("{stderr_prefix}{STALE_MSG}"));
+            let stdout_tail_event = None;
+
+            let finish_mutation = chat.history_state.apply_domain_event(
+                HistoryDomainEvent::FinishExec {
+                    id: history_id,
+                    call_id: Some(call_id.as_ref().to_string()),
+                    status: ExecStatus::Success,
+                    exit_code: Some(exit_code),
+                    completed_at: Some(now),
+                    wait_total: running.wait_total,
+                    wait_active: false,
+                    wait_notes: wait_notes_record,
+                    stdout_tail: stdout_tail_event,
+                    stderr_tail: stderr_tail_event,
+                },
+            );
+
+            let mut handled_via_state = false;
+            if let HistoryMutation::Replaced {
+                id,
+                record: HistoryRecord::Exec(exec_record),
+                ..
+            } = finish_mutation
+            {
+                chat.update_cell_from_record(id, HistoryRecord::Exec(exec_record.clone()));
+                if let Some(idx) = chat.cell_index_for_history_id(id) {
+                    crate::chatwidget::exec_tools::try_merge_completed_exec_at(chat, idx);
+                }
+                handled_via_state = true;
+            }
+
+            if !handled_via_state {
+                let mut stdout_so_far = String::new();
+                let mut stderr_so_far = String::new();
+                if let Some(history_id) = history_id {
+                    if let Some(record) = chat.history_state.record(history_id) {
+                        match record {
+                            HistoryRecord::Exec(exec_record) => {
+                                stdout_so_far = stream_chunks_tail_to_text(
+                                    &exec_record.stdout_chunks,
+                                    STREAM_TAIL_MAX_BYTES,
+                                );
+                                stderr_so_far = stream_chunks_tail_to_text(
+                                    &exec_record.stderr_chunks,
+                                    STREAM_TAIL_MAX_BYTES,
+                                );
+                            }
+                            HistoryRecord::MergedExec(merged) => {
+                                if let Some(last) = merged.segments.last() {
+                                    stdout_so_far = stream_chunks_tail_to_text(
+                                        &last.stdout_chunks,
+                                        STREAM_TAIL_MAX_BYTES,
+                                    );
+                                    stderr_so_far = stream_chunks_tail_to_text(
+                                        &last.stderr_chunks,
+                                        STREAM_TAIL_MAX_BYTES,
+                                    );
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                if !stderr_so_far.is_empty() {
+                    stderr_so_far.push('\n');
+                }
+                stderr_so_far.push_str(STALE_MSG);
+
+                let mut completed_cell = history_cell::new_completed_exec_command(
+                    running.command.clone(),
+                    running.parsed.clone(),
+                    CommandOutput {
+                        exit_code,
+                        stdout: stdout_so_far,
+                        stderr: stderr_so_far,
+                    },
+                );
+                // Preserve linkage to the original call id when possible.
+                completed_cell.record.call_id = Some(call_id.as_ref().to_string());
+
+                if let Some(idx) = running.history_index {
+                    chat.history_replace_and_maybe_merge(idx, Box::new(completed_cell));
+                } else {
+                    let key = chat.next_internal_key();
+                    let idx = chat.history_insert_with_key_global(Box::new(completed_cell), key);
+                    crate::chatwidget::exec_tools::try_merge_completed_exec_at(chat, idx);
+                }
+            }
+        }
     }
 
-    for call_id in remove_after_finalize {
-        chat.exec.suppress_exec_end(call_id.clone());
-        chat.exec.running_commands.remove(&call_id);
-    }
     if agg_was_updated {
         chat.exec.running_explore_agg_index = None;
         chat.invalidate_height_cache();
@@ -437,51 +680,187 @@ pub(super) fn finalize_all_running_due_to_answer(chat: &mut ChatWidget<'_>) {
 
     crate::chatwidget::running_tools::finalize_all_due_to_answer(chat);
 
-    if !chat.tools_state.running_web_search.is_empty() {
-        let entries: Vec<(super::ToolCallId, (usize, Option<String>))> = chat
-            .tools_state
-            .running_web_search
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        for (call_id, (idx, query_opt)) in entries {
-            let mut target_idx = None;
-            if idx < chat.history_cells.len() {
-                let is_ws = chat.history_cells[idx]
-                    .as_any()
-                    .downcast_ref::<history_cell::RunningToolCallCell>()
-                    .is_some_and(|rt| rt.has_title("Web Search..."));
-                if is_ws {
-                    target_idx = Some(idx);
-                }
+    web_search_sessions::finalize_all_completed(chat, "Search finished");
+
+    chat.maybe_hide_spinner();
+    chat.refresh_auto_drive_visuals();
+}
+
+pub(super) fn finalize_wait_missing_exec(
+    chat: &mut ChatWidget<'_>,
+    call_id: super::ExecCallId,
+    message: &str,
+) -> bool {
+    const STREAM_TAIL_MAX_BYTES: usize = 64 * 1024;
+    let trimmed = message.trim();
+    let fallback_message = if trimmed.is_empty() {
+        "Background job finished but output was unavailable."
+    } else {
+        trimmed
+    };
+
+    let history_id: Option<HistoryId>;
+    let mut history_index: Option<usize> = None;
+    let mut command: Vec<String> = Vec::new();
+    let mut parsed: Vec<ParsedCommand> = Vec::new();
+    let mut wait_total: Option<std::time::Duration> = None;
+    let mut wait_notes_pairs: Vec<(String, bool)> = Vec::new();
+    let mut explore_entry: Option<(usize, usize)> = None;
+
+    if let Some(running) = chat.exec.running_commands.remove(&call_id) {
+        history_id = running
+            .history_id
+            .or_else(|| chat.history_state.history_id_for_exec_call(call_id.as_ref()))
+            .or_else(|| {
+                running
+                    .history_index
+                    .and_then(|idx| chat.history_cell_ids.get(idx).and_then(|slot| *slot))
+            });
+        history_index = running.history_index;
+        command = running.command;
+        parsed = running.parsed;
+        wait_total = running.wait_total;
+        wait_notes_pairs = running.wait_notes;
+        explore_entry = running.explore_entry;
+    } else {
+        history_id = chat.history_state.history_id_for_exec_call(call_id.as_ref());
+        if let Some(id) = history_id {
+            if let Some(HistoryRecord::Exec(record)) = chat.history_state.record(id).cloned() {
+                command = record.command.clone();
+                parsed = record.parsed.clone();
+                wait_total = record.wait_total;
+                wait_notes_pairs = ChatWidget::wait_pairs_from_exec_notes(&record.wait_notes);
             }
-            if target_idx.is_none() {
-                for i in (0..chat.history_cells.len()).rev() {
-                    if let Some(rt) = chat.history_cells[i]
-                        .as_any()
-                        .downcast_ref::<history_cell::RunningToolCallCell>()
-                    {
-                        if rt.has_title("Web Search...") {
-                            target_idx = Some(i);
-                            break;
-                        }
-                    }
-                }
-            }
-            if let Some(i) = target_idx {
-                if let Some(rt) = chat.history_cells[i]
-                    .as_any()
-                    .downcast_ref::<history_cell::RunningToolCallCell>()
-                {
-                    let completed = rt.finalize_web_search(true, query_opt);
-                    chat.history_replace_at(i, Box::new(completed));
-                }
-            }
-            chat.tools_state.running_web_search.remove(&call_id);
+        } else {
+            return false;
         }
     }
 
+    if let Some(id) = history_id {
+        if let Some(record) = chat.history_state.record(id) {
+            match record {
+                HistoryRecord::Exec(exec_record) => {
+                    if exec_record.status != ExecStatus::Running {
+                        chat.maybe_hide_spinner();
+                        chat.refresh_auto_drive_visuals();
+                        return true;
+                    }
+                }
+                HistoryRecord::MergedExec(_) => {
+                    chat.maybe_hide_spinner();
+                    chat.refresh_auto_drive_visuals();
+                    return true;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if let Some((agg_idx, entry_idx)) = explore_entry {
+        let status = history_cell::ExploreEntryStatus::Error { exit_code: None };
+        let updated =
+            update_explore_entry_status(chat, Some(agg_idx), entry_idx, status).is_some();
+        if updated && !chat
+            .exec
+            .running_commands
+            .values()
+            .any(|rc| rc.explore_entry.is_some())
+        {
+            chat.exec.running_explore_agg_index = None;
+        }
+    }
+
+    let wait_notes_record = exec_wait_notes_from_pairs(&wait_notes_pairs);
+    let finish_mutation = chat
+        .history_state
+        .apply_domain_event(HistoryDomainEvent::FinishExec {
+            id: history_id,
+            call_id: Some(call_id.as_ref().to_string()),
+            status: ExecStatus::Error,
+            exit_code: Some(-1),
+            completed_at: Some(SystemTime::now()),
+            wait_total,
+            wait_active: false,
+            wait_notes: wait_notes_record,
+            stdout_tail: None,
+            stderr_tail: Some(fallback_message.to_string()),
+        });
+
+    let mut handled_via_state = false;
+    if let HistoryMutation::Replaced {
+        id,
+        record: HistoryRecord::Exec(exec_record),
+        ..
+    } = finish_mutation
+    {
+        chat.update_cell_from_record(id, HistoryRecord::Exec(exec_record.clone()));
+        if let Some(idx) = chat.cell_index_for_history_id(id) {
+            crate::chatwidget::exec_tools::try_merge_completed_exec_at(chat, idx);
+        }
+        handled_via_state = true;
+    }
+
+    if !handled_via_state {
+        let mut stdout_so_far = String::new();
+        let mut stderr_so_far = String::new();
+        if let Some(history_id) = history_id {
+            if let Some(record) = chat.history_state.record(history_id) {
+                match record {
+                    HistoryRecord::Exec(exec_record) => {
+                        stdout_so_far = stream_chunks_tail_to_text(
+                            &exec_record.stdout_chunks,
+                            STREAM_TAIL_MAX_BYTES,
+                        );
+                        stderr_so_far = stream_chunks_tail_to_text(
+                            &exec_record.stderr_chunks,
+                            STREAM_TAIL_MAX_BYTES,
+                        );
+                    }
+                    HistoryRecord::MergedExec(merged) => {
+                        if let Some(last) = merged.segments.last() {
+                            stdout_so_far = stream_chunks_tail_to_text(
+                                &last.stdout_chunks,
+                                STREAM_TAIL_MAX_BYTES,
+                            );
+                            stderr_so_far = stream_chunks_tail_to_text(
+                                &last.stderr_chunks,
+                                STREAM_TAIL_MAX_BYTES,
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        if !stderr_so_far.is_empty() {
+            stderr_so_far.push('\n');
+        }
+        stderr_so_far.push_str(fallback_message);
+
+        let mut completed_cell = history_cell::new_completed_exec_command(
+            command,
+            parsed,
+            CommandOutput {
+                exit_code: -1,
+                stdout: stdout_so_far,
+                stderr: stderr_so_far,
+            },
+        );
+        completed_cell.record.call_id = Some(call_id.as_ref().to_string());
+
+        if let Some(idx) = history_index {
+            chat.history_replace_and_maybe_merge(idx, Box::new(completed_cell));
+        } else {
+            let key = chat.next_internal_key();
+            let idx = chat.history_insert_with_key_global(Box::new(completed_cell), key);
+            crate::chatwidget::exec_tools::try_merge_completed_exec_at(chat, idx);
+        }
+    }
+
+    chat.maybe_hide_spinner();
     chat.refresh_auto_drive_visuals();
+    true
 }
 
 pub(super) fn try_merge_completed_exec_at(chat: &mut ChatWidget<'_>, idx: usize) {
@@ -552,13 +931,20 @@ fn try_upgrade_fallback_exec_cell(
             .as_any()
             .downcast_ref::<history_cell::ExecCell>()
         {
-            let looks_like_fallback = exec.output.is_some()
-                && exec.parsed.is_empty()
-                && exec.command.len() == 1
+            let command_matches_call = exec.command.len() == 1
                 && exec.command
                     .first()
                     .map(|cmd| cmd == &ev.call_id)
                     .unwrap_or(false);
+            let record_matches_call = exec
+                .record
+                .call_id
+                .as_deref()
+                .map(|cid| cid == ev.call_id)
+                .unwrap_or(false);
+            let looks_like_fallback = exec.output.is_some()
+                && exec.parsed.is_empty()
+                && (command_matches_call || record_matches_call);
             if looks_like_fallback {
                 let mut upgraded = false;
                 if let Some(HistoryRecord::Exec(mut exec_record)) =
@@ -593,6 +979,9 @@ fn try_upgrade_fallback_exec_cell(
                             HistoryRecord::Exec(updated_record.clone()),
                         );
                         if let Some(idx) = chat.cell_index_for_history_id(id) {
+                            if promote_exec_cell_to_explore(chat, idx) {
+                                return true;
+                            }
                             crate::chatwidget::exec_tools::try_merge_completed_exec_at(chat, idx);
                         }
                         upgraded = true;
@@ -606,6 +995,9 @@ fn try_upgrade_fallback_exec_cell(
                     {
                         exec_mut.replace_command_metadata(ev.command.clone(), ev.parsed_cmd.clone());
                     }
+                    if promote_exec_cell_to_explore(chat, i) {
+                        return true;
+                    }
                     try_merge_completed_exec_at(chat, i);
                 }
 
@@ -618,6 +1010,175 @@ fn try_upgrade_fallback_exec_cell(
     false
 }
 
+fn hydrate_exec_record_from_begin(
+    record: &mut ExecRecord,
+    ev: &ExecCommandBeginEvent,
+) -> bool {
+    let mut changed = false;
+    if record.command != ev.command {
+        record.command = ev.command.clone();
+        changed = true;
+    }
+    if record.parsed != ev.parsed_cmd {
+        record.parsed = ev.parsed_cmd.clone();
+        changed = true;
+    }
+    let new_action = history_cell::action_enum_from_parsed(&record.parsed);
+    if record.action != new_action {
+        record.action = new_action;
+        changed = true;
+    }
+    if record.call_id.as_deref() != Some(ev.call_id.as_str()) {
+        record.call_id = Some(ev.call_id.clone());
+        changed = true;
+    }
+    if record.working_dir.is_none() {
+        record.working_dir = Some(ev.cwd.clone());
+        changed = true;
+    }
+    changed
+}
+
+fn apply_exec_begin_metadata_to_finished_call(
+    chat: &mut ChatWidget<'_>,
+    ev: &ExecCommandBeginEvent,
+) -> bool {
+    let history_id = match chat
+        .history_state
+        .history_id_for_exec_call(&ev.call_id)
+    {
+        Some(id) => id,
+        None => return false,
+    };
+    let index = match chat.history_state.index_of(history_id) {
+        Some(idx) => idx,
+        None => return false,
+    };
+    let record = match chat.history_state.record(history_id).cloned() {
+        Some(record) => record,
+        None => return false,
+    };
+    match record {
+        HistoryRecord::Exec(mut exec_record) => {
+            if !hydrate_exec_record_from_begin(&mut exec_record, ev) {
+                return false;
+            }
+
+            let mutation = chat
+                .history_state
+                .apply_domain_event(HistoryDomainEvent::Replace {
+                    index,
+                    record: HistoryDomainRecord::Exec(exec_record.clone()),
+                });
+
+            if let HistoryMutation::Replaced {
+                id,
+                record: HistoryRecord::Exec(updated_record),
+                ..
+            } = mutation
+            {
+                chat.update_cell_from_record(id, HistoryRecord::Exec(updated_record.clone()));
+                if let Some(idx) = chat.cell_index_for_history_id(id) {
+                    if promote_exec_cell_to_explore(chat, idx) {
+                        return true;
+                    }
+                    crate::chatwidget::exec_tools::try_merge_completed_exec_at(chat, idx);
+                }
+                chat.invalidate_height_cache();
+                chat.request_redraw();
+                return true;
+            }
+
+            if let Some(idx) = chat.cell_index_for_history_id(history_id) {
+                let cell = history_cell::ExecCell::from_record(exec_record.clone());
+                chat.history_replace_with_record(
+                    idx,
+                    Box::new(cell),
+                    HistoryDomainRecord::Exec(exec_record),
+                );
+                if promote_exec_cell_to_explore(chat, idx) {
+                    return true;
+                }
+                return true;
+            }
+
+            false
+        }
+        HistoryRecord::MergedExec(mut merged_record) => {
+            let mut segment_found = false;
+            for segment in merged_record.segments.iter_mut() {
+                let matches_call = segment
+                    .call_id
+                    .as_deref()
+                    .map(|cid| cid == ev.call_id)
+                    .unwrap_or(false);
+                let fallback_matches = segment.call_id.is_none()
+                    && segment.command.len() == 1
+                    && segment
+                        .command
+                        .first()
+                        .map(|cmd| cmd.contains(&ev.call_id))
+                        .unwrap_or(false);
+                if matches_call || fallback_matches {
+                    if hydrate_exec_record_from_begin(segment, ev) {
+                        segment_found = true;
+                    }
+                    break;
+                }
+            }
+
+            if !segment_found {
+                return false;
+            }
+
+            let new_action = history_cell::action_enum_from_parsed(&ev.parsed_cmd);
+            if merged_record.action != new_action {
+                merged_record.action = new_action;
+            }
+
+            let mutation = chat
+                .history_state
+                .apply_domain_event(HistoryDomainEvent::Replace {
+                    index,
+                    record: HistoryDomainRecord::MergedExec(merged_record.clone()),
+                });
+
+            if let HistoryMutation::Replaced {
+                id,
+                record: HistoryRecord::MergedExec(updated_record),
+                ..
+            } = mutation
+            {
+                chat.update_cell_from_record(id, HistoryRecord::MergedExec(updated_record));
+                if let Some(idx) = chat.cell_index_for_history_id(id) {
+                    if promote_exec_cell_to_explore(chat, idx) {
+                        return true;
+                    }
+                }
+                chat.invalidate_height_cache();
+                chat.request_redraw();
+                return true;
+            }
+
+            if let Some(idx) = chat.cell_index_for_history_id(history_id) {
+                let cell = history_cell::MergedExecCell::from_state(merged_record.clone());
+                chat.history_replace_with_record(
+                    idx,
+                    Box::new(cell),
+                    HistoryDomainRecord::MergedExec(merged_record),
+                );
+                if promote_exec_cell_to_explore(chat, idx) {
+                    return true;
+                }
+                return true;
+            }
+
+            false
+        }
+        _ => false,
+    }
+}
+
 pub(super) fn handle_exec_begin_now(
     chat: &mut ChatWidget<'_>,
     ev: ExecCommandBeginEvent,
@@ -628,6 +1189,9 @@ pub(super) fn handle_exec_begin_now(
         .contains(&super::ExecCallId(ev.call_id.clone()))
     {
         if try_upgrade_fallback_exec_cell(chat, &ev) {
+            return;
+        }
+        if apply_exec_begin_metadata_to_finished_call(chat, &ev) {
             return;
         }
         return;
@@ -644,12 +1208,25 @@ pub(super) fn handle_exec_begin_now(
     let has_read_command = parsed_command
         .iter()
         .any(|p| matches!(p, ParsedCommand::ReadCommand { .. }));
+    let mut upgraded_tool_idx = if let Some(entry) = chat
+        .tools_state
+        .running_custom_tools
+        .remove(&super::ToolCallId(ev.call_id.clone()))
+    {
+        running_tools::resolve_entry_index(chat, &entry, &ev.call_id)
+            .or_else(|| running_tools::find_by_call_id(chat, &ev.call_id))
+    } else {
+        running_tools::find_by_call_id(chat, &ev.call_id)
+    };
 
     if matches!(
         action,
         ExecAction::Read | ExecAction::Search | ExecAction::List
     ) || has_read_command
     {
+        if let Some(idx) = upgraded_tool_idx.take() {
+            chat.history_remove_at(idx);
+        }
         let mut created_new = false;
         let mut agg_idx = chat.exec.running_explore_agg_index.and_then(|idx| {
             if idx < chat.history_cells.len()
@@ -714,8 +1291,8 @@ pub(super) fn handle_exec_begin_now(
                             history_index: None,
                             history_id: None,
                             explore_entry: Some((idx, entry_idx)),
-                            stdout: String::new(),
-                            stderr: String::new(),
+                            stdout_offset: 0,
+                            stderr_offset: 0,
                             wait_total: None,
                             wait_active: false,
                             wait_notes: Vec::new(),
@@ -742,23 +1319,46 @@ pub(super) fn handle_exec_begin_now(
 
     let exec_record = exec_record_from_begin(&ev);
     let key = chat.provider_order_key_from_order_meta(order);
-    let cell = history_cell::ExecCell::from_record(exec_record.clone());
-    let idx = chat.history_insert_with_key_global_tagged(
-        Box::new(cell),
-        key,
-        "exec-begin",
-        Some(HistoryDomainRecord::Exec(exec_record)),
-    );
+    let history_idx = if let Some(idx) = upgraded_tool_idx {
+        let replacement = history_cell::ExecCell::from_record(exec_record.clone());
+        chat.history_replace_with_record(
+            idx,
+            Box::new(replacement),
+            HistoryDomainRecord::Exec(exec_record.clone()),
+        );
+        if idx < chat.cell_order_seq.len() {
+            chat.cell_order_seq[idx] = key;
+        }
+        if idx < chat.cell_order_dbg.len() {
+            chat.cell_order_dbg[idx] = None;
+        }
+        chat.last_assigned_order = Some(
+            chat
+                .last_assigned_order
+                .map(|prev| prev.max(key))
+                .unwrap_or(key),
+        );
+        chat.bottom_pane.set_has_chat_history(true);
+        idx
+    } else {
+        let cell = history_cell::ExecCell::from_record(exec_record.clone());
+        chat.history_insert_with_key_global_tagged(
+            Box::new(cell),
+            key,
+            "exec-begin",
+            Some(HistoryDomainRecord::Exec(exec_record.clone())),
+        )
+    };
     chat.exec.running_commands.insert(
         super::ExecCallId(ev.call_id.clone()),
         super::RunningCommand {
             command: ev.command.clone(),
             parsed: parsed_command,
-            history_index: Some(idx),
+            history_index: Some(history_idx),
             history_id: None,
             explore_entry: None,
-            stdout: String::new(),
-            stderr: String::new(),
+            stdout_offset: 0,
+            stderr_offset: 0,
             wait_total: None,
             wait_active: false,
             wait_notes: Vec::new(),
@@ -772,10 +1372,10 @@ pub(super) fn handle_exec_begin_now(
         let history_id = chat
             .history_state
             .history_id_for_exec_call(&ev.call_id)
-            .or_else(|| chat.history_cell_ids.get(idx).and_then(|slot| *slot));
+            .or_else(|| chat.history_cell_ids.get(history_idx).and_then(|slot| *slot));
         running.history_id = history_id;
     }
-    if !chat.tools_state.running_web_search.is_empty() {
+    if !chat.tools_state.web_search_sessions.is_empty() {
         chat.bottom_pane.update_status_text("Search".to_string());
     } else {
         let preview = chat
@@ -859,31 +1459,105 @@ pub(super) fn handle_exec_end_now(
             explore_entry,
             wait_total,
             wait_notes,
-            stdout: streamed_stdout,
-            stderr: streamed_stderr,
             ..
-        }) => (
-            command,
-            parsed,
-            history_id,
-            history_index,
-            explore_entry,
-            wait_total,
-            wait_notes,
-            streamed_stdout,
-            streamed_stderr,
-        ),
-        None => (
-            vec![call_id.clone()],
-            vec![],
-            None,
-            None,
-            None,
-            None,
-            Vec::new(),
-            String::new(),
-            String::new(),
-        ),
+        }) => {
+            let mut streamed_stdout = String::new();
+            let mut streamed_stderr = String::new();
+            if let Some(id) = history_id {
+                if let Some(HistoryRecord::Exec(record)) = chat.history_state.record(id).cloned() {
+                    streamed_stdout = stream_chunks_to_text(&record.stdout_chunks);
+                    streamed_stderr = stream_chunks_to_text(&record.stderr_chunks);
+                }
+            } else if let Some(idx) = history_index {
+                if let Some(exec_cell) = chat
+                    .history_cells
+                    .get(idx)
+                    .and_then(|cell| cell.as_any().downcast_ref::<history_cell::ExecCell>())
+                {
+                    streamed_stdout = stream_chunks_to_text(&exec_cell.record.stdout_chunks);
+                    streamed_stderr = stream_chunks_to_text(&exec_cell.record.stderr_chunks);
+                }
+            }
+
+            (
+                command,
+                parsed,
+                history_id,
+                history_index,
+                explore_entry,
+                wait_total,
+                wait_notes,
+                streamed_stdout,
+                streamed_stderr,
+            )
+        }
+        None => {
+            let mut history_id = chat
+                .history_state
+                .history_id_for_exec_call(call_id.as_ref());
+            let mut history_index = history_id.and_then(|id| chat.cell_index_for_history_id(id));
+            let mut command = vec![format!("Command running ({call_id})")];
+            let mut parsed: Vec<ParsedCommand> = Vec::new();
+            let mut wait_total: Option<std::time::Duration> = None;
+            let mut wait_notes_pairs: Vec<(String, bool)> = Vec::new();
+            let mut streamed_stdout = String::new();
+            let mut streamed_stderr = String::new();
+
+            if let Some(id) = history_id {
+                if let Some(HistoryRecord::Exec(record)) = chat.history_state.record(id).cloned() {
+                    command = record.command.clone();
+                    parsed = record.parsed.clone();
+                    wait_total = record.wait_total;
+                    wait_notes_pairs = ChatWidget::wait_pairs_from_exec_notes(&record.wait_notes);
+                    streamed_stdout = stream_chunks_to_text(&record.stdout_chunks);
+                    streamed_stderr = stream_chunks_to_text(&record.stderr_chunks);
+                    if history_index.is_none() {
+                        history_index = chat.cell_index_for_history_id(id);
+                    }
+                }
+            }
+
+            if history_index.is_none() {
+                if let Some((idx, exec_cell)) = chat
+                    .history_cells
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find_map(|(idx, cell)| {
+                        cell.as_any()
+                            .downcast_ref::<history_cell::ExecCell>()
+                            .and_then(|exec_cell| {
+                                if exec_cell.record.call_id.as_deref() == Some(call_id.as_ref()) {
+                                    Some((idx, exec_cell))
+                                } else {
+                                    None
+                                }
+                            })
+                    })
+                {
+                    history_index = Some(idx);
+                    history_id = chat.history_cell_ids.get(idx).and_then(|slot| *slot);
+                    command = exec_cell.command.clone();
+                    parsed = exec_cell.parsed.clone();
+                    wait_total = exec_cell.record.wait_total;
+                    wait_notes_pairs = ChatWidget::wait_pairs_from_exec_notes(&exec_cell.record.wait_notes);
+                    streamed_stdout = stream_chunks_to_text(&exec_cell.record.stdout_chunks);
+                    streamed_stderr = stream_chunks_to_text(&exec_cell.record.stderr_chunks);
+                }
+            }
+
+            (
+                command,
+                parsed,
+                history_id,
+                history_index,
+                None,
+                wait_total,
+                wait_notes_pairs,
+                streamed_stdout,
+                streamed_stderr,
+            )
+        }
     };
 
     if let Some((agg_idx, entry_idx)) = explore_entry {
@@ -988,6 +1662,9 @@ pub(super) fn handle_exec_end_now(
             cell.set_wait_notes(&wait_notes_pairs);
             cell.set_waiting(false);
             cell.set_run_duration(Some(duration));
+            if cell.record.call_id.as_deref().is_none() {
+                cell.record.call_id = Some(call_id.clone());
+            }
         }
 
         let mut replaced = false;
@@ -998,7 +1675,10 @@ pub(super) fn handle_exec_end_now(
                     .downcast_ref::<history_cell::ExecCell>()
                     .map(|e| {
                         if let Some(ref c) = completed_opt {
-                            e.output.is_none() && e.command == c.command
+                            // Match by command OR call_id to reliably update the correct cell
+                            let command_matches = e.command == c.command;
+                            let call_id_matches = e.record.call_id.as_deref() == Some(call_id.as_ref());
+                            (command_matches || call_id_matches) && e.output.is_none()
                         } else {
                             false
                         }
@@ -1019,7 +1699,10 @@ pub(super) fn handle_exec_end_now(
                         .downcast_ref::<history_cell::ExecCell>()
                     {
                         let is_same = if let Some(ref c) = completed_opt {
-                            exec.command == c.command
+                            // Match by command OR call_id to avoid leaving exec cells stuck running
+                            let command_matches = exec.command == c.command;
+                            let call_id_matches = exec.record.call_id.as_deref() == Some(call_id.as_ref());
+                            command_matches || call_id_matches
                         } else {
                             false
                         };
