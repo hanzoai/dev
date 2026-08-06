@@ -5,7 +5,21 @@ import readline from "node:readline";
 import { CodexConfigObject, CodexConfigValue } from "./codexOptions";
 import { SandboxMode } from "./threadOptions";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+
+const moduleRequire = createRequire(import.meta.url);
+
+/** The npm package that carries the CLI and its per-platform binaries. */
+const CODEX_NPM_NAME = "@hanzo/dev";
+
+const PLATFORM_PACKAGE_BY_TARGET: Record<string, string> = {
+  "aarch64-apple-darwin": "@hanzo/dev-darwin-arm64",
+  "x86_64-apple-darwin": "@hanzo/dev-darwin-x64",
+  "x86_64-unknown-linux-musl": "@hanzo/dev-linux-x64-musl",
+  "aarch64-unknown-linux-musl": "@hanzo/dev-linux-arm64-musl",
+  "x86_64-pc-windows-msvc": "@hanzo/dev-win32-x64",
+};
 
 export type CodexExecArgs = {
   input: string;
@@ -26,10 +40,16 @@ export type CodexExecArgs = {
 export class CodexExec {
   private executablePath: string;
   private configOverrides?: CodexConfigObject;
+  private env?: Record<string, string>;
 
-  constructor(executablePath: string | null = null, configOverrides?: CodexConfigObject) {
+  constructor(
+    executablePath: string | null = null,
+    configOverrides?: CodexConfigObject,
+    env?: Record<string, string>,
+  ) {
     this.executablePath = executablePath || findCodexPath();
     this.configOverrides = configOverrides;
+    this.env = env;
   }
 
   async *run(args: CodexExecArgs): AsyncGenerator<string> {
@@ -68,9 +88,9 @@ export class CodexExec {
       commandArgs.push("resume", args.threadId);
     }
 
-    const env = {
-      ...process.env,
-    };
+    const env: Record<string, string | undefined> = this.env
+      ? { ...this.env }
+      : { ...process.env };
     if (args.baseUrl) {
       env.OPENAI_BASE_URL = args.baseUrl;
     }
@@ -293,13 +313,13 @@ function findCodexPath() {
     vendorRoot = path.join(path.dirname(platformPackageJsonPath), "vendor");
   } catch {
     throw new Error(
-      `Unable to locate Codex CLI binaries. Ensure ${CODEX_NPM_NAME} is installed with optional dependencies.`,
+      `Unable to locate the Hanzo Dev binaries. Ensure ${CODEX_NPM_NAME} is installed with optional dependencies.`,
     );
   }
 
   const archRoot = path.join(vendorRoot, targetTriple);
-  const codexBinaryName = process.platform === "win32" ? "codex.exe" : "codex";
-  const binaryPath = path.join(archRoot, "codex", codexBinaryName);
+  const binaryName = process.platform === "win32" ? "dev.exe" : "dev";
+  const binaryPath = path.join(archRoot, "codex", binaryName);
 
   return binaryPath;
 }

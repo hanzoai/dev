@@ -408,6 +408,23 @@ pub struct SendUserMessageParams {
     pub items: Vec<InputItem>,
 }
 
+/// Steer a turn that is already running instead of replacing it.
+///
+/// `sendUserMessage` submits `Op::UserInput`, which aborts the running task and
+/// spawns a new one — the caller can interrupt, never redirect. This submits
+/// `Op::QueueUserInput`, which folds the items into the turn already in flight.
+/// With no turn running the two are equivalent.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueUserMessageParams {
+    pub conversation_id: ThreadId,
+    pub items: Vec<InputItem>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueUserMessageResponse {}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SendUserTurnParams {

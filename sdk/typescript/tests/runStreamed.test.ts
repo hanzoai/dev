@@ -9,8 +9,7 @@ import {
   sse,
   startResponsesTestProxy,
 } from "./responsesProxy";
-
-const codexExecPath = path.join(process.cwd(), "..", "..", "code-rs", "target", "debug", "code");
+import { createMockClient } from "./testCodex";
 
 describe("Codex", () => {
   it("returns thread events", async () => {

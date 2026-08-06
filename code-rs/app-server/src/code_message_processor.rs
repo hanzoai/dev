@@ -100,6 +100,8 @@ use code_protocol::mcp_protocol::RemoveConversationListenerParams;
 use code_protocol::mcp_protocol::RemoveConversationSubscriptionResponse;
 use code_protocol::mcp_protocol::SetDefaultModelParams;
 use code_protocol::mcp_protocol::SetDefaultModelResponse;
+use code_protocol::mcp_protocol::QueueUserMessageParams;
+use code_protocol::mcp_protocol::QueueUserMessageResponse;
 use code_protocol::mcp_protocol::SendUserMessageParams;
 use code_protocol::mcp_protocol::SendUserMessageResponse;
 use code_protocol::mcp_protocol::SendUserTurnParams;
@@ -206,6 +208,9 @@ impl CodexMessageProcessor {
             }
             ClientRequest::SendUserMessage { request_id, params } => {
                 self.send_user_message(request_id, params).await;
+            }
+            ClientRequest::QueueUserMessage { request_id, params } => {
+                self.queue_user_message(request_id, params).await;
             }
             ClientRequest::InterruptConversation { request_id, params } => {
                 self.interrupt_conversation(request_id, params).await;
@@ -576,11 +581,14 @@ impl CodexMessageProcessor {
         }
     }
 
-    async fn send_user_message(&self, request_id: RequestId, params: SendUserMessageParams) {
-        let SendUserMessageParams {
-            conversation_id,
-            items,
-        } = params;
+    /// Resolve the conversation and map wire items to core items. `None` means
+    /// the error response has already been sent.
+    async fn resolve_conversation_items(
+        &self,
+        request_id: RequestId,
+        conversation_id: ConversationId,
+        items: Vec<WireInputItem>,
+    ) -> Option<(Arc<CodexConversation>, Vec<CoreInputItem>)> {
         let Ok(conversation) = self
             .conversation_manager
             .get_conversation(conversation_id)
@@ -592,7 +600,7 @@ impl CodexMessageProcessor {
                 data: None,
             };
             self.outgoing.send_error(request_id, error).await;
-            return;
+            return None;
         };
 
         let mapped_items: Vec<CoreInputItem> = items
@@ -604,7 +612,22 @@ impl CodexMessageProcessor {
             })
             .collect();
 
-        // Submit user input to the conversation.
+        Some((conversation, mapped_items))
+    }
+
+    async fn send_user_message(&self, request_id: RequestId, params: SendUserMessageParams) {
+        let SendUserMessageParams {
+            conversation_id,
+            items,
+        } = params;
+        let Some((conversation, mapped_items)) = self
+            .resolve_conversation_items(request_id.clone(), conversation_id, items)
+            .await
+        else {
+            return;
+        };
+
+        // Op::UserInput aborts any running task and spawns a new turn.
         let _ = conversation
             .submit(Op::UserInput {
                 items: mapped_items,
@@ -615,6 +638,35 @@ impl CodexMessageProcessor {
         // Acknowledge with an empty result.
         self.outgoing
             .send_response(request_id, SendUserMessageResponse {})
+            .await;
+    }
+
+    /// Steer the turn already in flight instead of replacing it.
+    ///
+    /// The difference from `send_user_message` is entirely in the Op:
+    /// `Op::QueueUserInput` folds the items into the running task, where
+    /// `Op::UserInput` calls `sess.abort()` first. With nothing running, core
+    /// spawns a turn either way.
+    async fn queue_user_message(&self, request_id: RequestId, params: QueueUserMessageParams) {
+        let QueueUserMessageParams {
+            conversation_id,
+            items,
+        } = params;
+        let Some((conversation, mapped_items)) = self
+            .resolve_conversation_items(request_id.clone(), conversation_id, items)
+            .await
+        else {
+            return;
+        };
+
+        let _ = conversation
+            .submit(Op::QueueUserInput {
+                items: mapped_items,
+            })
+            .await;
+
+        self.outgoing
+            .send_response(request_id, QueueUserMessageResponse {})
             .await;
     }
 

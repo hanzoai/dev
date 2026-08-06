@@ -1,7 +1,8 @@
 mod cli;
 mod event_processor;
 mod event_processor_with_human_output;
-mod event_processor_with_json_output;
+pub mod exec_events;
+mod experimental_event_processor_with_json_output;
 mod slash;
 
 pub use cli::Cli;
@@ -48,7 +49,7 @@ use code_protocol::protocol::SessionSource;
 use code_ollama::DEFAULT_OSS_MODEL;
 use code_protocol::config_types::SandboxMode;
 use event_processor_with_human_output::EventProcessorWithHumanOutput;
-use event_processor_with_json_output::EventProcessorWithJsonOutput;
+use experimental_event_processor_with_json_output::ExperimentalEventProcessorWithJsonOutput;
 use event_processor::handle_last_message;
 use code_git_tooling::GhostCommit;
 use code_git_tooling::CreateGhostCommitOptions;
@@ -477,7 +478,9 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     }
     let stop_on_task_complete = auto_drive_goal.is_none() && auto_resolve_state.is_none();
     let mut event_processor: Box<dyn EventProcessor> = if json_mode {
-        Box::new(EventProcessorWithJsonOutput::new(last_message_file.clone()))
+        Box::new(ExperimentalEventProcessorWithJsonOutput::new(
+            last_message_file.clone(),
+        ))
     } else {
         Box::new(EventProcessorWithHumanOutput::create_with_ansi(
             stdout_with_ansi,
@@ -542,7 +545,8 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     } else {
         event_processor.print_config_summary(&config, &summary_prompt);
     }
-    info!("Codex initialized with event: {session_configured:?}");
+    event_processor.on_session_configured(&session_configured);
+    info!("Hanzo Dev initialized with event: {session_configured:?}");
 
     if let Some(goal) = auto_drive_goal {
         return run_auto_drive_session(

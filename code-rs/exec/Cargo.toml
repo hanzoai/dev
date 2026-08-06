@@ -47,6 +47,11 @@ tokio = { workspace = true, features = [
     "sync",
 ] }
 tracing = { workspace = true, features = ["log"] }
+ts-rs = { workspace = true, features = [
+    "uuid-impl",
+    "serde-json-impl",
+    "no-serde-warnings",
+] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 once_cell = { workspace = true }
 

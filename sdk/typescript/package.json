@@ -1,18 +1,18 @@
 {
-  "name": "@openai/codex-sdk",
+  "name": "@hanzo/dev-sdk",
   "version": "0.0.0-dev",
-  "description": "TypeScript SDK for Codex APIs.",
+  "description": "TypeScript SDK for Hanzo Dev.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/openai/codex.git",
+    "url": "git+https://github.com/hanzoai/dev.git",
     "directory": "sdk/typescript"
   },
   "keywords": [
-    "openai",
-    "codex",
+    "hanzo",
+    "dev",
+    "agent",
     "sdk",
-    "typescript",
-    "api"
+    "typescript"
   ],
   "license": "Apache-2.0",
   "type": "module",

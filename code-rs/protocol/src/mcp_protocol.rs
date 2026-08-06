@@ -156,6 +156,11 @@ pub enum ClientRequest {
         request_id: RequestId,
         params: SendUserMessageParams,
     },
+    QueueUserMessage {
+        #[serde(rename = "id")]
+        request_id: RequestId,
+        params: QueueUserMessageParams,
+    },
     SendUserTurn {
         #[serde(rename = "id")]
         request_id: RequestId,
@@ -639,6 +644,23 @@ pub struct SendUserMessageParams {
     pub items: Vec<InputItem>,
 }
 
+/// Steer a turn that is already running instead of replacing it.
+///
+/// `sendUserMessage` submits `Op::UserInput`, which calls `sess.abort()` and
+/// spawns a fresh turn — the caller can interrupt, never redirect. This submits
+/// `Op::QueueUserInput`, which folds the items into the turn already in flight.
+/// With no turn running, core spawns one either way.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueUserMessageParams {
+    pub conversation_id: ConversationId,
+    pub items: Vec<InputItem>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueUserMessageResponse {}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SendUserTurnParams {
@@ -942,6 +964,33 @@ mod tests {
             }),
             serde_json::to_value(&request)?,
         );
+        Ok(())
+    }
+
+    /// Locks the wire shape of the steering method. `sendUserMessage` submits
+    /// `Op::UserInput`, which aborts the running turn; this one submits
+    /// `Op::QueueUserInput`, which does not. They are separate methods
+    /// precisely so a caller cannot pick the destructive one by accident.
+    #[test]
+    fn serialize_queue_user_message() -> Result<()> {
+        let request = ClientRequest::QueueUserMessage {
+            request_id: RequestId::Integer(7),
+            params: QueueUserMessageParams {
+                conversation_id: ConversationId::default(),
+                items: vec![InputItem::Text {
+                    text: "steer".to_string(),
+                }],
+            },
+        };
+        let value = serde_json::to_value(&request)?;
+        assert_eq!(json!("queueUserMessage"), value["method"]);
+        assert_eq!(
+            json!([{ "type": "text", "data": { "text": "steer" } }]),
+            value["params"]["items"],
+        );
+        // And it round-trips back to the same variant.
+        let back: ClientRequest = serde_json::from_value(value)?;
+        assert!(matches!(back, ClientRequest::QueueUserMessage { .. }));
         Ok(())
     }
 

@@ -2,6 +2,7 @@ use std::path::Path;
 
 use code_core::config::Config;
 use code_core::protocol::Event;
+use code_core::protocol::SessionConfiguredEvent;
 
 pub(crate) enum CodexStatus {
     Running,
@@ -12,6 +13,11 @@ pub(crate) enum CodexStatus {
 pub(crate) trait EventProcessor {
     /// Print summary of effective configuration and user prompt.
     fn print_config_summary(&mut self, config: &Config, prompt: &str);
+
+    /// The session handshake. `exec` consumes `SessionConfigured` before the
+    /// event loop starts, so a processor that needs it — JSON mode, which
+    /// derives `thread.started` from it — has to be handed it here.
+    fn on_session_configured(&mut self, _ev: &SessionConfiguredEvent) {}
 
     /// Handle a single event emitted by the agent.
     fn process_event(&mut self, event: Event) -> CodexStatus;
