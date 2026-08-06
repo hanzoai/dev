@@ -1661,6 +1661,31 @@
           "type": "object"
         },
         {
+          "description": "Steer the running turn without tearing it down.",
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/RequestId"
+            },
+            "method": {
+              "enum": [
+                "queueUserMessage"
+              ],
+              "title": "QueueUserMessageRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/QueueUserMessageParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "QueueUserMessageRequest",
+          "type": "object"
+        },
+        {
           "properties": {
             "id": {
               "$ref": "#/definitions/RequestId"
@@ -3437,6 +3462,12 @@
             },
             "status": {
               "type": "string"
+            },
+            "transparent_background": {
+              "type": [
+                "boolean",
+                "null"
+              ]
             },
             "type": {
               "enum": [
@@ -7002,6 +7033,32 @@
       },
       "type": "object"
     },
+    "QueueUserMessageParams": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "description": "Steer a turn that is already running instead of replacing it.\n\n`sendUserMessage` submits `Op::UserInput`, which aborts the running task and spawns a new one — the caller can interrupt, never redirect. This submits `Op::QueueUserInput`, which folds the items into the turn already in flight. With no turn running the two are equivalent.",
+      "properties": {
+        "conversationId": {
+          "$ref": "#/definitions/ThreadId"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/InputItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "conversationId",
+        "items"
+      ],
+      "title": "QueueUserMessageParams",
+      "type": "object"
+    },
+    "QueueUserMessageResponse": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "QueueUserMessageResponse",
+      "type": "object"
+    },
     "RateLimitSnapshot": {
       "properties": {
         "credits": {
@@ -10177,6 +10234,12 @@
             },
             "status": {
               "type": "string"
+            },
+            "transparent_background": {
+              "type": [
+                "boolean",
+                "null"
+              ]
             },
             "type": {
               "enum": [
@@ -16467,6 +16530,12 @@
               },
               "status": {
                 "type": "string"
+              },
+              "transparentBackground": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
               },
               "type": {
                 "enum": [
