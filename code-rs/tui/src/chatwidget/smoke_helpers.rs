@@ -24,6 +24,10 @@ static TEST_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
         .expect("test runtime")
 });
 
+/// The one working directory every snapshot renders. Machine-independent by
+/// construction: absolute, outside $HOME, and not a git checkout.
+pub const SNAPSHOT_CWD: &str = "/snapshot";
+
 pub struct ChatWidgetHarness {
     chat: ChatWidget<'static>,
     events: Receiver<AppEvent>,
@@ -43,9 +47,20 @@ impl ChatWidgetHarness {
         // Safe: tests run single-threaded by design.
         unsafe { std::env::set_var("CODEX_TUI_FAKE_HOUR", "12"); }
 
+        // Pin the working directory. The status header renders `Directory: <cwd>`,
+        // and an unset override resolves to `std::env::current_dir()` — the crate
+        // the test happens to run from. That put the checkout path inside every
+        // VT100 snapshot, so the snapshots only ever matched the one machine that
+        // recorded them. An absolute override is taken verbatim (see
+        // Config::load_from_base_config_with_overrides) and this one is outside
+        // $HOME, so it is never abbreviated to `~/…`, and outside any git repo,
+        // so no `Branch:` segment appears either.
         let cfg = Config::load_from_base_config_with_overrides(
             ConfigToml::default(),
-            ConfigOverrides::default(),
+            ConfigOverrides {
+                cwd: Some(SNAPSHOT_CWD.into()),
+                ..ConfigOverrides::default()
+            },
             std::env::temp_dir(),
         )
         .expect("config");

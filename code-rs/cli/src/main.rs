@@ -1055,12 +1055,22 @@ mod tests {
     use code_protocol::protocol::UserMessageEvent;
 
     #[test]
-    fn bash_completion_uses_code_command_name() {
+    fn bash_completion_uses_cli_command_name() {
         let mut buf = Vec::new();
         write_completion(Shell::Bash, &mut buf);
         let script = String::from_utf8(buf).expect("completion output should be valid UTF-8");
-        assert!(script.contains("_code()"), "expected bash completion function to be named _code");
-        assert!(!script.contains("_codex()"), "bash completion output should not use legacy codex prefix");
+        // Derive the expectation from CLI_COMMAND_NAME rather than restating it.
+        // The literal `_code` lived here as a second copy of the product name and
+        // went stale the moment the product was renamed to `dev`.
+        let expected = format!("_{CLI_COMMAND_NAME}()");
+        assert!(
+            script.contains(&expected),
+            "expected bash completion function to be named {expected}"
+        );
+        assert!(
+            !script.contains("_codex()"),
+            "bash completion output should not use legacy codex prefix"
+        );
     }
 
     fn finalize_from_args(args: &[&str]) -> TuiCli {
