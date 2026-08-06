@@ -1,6 +1,11 @@
 name: Release
 
 on:
+  # A release you cannot re-run by hand is a release you cannot recover. Pushes
+  # authored by a flagged account dispatch no run at all — the commit lands on
+  # main and Actions stays silent, which is indistinguishable from a queue — and
+  # a transient runner/registry failure otherwise needs a no-op commit to retry.
+  workflow_dispatch:
   push:
     branches: [ main ]
     # Ignore common non-release paths, but DO NOT ignore release.yml so that
