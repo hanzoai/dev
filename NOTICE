@@ -1,0 +1,24 @@
+Hanzo Dev
+Copyright (c) 2025-2026 Hanzo AI Inc.
+
+This product includes software from OpenAI Codex
+(https://github.com/openai/codex), licensed under the Apache License 2.0.
+The attribution notices below are reproduced from that project's NOTICE file
+as required by Apache-2.0 section 4(d):
+
+    OpenAI Codex
+    Copyright 2025 OpenAI
+
+    This project includes code derived from Ratatui
+    (https://github.com/ratatui/ratatui), licensed under the MIT license.
+    Copyright (c) 2016-2022 Florian Dehau
+    Copyright (c) 2023-2025 The Ratatui Developers
+
+--- Fork provenance ---
+
+Hanzo Dev descends from OpenAI Codex by way of just-every/code
+(https://github.com/just-every/code). Both are carried here under their
+original licenses; this file is the whole of the attribution, and the upstream
+project names deliberately appear nowhere else — not in the README, the repo
+description, the CLI, or the TUI. That is the house rule for every import we
+carry, and it is why this file has to be exact rather than approximate.
