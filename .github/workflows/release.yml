@@ -61,7 +61,13 @@ jobs:
 
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
 
-          if npm whoami >/dev/null 2>&1; then
+          # --registry is load-bearing: the repo's root .npmrc sets
+          # registry=https://pkg.hanzo.ai/, and npm gives the project file
+          # precedence over the user config setup-node writes. A bare
+          # `npm whoami` therefore asks OUR registry to validate an npmjs
+          # token; pkg.hanzo.ai answers 200 with a body of `{}`, which older
+          # npm tolerated and the npm on Node 24 reads as "not logged in".
+          if npm whoami --registry=https://registry.npmjs.org/ >/dev/null 2>&1; then
             echo "npm auth ok"
           else
             echo "::error::npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @hanzo/*, bypass 2FA enabled: https://docs.npmjs.com/creating-and-viewing-access-tokens#creating-access-tokens ; update the secret: https://github.com/organizations/hanzoai/settings/secrets/actions/NPM_TOKEN" >&2
@@ -206,7 +212,7 @@ jobs:
           # Find the highest published version across all packages
           MAX_PUBLISHED="0.0.0"
           for p in "${PKGS[@]}"; do
-            v=$(npm view "$p" version 2>/dev/null || echo "0.0.0")
+            v=$(npm view "$p" version --registry=https://registry.npmjs.org/ 2>/dev/null || echo "0.0.0")
             if [ "$(printf '%s\n%s\n' "$MAX_PUBLISHED" "$v" | sort -V | tail -n1)" != "$MAX_PUBLISHED" ]; then
               MAX_PUBLISHED="$v"
             fi
@@ -221,7 +227,7 @@ jobs:
           while :; do
             used=false
             for p in "${PKGS[@]}"; do
-              if [ "$(npm view "$p@$CANDIDATE" version 2>/dev/null || true)" = "$CANDIDATE" ]; then
+              if [ "$(npm view "$p@$CANDIDATE" version --registry=https://registry.npmjs.org/ 2>/dev/null || true)" = "$CANDIDATE" ]; then
                 used=true; break
               fi
             done
@@ -908,7 +914,7 @@ jobs:
           set -euo pipefail
           for dir in npm-binaries/*; do
             echo "Publishing $(basename "$dir")"
-            (cd "$dir" && npm publish --access public)
+            (cd "$dir" && npm publish --access public --registry=https://registry.npmjs.org/)
           done
 
       - name: Sync README for npm
@@ -1372,19 +1378,23 @@ jobs:
           config_path="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           mkdir -p "$(dirname "$config_path")"
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "$config_path"
-          npm whoami >/dev/null 2>&1 || { echo "npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @hanzo/* and bypass 2FA enabled; update the secret via npmjs.com." >&2; exit 1; }
+          # See the note in the npm-auth-check job: the root .npmrc points npm
+          # at pkg.hanzo.ai, so this must name npmjs explicitly or it validates
+          # the token against the wrong registry. Show npm's own error rather
+          # than swallowing it into a generic message.
+          npm whoami --registry=https://registry.npmjs.org/ || { echo "npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @hanzo/* and bypass 2FA enabled; update the secret via npmjs.com." >&2; exit 1; }
           shopt -s nullglob
           for dir in npm-binaries/*; do
             name=$(jq -r '.name' "$dir/package.json")
             version=$(jq -r '.version' "$dir/package.json")
             echo "Preparing to publish $name@$version"
-            existing=$(npm view "$name@$version" version 2>/dev/null || true)
+            existing=$(npm view "$name@$version" version --registry=https://registry.npmjs.org/ 2>/dev/null || true)
             if [ "$existing" = "$version" ]; then
               echo "Skip: $name@$version already published"
               continue
             fi
             echo "Publishing $(basename "$dir")"
-            (cd "$dir" && npm publish --access public)
+            (cd "$dir" && npm publish --access public --registry=https://registry.npmjs.org/)
           done
 
       - name: Publish main npm package (last)
@@ -1398,13 +1408,17 @@ jobs:
           config_path="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
           mkdir -p "$(dirname "$config_path")"
           echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "$config_path"
-          npm whoami >/dev/null 2>&1 || { echo "npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @hanzo/* and bypass 2FA enabled; update the secret via npmjs.com." >&2; exit 1; }
+          # See the note in the npm-auth-check job: the root .npmrc points npm
+          # at pkg.hanzo.ai, so this must name npmjs explicitly or it validates
+          # the token against the wrong registry. Show npm's own error rather
+          # than swallowing it into a generic message.
+          npm whoami --registry=https://registry.npmjs.org/ || { echo "npm auth failed (npm whoami). Ensure NPM_TOKEN is a granular/automation token with publish rights to @hanzo/* and bypass 2FA enabled; update the secret via npmjs.com." >&2; exit 1; }
           name="@hanzo/dev"
           version=$(jq -r '.version' package.json)
           echo "Preparing to publish $name@$version"
-          existing=$(npm view "$name@$version" version 2>/dev/null || true)
+          existing=$(npm view "$name@$version" version --registry=https://registry.npmjs.org/ 2>/dev/null || true)
           if [ "$existing" = "$version" ]; then
             echo "Skip: $name@$version already published"
             exit 0
           fi
-          npm publish --access public
+          npm publish --access public --registry=https://registry.npmjs.org/
