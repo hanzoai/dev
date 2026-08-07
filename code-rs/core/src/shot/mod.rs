@@ -151,16 +151,7 @@ impl Plan {
             .find_map(|p| ui::route(p))
             .unwrap_or_else(|| "/".to_string());
         let slug = ui::slug(&route, first);
-        let files = changed
-            .iter()
-            .take(NAMED)
-            .map(|p| {
-                p.strip_prefix(&cwd)
-                    .unwrap_or(p)
-                    .to_string_lossy()
-                    .into_owned()
-            })
-            .collect();
+        let files = ui::named(&changed, &cwd, NAMED);
 
         Some(Self {
             cwd,
@@ -335,6 +326,14 @@ async fn put(http: &reqwest::Client, signed: &str, png: Vec<u8>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::Mock;
+    use wiremock::MockServer;
+    use wiremock::Request;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers::body_json;
+    use wiremock::matchers::header;
+    use wiremock::matchers::method;
+    use wiremock::matchers::path;
 
     fn plan() -> Plan {
         Plan {
@@ -392,6 +391,83 @@ mod tests {
             .collect();
         let body = p.payload("sessions/ses_abc123/7-settings.png", "http://127.0.0.1:3000");
         assert!(body.to_string().len() < 64 * 1024);
+    }
+
+    /// The three calls, against a stand-in for cloud. This is the contract:
+    /// which doors, in which order, carrying what — and, load-bearing, which of
+    /// them the org bearer is allowed anywhere near.
+    #[tokio::test]
+    async fn publishing_is_three_calls_and_one_of_them_is_unauthenticated() {
+        let cloud = MockServer::start().await;
+        let key = "sessions/ses_abc123/7-settings.png";
+        let signed = format!("{}/bucket/object?X-Amz-Signature=deadbeef", cloud.uri());
+
+        Mock::given(method("POST"))
+            .and(path("/v1/s3/buckets/sessions/objects"))
+            .and(header("authorization", "Bearer hk-secret-value"))
+            .and(body_json(json!({ "key": key })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "url": signed, "method": "PUT", "key": key, "expiresIn": 900
+            })))
+            .expect(1)
+            .mount(&cloud)
+            .await;
+
+        // The signature IS the credential for this URL. Sending our bearer along
+        // would hand an org key to whatever host cloud signed against.
+        Mock::given(method("PUT"))
+            .and(path("/bucket/object"))
+            .and(header("content-type", "image/png"))
+            .and(|req: &Request| req.headers.get("authorization").is_none())
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&cloud)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/v1/agents/sessions/ses_abc123/events"))
+            .and(header("authorization", "Bearer hk-secret-value"))
+            .and(body_json(json!({
+                "kind": "tool-call",
+                "payload": {
+                    "tool": "shot",
+                    "route": "/settings",
+                    "bucket": "sessions",
+                    "key": key,
+                    "origin": "http://127.0.0.1:3000",
+                    "viewport": { "width": 1280, "height": 800 },
+                    "files": ["src/app/settings/page.tsx"],
+                }
+            })))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "seq": 12 })))
+            .expect(1)
+            .mount(&cloud)
+            .await;
+
+        let mut p = plan();
+        p.base = format!("{}/v1", cloud.uri());
+        let http = create_client("shot");
+        let url = p.presign(&http, key).await.unwrap();
+        assert_eq!(url, signed);
+        put(&http, &url, b"\x89PNG\r\n\x1a\n".to_vec()).await.unwrap();
+        p.append(&http, key, "http://127.0.0.1:3000").await.unwrap();
+        // Dropping the server asserts every `expect(1)` was met exactly once.
+    }
+
+    /// Cloud refusing is not the agent's problem, but it must be reported as a
+    /// refusal rather than swallowed as success.
+    #[tokio::test]
+    async fn a_refusal_is_an_error_not_a_shrug() {
+        let cloud = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(422).set_body_json(json!({ "error": "leak" })))
+            .mount(&cloud)
+            .await;
+        let mut p = plan();
+        p.base = format!("{}/v1", cloud.uri());
+        let http = create_client("shot");
+        assert!(p.presign(&http, "k.png").await.is_err());
+        assert!(p.append(&http, "k.png", "http://127.0.0.1:3000").await.is_err());
     }
 
     #[test]

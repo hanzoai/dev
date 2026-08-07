@@ -137,6 +137,30 @@ fn dynamic(seg: &str) -> bool {
     seg.starts_with('[') || seg.starts_with('$') || seg.starts_with('_') || seg.starts_with(':')
 }
 
+/// The changed files, named the way they may be published: relative to the
+/// workspace, capped, and never absolute.
+///
+/// An absolute path carries the operator's home directory, and with it their
+/// account name, into a log the whole org can read. A diff can name a file
+/// outside the workspace, so falling back to the bare filename is the last line
+/// rather than a case that cannot happen.
+pub(crate) fn named(changed: &[PathBuf], cwd: &Path, cap: usize) -> Vec<String> {
+    changed
+        .iter()
+        .take(cap)
+        .map(|p| {
+            let short = p.strip_prefix(cwd).unwrap_or(p);
+            if short.is_absolute() {
+                Path::new(short.file_name().unwrap_or_default())
+            } else {
+                short
+            }
+            .to_string_lossy()
+            .into_owned()
+        })
+        .collect()
+}
+
 /// A short, key-safe name for the object, derived from the route when there is
 /// one and from the file otherwise. Lowercase alphanumerics and dashes only, so
 /// nothing here can shape the storage key it lands in.
@@ -366,6 +390,29 @@ mod tests {
         ] {
             assert_eq!(route(Path::new(path)), None, "route for {path}");
         }
+    }
+
+    #[test]
+    fn published_names_are_never_absolute() {
+        let cwd = Path::new("/home/someone/work/web");
+        let changed = [
+            PathBuf::from("/home/someone/work/web/src/app/page.tsx"),
+            PathBuf::from("src/Button.tsx"),
+            // A diff can name a file the workspace does not contain.
+            PathBuf::from("/etc/skel/theme.css"),
+        ];
+        let out = named(&changed, cwd, 10);
+        assert_eq!(out, ["src/app/page.tsx", "src/Button.tsx", "theme.css"]);
+        for name in &out {
+            assert!(!name.starts_with('/'), "{name} leaks a filesystem location");
+            assert!(!name.contains("someone"), "{name} leaks an account name");
+        }
+    }
+
+    #[test]
+    fn published_names_are_capped() {
+        let changed: Vec<PathBuf> = (0..50).map(|i| PathBuf::from(format!("a/{i}.tsx"))).collect();
+        assert_eq!(named(&changed, Path::new("/w"), 10).len(), 10);
     }
 
     #[test]
