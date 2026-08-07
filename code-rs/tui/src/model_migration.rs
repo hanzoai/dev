@@ -25,7 +25,7 @@ pub(crate) fn migration_copy_for_key(key: &str) -> ModelMigrationCopy {
         code_common::model_presets::HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG => ModelMigrationCopy {
             heading: "Introducing our gpt-5.1 models",
             content: &[
-                "We've upgraded Codex to gpt-5.1, gpt-5.1-codex, and gpt-5.1-codex-mini.",
+                "We've upgraded Hanzo Dev to gpt-5.1, gpt-5.1-codex, and gpt-5.1-codex-mini.",
                 "Legacy gpt-5 models continue to work via -m or config.toml overrides.",
                 "Learn more: www.openai.com/index/gpt-5-1",
                 "Press Enter to continue.",
@@ -50,12 +50,12 @@ pub(crate) fn migration_copy_for_key(key: &str) -> ModelMigrationCopy {
             can_opt_out: true,
         },
         _ => ModelMigrationCopy {
-            heading: "Codex just got an upgrade: meet gpt-5.1-codex-max",
+            heading: "A new model is available: gpt-5.1-codex-max",
             content: &[
                 "Our flagship agentic coding model is smarter, faster, and tuned for long sessions.",
                 "Everyone signed in with ChatGPT gets it automatically.",
                 "Learn more: www.openai.com/index/gpt-5-1-codex-max",
-                "Choose how you'd like Codex to proceed.",
+                "Choose how you'd like Hanzo Dev to proceed.",
             ],
             can_opt_out: true,
         },

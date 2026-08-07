@@ -167,7 +167,7 @@ enum Subcommand {
     /// Side-channel LLM utilities (no TUI events).
     Llm(LlmCli),
 
-    /// Manage Code Bridge subscription for this workspace.
+    /// Manage Hanzo Dev Bridge subscription for this workspace.
     Bridge(BridgeCommand),
 }
 

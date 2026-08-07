@@ -85,7 +85,7 @@ impl SettingsSection {
             SettingsSection::Model => "Model settings coming soon.",
             SettingsSection::Theme => "Theme settings coming soon.",
         SettingsSection::Planning => "Planning settings coming soon.",
-        SettingsSection::Updates => "Upgrade Codex and manage automatic updates.",
+        SettingsSection::Updates => "Upgrade Hanzo Dev and manage automatic updates.",
         SettingsSection::Accounts => "Account switching settings coming soon.",
         SettingsSection::Agents => "Agents configuration coming soon.",
         SettingsSection::Memories => "Enable or disable cross-session memories.",

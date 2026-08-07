@@ -276,17 +276,17 @@ impl AuthModeWidget {
             Line::from(""),
             Line::from("> Before you start:"),
             Line::from(""),
-            Line::from("  Decide how much autonomy you want to grant Code"),
+            Line::from("  Decide how much autonomy you want to grant Hanzo Dev"),
             Line::from(vec![
                 Span::raw("  For more details see the "),
                 Span::styled(
-                    "\u{1b}]8;;https://github.com/hanzoai/dev\u{7}Code docs\u{1b}]8;;\u{7}",
+                    "\u{1b}]8;;https://github.com/hanzoai/dev\u{7}Hanzo Dev docs\u{1b}]8;;\u{7}",
                     Style::default().add_modifier(Modifier::UNDERLINED),
                 ),
             ])
             .style(Style::default().add_modifier(Modifier::DIM)),
             Line::from(""),
-            Line::from("  Code can make mistakes"),
+            Line::from("  Hanzo Dev can make mistakes"),
             Line::from("  Review the code it writes and commands it runs")
                 .style(Style::default().add_modifier(Modifier::DIM)),
             Line::from(""),
@@ -327,7 +327,7 @@ impl AuthModeWidget {
     fn render_env_var_missing(&self, area: Rect, buf: &mut Buffer) {
         let lines = vec![
             Line::from(
-                "  To use Code with the OpenAI API, set OPENAI_API_KEY in your environment",
+                "  To use Hanzo Dev with the OpenAI API, set OPENAI_API_KEY in your environment",
             )
             .style(Style::default().fg(crate::colors::info())),
             Line::from(""),
