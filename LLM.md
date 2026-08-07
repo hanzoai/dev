@@ -204,6 +204,32 @@ Quick procedure (merge-only):
   - `git add -A && git commit -m "Merge origin/main: adopt remote version bumps; keep ours elsewhere (<areas>)"`
 - Run `./build-fast.sh` and then `git push`
 
+## The one thing `dev` sends to cloud besides inference
+
+`code-rs/core/src/shot/` publishes a screenshot of the UI a patch just changed:
+after each `TurnDiff`, a rendered file in the diff earns a headless capture of
+the route it renders at, uploaded to the `sessions` bucket and named by one
+`tool-call` event on `POST /v1/agents/sessions/{id}/events`, so a console
+watching the live stream shows the picture beside the diff.
+
+Four things about it are load-bearing and easy to undo by accident:
+
+- **It is off unless `HANZO_SESSION` names a session.** Without one there is
+  nowhere to publish, so nothing dials and nothing launches. That variable, not a
+  config key, is the switch — and it is validated before it reaches a URL path.
+- **It never starts a dev server.** It reads `package.json` for a port and dials
+  it. Starting one would run repo-supplied scripts outside the approval and
+  sandbox path every other command here goes through.
+- **Base URL and bearer come from `create_hanzo_provider()`.** Same door, same
+  credential as inference. Do not grow a second notion of where cloud is.
+- **The event names bucket and key, never a URL.** The only URL for a private
+  object is a signed, expiring one; writing that into a transcript leaks a
+  credential that outlives the session.
+
+It fails soft everywhere — evidence is not the work — so a broken capture is a
+`debug!` line, never a failed turn. Most of it arrived in `bc20e6af40`, whose
+subject is about the Hanzo provider's machine credential and does not mention it.
+
 ## Command Execution Architecture
 
 The command execution flow in Codex follows an event-driven pattern:
