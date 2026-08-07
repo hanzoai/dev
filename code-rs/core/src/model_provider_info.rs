@@ -13,7 +13,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
-use std::env::VarError;
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
@@ -92,6 +91,19 @@ pub struct ModelProviderInfo {
     pub base_url: Option<String>,
     /// Environment variable that stores the user's API key for this provider.
     pub env_key: Option<String>,
+
+    /// Variables tried BEFORE `env_key`, for the same provider reached by a
+    /// MACHINE rather than a person.
+    ///
+    /// A provider has one endpoint and two kinds of caller. `env_key` names the
+    /// human's — a session a login filled in. A service run (the coding harness
+    /// in a sandbox, a scheduled job, an agent acting for an org) never has one
+    /// and carries an org API key or an IAM machine identity's token instead.
+    ///
+    /// Empty for every provider that has only one kind of caller, so nothing
+    /// changes for them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub alt_env_keys: Vec<String>,
 
     /// Optional instructions to help the user get a valid value for the
     /// variable and set it.
@@ -561,27 +573,39 @@ impl ModelProviderInfo {
     /// If `env_key` is Some, returns the API key for this provider if present
     /// (and non-empty) in the environment. If `env_key` is required but
     /// cannot be found, returns an error.
+    ///
+    /// A PROVIDER MAY BE REACHED BY A PERSON OR BY A MACHINE, and those carry
+    /// different credentials. `HANZO_USER_KEY` is a signed-in human's session,
+    /// filled in by `hanzo auth login`. A run started by a service — the coding
+    /// harness inside a sandbox pod, a scheduled job, an agent acting for an org
+    /// — has no human session and holds an org API key or an IAM machine
+    /// identity's token instead.
+    ///
+    /// Reading only the user variable made the machine case impossible: dev in a
+    /// sandbox reported "Authentication expired. Run `code login` to continue"
+    /// for a caller that was perfectly authenticated, because the only bearer it
+    /// would look at was the one no service has. So the provider accepts
+    /// EITHER, and `alt_env_keys` is how a provider says which.
+    ///
+    /// Order is machine-first and deliberate: where both are present the process
+    /// was started BY something, and the credential it was given is the one that
+    /// should be billed and audited. A stale human key left in an environment
+    /// must not quietly outrank the identity the caller actually presented.
     pub fn api_key(&self) -> crate::error::Result<Option<String>> {
-        match &self.env_key {
-            Some(env_key) => {
-                let env_value = std::env::var(env_key);
-                env_value
-                    .and_then(|v| {
-                        if v.trim().is_empty() {
-                            Err(VarError::NotPresent)
-                        } else {
-                            Ok(Some(v))
-                        }
-                    })
-                    .map_err(|_| {
-                        crate::error::CodexErr::EnvVar(EnvVarError {
-                            var: env_key.clone(),
-                            instructions: self.env_key_instructions.clone(),
-                        })
-                    })
+        let Some(env_key) = &self.env_key else {
+            return Ok(None);
+        };
+        for key in self.alt_env_keys.iter().chain(std::iter::once(env_key)) {
+            if let Ok(v) = std::env::var(key) {
+                if !v.trim().is_empty() {
+                    return Ok(Some(v));
+                }
             }
-            None => Ok(None),
         }
+        Err(crate::error::CodexErr::EnvVar(EnvVarError {
+            var: env_key.clone(),
+            instructions: self.env_key_instructions.clone(),
+        }))
     }
 
     /// Effective maximum number of request retries for this provider.
@@ -729,6 +753,15 @@ const HANZO_BASE_URL: &str = "https://api.hanzo.ai/v1";
 /// `hanzo auth login` is how a human fills it in.
 const HANZO_ENV_KEY: &str = "HANZO_USER_KEY";
 
+/// The credentials a SERVICE presents, tried before the human session.
+///
+/// `HANZO_API_KEY` is an org key. `HANZO_MACHINE_TOKEN` is the bearer an IAM
+/// machine identity holds after the client_credentials exchange — the identity
+/// a sandbox run, a cron job or an agent acting for an org actually carries.
+/// Neither exists on a developer's laptop, and `HANZO_USER_KEY` never exists in
+/// a pod, which is why reading only one of them made the other case impossible.
+const HANZO_MACHINE_ENV_KEYS: [&str; 2] = ["HANZO_API_KEY", "HANZO_MACHINE_TOKEN"];
+
 /// Built-in default provider list.
 fn wire_api_override_from_env(env_key: &str) -> Option<WireApi> {
     match std::env::var(env_key) {
@@ -763,6 +796,7 @@ pub fn built_in_model_providers(
                 name: "OpenAI".into(),
                 base_url: openai_base_url,
                 env_key: None,
+                alt_env_keys: Vec::new(),
                 env_key_instructions: None,
                 experimental_bearer_token: None,
                 auth: None,
@@ -821,9 +855,11 @@ pub fn create_hanzo_provider() -> ModelProviderInfo {
         name: "Hanzo".into(),
         base_url: Some(base_url),
         env_key: Some(HANZO_ENV_KEY.into()),
+        alt_env_keys: HANZO_MACHINE_ENV_KEYS.iter().map(|s| (*s).to_string()).collect(),
         env_key_instructions: Some(
             "Sign in with `hanzo auth login`, or set HANZO_USER_KEY to a key from \
-             https://hanzo.ai/settings/keys."
+             https://hanzo.ai/settings/keys. A service sets HANZO_API_KEY or \
+             HANZO_MACHINE_TOKEN instead."
                 .into(),
         ),
         experimental_bearer_token: None,
@@ -871,6 +907,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str) -> ModelProviderInfo {
         name: "gpt-oss".into(),
         base_url: Some(base_url.into()),
         env_key: None,
+        alt_env_keys: Vec::new(),
         env_key_instructions: None,
         experimental_bearer_token: None,
         auth: None,
@@ -1013,6 +1050,7 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
                 name: "test".into(),
                 base_url: Some(base_url.into()),
                 env_key: None,
+                alt_env_keys: Vec::new(),
                 env_key_instructions: None,
                 experimental_bearer_token: None,
                 auth: None,
@@ -1086,6 +1124,7 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
                 name: name.into(),
                 base_url: base_url.map(str::to_string),
                 env_key: None,
+                alt_env_keys: Vec::new(),
                 env_key_instructions: None,
                 experimental_bearer_token: None,
                 auth: None,

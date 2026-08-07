@@ -129,3 +129,43 @@ fn the_release_pipeline_publishes_to_our_namespaces() {
         "the release must build the `dev` binary"
     );
 }
+
+/// A SERVICE HAS NO HUMAN SESSION, and reading only `HANZO_USER_KEY` made that
+/// case impossible: `dev` inside a sandbox pod reported "Authentication expired.
+/// Run `code login` to continue" for a caller that was perfectly authenticated,
+/// because the one variable it would look at is the one no service ever has.
+#[test]
+fn the_hanzo_provider_accepts_a_machine_credential() {
+    let p = code_core::create_hanzo_provider();
+    for want in ["HANZO_API_KEY", "HANZO_MACHINE_TOKEN"] {
+        assert!(
+            p.alt_env_keys.iter().any(|k| k == want),
+            "a service run carries {want}; the provider must read it"
+        );
+    }
+    assert_eq!(
+        p.env_key.as_deref(),
+        Some("HANZO_USER_KEY"),
+        "the human session stays the declared key"
+    );
+}
+
+/// MACHINE FIRST, and deliberately. Where both are present the process was
+/// started BY something, and the credential it was handed is the one that should
+/// be billed and audited — a stale human key left in an environment must not
+/// quietly outrank the identity the caller actually presented.
+#[test]
+fn a_machine_credential_outranks_a_stale_human_one() {
+    let p = code_core::create_hanzo_provider();
+    let idx = |name: &str| {
+        p.alt_env_keys
+            .iter()
+            .chain(p.env_key.iter())
+            .position(|k| k == name)
+            .expect("declared")
+    };
+    assert!(
+        idx("HANZO_API_KEY") < idx("HANZO_USER_KEY"),
+        "the machine credential must be tried before the human session"
+    );
+}
