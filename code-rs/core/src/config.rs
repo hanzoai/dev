@@ -2496,6 +2496,7 @@ model_verbosity = "high"
             name: "OpenAI using Chat Completions".to_string(),
             base_url: Some("https://api.openai.com/v1".to_string()),
             env_key: Some("OPENAI_API_KEY".to_string()),
+            alt_env_keys: Vec::new(),
             wire_api: crate::WireApi::Chat,
             env_key_instructions: None,
             experimental_bearer_token: None,
