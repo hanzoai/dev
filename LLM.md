@@ -115,18 +115,35 @@ Read this before attempting a sync. The directory names lie about the topology.
 
 ### Syncing
 
-Because the graphs are disjoint, `git merge` needs a merge base supplied by
-hand. The base is the just-every commit matching our last sync — recorded here,
-and nowhere else:
+The graphs are disjoint, so there is no merge base to discover — the just-every
+commit our tree currently matches is recorded here, and nowhere else:
 
     upstream        just-every/code
-    synced-to       e4fe007150  (v0.6.169)
-    merge-base-used e92d81b496  ("fix(tui/auto-drive): block resume while auto-resolve pending")
+    synced-to       00910569e0  ("Complete image generation metadata backport")
+    method          3-way apply of the delta (see below)
 
-To sync: fetch just-every, `git replace --graft <our-fork-point> <its-parent>
-<merge-base-used>`, `git merge`, resolve, `git replace -d <our-fork-point>`,
-then update the two SHAs above. Conflicts concentrate in the TUI chatwidget,
-`core/src/config.rs`, and every file carrying our name.
+To sync: fetch just-every, then apply the delta `<synced-to>..<their-new-head>`
+onto our tree and update the SHA above. Conflicts concentrate in the TUI
+chatwidget, `core/src/config.rs`, and every file carrying our name.
+
+The graft-and-merge recipe this section used to give (`git replace --graft`,
+`git merge`, `git replace -d`) is not what the last sync actually did, and the
+base it named — `e4fe007150` / `e92d81b496` — is now stale. Applying the delta
+directly is simpler and has the same effect, because a graft merge against a
+disjoint history degenerates to exactly that. The v0.6.170 sync (`2ebbda854e`)
+recorded the numbers: the upstream delta touched 249 files, our fork diverges
+in 140, and the intersection was 2 files — both pure additions.
+
+**Do not merge `openai/codex` directly**, whatever the `upstream` remote
+suggests. Measured 2026-08-06: `origin/main` and `openai/codex` share no merge
+base at all (different root commits), our `codex-rs/` mirror differs from
+upstream by 341 shadowed files and ~175k lines, and 72 upstream crates have no
+counterpart here. The subsystems people ask for by name — `tool_search`,
+`thread_manager`, `multi_agents_v2`, MCP `connection_manager`, `resize_reflow` —
+do not exist in `code-rs` at all; upstream refactored `core` into ~15 crates
+while this fork kept the 2025-era monolith. Take upstream through just-every,
+who already carry the mirror, or port one subsystem deliberately. A direct merge
+is a re-fork, not a sync.
 
 ## Documentation hygiene
 
