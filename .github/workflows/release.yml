@@ -417,13 +417,34 @@ jobs:
             fi
           fi
 
-      - name: Fallback release notes without OPENAI_API_KEY
-        if: env.OPENAI_API_KEY == ''
+      # Publishing must not depend on a model call succeeding. This used to be
+      # gated on `env.OPENAI_API_KEY == ''`, which asked the wrong question: the
+      # generator above drives our own `dev` binary, and `dev` defaults to the
+      # hanzo provider, so it needs HANZO_USER_KEY — not OPENAI_API_KEY. With the
+      # OpenAI secret set and the Hanzo one absent, the agent died with "Missing
+      # environment variable: HANZO_USER_KEY", the `|| { echo ...; }` above
+      # swallowed it, and this step was skipped because the OpenAI key was
+      # non-empty. Nothing wrote the notes, so the stale committed file survived
+      # — still headed "## @just-every/code v0.6.169" — and
+      # check-release-notes-version.sh correctly refused it, skipping every
+      # publish step. That is why 0.6.93 built five clean binaries and shipped
+      # nothing.
+      #
+      # So: ask about the artifact, not the credentials. Write the deterministic
+      # fallback whenever the notes are missing or carry the wrong header.
+      - name: Ensure release notes exist and match this version
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p docs/release-notes
-          printf "## @hanzo/dev v%s\n\nSee CHANGELOG.md for details." "${NEW_VERSION}" > docs/release-notes/RELEASE_NOTES.md
+          notes=docs/release-notes/RELEASE_NOTES.md
+          want="## @hanzo/dev v${NEW_VERSION}"
+          if [ -s "$notes" ] && [ "$(grep -m1 '^## @hanzo/dev v' "$notes" || true)" = "$want" ]; then
+            echo "generated notes are present and correctly headed"
+          else
+            echo "::notice::writing fallback release notes for ${NEW_VERSION}"
+            printf '%s\n\nSee CHANGELOG.md for details.\n' "$want" > "$notes"
+          fi
 
       - name: Assert release metadata exists
         shell: bash
@@ -959,6 +980,20 @@ jobs:
           meta_dir="artifacts/release-metadata"
           test -s "$meta_dir/CHANGELOG.md" || { echo "release metadata missing CHANGELOG.md" >&2; exit 1; }
           test -s "$meta_dir/docs/release-notes/RELEASE_NOTES.md" || { echo "release metadata missing RELEASE_NOTES.md" >&2; exit 1; }
+
+          # Apply it. The step is named "Apply generated release metadata" and
+          # until now it only *validated* the artifact — the release-notes job
+          # built correctly-headed notes, uploaded them, and this job then read
+          # the stale copy committed in the tree instead. That copy was still
+          # headed "## @just-every/code v0.6.169", so
+          # check-release-notes-version.sh reported `actual: <none>` (no line
+          # matches ^## @hanzo/dev v) and skipped every publish step below,
+          # which is how run 31147947735 built five clean binaries and shipped
+          # nothing.
+          mkdir -p docs/release-notes
+          cp "$meta_dir/CHANGELOG.md" CHANGELOG.md
+          cp "$meta_dir/docs/release-notes/RELEASE_NOTES.md" docs/release-notes/RELEASE_NOTES.md
+          echo "applied release notes: $(head -n1 docs/release-notes/RELEASE_NOTES.md)"
 
           # Determine previous tag (the most recent tag before the new one).
           # If none exists, use the initial commit as the base.
