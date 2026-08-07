@@ -418,6 +418,10 @@ impl Session {
         if is_apply_patch {
             let unified_diff = turn_diff_tracker.get_unified_diff();
             if let Ok(Some(unified_diff)) = unified_diff {
+                // The diff says what moved; a picture says what it looks like.
+                // Reads the same value the reviewer is about to, and returns
+                // before the browser it may launch has started.
+                crate::shot::capture(self, &unified_diff);
                 let msg = EventMsg::TurnDiff(TurnDiffEvent { unified_diff });
                 let event = self.make_event(sub_id, msg);
                 let _ = self.tx_event.send(event).await;

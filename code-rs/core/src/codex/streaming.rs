@@ -10838,6 +10838,9 @@ async fn handle_container_exec_with_params(
                         .await;
 
                     if let Ok(Some(unified_diff)) = turn_diff_tracker.get_unified_diff() {
+                        // The diff says what moved; a picture says what it looks
+                        // like. Same value the reviewer is about to read.
+                        crate::shot::capture(sess, &unified_diff);
                         let diff_event = sess.make_event(
                             &sub_id,
                             EventMsg::TurnDiff(TurnDiffEvent { unified_diff }),
