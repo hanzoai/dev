@@ -760,6 +760,21 @@ const HANZO_ENV_KEY: &str = "HANZO_USER_KEY";
 /// a sandbox run, a cron job or an agent acting for an org actually carries.
 /// Neither exists on a developer's laptop, and `HANZO_USER_KEY` never exists in
 /// a pod, which is why reading only one of them made the other case impossible.
+///
+/// THIS IS A RESTORATION, and the fleet proves it. `HANZO_ENV_KEY` was
+/// introduced by 8a4de1f45b (2026-08-01), which is NOT in v0.6.91 — and v0.6.91
+/// is what runs in the sandbox image today. Measured against that live pod, with
+/// the two variables set one at a time:
+///
+///   nothing set             no request is attempted at all
+///   HANZO_API_KEY only      the request goes out; IAM rejects the sentinel (400)
+///   HANZO_USER_KEY only     no request is attempted at all
+///
+/// So the deployed build reaches our gateway on the MACHINE variable and ignores
+/// the human one, and main reversed that without anything noticing: every
+/// service caller in the fleet would have stopped authenticating at the next
+/// image rebuild, silently, because a missing credential and an unread one look
+/// identical from outside.
 const HANZO_MACHINE_ENV_KEYS: [&str; 2] = ["HANZO_API_KEY", "HANZO_MACHINE_TOKEN"];
 
 /// Built-in default provider list.
