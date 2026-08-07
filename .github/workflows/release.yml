@@ -425,7 +425,7 @@ jobs:
       # environment variable: HANZO_USER_KEY", the `|| { echo ...; }` above
       # swallowed it, and this step was skipped because the OpenAI key was
       # non-empty. Nothing wrote the notes, so the stale committed file survived
-      # — still headed "## @just-every/code v0.6.169" — and
+      # — still headed with the upstream fork's npm scope at v0.6.169 — and
       # check-release-notes-version.sh correctly refused it, skipping every
       # publish step. That is why 0.6.93 built five clean binaries and shipped
       # nothing.
@@ -985,7 +985,7 @@ jobs:
           # until now it only *validated* the artifact — the release-notes job
           # built correctly-headed notes, uploaded them, and this job then read
           # the stale copy committed in the tree instead. That copy was still
-          # headed "## @just-every/code v0.6.169", so
+          # headed with the upstream fork's npm scope at v0.6.169, so
           # check-release-notes-version.sh reported `actual: <none>` (no line
           # matches ^## @hanzo/dev v) and skipped every publish step below,
           # which is how run 31147947735 built five clean binaries and shipped
