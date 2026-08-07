@@ -13168,7 +13168,7 @@ impl ChatWidget<'_> {
     fn conversation_line(role: UndoPreviewRole, text: &str) -> Line<'static> {
         let (label, color) = match role {
             UndoPreviewRole::User => ("You", crate::colors::text_bright()),
-            UndoPreviewRole::Assistant => ("Code", crate::colors::primary()),
+            UndoPreviewRole::Assistant => ("Dev", crate::colors::primary()),
         };
         let label_span = Span::styled(
             format!("{label}: "),
@@ -23066,13 +23066,11 @@ Have we met every part of this goal and is there no further work to do?"#
             if cmd_str == "test-approval" {
                 continue;
             }
-            // Prefer "Code" branding in the Help panel
-            let desc = cmd.description().replace("Codex", "Code");
             // Render as "/command  —  description"
             lines.push(RtLine::from(vec![
                 RtSpan::styled(format!("/{cmd_str:<12}"), t_fg),
                 RtSpan::raw("  —  "),
-                RtSpan::styled(desc.to_string(), t_dim),
+                RtSpan::styled(cmd.description().to_string(), t_dim),
             ]));
         }
 
@@ -44844,7 +44842,7 @@ impl ChatWidget<'_> {
             .filter(|text| !text.is_empty());
 
         self.app_event_tx.send(AppEvent::EmitTuiNotification {
-            title: "Code".to_string(),
+            title: "Hanzo Dev".to_string(),
             body: snippet,
         });
     }

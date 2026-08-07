@@ -16,8 +16,13 @@ const SMALL_MIN_WIDTH: u16 = 50;
 const LARGE_MIN_HEIGHT: u16 = 28;
 const MEDIUM_MIN_HEIGHT: u16 = 21;
 const SMALL_MIN_HEIGHT: u16 = 19;
-const LARGE_VERSION_COLUMN: usize = 65;
-const MEDIUM_VERSION_COLUMN: usize = 43;
+// Row of the word art that carries the version tag, and the column it starts on.
+const LARGE_VERSION_ROW: usize = 4;
+const LARGE_VERSION_COLUMN: usize = 48;
+const MEDIUM_VERSION_ROW: usize = 5;
+const MEDIUM_VERSION_COLUMN: usize = 44;
+const SMALL_VERSION_ROW: usize = 5;
+const SMALL_VERSION_COLUMN: usize = 39;
 const ANIMATED_CHARS: &[char] = &['█'];
 
 pub fn intro_art_size_for_width(width: u16) -> IntroArtSize {
@@ -169,158 +174,141 @@ fn welcome_lines(size: IntroArtSize, version: &str) -> Vec<String> {
     }
 }
 
-const LARGE_VERSION_LINE: &str = "   ███████╗ ╚████╔╝ ███████╗██║  ██║   ██║";
+/// "HANZO" in ANSI Shadow. The Large and Medium art share it.
+const HANZO: [&str; 6] = [
+    "██╗  ██╗ █████╗ ███╗   ██╗███████╗ ██████╗",
+    "██║  ██║██╔══██╗████╗  ██║╚══███╔╝██╔═══██╗",
+    "███████║███████║██╔██╗ ██║  ███╔╝ ██║   ██║",
+    "██╔══██║██╔══██║██║╚██╗██║ ███╔╝  ██║   ██║",
+    "██║  ██║██║  ██║██║ ╚████║███████╗╚██████╔╝",
+    "╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝ ╚═════╝",
+];
+
+/// Condensed "HANZO" so the Small art still fits inside `SMALL_MIN_WIDTH`.
+const HANZO_NARROW: [&str; 6] = [
+    "██╗ ██╗ ████╗ ███╗  ██╗██████╗ █████╗",
+    "██║ ██║██╔═██╗████╗ ██║╚═███╔╝██╔══██╗",
+    "██████║██████║██╔██╗██║ ███╔╝ ██║  ██║",
+    "██╔═██║██╔═██║██║╚████║███╔╝  ██║  ██║",
+    "██║ ██║██║ ██║██║ ╚███║██████╗╚█████╔╝",
+    "╚═╝ ╚═╝╚═╝ ╚═╝╚═╝  ╚══╝╚═════╝ ╚════╝",
+];
+
+/// Render the top word, appending the version tag to `version_row` at
+/// `version_column`.
+fn word_lines(
+    word: &[&str; 6],
+    version_row: usize,
+    version_column: usize,
+    version: &str,
+) -> Vec<String> {
+    word.iter()
+        .enumerate()
+        .map(|(row, line)| {
+            if row != version_row {
+                return (*line).to_string();
+            }
+            let pad = " ".repeat(version_column.saturating_sub(line.chars().count()));
+            format!("{line}{pad}{version}")
+        })
+        .collect()
+}
+
+/// "DEV" at stroke thickness 3: three 16-column cells separated by 4 blanks.
 const LARGE_BODY_TAIL: [&str; 22] = [
-    "      █████████╗        █████████╗     ████████████╗     ███████████████╗",
-    "      █████████║        █████████║     ████████████║     ███████████████║",
-    "      █████████║        █████████║     ████████████║     ███████████████║",
-    "   ███╔════════███╗  ███╔════════███╗  ███╔════════███╗  ███╔═══════════╝",
-    "   ███║        ███║  ███║        ███║  ███║        ███║  ███║",
-    "   ███║        ███║  ███║        ███║  ███║        ███║  ███║",
-    "   ███║        ╚══╝  ███║        ███║  ███║        ███║  ███║",
-    "   ███║              ███║        ███║  ███║        ███║  ███║",
-    "   ███║              ███║        ███║  ███║        ███║  ███║",
-    "   ███║              ███║        ███║  ███║        ███║  ███████████████╗",
-    "   ███║              ███║        ███║  ███║        ███║  ███████████████║",
-    "   ███║              ███║        ███║  ███║        ███║  ███████████████║",
-    "   ███║              ███║        ███║  ███║        ███║  ███╔═══════════╝",
-    "   ███║              ███║        ███║  ███║        ███║  ███║",
-    "   ███║              ███║        ███║  ███║        ███║  ███║",
-    "   ███║        ███╗  ███║        ███║  ███║        ███║  ███║",
-    "   ███║        ███║  ███║        ███║  ███║        ███║  ███║",
-    "   ███║        ███║  ███║        ███║  ███║        ███║  ███║",
-    "   ╚══█████████╔══╝  ╚══█████████╔══╝  ████████████╔══╝  ███████████████╗",
-    "      █████████║        █████████║     ████████████║     ███████████████║",
-    "      █████████║        █████████║     ████████████║     ███████████████║",
-    "      ╚════════╝        ╚════════╝      ╚══════════╝      ╚═════════════╝",
+    "████████████╗       ███████████████╗    ███╗        ███╗",
+    "████████████║       ███████████████║    ███║        ███║",
+    "████████████║       ███████████████║    ███║        ███║",
+    "███╔════════███╗    ███╔═══════════╝    ███║        ███║",
+    "███║        ███║    ███║                ███║        ███║",
+    "███║        ███║    ███║                ╚███╗      ███╔╝",
+    "███║        ███║    ███║                 ███║      ███║",
+    "███║        ███║    ███║                 ███║      ███║",
+    "███║        ███║    ███║                 ███║      ███║",
+    "███║        ███║    ███████████████╗     ███║      ███║",
+    "███║        ███║    ███████████████║     ╚███╗    ███╔╝",
+    "███║        ███║    ███████████████║      ███║    ███║",
+    "███║        ███║    ███╔═══════════╝      ███║    ███║",
+    "███║        ███║    ███║                  ███║    ███║",
+    "███║        ███║    ███║                  ███║    ███║",
+    "███║        ███║    ███║                  ╚███╗  ███╔╝",
+    "███║        ███║    ███║                   ███║  ███║",
+    "███║        ███║    ███║                   ███║  ███║",
+    "████████████╔══╝    ███████████████╗       ███║  ███║",
+    "████████████║       ███████████████║       ╚███████╔╝",
+    "████████████║       ███████████████║        ╚█████╔╝",
+    " ╚══════════╝        ╚═════════════╝         ╚════╝",
 ];
 
 fn large_welcome_lines(version: &str) -> Vec<String> {
-    let mut animated = vec![
-        "   ███████╗██╗   ██╗███████╗██████╗ ██╗   ██╗".to_string(),
-        "   ██╔════╝██║   ██║██╔════╝██╔══██╗╚██╗ ██╔╝".to_string(),
-        "   █████╗  ██║   ██║█████╗  ██████╔╝ ╚████╔╝".to_string(),
-        "   ██╔══╝  ╚██╗ ██╔╝██╔══╝  ██╔══██╗  ╚██╔╝".to_string(),
-    ];
-
-    let base_width = LARGE_VERSION_LINE.chars().count();
-    let padding = LARGE_VERSION_COLUMN.saturating_sub(base_width);
-    let _version_pad = " ".repeat(padding);
-    let footer_line = "   ╚══════╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝   ╚═╝";
-    let footer_len = footer_line.chars().count();
-    let footer_pad = LARGE_VERSION_COLUMN.saturating_sub(footer_len);
-    let footer_version_pad = " ".repeat(footer_pad);
-    animated.push(format!("{LARGE_VERSION_LINE}{footer_version_pad}{version}"));
-    animated.push(footer_line.to_string());
-    animated.extend(LARGE_BODY_TAIL.iter().map(|line| (*line).to_string()));
-
-    shift_left(animated, 3)
+    let mut lines = word_lines(&HANZO, LARGE_VERSION_ROW, LARGE_VERSION_COLUMN, version);
+    lines.extend(LARGE_BODY_TAIL.iter().map(|line| (*line).to_string()));
+    lines
 }
 
-const MEDIUM_VERSION_LINE: &str = "   ╚══════╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝   ╚═╝ ";
+/// "DEV" at stroke thickness 2: three 11-column cells separated by 5 blanks.
 const MEDIUM_BODY_TAIL: [&str; 15] = [
-    "     ██████╗     ██████╗   ████████╗   ██████████╗",
-    "     ██████║     ██████║   ████████║   ██████████║",
-    "   ██╔═════██╗ ██╔═════██╗ ██╔═════██╗ ██╔═══════╝",
-    "   ██║     ██║ ██║     ██║ ██║     ██║ ██║",
-    "   ██║     ╚═╝ ██║     ██║ ██║     ██║ ██║",
-    "   ██║         ██║     ██║ ██║     ██║ ██║",
-    "   ██║         ██║     ██║ ██║     ██║ ██████████╗",
-    "   ██║         ██║     ██║ ██║     ██║ ██████████║",
-    "   ██║         ██║     ██║ ██║     ██║ ██╔═══════╝",
-    "   ██║         ██║     ██║ ██║     ██║ ██║",
-    "   ██║     ██╗ ██║     ██║ ██║     ██║ ██║",
-    "   ██║     ██║ ██║     ██║ ██║     ██║ ██║",
-    "   ╚═██████╔═╝ ╚═██████╔═╝ ████████╔═╝ ██████████╗",
-    "     ██████║     ██████║   ████████║   ██████████║",
-    "     ╚═════╝     ╚═════╝   ╚═══════╝   ╚═════════╝",
+    "████████╗       ██████████╗     ██╗     ██╗",
+    "████████║       ██████████║     ██║     ██║",
+    "██╔═════██╗     ██╔═══════╝     ██║     ██║",
+    "██║     ██║     ██║             ██║     ██║",
+    "██║     ██║     ██║             ██║     ██║",
+    "██║     ██║     ██║             ╚██╗   ██╔╝",
+    "██║     ██║     ██████████╗      ██║   ██║",
+    "██║     ██║     ██████████║      ██║   ██║",
+    "██║     ██║     ██╔═══════╝      ██║   ██║",
+    "██║     ██║     ██║              ██║   ██║",
+    "██║     ██║     ██║              ╚██╗ ██╔╝",
+    "██║     ██║     ██║               ██║ ██║",
+    "████████╔═╝     ██████████╗       ██║ ██║",
+    "████████║       ██████████║       ╚████╔╝",
+    "╚═══════╝       ╚═════════╝        ╚═══╝",
 ];
 
 fn medium_welcome_lines(version: &str) -> Vec<String> {
-    let mut animated = vec![
-        "   ███████╗██╗   ██╗███████╗██████╗ ██╗   ██╗".to_string(),
-        "   ██╔════╝██║   ██║██╔════╝██╔══██╗╚██╗ ██╔╝".to_string(),
-        "   █████╗  ██║   ██║█████╗  ██████╔╝ ╚████╔╝".to_string(),
-        "   ██╔══╝  ╚██╗ ██╔╝██╔══╝  ██╔══██╗  ╚██╔╝".to_string(),
-        "   ███████╗ ╚████╔╝ ███████╗██║  ██║   ██║".to_string(),
-    ];
-
-    let base_width = MEDIUM_VERSION_LINE.chars().count();
-    let padding = MEDIUM_VERSION_COLUMN.saturating_sub(base_width);
-    let _version_pad = " ".repeat(padding);
-    if let Some(first_tail) = MEDIUM_BODY_TAIL.first() {
-        let tail_len = first_tail.chars().count();
-        let tail_pad = MEDIUM_VERSION_COLUMN.saturating_sub(tail_len);
-        let tail_version_pad = " ".repeat(tail_pad);
-        animated.push(format!("{MEDIUM_VERSION_LINE}{tail_version_pad}{version}  "));
-        animated.extend(MEDIUM_BODY_TAIL.iter().map(|line| (*line).to_string()));
-    }
-    shift_left(animated, 3)
+    let mut lines = word_lines(&HANZO, MEDIUM_VERSION_ROW, MEDIUM_VERSION_COLUMN, version);
+    lines.extend(MEDIUM_BODY_TAIL.iter().map(|line| (*line).to_string()));
+    lines
 }
 
-const SMALL_VERSION_LINE: &str = "   ╚═════╝  ╚═══╝  ╚═════╝╚═╝  ╚═╝   ╚═╝  ";
+/// "DEV" at stroke thickness 2, two rows shorter than `MEDIUM_BODY_TAIL`.
+const SMALL_BODY_TAIL: [&str; 13] = [
+    "████████╗     ██████████╗   ██╗     ██╗",
+    "████████║     ██████████║   ██║     ██║",
+    "██╔═════██╗   ██╔═══════╝   ██║     ██║",
+    "██║     ██║   ██║           ██║     ██║",
+    "██║     ██║   ██║           ╚██╗   ██╔╝",
+    "██║     ██║   ██████████╗    ██║   ██║",
+    "██║     ██║   ██████████║    ██║   ██║",
+    "██║     ██║   ██╔═══════╝    ██║   ██║",
+    "██║     ██║   ██║            ╚██╗ ██╔╝",
+    "██║     ██║   ██║             ██║ ██║",
+    "████████╔═╝   ██████████╗     ██║ ██║",
+    "████████║     ██████████║     ╚████╔╝",
+    "╚═══════╝     ╚═════════╝      ╚═══╝",
+];
 
 fn small_welcome_lines(version: &str) -> Vec<String> {
-    let mut lines = vec![
-        "   ██████╗██╗   ██╗██████╗██████╗ ██╗   ██╗".to_string(),
-        "   ██╔═══╝██║   ██║██╔═══╝██╔══██╗╚██╗ ██╔╝".to_string(),
-        "   █████╗ ██║   ██║█████╗ ██████╔╝ ╚████╔╝".to_string(),
-        "   ██╔══╝ ╚██╗ ██╔╝██╔══╝ ██╔══██╗  ╚██╔╝".to_string(),
-        "   ██████╗ ╚████╔╝ ██████╗██║  ██║   ██║".to_string(),
-    ];
-
-    let base_width = SMALL_VERSION_LINE.chars().count();
-    let padding = MEDIUM_VERSION_COLUMN.saturating_sub(base_width);
-    let pad = " ".repeat(padding);
-    lines.push(format!("{SMALL_VERSION_LINE}{pad}{version}  "));
-
-    let tail = [
-        "     ██████╗     ██████╗   ████████╗   ██████████╗",
-        "     ██████║     ██████║   ████████║   ██████████║",
-        "   ██╔═════██╗ ██╔═════██╗ ██╔═════██╗ ██╔═══════╝",
-        "   ██║     ██║ ██║     ██║ ██║     ██║ ██║",
-        "   ██║     ╚═╝ ██║     ██║ ██║     ██║ ██║",
-        "   ██║         ██║     ██║ ██║     ██║ ██████████╗",
-        "   ██║         ██║     ██║ ██║     ██║ ██████████║",
-        "   ██║         ██║     ██║ ██║     ██║ ██╔═══════╝",
-        "   ██║     ██╗ ██║     ██║ ██║     ██║ ██║",
-        "   ██║     ██║ ██║     ██║ ██║     ██║ ██║",
-        "   ╚═██████╔═╝ ╚═██████╔═╝ ████████╔═╝ ██████████╗",
-        "     ██████║     ██████║   ████████║   ██████████║",
-        "     ╚═════╝     ╚═════╝   ╚═══════╝   ╚═════════╝",
-    ];
-    lines.extend(tail.iter().map(|l| (*l).to_string()));
-
-    shift_left(lines, 3)
+    let mut lines = word_lines(
+        &HANZO_NARROW,
+        SMALL_VERSION_ROW,
+        SMALL_VERSION_COLUMN,
+        version,
+    );
+    lines.extend(SMALL_BODY_TAIL.iter().map(|line| (*line).to_string()));
+    lines
 }
 
 fn tiny_welcome_lines(version: &str) -> Vec<String> {
     vec![
-        format!("EVERY                 {version}    "),
-        " █████╗ █████╗ █████╗ ██████╗         ".to_string(),
-        "██╔═══╝██╔══██╗██╔═██╗██╔═══╝         ".to_string(),
-        "██║    ██║  ██║██║ ██║████╗           ".to_string(),
-        "██║    ██║  ██║██║ ██║██╔═╝           ".to_string(),
-        "╚█████╗╚█████╔╝█████╔╝██████╗         ".to_string(),
-        " ╚════╝ ╚════╝ ╚════╝ ╚═════╝         ".to_string(),
+        format!("HANZO        {version}"),
+        "█████╗ ██████╗██╗ ██╗".to_string(),
+        "██╔═██╗██╔═══╝██║ ██║".to_string(),
+        "██║ ██║████╗  ██║ ██║".to_string(),
+        "██║ ██║██╔═╝  ╚████╔╝".to_string(),
+        "█████╔╝██████╗ ╚██╔╝".to_string(),
+        "╚════╝ ╚═════╝  ╚═╝".to_string(),
     ]
-}
-
-fn shift_left(lines: Vec<String>, n: usize) -> Vec<String> {
-    let mut out = Vec::with_capacity(lines.len());
-    for line in lines {
-        let mut drop = n;
-        let mut new_line = String::with_capacity(line.len());
-        for ch in line.chars() {
-            if drop > 0 && ch == ' ' {
-                drop -= 1;
-                continue;
-            }
-            new_line.push(ch);
-        }
-        out.push(new_line);
-    }
-    out
 }
 
 /* ---------------- outline fill renderer ---------------- */
@@ -362,7 +350,7 @@ fn render_static_lines(
     _frame: u32,
     reveal_x_shadow: isize,
 ) {
-    let static_target = Color::Rgb(230, 232, 235); // matches CODE/EVERY final color (#e6e8eb)
+    let static_target = Color::Rgb(230, 232, 235); // matches the HANZO/DEV final color (#e6e8eb)
     let static_color_base = blend_to_background(static_target, alpha);
     for (row_idx, line) in lines.iter().enumerate() {
         let y = area.y + row_idx as u16;
@@ -664,7 +652,7 @@ mod tests {
     #[test]
     fn renders_small_art_pixel_perfect() {
         let version = format!("v{}", code_version::version());
-        let expected = vec!["██████╗██╗   ██╗█".to_string()];
+        let expected = vec!["██╗ ██╗ ████╗ ███".to_string()];
         let width = expected[0].chars().count() as u16;
         let rect = Rect::new(0, 0, width, 1);
         let mut buf = Buffer::empty(rect);
@@ -681,6 +669,47 @@ mod tests {
 
         let rendered = buffer_to_strings(&buf, rect);
         assert_eq!(trim_lines(rendered), trim_lines(expected));
+    }
+
+    /// `intro_art_height` drives the cell's layout reservation. If it drifts from
+    /// what `welcome_lines` actually returns the splash clips or leaves a gap.
+    #[test]
+    fn declared_height_matches_line_count() {
+        let version = format!("v{}", code_version::version());
+        for size in [
+            IntroArtSize::Large,
+            IntroArtSize::Medium,
+            IntroArtSize::Small,
+            IntroArtSize::Tiny,
+        ] {
+            assert_eq!(
+                welcome_lines(size, &version).len(),
+                intro_art_height(size) as usize,
+                "{size:?} art height disagrees with its line count"
+            );
+        }
+    }
+
+    /// Each variant is chosen at its minimum width, so it has to fit there —
+    /// including the version tag, which sits furthest right.
+    #[test]
+    fn art_fits_its_minimum_width() {
+        let version = format!("v{}", code_version::version());
+        for (size, min_width) in [
+            (IntroArtSize::Large, LARGE_MIN_WIDTH),
+            (IntroArtSize::Medium, MEDIUM_MIN_WIDTH),
+            (IntroArtSize::Small, SMALL_MIN_WIDTH),
+        ] {
+            let width = welcome_lines(size, &version)
+                .iter()
+                .map(|line| line.chars().count())
+                .max()
+                .unwrap_or(0);
+            assert!(
+                width <= min_width as usize,
+                "{size:?} art is {width} columns wide but renders at {min_width}"
+            );
+        }
     }
 
     fn buffer_to_strings(buf: &Buffer, area: Rect) -> Vec<String> {
@@ -706,34 +735,34 @@ mod tests {
 
     fn expected_large(version: &str) -> Vec<String> {
         let art = indoc! {"
-           ███████╗██╗   ██╗███████╗██████╗ ██╗   ██╗
-           ██╔════╝██║   ██║██╔════╝██╔══██╗╚██╗ ██╔╝
-           █████╗  ██║   ██║█████╗  ██████╔╝ ╚████╔╝
-           ██╔══╝  ╚██╗ ██╔╝██╔══╝  ██╔══██╗  ╚██╔╝
-           ███████╗ ╚████╔╝ ███████╗██║  ██║   ██║                       {VERSION}
-           ╚══════╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝   ╚═╝
-              █████████╗        █████████╗     ████████████╗     ███████████████╗
-              █████████║        █████████║     ████████████║     ███████████████║
-              █████████║        █████████║     ████████████║     ███████████████║
-           ███╔════════███╗  ███╔════════███╗  ███╔════════███╗  ███╔═══════════╝
-           ███║        ███║  ███║        ███║  ███║        ███║  ███║
-           ███║        ███║  ███║        ███║  ███║        ███║  ███║
-           ███║        ╚══╝  ███║        ███║  ███║        ███║  ███║
-           ███║              ███║        ███║  ███║        ███║  ███║
-           ███║              ███║        ███║  ███║        ███║  ███║
-           ███║              ███║        ███║  ███║        ███║  ███████████████╗
-           ███║              ███║        ███║  ███║        ███║  ███████████████║
-           ███║              ███║        ███║  ███║        ███║  ███████████████║
-           ███║              ███║        ███║  ███║        ███║  ███╔═══════════╝
-           ███║              ███║        ███║  ███║        ███║  ███║
-           ███║              ███║        ███║  ███║        ███║  ███║
-           ███║        ███╗  ███║        ███║  ███║        ███║  ███║
-           ███║        ███║  ███║        ███║  ███║        ███║  ███║
-           ███║        ███║  ███║        ███║  ███║        ███║  ███║
-           ╚══█████████╔══╝  ╚══█████████╔══╝  ████████████╔══╝  ███████████████╗
-              █████████║        █████████║     ████████████║     ███████████████║
-              █████████║        █████████║     ████████████║     ███████████████║
-              ╚════════╝        ╚════════╝      ╚══════════╝      ╚═════════════╝
+            ██╗  ██╗ █████╗ ███╗   ██╗███████╗ ██████╗
+            ██║  ██║██╔══██╗████╗  ██║╚══███╔╝██╔═══██╗
+            ███████║███████║██╔██╗ ██║  ███╔╝ ██║   ██║
+            ██╔══██║██╔══██║██║╚██╗██║ ███╔╝  ██║   ██║
+            ██║  ██║██║  ██║██║ ╚████║███████╗╚██████╔╝     {VERSION}
+            ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝ ╚═════╝
+            ████████████╗       ███████████████╗    ███╗        ███╗
+            ████████████║       ███████████████║    ███║        ███║
+            ████████████║       ███████████████║    ███║        ███║
+            ███╔════════███╗    ███╔═══════════╝    ███║        ███║
+            ███║        ███║    ███║                ███║        ███║
+            ███║        ███║    ███║                ╚███╗      ███╔╝
+            ███║        ███║    ███║                 ███║      ███║
+            ███║        ███║    ███║                 ███║      ███║
+            ███║        ███║    ███║                 ███║      ███║
+            ███║        ███║    ███████████████╗     ███║      ███║
+            ███║        ███║    ███████████████║     ╚███╗    ███╔╝
+            ███║        ███║    ███████████████║      ███║    ███║
+            ███║        ███║    ███╔═══════════╝      ███║    ███║
+            ███║        ███║    ███║                  ███║    ███║
+            ███║        ███║    ███║                  ███║    ███║
+            ███║        ███║    ███║                  ╚███╗  ███╔╝
+            ███║        ███║    ███║                   ███║  ███║
+            ███║        ███║    ███║                   ███║  ███║
+            ████████████╔══╝    ███████████████╗       ███║  ███║
+            ████████████║       ███████████████║       ╚███████╔╝
+            ████████████║       ███████████████║        ╚█████╔╝
+             ╚══════════╝        ╚═════════════╝         ╚════╝
         "}
         .replace("{VERSION}", version);
 
@@ -742,27 +771,27 @@ mod tests {
 
     fn expected_medium(version: &str) -> Vec<String> {
         let art = indoc! {"
-           ███████╗██╗   ██╗███████╗██████╗ ██╗   ██╗
-           ██╔════╝██║   ██║██╔════╝██╔══██╗╚██╗ ██╔╝
-           █████╗  ██║   ██║█████╗  ██████╔╝ ╚████╔╝
-           ██╔══╝  ╚██╗ ██╔╝██╔══╝  ██╔══██╗  ╚██╔╝
-           ███████╗ ╚████╔╝ ███████╗██║  ██║   ██║
-           ╚══════╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝   ╚═╝ {VERSION}  
-             ██████╗     ██████╗   ████████╗   ██████████╗
-             ██████║     ██████║   ████████║   ██████████║
-           ██╔═════██╗ ██╔═════██╗ ██╔═════██╗ ██╔═══════╝
-           ██║     ██║ ██║     ██║ ██║     ██║ ██║
-           ██║     ╚═╝ ██║     ██║ ██║     ██║ ██║
-           ██║         ██║     ██║ ██║     ██║ ██║
-           ██║         ██║     ██║ ██║     ██║ ██████████╗
-           ██║         ██║     ██║ ██║     ██║ ██████████║
-           ██║         ██║     ██║ ██║     ██║ ██╔═══════╝
-           ██║         ██║     ██║ ██║     ██║ ██║
-           ██║     ██╗ ██║     ██║ ██║     ██║ ██║
-           ██║     ██║ ██║     ██║ ██║     ██║ ██║
-           ╚═██████╔═╝ ╚═██████╔═╝ ████████╔═╝ ██████████╗
-             ██████║     ██████║   ████████║   ██████████║
-             ╚═════╝     ╚═════╝   ╚═══════╝   ╚═════════╝
+            ██╗  ██╗ █████╗ ███╗   ██╗███████╗ ██████╗
+            ██║  ██║██╔══██╗████╗  ██║╚══███╔╝██╔═══██╗
+            ███████║███████║██╔██╗ ██║  ███╔╝ ██║   ██║
+            ██╔══██║██╔══██║██║╚██╗██║ ███╔╝  ██║   ██║
+            ██║  ██║██║  ██║██║ ╚████║███████╗╚██████╔╝
+            ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝ ╚═════╝  {VERSION}
+            ████████╗       ██████████╗     ██╗     ██╗
+            ████████║       ██████████║     ██║     ██║
+            ██╔═════██╗     ██╔═══════╝     ██║     ██║
+            ██║     ██║     ██║             ██║     ██║
+            ██║     ██║     ██║             ██║     ██║
+            ██║     ██║     ██║             ╚██╗   ██╔╝
+            ██║     ██║     ██████████╗      ██║   ██║
+            ██║     ██║     ██████████║      ██║   ██║
+            ██║     ██║     ██╔═══════╝      ██║   ██║
+            ██║     ██║     ██║              ██║   ██║
+            ██║     ██║     ██║              ╚██╗ ██╔╝
+            ██║     ██║     ██║               ██║ ██║
+            ████████╔═╝     ██████████╗       ██║ ██║
+            ████████║       ██████████║       ╚████╔╝
+            ╚═══════╝       ╚═════════╝        ╚═══╝
         "}
         .replace("{VERSION}", version);
 
