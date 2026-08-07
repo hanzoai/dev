@@ -1,6 +1,11 @@
 name: Release
 
 on:
+  # A release you cannot re-run by hand is a release you cannot recover. Pushes
+  # authored by a flagged account dispatch no run at all — the commit lands on
+  # main and Actions stays silent, which is indistinguishable from a queue — and
+  # a transient runner/registry failure otherwise needs a no-op commit to retry.
+  workflow_dispatch:
   push:
     branches: [ main ]
     # Ignore common non-release paths, but DO NOT ignore release.yml so that
@@ -162,7 +167,14 @@ jobs:
   determine-version:
     name: Determine Version
     needs: [npm-auth-check]
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, not the ubuntu-latest alias. Measured on run 31128398197:
+    # `Preflight Tests` (ubuntu-24.04) had a runner in five seconds, while this
+    # job sat on ubuntu-latest for fifteen minutes and was cancelled with
+    # "The job was not acquired by Runner of type hosted even after multiple
+    # attempts" — taking the whole release with it. The alias also silently
+    # re-points when GitHub rotates the default image; naming the version means
+    # the runner we get is the runner we chose.
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -434,6 +446,11 @@ jobs:
     needs: [determine-version]
     runs-on: ${{ matrix.os }}
     strategy:
+      # One target failing must not cancel the other four. With the default
+      # fail-fast the aarch64 leg died four seconds in and took every sibling
+      # with it, so `release` was skipped and npm published nothing — a red run
+      # that looked like one broken architecture was actually zero shipped.
+      fail-fast: false
       matrix:
         include:
           # Linux builds
@@ -686,25 +703,22 @@ jobs:
             rm -f "$f"
           done
 
+      # v4, not v3. The v3 pin came from git.hanzo.ai, which presents as GHES and
+      # whose runners reject v4 with GHESNotSupportedError. But this file is under
+      # .github/workflows/, so it runs on github.com — and github.com now hard-fails
+      # v3 during "Set up job", before a single step executes:
+      #   "This request has been automatically failed because it uses a deprecated
+      #    version of `actions/upload-artifact: v3`."
+      # One host per path: v3 belongs only under .hanzo/workflows/.
       - name: Upload binaries (compressed)
-        # v3, not v4+: this workflow runs on git.hanzo.ai, which presents as GHES.
-        # The v4 action refuses outright — "GHESNotSupportedError: @actions/artifact
-        # v2.0.0+ ... not currently supported on GHES" — so the job builds its
-        # artifact and then discards it at the last step, and reads as a build
-        # failure when the build actually succeeded.
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.target }}
           path: artifacts/
           compression-level: 0
 
       - name: Upload cargo timings
-        # v3, not v4+: this workflow runs on git.hanzo.ai, which presents as GHES.
-        # The v4 action refuses outright — "GHESNotSupportedError: @actions/artifact
-        # v2.0.0+ ... not currently supported on GHES" — so the job builds its
-        # artifact and then discards it at the last step, and reads as a build
-        # failure when the build actually succeeded.
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: cargo-timings-${{ matrix.target }}
           path: code-rs/target/cargo-timings/*.html
@@ -714,7 +728,14 @@ jobs:
   release:
     name: Publish to npm
     needs: [determine-version, release-notes, build-binaries, preflight-tests]
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, not the ubuntu-latest alias. Measured on run 31128398197:
+    # `Preflight Tests` (ubuntu-24.04) had a runner in five seconds, while this
+    # job sat on ubuntu-latest for fifteen minutes and was cancelled with
+    # "The job was not acquired by Runner of type hosted even after multiple
+    # attempts" — taking the whole release with it. The alias also silently
+    # re-points when GitHub rotates the default image; naming the version means
+    # the runner we get is the runner we chose.
+    runs-on: ubuntu-24.04
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     timeout-minutes: 30
     env:
@@ -733,13 +754,10 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
+      # v4 to match the uploads above. Each artifact lands in its own subdirectory
+      # under artifacts/; "Prepare release assets" already walks it recursively.
       - name: Download all artifacts
-        # v3, not v4+: this workflow runs on git.hanzo.ai, which presents as GHES.
-        # The v4 action refuses outright — "GHESNotSupportedError: @actions/artifact
-        # v2.0.0+ ... not currently supported on GHES" — so the job builds its
-        # artifact and then discards it at the last step, and reads as a build
-        # failure when the build actually succeeded.
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: artifacts/
 
@@ -760,6 +778,30 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: sudo apt-get update -qq && sudo apt-get install -y zstd
+
+      # Every architecture, or nothing. The packaging step below iterates over
+      # whatever happens to be in release-assets/ and `continue`s past anything
+      # it does not recognise, so a target that never built produced a smaller
+      # set of npm packages and a green release — while @hanzo/dev still listed
+      # all five in optionalDependencies and users on the missing arch got a
+      # wrapper with no binary under it. Name the five here and refuse early.
+      - name: Assert every architecture built
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for t in x86_64-unknown-linux-musl \
+                   aarch64-unknown-linux-musl \
+                   x86_64-apple-darwin \
+                   aarch64-apple-darwin \
+                   x86_64-pc-windows-msvc.exe; do
+            compgen -G "release-assets/dev-${t}*" >/dev/null || missing+=("$t")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            printf '::error::no binary for: %s — refusing to publish a partial matrix\n' "${missing[*]}"
+            exit 1
+          fi
+          echo "all 5 target binaries present"
 
       - name: Build per-target npm binary packages
         shell: bash
