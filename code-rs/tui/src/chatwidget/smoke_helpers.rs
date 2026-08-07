@@ -33,9 +33,18 @@ pub fn enter_test_runtime_guard() -> tokio::runtime::EnterGuard<'static> {
     TEST_RUNTIME.enter()
 }
 
-/// The one working directory every snapshot renders. Machine-independent by
-/// construction: absolute, outside $HOME, and not a git checkout.
-pub const SNAPSHOT_CWD: &str = "/snapshot";
+// There is deliberately no cwd override here. main once pinned cwd to a
+// literal "/snapshot" so the status header's `Directory: <cwd>` segment could
+// not leak the recording machine's checkout path into a snapshot. The goal was
+// right; the mechanism is redundant here and actively harmful. Redundant
+// because CODEX_TUI_FORCE_MINIMAL_HEADER below renders a header with no
+// Directory segment at all, so no snapshot contains a path to begin with.
+// Harmful because "/snapshot" does not exist on disk, and the chatwidget tests
+// that resolve sandbox write permission against the working directory then
+// decide the workspace is not writable — `assertion failed: action.write` in
+// auto_handle_decision_launches_cli_agents_and_review and four of its
+// neighbours. If you reintroduce a cwd override, give it a directory that
+// actually exists, and run the code-tui lib tests, not just the snapshots.
 
 pub struct ChatWidgetHarness {
     chat: ChatWidget<'static>,
@@ -86,20 +95,9 @@ impl ChatWidgetHarness {
             std::env::set_var("CODE_TUI_TEST_MODE", "1");
         }
 
-        // Pin the working directory. The status header renders `Directory: <cwd>`,
-        // and an unset override resolves to `std::env::current_dir()` — the crate
-        // the test happens to run from. That put the checkout path inside every
-        // VT100 snapshot, so the snapshots only ever matched the one machine that
-        // recorded them. An absolute override is taken verbatim (see
-        // Config::load_from_base_config_with_overrides) and this one is outside
-        // $HOME, so it is never abbreviated to `~/…`, and outside any git repo,
-        // so no `Branch:` segment appears either.
         let cfg = Config::load_from_base_config_with_overrides(
             ConfigToml::default(),
-            ConfigOverrides {
-                cwd: Some(SNAPSHOT_CWD.into()),
-                ..ConfigOverrides::default()
-            },
+            ConfigOverrides::default(),
             std::env::temp_dir(),
         )
         .expect("config");
