@@ -525,7 +525,7 @@ jobs:
           GH_TOKEN: ${{ secrets.CODE_GH_PAT || github.token }}
           MERGE_MODE: ${{ steps.prep.outputs.merge_mode || 'one-shot' }}
           OURS_GLOBS: |
-            codex-rs/tui/**
+            vendor/codex/tui/**
             codex-cli/**
             .github/workflows/**
             AGENTS.md
@@ -585,7 +585,7 @@ jobs:
              - Do NOT blanket-delete new crates or reintroduced paths. Surface noteworthy cases in MERGE_REPORT.md and make a reasoned choice.
              - For any path listed in purge_globs or perma_removed_paths, ensure it remains deleted if upstream reintroduced it.
              - Review the upstream commit range (e.g., via `git rev-list upstream/UPSTREAM_BRANCH ^origin/DEFAULT_BRANCH`). Use repo context and the provided artifacts to make sensible, minimal decisions. Prefer preserving our local UX/branding and workflows; adopt upstream when it improves correctness, security, or compatibility. Record notable decisions in MERGE_REPORT.md.
-          5) Resolve lockfile conflicts early: if `codex-rs/Cargo.lock` contains merge markers or becomes out of sync with the workspace manifests, regenerate it inside `codex-rs/` (e.g., `cargo update --workspace --locked`; fall back to `cargo update --workspace` if the locked run fails). Commit the regenerated lock as part of the merge and note the action in MERGE_REPORT.md. Prefer preserving our crate versions, but do not leave conflict markers in place.
+          5) Resolve lockfile conflicts early: if `vendor/codex/Cargo.lock` contains merge markers or becomes out of sync with the workspace manifests, regenerate it inside `vendor/codex/` (e.g., `cargo update --workspace --locked`; fall back to `cargo update --workspace` if the locked run fails). Commit the regenerated lock as part of the merge and note the action in MERGE_REPORT.md. Prefer preserving our crate versions, but do not leave conflict markers in place.
           6) Compatibility (do not break callers):
              - Keep these public re-exports in codex-core: ModelClient, Prompt, ResponseEvent, ResponseStream.
                Removing them breaks downstream imports and will fail API tests.
@@ -634,7 +634,7 @@ jobs:
             -c sandbox_workspace_write.allow_git_writes=true \
             -c sandbox_workspace_write.network_access=true \
             -c shell_environment_policy.r#set.CARGO_HOME="${RUNNER_TEMP}/cargo-home" \
-            -c shell_environment_policy.r#set.CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/codex-rs/target" \
+            -c shell_environment_policy.r#set.CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/vendor/codex/target" \
             -c shell_environment_policy.r#set.RUSTC_WRAPPER="sccache" \
             -c shell_environment_policy.r#set.SCCACHE_GHA_ENABLED="true" \
             -c shell_environment_policy.r#set.SCCACHE_IDLE_TIMEOUT="1800" \
@@ -723,7 +723,7 @@ jobs:
           - Restore or add back missing public re-exports in codex-core that cause `cargo check --tests` to fail (e.g., ModelClient, Prompt, ResponseEvent, ResponseStream), unless you can conclusively update all workspace imports safely.
           - Prefer adding compatibility aliases over large refactors.
           - Do not remove or rename crates. Do not drop ICU/sys-locale unless unused repo-wide.
-          - If verification failed due to `codex-rs/Cargo.lock` parse errors or merge markers, regenerate the lock inside `codex-rs/` (try `cargo update --workspace --locked`; fall back to `cargo update --workspace` if necessary) and include the updated file in the fix.
+          - If verification failed due to `vendor/codex/Cargo.lock` parse errors or merge markers, regenerate the lock inside `vendor/codex/` (try `cargo update --workspace --locked`; fall back to `cargo update --workspace` if necessary) and include the updated file in the fix.
           - Run scripts/upstream-merge/verify.sh and iterate until it returns success.
           - Update .github/auto/MERGE_REPORT.md with a short note under "Other changes" describing the compatibility adjustments.
           - Push to ${MERGE_BRANCH}.
@@ -747,7 +747,7 @@ jobs:
               -c sandbox_workspace_write.allow_git_writes=true \
               -c sandbox_workspace_write.network_access=true \
               -c shell_environment_policy.r#set.CARGO_HOME="${RUNNER_TEMP}/cargo-home" \
-              -c shell_environment_policy.r#set.CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/codex-rs/target" \
+              -c shell_environment_policy.r#set.CARGO_TARGET_DIR="${GITHUB_WORKSPACE}/vendor/codex/target" \
               -c shell_environment_policy.r#set.RUSTC_WRAPPER="sccache" \
               -c shell_environment_policy.r#set.SCCACHE_GHA_ENABLED="true" \
               -c shell_environment_policy.r#set.SCCACHE_IDLE_TIMEOUT="1800" \
@@ -813,8 +813,8 @@ jobs:
             if [ -n "$files" ]; then echo "$files" | xargs -r git rm -f --; removed=true; fi
           done
           # Belt-and-suspenders: drop any accidentally committed cargo cache dirs
-          # Cover both repo-root and nested workspace (e.g., codex-rs/.cargo-home)
-          for d in .cargo-home .cargo2 codex-rs/.cargo-home codex-rs/.cargo2; do
+          # Cover both repo-root and nested workspace (e.g., vendor/codex/.cargo-home)
+          for d in .cargo-home .cargo2 vendor/codex/.cargo-home vendor/codex/.cargo2; do
             files=$(git ls-files -- "$d/**" || true)
             if [ -n "$files" ]; then echo "$files" | xargs -r git rm -f --; removed=true; fi
           done
@@ -847,7 +847,7 @@ jobs:
           # Guide-only branding report: detect user-visible 'Codex' strings under TUI/CLI affected by this merge.
           mkdir -p .github/auto
           : > .github/auto/VERIFY_branding.log
-          changed_files=$(git diff --name-only "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- 'codex-rs/tui/**' 'codex-cli/**' | tr '\n' ' ' || true)
+          changed_files=$(git diff --name-only "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- 'vendor/codex/tui/**' 'codex-cli/**' | tr '\n' ' ' || true)
           if [ -n "${changed_files:-}" ]; then
             echo "[branding] scanning changed TUI/CLI files for user-visible 'Codex' strings..." | tee -a .github/auto/VERIFY_branding.log
             git diff -U0 --no-color "origin/${DEFAULT_BRANCH}..origin/upstream-merge" -- $changed_files \
@@ -909,14 +909,14 @@ jobs:
         run: |
           set -euo pipefail
           # Only run if upstream delta touched TUI
-          if ! grep -q '^codex-rs/tui/' .github/auto/DELTA_FILES.txt 2>/dev/null; then
+          if ! grep -q '^vendor/codex/tui/' .github/auto/DELTA_FILES.txt 2>/dev/null; then
             echo "No TUI changes in upstream delta; skipping invariants guard."; exit 0
           fi
-          # Verify critical ordering identifiers exist somewhere under codex-rs/tui/
+          # Verify critical ordering identifiers exist somewhere under vendor/codex/tui/
           failed=0
           for token in request_ordinal output_index sequence_number; do
-            if ! git ls-tree -r --name-only origin/upstream-merge -- 'codex-rs/tui/**' | while read -r f; do git show "origin/upstream-merge:$f" || true; done | grep -q "$token"; then
-              echo "::warning::Invariant token '$token' not found under codex-rs/tui on upstream-merge (non-blocking)." >&2
+            if ! git ls-tree -r --name-only origin/upstream-merge -- 'vendor/codex/tui/**' | while read -r f; do git show "origin/upstream-merge:$f" || true; done | grep -q "$token"; then
+              echo "::warning::Invariant token '$token' not found under vendor/codex/tui on upstream-merge (non-blocking)." >&2
             fi
           done
 

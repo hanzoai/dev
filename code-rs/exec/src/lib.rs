@@ -102,7 +102,7 @@ use code_core::timeboxed_exec_guidance::{
 const AUTO_REVIEW_SHUTDOWN_GRACE_MS: u64 = 1_500;
 const REVIEW_SCOPE_MAX_LISTED_PATHS: usize = 120;
 const REVIEW_SCOPE_EXCLUDED_PREFIXES: [&str; 5] = [
-    "codex-rs/",
+    "vendor/",
     "node_modules/",
     "target/",
     ".git/",
@@ -2826,7 +2826,7 @@ mod tests {
     fn apply_commit_scope_filters_and_truncates_paths() {
         let mut paths = vec![
             "./src/main.rs".to_string(),
-            "codex-rs/Cargo.lock".to_string(),
+            "vendor/codex/Cargo.lock".to_string(),
             "./src/main.rs".to_string(),
         ];
         for idx in 0..130 {
@@ -2844,19 +2844,19 @@ mod tests {
         let scoped = apply_commit_scope_to_review_request(request, "abc1234", "def5678", Some(&paths));
         assert!(scoped.prompt.contains("Files changed in this snapshot:"));
         assert!(scoped.prompt.contains("- src/main.rs"));
-        assert!(!scoped.prompt.contains("codex-rs/Cargo.lock"));
+        assert!(!scoped.prompt.contains("vendor/codex/Cargo.lock"));
         assert!(
             scoped
                 .prompt
                 .contains("Omitted 12 changed path(s) from this list (1 excluded by path policy; 11 truncated for prompt size).")
         );
-        assert!(scoped.prompt.contains("Excluded prefixes: codex-rs/"));
+        assert!(scoped.prompt.contains("Excluded prefixes: vendor/"));
     }
 
     #[test]
     fn apply_commit_scope_reports_when_all_paths_excluded() {
         let paths = vec![
-            "codex-rs/Cargo.lock".to_string(),
+            "vendor/codex/Cargo.lock".to_string(),
             "target/debug/code".to_string(),
             "node_modules/pkg/index.js".to_string(),
         ];
@@ -2876,7 +2876,7 @@ mod tests {
                 .prompt
                 .contains("Omitted 3 changed path(s) from this list (3 excluded by path policy; 0 truncated for prompt size).")
         );
-        assert!(scoped.prompt.contains("Excluded prefixes: codex-rs/"));
+        assert!(scoped.prompt.contains("Excluded prefixes: vendor/"));
     }
 
     #[test]

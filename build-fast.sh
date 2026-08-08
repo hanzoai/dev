@@ -194,7 +194,7 @@ fi
 
 REPO_ROOT="${SCRIPT_DIR}"
 
-# Guard against regressions where a code-rs crate references ../codex-rs.
+# Guard against regressions where a code-rs crate references the vendored tree.
 if [ "${BUILD_FAST_SKIP_CODEX_GUARD:-0}" != "1" ]; then
   echo "Running codex path dependency guard..."
   (
@@ -234,7 +234,7 @@ esac
 
 case "$WORKSPACE_CHOICE" in
   codex|codex-rs)
-    WORKSPACE_DIR="codex-rs"
+    WORKSPACE_DIR="vendor/codex"
     CRATE_PREFIX="codex"
     ;;
   code|code-rs)
