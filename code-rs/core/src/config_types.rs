@@ -956,13 +956,13 @@ fn default_auto_drive_model_routing_reasoning_levels() -> Vec<ReasoningEffort> {
 pub fn default_auto_drive_model_routing_entries() -> Vec<AutoDriveModelRoutingEntry> {
     vec![
         AutoDriveModelRoutingEntry {
-            model: "gpt-5.5".to_string(),
+            model: "zen5-pro".to_string(),
             enabled: true,
-            reasoning_levels: vec![ReasoningEffort::High, ReasoningEffort::XHigh],
+            reasoning_levels: vec![ReasoningEffort::High],
             description: "Hard planning and complex problem solving".to_string(),
         },
         AutoDriveModelRoutingEntry {
-            model: "gpt-5.4-mini".to_string(),
+            model: "zen5-flash".to_string(),
             enabled: true,
             reasoning_levels: vec![ReasoningEffort::High],
             description: "Fast implementation loops and failing-test iteration".to_string(),
@@ -1048,8 +1048,9 @@ const fn default_auto_drive_coordinator_turn_cap() -> u32 {
 }
 
 fn default_auto_drive_model() -> String {
-    // Keep aligned with the coordinator's preferred model fallback.
-    String::from("gpt-5.1")
+    // A model id only means something to the endpoint that serves it, and the
+    // endpoint here is the Hanzo Cloud.
+    String::from(crate::config::HANZO_DEFAULT_MODEL)
 }
 
 const fn default_auto_drive_reasoning_effort() -> ReasoningEffort {

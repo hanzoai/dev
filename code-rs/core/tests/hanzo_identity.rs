@@ -169,3 +169,75 @@ fn a_machine_credential_outranks_a_stale_human_one() {
         "the machine credential must be tried before the human session"
     );
 }
+
+/// A repo-relative path, read from the test's own manifest location.
+fn repo_file(rel: &str) -> String {
+    let path = format!("{}/../../{rel}", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"))
+}
+
+/// Auto Drive drives the same gateway everything else does. Its defaults were
+/// `gpt-5.1` for the model and `gpt-5.5`/`gpt-5.4-mini` for routing — ids the
+/// Hanzo Cloud answers with `400 model is not available`, so the feature was
+/// broken out of the box for the default provider rather than merely misnamed.
+#[test]
+fn auto_drive_defaults_to_models_our_gateway_serves() {
+    let settings = code_core::config_types::AutoDriveSettings::default();
+
+    assert!(
+        is_zen_model(&settings.model),
+        "Auto Drive defaults to `{}`, which the Hanzo Cloud does not serve",
+        settings.model
+    );
+
+    for entry in code_core::config_types::default_auto_drive_model_routing_entries() {
+        assert!(
+            is_zen_model(&entry.model),
+            "Auto Drive routes to `{}`, which the Hanzo Cloud does not serve",
+            entry.model
+        );
+    }
+}
+
+/// `brew upgrade code` names a formula that does not exist; ours is
+/// `Formula/hanzo-dev.rb`. This string is not merely displayed — the TUI runs it.
+#[test]
+fn the_homebrew_upgrade_command_names_our_formula() {
+    let updates = repo_file("code-rs/tui/src/updates.rs");
+
+    assert!(
+        updates.contains("brew upgrade hanzo-dev"),
+        "the guided Homebrew upgrade must name the `hanzo-dev` formula"
+    );
+    assert!(
+        !updates.contains(r#""upgrade".to_string(),
+                        "code".to_string(),"#),
+        "the Homebrew upgrade must not target a `code` formula"
+    );
+}
+
+/// The first screen a new user sees. It greeted them as OpenAI's product for
+/// months after the rest of the identity had been fixed, because nothing here
+/// looked at rendered text — only at structural defaults.
+#[test]
+fn the_onboarding_screen_introduces_our_product() {
+    let welcome = repo_file("code-rs/tui/src/onboarding/welcome.rs");
+    assert!(
+        welcome.contains("Welcome to Hanzo Dev"),
+        "the welcome screen must greet the user as Hanzo Dev"
+    );
+
+    // The screen serves both providers, so the OpenAI copy — including a link to
+    // ChatGPT's settings — legitimately survives on that branch. What must hold
+    // is that the Hanzo path exists and is the one a default install is offered.
+    let auth = repo_file("code-rs/tui/src/onboarding/auth.rs");
+    for needle in [
+        "Sign in with Hanzo",
+        "Sign in with Hanzo to use your Hanzo Cloud account",
+    ] {
+        assert!(
+            auth.contains(needle),
+            "the sign-in screen must offer the Hanzo path (`{needle}` is missing)"
+        );
+    }
+}
