@@ -1155,10 +1155,14 @@ impl Config {
             model_providers.entry(key).or_insert(provider);
         }
 
+        // LAST link on purpose: a flag, a profile or config.toml has already had
+        // its say, and only when all three decline does the environment answer.
+        // The key you already hold picks the provider (provider_from_env), so a
+        // person with ANTHROPIC_API_KEY and no config is not told to go get ours.
         let model_provider_id = model_provider
             .or(config_profile.model_provider)
             .or(cfg.model_provider)
-            .unwrap_or_else(|| HANZO_PROVIDER_ID.to_string());
+            .unwrap_or_else(crate::model_provider_info::provider_from_env);
         let model_provider = model_providers
             .get(&model_provider_id)
             .ok_or_else(|| {

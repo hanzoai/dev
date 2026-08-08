@@ -743,6 +743,36 @@ pub const BUILT_IN_OSS_MODEL_PROVIDER_ID: &str = "oss";
 /// The Hanzo Cloud — `dev`'s home and its default. Every other provider stays
 /// configurable; this is the one you get without asking.
 pub const HANZO_PROVIDER_ID: &str = "hanzo";
+pub const ANTHROPIC_PROVIDER_ID: &str = "anthropic";
+pub const OPENAI_PROVIDER_ID: &str = "openai";
+
+/// The key you already have decides the provider, when you have not said.
+///
+/// A coding agent should work with whatever credential is in the environment
+/// rather than insisting on ours, so this is consulted ONLY after an explicit
+/// choice — flag, profile, config.toml — has declined to answer. Hanzo first
+/// because it is the default and the one we serve; then a key that names its
+/// own vendor.
+///
+/// With no key at all the answer is still Hanzo: that is the provider whose
+/// `env_key_instructions` tell a person how to sign in, and an empty
+/// environment is exactly when someone needs to read them.
+pub fn provider_from_env() -> String {
+    fn set(k: &str) -> bool {
+        std::env::var(k).is_ok_and(|v| !v.trim().is_empty())
+    }
+    if set(HANZO_ENV_KEY) || HANZO_MACHINE_ENV_KEYS.iter().any(|k| set(k)) {
+        return HANZO_PROVIDER_ID.to_string();
+    }
+    if set(ANTHROPIC_ENV_KEY) {
+        return ANTHROPIC_PROVIDER_ID.to_string();
+    }
+    if set(OPENAI_ENV_KEY) {
+        return OPENAI_PROVIDER_ID.to_string();
+    }
+    HANZO_PROVIDER_ID.to_string()
+}
+
 
 /// Where the Hanzo Cloud answers. Override with `HANZO_BASE_URL` for a private
 /// deployment; the `hanzo` CLI does exactly that when its active network points
@@ -752,6 +782,8 @@ const HANZO_BASE_URL: &str = "https://api.hanzo.ai/v1";
 /// The bearer `dev` reads. `hanzo code` sets it on the child process, and
 /// `hanzo auth login` is how a human fills it in.
 const HANZO_ENV_KEY: &str = "HANZO_USER_KEY";
+const ANTHROPIC_ENV_KEY: &str = "ANTHROPIC_API_KEY";
+const OPENAI_ENV_KEY: &str = "OPENAI_API_KEY";
 
 /// The credentials a SERVICE presents, tried before the human session.
 ///
@@ -805,6 +837,7 @@ pub fn built_in_model_providers(
     // for them; add any other via `model_providers` in config.toml.
     [
         (HANZO_PROVIDER_ID, create_hanzo_provider()),
+        (ANTHROPIC_PROVIDER_ID, create_anthropic_provider()),
         (
             "openai",
             P {
@@ -886,6 +919,34 @@ pub fn create_hanzo_provider() -> ModelProviderInfo {
                 .into_iter()
                 .collect(),
         ),
+        env_http_headers: None,
+        request_max_retries: None,
+        stream_max_retries: None,
+        stream_idle_timeout_ms: None,
+        websocket_connect_timeout_ms: None,
+        requires_openai_auth: false,
+        openrouter: None,
+    }
+}
+
+/// Anthropic, through its OpenAI-compatible surface — so it needs no new wire
+/// format, only a base URL and a key. `wire_api: Chat` is that surface; the
+/// native Messages API is a different shape and is deliberately not spoken here.
+pub fn create_anthropic_provider() -> ModelProviderInfo {
+    ModelProviderInfo {
+        name: "Anthropic".into(),
+        base_url: Some("https://api.anthropic.com/v1".into()),
+        env_key: Some(ANTHROPIC_ENV_KEY.into()),
+        alt_env_keys: Vec::new(),
+        env_key_instructions: Some(
+            "Set ANTHROPIC_API_KEY to a key from https://console.anthropic.com/settings/keys."
+                .into(),
+        ),
+        experimental_bearer_token: None,
+        auth: None,
+        wire_api: WireApi::Chat,
+        query_params: None,
+        http_headers: None,
         env_http_headers: None,
         request_max_retries: None,
         stream_max_retries: None,
@@ -1260,5 +1321,65 @@ refresh_interval_ms = 0
             provider.validate(),
             Err("provider auth cannot be combined with env_key".to_string())
         );
+    }
+}
+
+#[cfg(test)]
+mod provider_from_env_tests {
+    use super::*;
+
+    // These read process-wide env, so they run as ONE test rather than racing
+    // each other through the same variables.
+    #[test]
+    fn the_key_you_hold_picks_the_provider() {
+        let keys = [HANZO_ENV_KEY, ANTHROPIC_ENV_KEY, OPENAI_ENV_KEY];
+        let saved: Vec<_> = keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
+        let clear = || {
+            for k in keys {
+                unsafe { std::env::remove_var(k) }
+            }
+            for k in HANZO_MACHINE_ENV_KEYS {
+                unsafe { std::env::remove_var(k) }
+            }
+        };
+
+        clear();
+        assert_eq!(provider_from_env(), HANZO_PROVIDER_ID, "no key at all still points at the provider whose instructions say how to sign in");
+
+        clear();
+        unsafe { std::env::set_var(OPENAI_ENV_KEY, "sk-x") };
+        assert_eq!(provider_from_env(), OPENAI_PROVIDER_ID, "someone with only an OpenAI key should not be told to fetch ours");
+
+        clear();
+        unsafe { std::env::set_var(ANTHROPIC_ENV_KEY, "sk-ant-x") };
+        assert_eq!(provider_from_env(), ANTHROPIC_PROVIDER_ID);
+
+        // Ours wins when several are present: it is the default and the one we serve.
+        clear();
+        unsafe { std::env::set_var(ANTHROPIC_ENV_KEY, "sk-ant-x") };
+        unsafe { std::env::set_var(OPENAI_ENV_KEY, "sk-x") };
+        unsafe { std::env::set_var(HANZO_ENV_KEY, "hz-x") };
+        assert_eq!(provider_from_env(), HANZO_PROVIDER_ID);
+
+        // An empty value is not a key.
+        clear();
+        unsafe { std::env::set_var(ANTHROPIC_ENV_KEY, "   ") };
+        assert_eq!(provider_from_env(), HANZO_PROVIDER_ID, "whitespace is not a credential");
+
+        clear();
+        for (k, v) in saved {
+            if let Some(v) = v {
+                unsafe { std::env::set_var(k, v) }
+            }
+        }
+    }
+
+    #[test]
+    fn anthropic_is_reachable_and_needs_no_new_wire_format() {
+        let p = built_in_model_providers(None);
+        let a = p.get(ANTHROPIC_PROVIDER_ID).expect("anthropic is built in");
+        assert_eq!(a.env_key.as_deref(), Some("ANTHROPIC_API_KEY"));
+        assert_eq!(a.wire_api, WireApi::Chat, "the OpenAI-compatible surface, not the native Messages API");
+        assert!(a.base_url.as_deref().unwrap_or_default().starts_with("https://api.anthropic.com"));
     }
 }
