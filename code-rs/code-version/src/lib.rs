@@ -14,7 +14,7 @@ pub const CODE_VERSION: &str = {
 };
 
 const ANNOUNCEMENT_TIP: &str = include_str!("../../../announcement_tip.toml");
-const MODELS_MANIFEST: &str = include_str!("../../../codex-rs/models-manager/models.json");
+const MODELS_MANIFEST: &str = include_str!("../../../vendor/codex/models-manager/models.json");
 pub const MIN_WIRE_COMPAT_VERSION_FALLBACK: &str = "0.101.0";
 
 static MIN_WIRE_COMPAT_VERSION: LazyLock<String> = LazyLock::new(|| {

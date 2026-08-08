@@ -38,18 +38,18 @@ these are contract, not preference:
 | Homebrew | `hanzoai/homebrew-tap`, `Formula/hanzo-dev.rb`, assets `dev-<triple>` | `scripts/generate-homebrew-formula.sh` |
 | Release repo | `hanzoai/dev` | `code-rs/tui/src/updates.rs`, `codex-cli/postinstall.js` |
 
-**`code-rs/` is the workspace that SHIPS.** `codex-rs/` is the vendored upstream
-copy. A change that only edits `codex-rs/` changes nothing a user runs — this is
+**`code-rs/` is the workspace that SHIPS.** `vendor/codex/` is the vendored upstream
+copy. A change that only edits `vendor/codex/` changes nothing a user runs — this is
 the single easiest mistake to make here, and `.github/merge-policy.json` made it
-for a long time (every glob pointed at `codex-rs/**`).
+for a long time (every glob pointed at `vendor/codex/**`).
 
 That sentence only became true with the v0.6.169 merge. Before it, building
-`dev` compiled ten crates out of `codex-rs/` — they were real path
+`dev` compiled ten crates out of `vendor/codex/` — they were real path
 dependencies, so the "read-only mirror" was load-bearing. Upstream finished
 the migration and the two workspaces are now separate. One thread remains:
-`codex-rs/models-manager/models.json` is `include_str!`'d by
+`vendor/codex/models-manager/models.json` is `include_str!`'d by
 `code-version/src/lib.rs`, `core/src/model_family.rs` and
-`core/src/agent_defaults.rs`. Deleting `codex-rs/` would not build.
+`core/src/agent_defaults.rs`. Deleting `vendor/codex/` would not build.
 
 **Why there is a test for all of this.** A one-time edit to a default is a
 suggestion that lasts until the next merge. `code-rs/core/tests/hanzo_identity.rs`
@@ -106,7 +106,7 @@ Read this before attempting a sync. The directory names lie about the topology.
   is just-every's history with every author email rewritten to `dev@hanzo.ai`,
   which is why `git merge-base` against just-every returns nothing: identical
   trees, different SHAs, disjoint graph.
-- **`codex-rs/` is not ours to track.** just-every carries it as a read-only
+- **`vendor/codex/` is not ours to track.** just-every carries it as a read-only
   mirror of `openai/codex:main` and refreshes it with "Refresh codex-rs mirror
   to upstream/main" commits. It reaches us through them. We never merge
   openai/codex directly. (The `upstream` git remote pointing at openai/codex is
@@ -123,7 +123,7 @@ commit our tree currently matches is recorded here, and nowhere else:
     method          3-way apply of the delta (see below)
 
 Generate the delta with `git diff --binary`. Two schema fixtures under
-`codex-rs/app-server-protocol/schema/precomputed/` are `.zst` blobs, and
+`vendor/codex/app-server-protocol/schema/precomputed/` are `.zst` blobs, and
 `git apply` is atomic: without full index lines it rejects those two hunks and
 silently rolls back all 371 files, reporting "Applied patch … cleanly" for
 every other file on the way. A clean worktree after an apply that printed
@@ -143,7 +143,7 @@ in 140, and the intersection was 2 files — both pure additions.
 
 **Do not merge `openai/codex` directly**, whatever the `upstream` remote
 suggests. Measured 2026-08-06: `origin/main` and `openai/codex` share no merge
-base at all (different root commits), our `codex-rs/` mirror differs from
+base at all (different root commits), our `vendor/codex/` mirror differs from
 upstream by 341 shadowed files and ~175k lines, and 72 upstream crates have no
 counterpart here. The subsystems people ask for by name — `tool_search`,
 `thread_manager`, `multi_agents_v2`, MCP `connection_manager`, `resize_reflow` —

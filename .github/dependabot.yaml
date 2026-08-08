@@ -11,7 +11,7 @@ updates:
   - package-ecosystem: cargo
     directories:
       - codex-rs
-      - codex-rs/*
+      - vendor/codex/*
     schedule:
       interval: weekly
     cooldown:
