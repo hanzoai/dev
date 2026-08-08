@@ -30,7 +30,9 @@
   "publishConfig": {
     "access": "public"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@hanzo/mcp": "^2.4.4"
+  },
   "devDependencies": {
     "prettier": "^3.3.3"
   },
