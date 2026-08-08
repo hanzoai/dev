@@ -16,6 +16,8 @@ use base64::Engine;
 use chrono::Utc;
 use code_app_server_protocol::AuthMode;
 use code_core::auth::AuthDotJson;
+use code_core::auth::HANZO_CLIENT_ID;
+use code_core::auth::HANZO_ISSUER;
 use code_core::auth::get_auth_file;
 use code_core::token_data::TokenData;
 use code_core::token_data::parse_id_token;
@@ -50,6 +52,15 @@ impl ServerOptions {
             open_browser: true,
             force_state: None,
             originator,
+        }
+    }
+
+    /// Hanzo IAM's issuer and public client. Sibling brands reach their own IAM
+    /// by overriding `issuer` and `client_id` (e.g. `https://lux.id/v1/iam`).
+    pub fn hanzo(code_home: PathBuf, originator: String) -> Self {
+        Self {
+            issuer: HANZO_ISSUER.to_string(),
+            ..Self::new(code_home, HANZO_CLIENT_ID.to_string(), originator)
         }
     }
 }

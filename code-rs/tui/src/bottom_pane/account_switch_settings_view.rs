@@ -120,7 +120,7 @@ impl AccountSwitchSettingsView {
         lines.push(Line::from(vec![
             Span::raw("    "),
             Span::styled(
-                "Only used if every connected ChatGPT account is limited.",
+                "Only used if every connected account is limited.",
                 dim,
             ),
         ]));

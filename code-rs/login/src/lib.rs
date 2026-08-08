@@ -1,8 +1,10 @@
 mod device_code_auth;
+mod oidc_device_auth;
 mod pkce;
 mod server;
 
 pub use device_code_auth::{run_device_code_login, DeviceCodeSession};
+pub use oidc_device_auth::DeviceGrant;
 pub use server::LoginServer;
 pub use server::ServerOptions;
 pub use server::ShutdownHandle;
@@ -14,6 +16,8 @@ pub use code_core::AuthManager;
 pub use code_core::CodexAuth;
 pub use code_core::auth::AuthDotJson;
 pub use code_core::auth::CLIENT_ID;
+pub use code_core::auth::HANZO_CLIENT_ID;
+pub use code_core::auth::HANZO_ISSUER;
 pub use code_core::auth::CODEX_API_KEY_ENV_VAR;
 pub use code_core::auth::OPENAI_API_KEY_ENV_VAR;
 pub use code_core::auth::get_auth_file;
