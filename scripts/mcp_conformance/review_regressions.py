@@ -130,7 +130,7 @@ def _review_registration_command(
         command.extend(
             [
                 "--env",
-                f"CODEX_MCP_PROTOCOL_VERSION={protocol_environment}",
+                f"DEV_MCP_PROTOCOL_VERSION={protocol_environment}",
                 "--",
                 sys.executable,
                 str(server_script),

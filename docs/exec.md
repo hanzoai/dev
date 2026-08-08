@@ -103,10 +103,10 @@ dev exec --model enso --json resume --last "Fix use-after-free issues"
 
 ## Authentication
 
-By default, `dev exec` uses the same authentication as the TUI. On the `openai` provider you can override the API key by setting the `CODEX_API_KEY` environment variable.
+By default, `dev exec` uses the same authentication as the TUI. On the `openai` provider you can override the API key by setting the `HANZO_API_KEY` environment variable.
 
 ```shell
-CODEX_API_KEY=your-api-key-here dev exec "Fix merge conflict"
+HANZO_API_KEY=your-api-key-here dev exec "Fix merge conflict"
 ```
 
-NOTE: `CODEX_API_KEY` is only supported in `dev exec`.
+NOTE: `HANZO_API_KEY` is only supported in `dev exec`.

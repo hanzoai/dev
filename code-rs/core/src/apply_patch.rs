@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 
-pub const CODEX_APPLY_PATCH_ARG1: &str = "--codex-run-as-apply-patch";
+pub const DEV_APPLY_PATCH_ARG1: &str = "--codex-run-as-apply-patch";
 
 pub(crate) struct ApplyPatchRun {
     pub auto_approved: bool,

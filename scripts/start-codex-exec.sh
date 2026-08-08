@@ -22,8 +22,8 @@ remote_host="$1"
 shift
 
 remote_path='~/code/codex-sync'
-local_exec_server_port="${CODEX_REMOTE_EXEC_SERVER_LOCAL_PORT:-8765}"
-remote_exec_server_start_timeout_seconds="${CODEX_REMOTE_EXEC_SERVER_START_TIMEOUT_SECONDS:-15}"
+local_exec_server_port="${DEV_REMOTE_EXEC_SERVER_LOCAL_PORT:-8765}"
+remote_exec_server_start_timeout_seconds="${DEV_REMOTE_EXEC_SERVER_START_TIMEOUT_SECONDS:-15}"
 
 remote_exec_server_pid=''
 remote_exec_server_log_path=''
@@ -170,7 +170,7 @@ echo "Remote exec server: ${listen_url}"
 echo "Remote exec server log: ${remote_exec_server_log_path}"
 echo "Press Ctrl-C to stop the SSH tunnel and remote exec server."
 echo "Start codex via: "
-printf '  CODEX_EXEC_SERVER_URL=ws://127.0.0.1:%s codex -C %q\n' \
+printf '  DEV_EXEC_SERVER_URL=ws://127.0.0.1:%s codex -C %q\n' \
   "${local_exec_server_port}" \
   "${remote_repo_root}"
 

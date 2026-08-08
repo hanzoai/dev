@@ -86,7 +86,7 @@ impl std::error::Error for RefreshTokenError {}
 const REFRESH_TOKEN_ACCOUNT_MISMATCH_MESSAGE: &str =
     "Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.";
 const REFRESH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
-pub const REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR: &str = "CODEX_REFRESH_TOKEN_URL_OVERRIDE";
+pub const REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR: &str = "DEV_REFRESH_TOKEN_URL_OVERRIDE";
 
 impl PartialEq for CodexAuth {
     fn eq(&self, other: &Self) -> bool {
@@ -376,7 +376,7 @@ fn should_proactively_refresh_auth(
 }
 
 pub const OPENAI_API_KEY_ENV_VAR: &str = "OPENAI_API_KEY";
-pub const CODEX_API_KEY_ENV_VAR: &str = "CODEX_API_KEY";
+pub const HANZO_API_KEY_ENV_VAR: &str = "HANZO_API_KEY";
 
 fn read_openai_api_key_from_env() -> Option<String> {
     env::var(OPENAI_API_KEY_ENV_VAR)
@@ -385,7 +385,7 @@ fn read_openai_api_key_from_env() -> Option<String> {
 }
 
 pub fn read_code_api_key_from_env() -> Option<String> {
-    env::var(CODEX_API_KEY_ENV_VAR)
+    env::var(HANZO_API_KEY_ENV_VAR)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -759,7 +759,7 @@ fn load_auth(
     }))
 }
 
-/// Attempt to read and refresh the `auth.json` file in the given `CODEX_HOME` directory.
+/// Attempt to read and refresh the `auth.json` file in the given `DEV_HOME` directory.
 /// Returns the full AuthDotJson structure after refreshing if necessary.
 pub fn try_read_auth_json(auth_file: &Path) -> std::io::Result<AuthDotJson> {
     let mut file = File::open(auth_file)?;
@@ -996,7 +996,7 @@ fn summarize_body(body: &str) -> String {
     }
 }
 
-/// Expected structure for $CODEX_HOME/auth.json.
+/// Expected structure for $DEV_HOME/auth.json.
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct AuthDotJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]

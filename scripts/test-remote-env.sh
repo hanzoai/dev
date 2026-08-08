@@ -24,7 +24,7 @@ setup_remote_env() {
   local remote_exec_server_port
   local remote_exec_server_stdout_path
 
-  container_name="${CODEX_TEST_REMOTE_ENV_CONTAINER_NAME:-codex-remote-test-env-local-$(date +%s)-${RANDOM}}"
+  container_name="${DEV_TEST_REMOTE_ENV_CONTAINER_NAME:-codex-remote-test-env-local-$(date +%s)-${RANDOM}}"
   codex_binary_path="${CARGO_TARGET_DIR:-${REPO_ROOT}/codex-rs/target}/debug/codex"
 
   if ! command -v docker >/dev/null 2>&1; then
@@ -64,7 +64,7 @@ setup_remote_env() {
     return 1
   fi
 
-  if [[ -z "${CODEX_TEST_REMOTE_EXEC_SERVER_URL:-}" ]]; then
+  if [[ -z "${DEV_TEST_REMOTE_EXEC_SERVER_URL:-}" ]]; then
     remote_codex_path="/tmp/codex-remote-env/codex"
     remote_exec_server_port="31987"
     remote_exec_server_stdout_path="/tmp/codex-remote-env/exec-server.stdout"
@@ -84,13 +84,13 @@ setup_remote_env() {
       docker rm -f "${container_name}" >/dev/null 2>&1 || true
       return 1
     fi
-    export CODEX_TEST_REMOTE_EXEC_SERVER_PID="${remote_exec_server_pid}"
-    export CODEX_TEST_REMOTE_EXEC_SERVER_URL="ws://${container_ip}:${remote_exec_server_port}"
+    export DEV_TEST_REMOTE_EXEC_SERVER_PID="${remote_exec_server_pid}"
+    export DEV_TEST_REMOTE_EXEC_SERVER_URL="ws://${container_ip}:${remote_exec_server_port}"
   fi
 
-  export CODEX_TEST_REMOTE_ENV="${container_name}"
-  export CODEX_TEST_REMOTE_ENV_CONTAINER_NAME="${container_name}"
-  export CODEX_TEST_ENVIRONMENT="docker"
+  export DEV_TEST_REMOTE_ENV="${container_name}"
+  export DEV_TEST_REMOTE_ENV_CONTAINER_NAME="${container_name}"
+  export DEV_TEST_ENVIRONMENT="docker"
 }
 
 wait_for_remote_exec_server_port() {
@@ -112,14 +112,14 @@ wait_for_remote_exec_server_port() {
 }
 
 codex_remote_env_cleanup() {
-  if [[ -n "${CODEX_TEST_REMOTE_ENV:-}" ]]; then
-    docker rm -f "${CODEX_TEST_REMOTE_ENV}" >/dev/null 2>&1 || true
-    unset CODEX_TEST_REMOTE_ENV
+  if [[ -n "${DEV_TEST_REMOTE_ENV:-}" ]]; then
+    docker rm -f "${DEV_TEST_REMOTE_ENV}" >/dev/null 2>&1 || true
+    unset DEV_TEST_REMOTE_ENV
   fi
-  unset CODEX_TEST_REMOTE_ENV_CONTAINER_NAME
-  unset CODEX_TEST_REMOTE_EXEC_SERVER_PID
-  unset CODEX_TEST_REMOTE_EXEC_SERVER_URL
-  unset CODEX_TEST_ENVIRONMENT
+  unset DEV_TEST_REMOTE_ENV_CONTAINER_NAME
+  unset DEV_TEST_REMOTE_EXEC_SERVER_PID
+  unset DEV_TEST_REMOTE_EXEC_SERVER_URL
+  unset DEV_TEST_ENVIRONMENT
 }
 
 if ! is_sourced; then
@@ -131,9 +131,9 @@ old_shell_options="$(set +o)"
 set -euo pipefail
 if setup_remote_env; then
   status=0
-  echo "CODEX_TEST_REMOTE_ENV=${CODEX_TEST_REMOTE_ENV}"
-  echo "CODEX_TEST_ENVIRONMENT=${CODEX_TEST_ENVIRONMENT}"
-  echo "CODEX_TEST_REMOTE_EXEC_SERVER_URL=${CODEX_TEST_REMOTE_EXEC_SERVER_URL}"
+  echo "DEV_TEST_REMOTE_ENV=${DEV_TEST_REMOTE_ENV}"
+  echo "DEV_TEST_ENVIRONMENT=${DEV_TEST_ENVIRONMENT}"
+  echo "DEV_TEST_REMOTE_EXEC_SERVER_URL=${DEV_TEST_REMOTE_EXEC_SERVER_URL}"
   echo "Remote env ready. Run your command, then call: codex_remote_env_cleanup"
 else
   status=$?

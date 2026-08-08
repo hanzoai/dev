@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 const moduleRequire = createRequire(import.meta.url);
 
 /** The npm package that carries the CLI and its per-platform binaries. */
-const CODEX_NPM_NAME = "@hanzo/dev";
+const DEV_NPM_NAME = "@hanzo/dev";
 
 const PLATFORM_PACKAGE_BY_TARGET: Record<string, string> = {
   "aarch64-apple-darwin": "@hanzo/dev-darwin-arm64",
@@ -95,7 +95,7 @@ export class CodexExec {
       env.OPENAI_BASE_URL = args.baseUrl;
     }
     if (args.apiKey) {
-      env.CODEX_API_KEY = args.apiKey;
+      env.HANZO_API_KEY = args.apiKey;
     }
 
     const child = spawn(this.executablePath, commandArgs, {
@@ -307,13 +307,13 @@ function findCodexPath() {
 
   let vendorRoot: string;
   try {
-    const codexPackageJsonPath = moduleRequire.resolve(`${CODEX_NPM_NAME}/package.json`);
+    const codexPackageJsonPath = moduleRequire.resolve(`${DEV_NPM_NAME}/package.json`);
     const codexRequire = createRequire(codexPackageJsonPath);
     const platformPackageJsonPath = codexRequire.resolve(`${platformPackage}/package.json`);
     vendorRoot = path.join(path.dirname(platformPackageJsonPath), "vendor");
   } catch {
     throw new Error(
-      `Unable to locate the Hanzo Dev binaries. Ensure ${CODEX_NPM_NAME} is installed with optional dependencies.`,
+      `Unable to locate the Hanzo Dev binaries. Ensure ${DEV_NPM_NAME} is installed with optional dependencies.`,
     );
   }
 

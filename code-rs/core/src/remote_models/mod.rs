@@ -31,7 +31,7 @@ mod cache;
 const MODEL_CACHE_FILE: &str = "models_cache.json";
 const DEFAULT_MODEL_CACHE_TTL: Duration = Duration::from_secs(300);
 const REMOTE_MODELS_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
-const CODEX_AUTO_BALANCED_MODEL: &str = "codex-auto-balanced";
+const DEV_AUTO_BALANCED_MODEL: &str = "codex-auto-balanced";
 
 #[derive(Debug, Default, Clone)]
 struct RemoteModelsState {
@@ -96,8 +96,8 @@ impl RemoteModelsManager {
         state
             .models
             .iter()
-            .any(|m| m.slug == CODEX_AUTO_BALANCED_MODEL)
-            .then(|| CODEX_AUTO_BALANCED_MODEL.to_string())
+            .any(|m| m.slug == DEV_AUTO_BALANCED_MODEL)
+            .then(|| DEV_AUTO_BALANCED_MODEL.to_string())
     }
 
     /// Best-effort refresh of remote models.

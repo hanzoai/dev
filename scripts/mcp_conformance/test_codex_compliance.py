@@ -64,7 +64,7 @@ def test_registration_commands_select_stdio_then_http_shapes() -> None:
         "add",
         TEST_SERVER_NAME,
         "--env",
-        f"CODEX_MCP_PROTOCOL_VERSION={MODERN_VERSION}",
+        f"DEV_MCP_PROTOCOL_VERSION={MODERN_VERSION}",
         "--",
         sys.executable,
         "/src/server.py",
@@ -120,7 +120,7 @@ def test_registration_validation_checks_transport_and_mode() -> None:
                     "--transport",
                     "stdio",
                 ],
-                "env": {"CODEX_MCP_PROTOCOL_VERSION": MODERN_VERSION},
+                "env": {"DEV_MCP_PROTOCOL_VERSION": MODERN_VERSION},
             },
         },
         transport="stdio",
@@ -207,15 +207,15 @@ def test_isolated_environment_drops_model_credentials(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    monkeypatch.setenv("CODEX_API_KEY", "secret")
-    monkeypatch.setenv("CODEX_ACCESS_TOKEN", "secret")
+    monkeypatch.setenv("HANZO_API_KEY", "secret")
+    monkeypatch.setenv("DEV_ACCESS_TOKEN", "secret")
     monkeypatch.setenv("OPENAI_API_KEY", "secret")
 
     env = _isolated_environment(tmp_path)
 
-    assert env["CODEX_HOME"] == str(tmp_path)
-    assert "CODEX_API_KEY" not in env
-    assert "CODEX_ACCESS_TOKEN" not in env
+    assert env["DEV_HOME"] == str(tmp_path)
+    assert "HANZO_API_KEY" not in env
+    assert "DEV_ACCESS_TOKEN" not in env
     assert "OPENAI_API_KEY" not in env
     assert env.get("PATH") == os.environ.get("PATH")
 

@@ -13,7 +13,7 @@ Hanzo Dev supports several mechanisms for setting config values:
   - If `value` cannot be parsed as a valid TOML value, it is treated as a string value. This means that `-c model='"o3"'` and `-c model=o3` are equivalent.
     - In the first case, the value is the TOML string `"o3"`, while in the second the value is `o3`, which is not valid TOML and therefore treated as the TOML string `"o3"`.
     - Because quotes are interpreted by one's shell, `-c key="true"` will be correctly interpreted in TOML as `key = true` (a boolean) and not `key = "true"` (a string). If for some reason you needed the string `"true"`, you would need to use `-c key='"true"'` (note the two sets of quotes).
-- The `$CODE_HOME/config.toml` configuration file. `CODE_HOME` defaults to `~/.code`; Hanzo Dev also reads from `$CODEX_HOME`/`~/.codex` for backwards compatibility but only writes to `~/.code`. (Logs and other state use the same directory.)
+- The `$CODE_HOME/config.toml` configuration file. `CODE_HOME` defaults to `~/.code`; Hanzo Dev also reads from `$DEV_HOME`/`~/.codex` for backwards compatibility but only writes to `~/.code`. (Logs and other state use the same directory.)
 
 ## model
 
@@ -624,7 +624,7 @@ inherit = "none"
 set = { PATH = "/usr/bin", MY_FLAG = "1" }
 ```
 
-Currently, `CODEX_SANDBOX_NETWORK_DISABLED=1` is also added to the environment, assuming network is disabled. This is not configurable.
+Currently, `DEV_SANDBOX_NETWORK_DISABLED=1` is also added to the environment, assuming network is disabled. This is not configurable.
 
 ## otel
 
@@ -835,7 +835,7 @@ notify = ["python3", "/Users/mbolin/.code/notify.py"]
 
 ## history
 
-By default, Dev records messages sent to the model in `$CODE_HOME/history.jsonl` (legacy `$CODEX_HOME/history.jsonl` is also read). On UNIX, the file permissions are set to `o600`, so it should only be readable and writable by the owner.
+By default, Dev records messages sent to the model in `$CODE_HOME/history.jsonl` (legacy `$DEV_HOME/history.jsonl` is also read). On UNIX, the file permissions are set to `o600`, so it should only be readable and writable by the owner.
 
 To disable this behavior, configure `[history]` as follows:
 

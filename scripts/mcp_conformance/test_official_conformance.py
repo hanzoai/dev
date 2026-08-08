@@ -119,7 +119,7 @@ def test_official_adapter_launcher_preserves_strict_production_auth_mode(
 ) -> None:
     adapter = tmp_path / "show_automatic_auth.py"
     adapter.write_text(
-        'import os\nprint(os.environ.get("CODEX_CONFORMANCE_REQUIRE_AUTOMATIC_AUTH", ""))\n',
+        'import os\nprint(os.environ.get("DEV_CONFORMANCE_REQUIRE_AUTOMATIC_AUTH", ""))\n',
         encoding="utf-8",
     )
     launcher = _make_adapter_launcher(adapter, require_automatic_auth=True)
@@ -163,7 +163,7 @@ def test_windows_official_adapter_launcher_quotes_checkout_paths(
     assert launcher.name == "client.cmd"
     assert contents.startswith("@echo off\n")
     assert (
-        f'set "CODEX_CONFORMANCE_REQUIRE_AUTOMATIC_AUTH={expected_auth}"\n' in contents
+        f'set "DEV_CONFORMANCE_REQUIRE_AUTOMATIC_AUTH={expected_auth}"\n' in contents
     )
     assert subprocess.list2cmdline([sys.executable, str(adapter)]) + " %*\n" in contents
 
@@ -572,7 +572,7 @@ result_dir.mkdir(parents=True)
         "status": "SUCCESS",
     },
 ]))
-pathlib.Path(os.environ["CODEX_CONFORMANCE_ADAPTER_REPORT"]).write_text(
+pathlib.Path(os.environ["DEV_CONFORMANCE_ADAPTER_REPORT"]).write_text(
     json.dumps({"success": True, "steps": []})
 )
 """.lstrip(),
@@ -652,7 +652,7 @@ import pathlib
 import time
 
 time.sleep(0.1)
-pathlib.Path(os.environ["CODEX_CONFORMANCE_ADAPTER_REPORT"]).write_text(
+pathlib.Path(os.environ["DEV_CONFORMANCE_ADAPTER_REPORT"]).write_text(
     json.dumps({"success": True, "steps": []})
 )
 '''

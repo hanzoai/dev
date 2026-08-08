@@ -18,7 +18,7 @@ pub use code_core::auth::AuthDotJson;
 pub use code_core::auth::CLIENT_ID;
 pub use code_core::auth::HANZO_CLIENT_ID;
 pub use code_core::auth::HANZO_ISSUER;
-pub use code_core::auth::CODEX_API_KEY_ENV_VAR;
+pub use code_core::auth::HANZO_API_KEY_ENV_VAR;
 pub use code_core::auth::OPENAI_API_KEY_ENV_VAR;
 pub use code_core::auth::get_auth_file;
 pub use code_core::auth::login_with_api_key;

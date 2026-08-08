@@ -42,8 +42,8 @@ What Auto Drive is, how to start it, and how it behaves in Hanzo Dev.
 - `auto_resolve_review_attempts` limits how many times Auto Drive will auto-resolve review feedback (default 5).
 
 ## Crash diagnostics
-- Set `CODEX_TUI_RECORD_SESSION=1` to persist a per-session JSONL trace of inbound TUI events, including Auto Drive coordinator decisions, countdowns, token metrics, and panic records.
-- Optionally set `CODEX_TUI_SESSION_LOG_PATH=/absolute/path/session.jsonl` to choose the output file; otherwise Dev writes under its normal log directory (typically `~/.code/debug_logs/`, and `code-dev` defaults to `~/.code/debug_logs/code-dev/`).
+- Set `DEV_TUI_RECORD_SESSION=1` to persist a per-session JSONL trace of inbound TUI events, including Auto Drive coordinator decisions, countdowns, token metrics, and panic records.
+- Optionally set `DEV_TUI_SESSION_LOG_PATH=/absolute/path/session.jsonl` to choose the output file; otherwise Dev writes under its normal log directory (typically `~/.code/debug_logs/`, and `code-dev` defaults to `~/.code/debug_logs/code-dev/`).
 - When the TUI panics, Dev now records the panic payload and captured backtrace in both the session JSONL log and the regular error log.
 
 ## Models

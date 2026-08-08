@@ -12,7 +12,7 @@ use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn skip_if_no_network() -> bool {
-    std::env::var(code_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok()
+    std::env::var(code_core::spawn::DEV_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok()
 }
 
 fn remote_model(slug: &str, display: &str, priority: i32) -> ModelInfo {

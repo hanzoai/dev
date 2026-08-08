@@ -897,16 +897,16 @@ pub fn create_hanzo_provider() -> ModelProviderInfo {
 }
 
 pub fn create_oss_provider() -> ModelProviderInfo {
-    // These CODEX_OSS_ environment variables are experimental: we may
+    // These DEV_OSS_ environment variables are experimental: we may
     // switch to reading values from config.toml instead.
-    let code_oss_base_url = match std::env::var("CODEX_OSS_BASE_URL")
+    let code_oss_base_url = match std::env::var("DEV_OSS_BASE_URL")
         .ok()
         .filter(|v| !v.trim().is_empty())
     {
         Some(url) => url,
         None => format!(
             "http://localhost:{port}/v1",
-            port = std::env::var("CODEX_OSS_PORT")
+            port = std::env::var("DEV_OSS_PORT")
                 .ok()
                 .filter(|v| !v.trim().is_empty())
                 .and_then(|v| v.parse::<u32>().ok())

@@ -322,7 +322,7 @@ pub struct NewConversationParams {
     pub sandbox: Option<SandboxMode>,
 
     /// Individual config settings that will override what is in
-    /// CODEX_HOME/config.toml.
+    /// DEV_HOME/config.toml.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config: Option<HashMap<String, serde_json::Value>>,
 

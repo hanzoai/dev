@@ -37,7 +37,7 @@ Notes
 - `/branch [task]`: create a worktree branch and switch to it. If a
   task/description is provided, it is used when naming the branch. Must be run
   from the repository root (not inside another branch worktree). Set
-  `CODE_BRANCH_COPY_CACHES=1` (legacy: `CODEX_BRANCH_COPY_CACHES=1`) to mirror
+  `CODE_BRANCH_COPY_CACHES=1` (legacy: `DEV_BRANCH_COPY_CACHES=1`) to mirror
   `node_modules` and Rust build caches into the worktree; otherwise no cache
   directories are copied automatically.
 - `/merge`: merge the current worktree branch back into the default branch and

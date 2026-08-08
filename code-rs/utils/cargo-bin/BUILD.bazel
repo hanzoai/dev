@@ -7,6 +7,6 @@ codex_rust_crate(
     lib_data_extra = ["repo_root.marker"],
     test_data_extra = ["repo_root.marker"],
     rustc_env = {
-        "CODEX_REPO_ROOT_MARKER": "$(rlocationpath :repo_root.marker)",
+        "DEV_REPO_ROOT_MARKER": "$(rlocationpath :repo_root.marker)",
     },
 )

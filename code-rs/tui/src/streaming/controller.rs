@@ -154,7 +154,7 @@ pub(crate) fn set_last_sequence_number(&mut self, kind: StreamKind, seq: Option<
     /// This avoids mutating the model content so title detection remains intact.
     fn maybe_append_reasoning_debug_marker(&self, kind: StreamKind, lines: &mut Vec<Line<'static>>) {
         // Only when explicitly enabled to avoid noise in normal use.
-        let enabled = match std::env::var("CODEX_DEBUG_REASONING_INDEX") {
+        let enabled = match std::env::var("DEV_DEBUG_REASONING_INDEX") {
             Ok(val) => !val.is_empty() && val != "0",
             Err(_) => false,
         };
@@ -599,7 +599,7 @@ pub(crate) fn set_last_sequence_number(&mut self, kind: StreamKind, seq: Option<
             // For finalized Reasoning blocks, include a debug marker as a separate line.
             if matches!(kind, StreamKind::Reasoning) {
                 // Append a FINAL marker variant to distinguish from streaming commits
-                let enabled = match std::env::var("CODEX_DEBUG_REASONING_INDEX") {
+                let enabled = match std::env::var("DEV_DEBUG_REASONING_INDEX") {
                     Ok(val) => !val.is_empty() && val != "0",
                     Err(_) => false,
                 };

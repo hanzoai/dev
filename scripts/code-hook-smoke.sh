@@ -134,8 +134,8 @@ set +e
 (
   cd "${PROJECT}"
   CODE_HOME="${SMOKE_HOME}" \
-  CODEX_HOME="${SMOKE_HOME}" \
-  CODEX_API_KEY=test \
+  DEV_HOME="${SMOKE_HOME}" \
+  HANZO_API_KEY=test \
   OPENAI_BASE_URL="http://127.0.0.1:${PORT}/v1" \
   "${BIN}" exec --skip-git-repo-check --sandbox danger-full-access "${PROMPT_TEXT}"
 ) >"${CLI_OUT}" 2>"${CLI_ERR}"

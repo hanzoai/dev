@@ -3,7 +3,7 @@
 # Install native runtime dependencies for codex-cli.
 #
 # Usage
-#   install_native_deps.sh [--workflow-url URL] [CODEX_CLI_ROOT]
+#   install_native_deps.sh [--workflow-url URL] [DEV_CLI_ROOT]
 #
 # The optional RELEASE_ROOT is the path that contains package.json.  Omitting
 # it installs the binaries into the repository's own bin/ folder to support
@@ -15,7 +15,7 @@ set -euo pipefail
 # Parse arguments
 # ------------------
 
-CODEX_CLI_ROOT=""
+DEV_CLI_ROOT=""
 
 # Until we start publishing stable GitHub releases, we have to grab the binaries
 # from the GitHub Action that created them. Update the URL below to point to the
@@ -31,8 +31,8 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     *)
-      if [[ -z "$CODEX_CLI_ROOT" ]]; then
-        CODEX_CLI_ROOT="$1"
+      if [[ -z "$DEV_CLI_ROOT" ]]; then
+        DEV_CLI_ROOT="$1"
       else
         echo "Unexpected argument: $1" >&2
         exit 1
@@ -46,15 +46,15 @@ done
 # Determine where the binaries should be installed.
 # ----------------------------------------------------------------------------
 
-if [ -n "$CODEX_CLI_ROOT" ]; then
+if [ -n "$DEV_CLI_ROOT" ]; then
   # The caller supplied a release root directory.
-  BIN_DIR="$CODEX_CLI_ROOT/bin"
+  BIN_DIR="$DEV_CLI_ROOT/bin"
 else
   # No argument; fall back to the repo’s own bin directory.
   # Resolve the path of this script, then walk up to the repo root.
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  CODEX_CLI_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-  BIN_DIR="$CODEX_CLI_ROOT/bin"
+  DEV_CLI_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+  BIN_DIR="$DEV_CLI_ROOT/bin"
 fi
 
 # Make sure the destination directory exists.

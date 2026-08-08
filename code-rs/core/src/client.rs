@@ -67,7 +67,7 @@ use crate::error::ModelCapError;
 use crate::error::RetryLimitReachedError;
 use crate::error::UnexpectedResponseError;
 use crate::error::UsageLimitReachedError;
-use crate::flags::CODEX_RS_SSE_FIXTURE;
+use crate::flags::DEV_RS_SSE_FIXTURE;
 use crate::model_family::{find_family_for_model, ModelFamily};
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
@@ -108,10 +108,10 @@ fn preferred_ws_version_from_env() -> ResponsesWebsocketVersion {
 // Sticky-routing token captured at the start of a turn. When present, it must
 // be replayed on every subsequent request within the same turn (retries,
 // continuations, websocket reconnects).
-const X_CODEX_TURN_STATE_HEADER: &str = "x-codex-turn-state";
-const X_CODEX_ROUTING_HINT_HEADER: &str = "x-codex-routing-hint";
-const X_CODEX_WINDOW_ID_HEADER: &str = "x-codex-window-id";
-const X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER: &str =
+const X_DEV_TURN_STATE_HEADER: &str = "x-codex-turn-state";
+const X_DEV_ROUTING_HINT_HEADER: &str = "x-codex-routing-hint";
+const X_DEV_WINDOW_ID_HEADER: &str = "x-codex-window-id";
+const X_OPENAI_INTERNAL_DEV_RESPONSES_LITE_HEADER: &str =
     "x-openai-internal-codex-responses-lite";
 
 const MODEL_CAP_MODEL_HEADER: &str = "x-codex-model-cap-model";
@@ -469,7 +469,7 @@ impl ModelClient {
             ("session_id".to_string(), session_id_str.clone()),
             ("thread_id".to_string(), session_id_str),
             (
-                X_CODEX_WINDOW_ID_HEADER.to_string(),
+                X_DEV_WINDOW_ID_HEADER.to_string(),
                 self.current_window_id(session_id),
             ),
         ])
@@ -925,7 +925,7 @@ impl ModelClient {
             if let Some(header_value) =
                 self.build_routing_hint_header(auth.as_ref(), request_model, service_tier.as_deref())
             {
-                req_builder = req_builder.header(X_CODEX_ROUTING_HINT_HEADER, header_value);
+                req_builder = req_builder.header(X_DEV_ROUTING_HINT_HEADER, header_value);
             }
 
             let has_beta_header = req_builder
@@ -947,14 +947,14 @@ impl ModelClient {
             req_builder =
                 attach_responses_lite_header(req_builder, request_family.use_responses_lite);
             if let Some(state) = turn_state.get() {
-                req_builder = req_builder.header(X_CODEX_TURN_STATE_HEADER, state);
+                req_builder = req_builder.header(X_DEV_TURN_STATE_HEADER, state);
             }
             req_builder = req_builder
                 .header("conversation_id", session_id_str.clone())
                 .header("session_id", session_id_str.clone())
                 .header("thread_id", session_id_str.clone());
             if let Ok(window_id) = HeaderValue::from_str(&self.current_window_id(session_id)) {
-                req_builder = req_builder.header(X_CODEX_WINDOW_ID_HEADER, window_id);
+                req_builder = req_builder.header(X_DEV_WINDOW_ID_HEADER, window_id);
             }
 
             if let Some(auth) = auth.as_ref()
@@ -1036,7 +1036,7 @@ impl ModelClient {
 
                     if let Some(value) = response
                         .headers()
-                        .get(X_CODEX_TURN_STATE_HEADER)
+                        .get(X_DEV_TURN_STATE_HEADER)
                         .and_then(|value| value.to_str().ok())
                     {
                         if let Some(existing) = turn_state.get()
@@ -1222,7 +1222,7 @@ impl ModelClient {
 
     /// Implementation for the OpenAI *Responses* experimental API.
     async fn stream_responses(&self, prompt: &Prompt, log_tag: Option<&str>) -> Result<ResponseStream> {
-        if let Some(path) = &*CODEX_RS_SSE_FIXTURE {
+        if let Some(path) = &*DEV_RS_SSE_FIXTURE {
             // short circuit for tests
             warn!(path, "Streaming from fixture");
             return stream_from_fixture(path, self.provider.clone(), self.otel_event_manager.clone())
@@ -1441,7 +1441,7 @@ impl ModelClient {
             if let Some(header_value) =
                 self.build_routing_hint_header(auth.as_ref(), request_model, service_tier.as_deref())
             {
-                req_builder = req_builder.header(X_CODEX_ROUTING_HINT_HEADER, header_value);
+                req_builder = req_builder.header(X_DEV_ROUTING_HINT_HEADER, header_value);
             }
 
             let has_beta_header = req_builder
@@ -1463,7 +1463,7 @@ impl ModelClient {
             req_builder =
                 attach_responses_lite_header(req_builder, request_family.use_responses_lite);
             if let Some(state) = turn_state.get() {
-                req_builder = req_builder.header(X_CODEX_TURN_STATE_HEADER, state);
+                req_builder = req_builder.header(X_DEV_TURN_STATE_HEADER, state);
             }
 
             req_builder = req_builder
@@ -1474,7 +1474,7 @@ impl ModelClient {
                 .header(reqwest::header::ACCEPT, "text/event-stream")
                 .json(&payload_json);
             if let Ok(window_id) = HeaderValue::from_str(&self.current_window_id(session_id)) {
-                req_builder = req_builder.header(X_CODEX_WINDOW_ID_HEADER, window_id);
+                req_builder = req_builder.header(X_DEV_WINDOW_ID_HEADER, window_id);
             }
 
             if let Some(auth) = auth.as_ref()
@@ -1523,7 +1523,7 @@ impl ModelClient {
                 Ok(resp) if resp.status().is_success() => {
                     if let Some(value) = resp
                         .headers()
-                        .get(X_CODEX_TURN_STATE_HEADER)
+                        .get(X_DEV_TURN_STATE_HEADER)
                         .and_then(|value| value.to_str().ok())
                     {
                         if let Some(existing) = turn_state.get()
@@ -1617,7 +1617,7 @@ impl ModelClient {
                     let status = res.status();
                     let headers = res.headers().clone();
                     if let Some(value) = headers
-                        .get(X_CODEX_TURN_STATE_HEADER)
+                        .get(X_DEV_TURN_STATE_HEADER)
                         .and_then(|value| value.to_str().ok())
                     {
                         if let Some(existing) = turn_state.get()
@@ -2094,7 +2094,7 @@ impl ModelClient {
             if let Some(header_value) =
                 self.build_routing_hint_header(auth.as_ref(), model_slug, service_tier.as_deref())
             {
-                request = request.header(X_CODEX_ROUTING_HINT_HEADER, header_value);
+                request = request.header(X_DEV_ROUTING_HINT_HEADER, header_value);
             }
 
             // Ensure Responses API beta header is present for compact calls. Mirror the
@@ -2118,10 +2118,10 @@ impl ModelClient {
             request = attach_codex_beta_features_header(request, &self.config);
             request = attach_responses_lite_header(request, family.use_responses_lite);
             if let Some(state) = turn_state.get() {
-                request = request.header(X_CODEX_TURN_STATE_HEADER, state);
+                request = request.header(X_DEV_TURN_STATE_HEADER, state);
             }
             if let Ok(window_id) = HeaderValue::from_str(&self.current_window_id(session_id)) {
-                request = request.header(X_CODEX_WINDOW_ID_HEADER, window_id);
+                request = request.header(X_DEV_WINDOW_ID_HEADER, window_id);
             }
 
             request = request
@@ -2164,7 +2164,7 @@ impl ModelClient {
             let status = response.status();
             let headers = response.headers().clone();
             if let Some(value) = headers
-                .get(X_CODEX_TURN_STATE_HEADER)
+                .get(X_DEV_TURN_STATE_HEADER)
                 .and_then(|value| value.to_str().ok())
             {
                 if let Some(existing) = turn_state.get()
@@ -2288,7 +2288,7 @@ fn attach_responses_lite_header(
     use_responses_lite: bool,
 ) -> reqwest::RequestBuilder {
     if use_responses_lite {
-        builder.header(X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER, "true")
+        builder.header(X_OPENAI_INTERNAL_DEV_RESPONSES_LITE_HEADER, "true")
     } else {
         builder
     }
@@ -3623,7 +3623,7 @@ mod tests {
 
         let header_value = request
             .headers()
-            .get(X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER)
+            .get(X_OPENAI_INTERNAL_DEV_RESPONSES_LITE_HEADER)
             .expect("Responses Lite header present");
         assert_eq!(header_value, "true");
     }

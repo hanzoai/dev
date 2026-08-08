@@ -8,7 +8,7 @@ import type { ThreadEvent, ThreadItem } from "@openai/codex-sdk";
 import path from "node:path";
 
 const codexPathOverride =
-  process.env.CODEX_EXECUTABLE ??
+  process.env.DEV_EXECUTABLE ??
   path.join(process.cwd(), "..", "..", "code-rs", "target", "debug", "code");
 
 const codex = new Codex({ codexPathOverride });

@@ -1545,7 +1545,7 @@ fn session_models_from_config(config: &Config) -> Option<acp::SessionModelState>
         available_models.push(acp::ModelInfo {
             model_id: id.clone(),
             name: config.model.clone(),
-            description: Some("Configured via CODEX_HOME/config.toml".to_string()),
+            description: Some("Configured via DEV_HOME/config.toml".to_string()),
             meta: None,
         });
         return Some(acp::SessionModelState {
@@ -1561,7 +1561,7 @@ fn session_models_from_config(config: &Config) -> Option<acp::SessionModelState>
         available_models.push(acp::ModelInfo {
             model_id: id.clone(),
             name: config.model.clone(),
-            description: Some("Configured via CODEX_HOME/config.toml".to_string()),
+            description: Some("Configured via DEV_HOME/config.toml".to_string()),
             meta: None,
         });
         current_model_id = Some(id);

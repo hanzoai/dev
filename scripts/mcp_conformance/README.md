@@ -109,13 +109,13 @@ env PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
 ## Run the required SDK integration
 
 The existing required SDK workflow runs the complete Python fixture self-tests.
-Its TypeScript job builds the actual Codex executable, sets `CODEX_EXEC_PATH`,
+Its TypeScript job builds the actual Codex executable, sets `DEV_EXEC_PATH`,
 installs the pinned upstream conformance runner, and runs both the official
 authenticated suite and the separate production reviewer regression matrix.
 Neither gate can be skipped. To reproduce the focused integration locally:
 
 ```bash
-CODEX_EXEC_PATH=/absolute/path/to/codex \
+DEV_EXEC_PATH=/absolute/path/to/codex \
   pnpm --filter @openai/codex-sdk test -- \
   --runInBand tests/mcpConformance.test.ts
 ```

@@ -12,7 +12,7 @@ if [ $# -ne 1 ]; then
 fi
 
 CRATE_NAME="$1"
-CODEX_CRATE_PATH="../codex-rs/${CRATE_NAME}"
+DEV_CRATE_PATH="../codex-rs/${CRATE_NAME}"
 CODE_CRATE_PATH="${CRATE_NAME}"
 
 # Colors for output
@@ -24,8 +24,8 @@ NC='\033[0m' # No Color
 echo -e "${GREEN}=== Migrating ${CRATE_NAME} from codex-rs to code-rs ===${NC}"
 
 # Step 1: Verify source crate exists
-if [ ! -d "$CODEX_CRATE_PATH" ]; then
-    echo -e "${RED}Error: Source crate not found at $CODEX_CRATE_PATH${NC}"
+if [ ! -d "$DEV_CRATE_PATH" ]; then
+    echo -e "${RED}Error: Source crate not found at $DEV_CRATE_PATH${NC}"
     exit 1
 fi
 
@@ -42,13 +42,13 @@ cp "${CODE_CRATE_PATH}/src/lib.rs" "${CODE_CRATE_PATH}/src/lib.rs.backup"
 # Step 4: Copy source files
 echo -e "${YELLOW}Copying source files from codex-rs...${NC}"
 # Copy all .rs files except main.rs and lib.rs (we'll handle those specially)
-find "${CODEX_CRATE_PATH}/src" -name "*.rs" -not -name "main.rs" -not -name "lib.rs" -exec cp -v {} "${CODE_CRATE_PATH}/src/" \;
+find "${DEV_CRATE_PATH}/src" -name "*.rs" -not -name "main.rs" -not -name "lib.rs" -exec cp -v {} "${CODE_CRATE_PATH}/src/" \;
 
 # Step 5: Copy tests if they exist
-if [ -d "${CODEX_CRATE_PATH}/tests" ]; then
+if [ -d "${DEV_CRATE_PATH}/tests" ]; then
     echo -e "${YELLOW}Copying test files...${NC}"
     mkdir -p "${CODE_CRATE_PATH}/tests"
-    cp -rv "${CODEX_CRATE_PATH}/tests/"* "${CODE_CRATE_PATH}/tests/"
+    cp -rv "${DEV_CRATE_PATH}/tests/"* "${CODE_CRATE_PATH}/tests/"
 fi
 
 # Step 6: Display the original Cargo.toml for reference
@@ -56,11 +56,11 @@ echo -e "${YELLOW}=== Original codex-rs Cargo.toml dependencies ===${NC}"
 echo "You need to manually update ${CODE_CRATE_PATH}/Cargo.toml with these dependencies:"
 echo "(replacing codex-* with code-* where applicable)"
 echo ""
-grep -A 100 "^\[dependencies\]" "${CODEX_CRATE_PATH}/Cargo.toml" | grep -B 100 "^\[" | head -n -1 || true
+grep -A 100 "^\[dependencies\]" "${DEV_CRATE_PATH}/Cargo.toml" | grep -B 100 "^\[" | head -n -1 || true
 echo ""
-grep -A 100 "^\[dev-dependencies\]" "${CODEX_CRATE_PATH}/Cargo.toml" | grep -B 100 "^\[" | head -n -1 || true
+grep -A 100 "^\[dev-dependencies\]" "${DEV_CRATE_PATH}/Cargo.toml" | grep -B 100 "^\[" | head -n -1 || true
 echo ""
-grep -A 100 "^\[target\." "${CODEX_CRATE_PATH}/Cargo.toml" || true
+grep -A 100 "^\[target\." "${DEV_CRATE_PATH}/Cargo.toml" || true
 
 echo -e "${GREEN}Files copied successfully!${NC}"
 echo ""

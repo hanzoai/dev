@@ -204,10 +204,10 @@ fn build_backend(config: &CloudTasksConfig) -> Result<Arc<dyn CloudBackend>> {
 }
 
 async fn load_config() -> Result<CloudTasksConfig> {
-    let base_url_env = std::env::var("CODEX_CLOUD_TASKS_BASE_URL")
+    let base_url_env = std::env::var("DEV_CLOUD_TASKS_BASE_URL")
         .unwrap_or_else(|_| "https://chatgpt.com/backend-api".to_string());
     let base_url = normalize_base_url(&base_url_env);
-    let use_mock = std::env::var("CODEX_CLOUD_TASKS_MODE")
+    let use_mock = std::env::var("DEV_CLOUD_TASKS_MODE")
         .ok()
         .map(|mode| mode.eq_ignore_ascii_case("mock"))
         .unwrap_or(false);

@@ -399,7 +399,7 @@ process.env.CODE_BINARY_PATH = binaryPath;
 
 const child = spawn(binaryPath, process.argv.slice(2), {
   stdio: "inherit",
-  env: { ...process.env, CODER_MANAGED_BY_NPM: "1", CODEX_MANAGED_BY_NPM: "1", CODE_BINARY_PATH: binaryPath },
+  env: { ...process.env, CODER_MANAGED_BY_NPM: "1", DEV_MANAGED_BY_NPM: "1", CODE_BINARY_PATH: binaryPath },
 });
 
 child.on("error", (err) => {

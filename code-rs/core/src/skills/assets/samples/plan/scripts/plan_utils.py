@@ -11,8 +11,8 @@ _NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
 
 def get_codex_home() -> Path:
-    """Return CODEX_HOME if set, else ~/.codex."""
-    return Path(os.environ.get("CODEX_HOME", "~/.codex")).expanduser()
+    """Return DEV_HOME if set, else ~/.codex."""
+    return Path(os.environ.get("DEV_HOME", "~/.codex")).expanduser()
 
 
 def get_plans_dir() -> Path:

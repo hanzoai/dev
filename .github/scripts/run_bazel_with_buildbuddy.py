@@ -183,7 +183,7 @@ def bazel_args_with_remote_config(
 
 def bazel_command(*args: str, env: Mapping[str, str] | None = None) -> list[str]:
     env = os.environ if env is None else env
-    bazel = env.get("CODEX_BAZEL_BIN", "bazel")
+    bazel = env.get("DEV_BAZEL_BIN", "bazel")
     return [bazel, *startup_args(args, env), *bazel_args_with_remote_config(args, env)]
 
 

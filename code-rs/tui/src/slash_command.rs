@@ -6,7 +6,7 @@ use strum_macros::EnumIter;
 use strum_macros::EnumString;
 use strum_macros::IntoStaticStr;
 
-const BUILD_PROFILE: Option<&str> = option_env!("CODEX_PROFILE");
+const BUILD_PROFILE: Option<&str> = option_env!("DEV_PROFILE");
 
 fn demo_command_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();

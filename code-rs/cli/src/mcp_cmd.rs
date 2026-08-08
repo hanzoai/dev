@@ -183,7 +183,7 @@ fn run_add(config_overrides: &CliConfigOverrides, add_args: AddArgs) -> Result<(
         Some(map)
     };
 
-    let code_home = find_code_home().context("failed to resolve CODEX_HOME")?;
+    let code_home = find_code_home().context("failed to resolve DEV_HOME")?;
     let mut servers = load_global_mcp_servers(&code_home)
         .with_context(|| format!("failed to load MCP servers from {}", code_home.display()))?;
 
@@ -268,7 +268,7 @@ fn run_remove(config_overrides: &CliConfigOverrides, remove_args: RemoveArgs) ->
 
     validate_server_name(&name)?;
 
-    let code_home = find_code_home().context("failed to resolve CODEX_HOME")?;
+    let code_home = find_code_home().context("failed to resolve DEV_HOME")?;
     let mut servers = load_global_mcp_servers(&code_home)
         .with_context(|| format!("failed to load MCP servers from {}", code_home.display()))?;
 

@@ -293,7 +293,7 @@ pub async fn persist_model_selection(
     Ok(())
 }
 
-/// Patch `CODEX_HOME/config.toml` project state.
+/// Patch `DEV_HOME/config.toml` project state.
 /// Use with caution.
 pub fn set_project_trusted(code_home: &Path, project_path: &Path) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
@@ -380,7 +380,7 @@ fn set_project_trusted_inner(doc: &mut DocumentMut, project_path: &Path) -> anyh
     Ok(())
 }
 
-/// Persist the selected TUI theme into `CODEX_HOME/config.toml` at `[tui.theme].name`.
+/// Persist the selected TUI theme into `DEV_HOME/config.toml` at `[tui.theme].name`.
 pub fn set_tui_theme_name(code_home: &Path, theme: ThemeName) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
 
@@ -486,7 +486,7 @@ pub fn set_cached_terminal_background(
     Ok(())
 }
 
-/// Persist the selected spinner into `CODEX_HOME/config.toml` at `[tui.spinner].name`.
+/// Persist the selected spinner into `DEV_HOME/config.toml` at `[tui.spinner].name`.
 pub fn set_tui_spinner_name(code_home: &Path, spinner_name: &str) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
 
@@ -622,7 +622,7 @@ pub fn set_custom_theme(
     Ok(())
 }
 
-/// Persist the alternate screen preference into `CODEX_HOME/config.toml` at `[tui].alternate_screen`.
+/// Persist the alternate screen preference into `DEV_HOME/config.toml` at `[tui].alternate_screen`.
 pub fn set_tui_alternate_screen(code_home: &Path, enabled: bool) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
 
@@ -650,7 +650,7 @@ pub fn set_tui_alternate_screen(code_home: &Path, enabled: bool) -> anyhow::Resu
     Ok(())
 }
 
-/// Persist the TUI notifications preference into `CODEX_HOME/config.toml` at `[tui].notifications`.
+/// Persist the TUI notifications preference into `DEV_HOME/config.toml` at `[tui].notifications`.
 pub fn set_tui_notifications(
     code_home: &Path,
     notifications: crate::config_types::Notifications,
@@ -686,7 +686,7 @@ pub fn set_tui_notifications(
     Ok(())
 }
 
-/// Persist the review auto-resolve preference into `CODEX_HOME/config.toml` at `[tui].review_auto_resolve`.
+/// Persist the review auto-resolve preference into `DEV_HOME/config.toml` at `[tui].review_auto_resolve`.
 pub fn set_tui_review_auto_resolve(code_home: &Path, enabled: bool) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
     let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
@@ -707,7 +707,7 @@ pub fn set_tui_review_auto_resolve(code_home: &Path, enabled: bool) -> anyhow::R
     Ok(())
 }
 
-/// Persist the auto review preference into `CODEX_HOME/config.toml` at `[tui].auto_review_enabled`.
+/// Persist the auto review preference into `DEV_HOME/config.toml` at `[tui].auto_review_enabled`.
 pub fn set_tui_auto_review_enabled(code_home: &Path, enabled: bool) -> anyhow::Result<()> {
     let config_path = code_home.join(CONFIG_TOML_FILE);
     let read_path = resolve_code_path_for_read(code_home, Path::new(CONFIG_TOML_FILE));
@@ -728,7 +728,7 @@ pub fn set_tui_auto_review_enabled(code_home: &Path, enabled: bool) -> anyhow::R
     Ok(())
 }
 
-/// Persist the review model + reasoning effort into `CODEX_HOME/config.toml`.
+/// Persist the review model + reasoning effort into `DEV_HOME/config.toml`.
 pub fn set_review_model(
     code_home: &Path,
     model: &str,
@@ -798,7 +798,7 @@ pub fn set_review_resolve_model(
     Ok(())
 }
 
-/// Persist the planning model + reasoning effort into `CODEX_HOME/config.toml`.
+/// Persist the planning model + reasoning effort into `DEV_HOME/config.toml`.
 pub fn set_planning_model(
     code_home: &Path,
     model: &str,
@@ -1284,7 +1284,7 @@ pub fn add_project_allowed_command(
     Ok(())
 }
 
-/// List MCP servers from `CODEX_HOME/config.toml`.
+/// List MCP servers from `DEV_HOME/config.toml`.
 /// Returns `(enabled, disabled)` lists of `(name, McpServerConfig)`.
 pub fn list_mcp_servers(code_home: &Path) -> anyhow::Result<(
     Vec<(String, McpServerConfig)>,
@@ -1693,7 +1693,7 @@ fn env_path(var: &str) -> std::io::Result<Option<PathBuf>> {
 
 fn env_overrides_present() -> bool {
     matches!(std::env::var("CODE_HOME"), Ok(ref v) if !v.trim().is_empty())
-        || matches!(std::env::var("CODEX_HOME"), Ok(ref v) if !v.trim().is_empty())
+        || matches!(std::env::var("DEV_HOME"), Ok(ref v) if !v.trim().is_empty())
 }
 
 fn default_code_home_dir() -> Option<PathBuf> {
@@ -1766,10 +1766,10 @@ pub fn resolve_code_path_for_read(code_home: &Path, relative: &Path) -> PathBuf 
 }
 
 /// Returns the path to the Code/Codex configuration directory, which can be
-/// specified by the `CODE_HOME` or `CODEX_HOME` environment variables. If not set,
+/// specified by the `CODE_HOME` or `DEV_HOME` environment variables. If not set,
 /// defaults to `~/.code` for the fork.
 ///
-/// - If `CODE_HOME` or `CODEX_HOME` is set, the value will be canonicalized and this
+/// - If `CODE_HOME` or `DEV_HOME` is set, the value will be canonicalized and this
 ///   function will Err if the path does not exist.
 /// - If neither is set, this function does not verify that the directory exists.
 pub fn find_code_home() -> std::io::Result<PathBuf> {
@@ -1777,7 +1777,7 @@ pub fn find_code_home() -> std::io::Result<PathBuf> {
         return Ok(path);
     }
 
-    if let Some(path) = env_path("CODEX_HOME")? {
+    if let Some(path) = env_path("DEV_HOME")? {
         return Ok(path);
     }
 

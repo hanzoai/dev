@@ -828,7 +828,7 @@ use uuid::Uuid;
 
 fn history_cell_logging_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
-    if let Ok(value) = std::env::var("CODEX_TRACE_HISTORY") {
+    if let Ok(value) = std::env::var("DEV_TRACE_HISTORY") {
         let trimmed = value.trim();
         if !matches!(trimmed, "" | "0") {
             return true;
@@ -25886,7 +25886,7 @@ Have we met every part of this goal and is there no further work to do?"#
         // Send ConfigureSession op to backend
         self.submit_configure_session_op();
 
-        // Persist selection into CODEX_HOME/config.toml for this project directory so it sticks.
+        // Persist selection into DEV_HOME/config.toml for this project directory so it sticks.
         let _ = set_project_access_mode(
             &self.config.code_home,
             &self.config.cwd,
@@ -26041,7 +26041,7 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     fn save_theme_to_config(&self, new_theme: code_core::config_types::ThemeName) {
-        // Persist the theme selection to CODE_HOME/CODEX_HOME config.toml
+        // Persist the theme selection to CODE_HOME/DEV_HOME config.toml
         match code_core::config::find_code_home() {
             Ok(home) => {
                 if let Err(e) = code_core::config::set_tui_theme_name(&home, new_theme) {
@@ -29249,7 +29249,7 @@ Have we met every part of this goal and is there no further work to do?"#
                         }
                     },
                     Err(e) => {
-                        let msg = format!("Failed to locate CODEX_HOME: {e}");
+                        let msg = format!("Failed to locate DEV_HOME: {e}");
                         self.history_push_plain_state(history_cell::new_error_event(msg));
                     }
                 }
@@ -29306,7 +29306,7 @@ Have we met every part of this goal and is there no further work to do?"#
                         }
                     }
                     Err(e) => {
-                        let msg = format!("Failed to locate CODEX_HOME: {}", e);
+                        let msg = format!("Failed to locate DEV_HOME: {}", e);
                         self.history_push_plain_state(history_cell::new_error_event(msg));
                     }
                 }
@@ -29443,7 +29443,7 @@ Have we met every part of this goal and is there no further work to do?"#
                         }
                     }
                     Err(e) => {
-                        let msg = format!("Failed to locate CODEX_HOME: {}", e);
+                        let msg = format!("Failed to locate DEV_HOME: {}", e);
                         self.history_push_plain_state(history_cell::new_error_event(msg));
                     }
                 }
@@ -30308,7 +30308,7 @@ Have we met every part of this goal and is there no further work to do?"#
         };
 
         // Start with all items in production; tests can opt-in to a minimal header via env flag.
-        let minimal_header = std::env::var_os("CODEX_TUI_FORCE_MINIMAL_HEADER").is_some();
+        let minimal_header = std::env::var_os("DEV_TUI_FORCE_MINIMAL_HEADER").is_some();
         let demo_mode = self.config.demo_developer_message.is_some();
         let mut include_reasoning = !minimal_header;
         let mut include_model = !minimal_header;
@@ -44653,7 +44653,7 @@ impl ChatWidget<'_> {
             }
             Err(_) => {
                 let msg = format!(
-                    "✅ {} TUI notifications (not persisted: CODE_HOME/CODEX_HOME not found)",
+                    "✅ {} TUI notifications (not persisted: CODE_HOME/DEV_HOME not found)",
                     if enabled { "Enabled" } else { "Disabled" }
                 );
                 self.push_background_tail(msg);
@@ -44748,7 +44748,7 @@ impl ChatWidget<'_> {
                 }
             },
             Err(e) => {
-                let msg = format!("Failed to locate CODEX_HOME: {}", e);
+                let msg = format!("Failed to locate DEV_HOME: {}", e);
                 self.history_push_plain_state(history_cell::new_error_event(msg));
             }
         }

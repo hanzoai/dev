@@ -6,7 +6,7 @@ import type { CodexConfigObject } from "../src/codexOptions";
 // code-rs is the workspace that ships; codex-rs is the read-only upstream
 // mirror and building it produces nothing a user runs.
 export const codexExecPath =
-  process.env.CODEX_EXEC_PATH ??
+  process.env.DEV_EXEC_PATH ??
   path.join(process.cwd(), "..", "..", "code-rs", "target", "debug", "dev");
 
 type CreateTestClientOptions = {
@@ -80,7 +80,7 @@ function mergeTestConfig(
   return {
     ...mergedConfig,
     // Disable plugins in SDK integration tests so background curated-plugin
-    // sync does not race temp CODEX_HOME cleanup.
+    // sync does not race temp DEV_HOME cleanup.
     features:
       featureOverrides && typeof featureOverrides === "object" && !Array.isArray(featureOverrides)
         ? { ...featureOverrides, plugins: false }
@@ -96,7 +96,7 @@ function getCurrentEnv(): Record<string, string> {
   const env: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(process.env)) {
-    if (key === "CODEX_INTERNAL_ORIGINATOR_OVERRIDE") {
+    if (key === "DEV_INTERNAL_ORIGINATOR_OVERRIDE") {
       continue;
     }
     if (value !== undefined) {
