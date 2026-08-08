@@ -65,7 +65,7 @@ pub struct Cli {
     #[clap(long = "debug", short = 'd', default_value_t = false)]
     pub debug: bool,
 
-    /// Allow running Codex outside a Git repository.
+    /// Allow running Hanzo Dev outside a Git repository.
     #[arg(long = "skip-git-repo-check", default_value_t = false)]
     pub skip_git_repo_check: bool,
 

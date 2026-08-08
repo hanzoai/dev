@@ -31,7 +31,7 @@ use code_core::config_types::ThemeName;
 use regex_lite::Regex;
 use code_login::AuthMode;
 use code_login::CodexAuth;
-use model_migration::{migration_copy_for_key, run_model_migration_prompt, ModelMigrationOutcome};
+use model_migration::{run_model_migration_prompt, ModelMigrationOutcome};
 use code_ollama::DEFAULT_OSS_MODEL;
 use code_protocol::config_types::SandboxMode;
 use std::fs::OpenOptions;
@@ -586,8 +586,7 @@ pub async fn run_main(
                     }
                 }
             } else {
-                let copy = migration_copy_for_key(plan.hide_key);
-                match run_model_migration_prompt(&copy)? {
+                match run_model_migration_prompt()? {
                     ModelMigrationOutcome::Accepted => {
                         if let Err(err) = persist_migration_acceptance(
                             &code_home,

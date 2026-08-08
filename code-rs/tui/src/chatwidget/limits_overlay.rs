@@ -215,7 +215,7 @@ fn placeholder_lines() -> Vec<RtLine<'static>> {
     vec![
         RtLine::from("Usage Limits".bold()),
         RtLine::from("  Real usage data is not available yet."),
-        RtLine::from("  Send a message to Code, then run /limits again.".dim()),
+        RtLine::from("  Send a message to Hanzo Dev, then run /limits again.".dim()),
     ]
 }
 

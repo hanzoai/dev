@@ -2731,7 +2731,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                 // Blank line between title and content
                 form_lines.push(Line::default());
                 form_lines.push(Line::from(Span::styled(
-                    "Code can generate a custom spinner just for you!",
+                    "Hanzo Dev can generate a custom spinner just for you!",
                     Style::default().fg(theme.text),
                 )));
                 form_lines.push(Line::from(Span::styled(
@@ -3017,7 +3017,7 @@ impl<'a> BottomPaneView<'a> for ThemeSelectionView {
                     }
                 }
                 form_lines.push(Line::from(Span::styled(
-                    "Code can generate a custom theme just for you!",
+                    "Hanzo Dev can generate a custom theme just for you!",
                     Style::default().fg(theme.text),
                 )));
                 form_lines.push(Line::from(Span::styled(
