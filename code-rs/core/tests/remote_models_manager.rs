@@ -44,7 +44,9 @@ fn remote_model(slug: &str, display: &str, priority: i32) -> ModelInfo {
 }
 
 fn provider_for(base_url: String) -> ModelProviderInfo {
+    alt_env_keys: Vec::new(),
     ModelProviderInfo {
+        alt_env_keys: Vec::new(),
         name: "mock".into(),
         base_url: Some(base_url),
         env_key: None,

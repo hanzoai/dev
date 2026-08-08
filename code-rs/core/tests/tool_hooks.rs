@@ -78,6 +78,7 @@ fn configure_test(
     config.sandbox_policy = SandboxPolicy::DangerFullAccess;
     config.project_hooks = ProjectHooks::from_configs(&hook_configs, &config.cwd);
     config.model_provider = ModelProviderInfo {
+        alt_env_keys: Vec::new(),
         base_url: Some(format!("{}/v1", server.uri())),
         ..built_in_model_providers(None)["openai"].clone()
     };
