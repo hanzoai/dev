@@ -12,7 +12,7 @@ use code_cli::SeatbeltCommand;
 use code_cli::login::read_api_key_from_stdin;
 use code_cli::login::run_login_status;
 use code_cli::login::run_login_with_api_key;
-use code_cli::login::run_login_with_chatgpt;
+use code_cli::login::run_login;
 use code_cli::login::run_login_with_device_code;
 use code_cli::login::run_logout;
 mod bridge;
@@ -328,7 +328,7 @@ struct LoginCommand {
 
     #[arg(
         long = "with-api-key",
-        help = "Read the API key from stdin (e.g. `printenv OPENAI_API_KEY | dev login --with-api-key`)"
+        help = "Read the API key from stdin (e.g. `printenv HANZO_USER_KEY | dev login --with-api-key`)"
     )]
     with_api_key: bool,
 
@@ -557,14 +557,14 @@ async fn cli_main(code_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()>
                         .await;
                     } else if login_cli.api_key.is_some() {
                         eprintln!(
-                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv OPENAI_API_KEY | dev login --with-api-key`."
+                            "The --api-key flag is no longer supported. Pipe the key instead, e.g. `printenv HANZO_USER_KEY | dev login --with-api-key`."
                         );
                         std::process::exit(1);
                     } else if login_cli.with_api_key {
                         let api_key = read_api_key_from_stdin();
                         run_login_with_api_key(login_cli.config_overrides, api_key).await;
                     } else {
-                        run_login_with_chatgpt(login_cli.config_overrides).await;
+                        run_login(login_cli.config_overrides).await;
                     }
                 }
             }

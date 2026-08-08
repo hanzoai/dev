@@ -219,7 +219,7 @@ impl LoginAccountsState {
                 true,
             ) {
                 self.feedback = Some(Feedback {
-                    message: format!("Failed to record ChatGPT login: {err}"),
+                    message: format!("Failed to record login: {err}"),
                     is_error: true,
                 });
             }
@@ -333,7 +333,7 @@ impl LoginAccountsState {
             Ok(()) => {
                 self.feedback = Some(Feedback {
                     message: if mode.is_chatgpt() {
-                        "ChatGPT account selected".to_string()
+                        "Account selected".to_string()
                     } else {
                         "API key selected".to_string()
                     },
@@ -695,7 +695,7 @@ impl LoginAddAccountState {
                 KeyCode::Enter => {
                     if *selected == 0 {
                         self.feedback = Some(Feedback {
-                            message: "Opening browser for ChatGPT sign-in…".to_string(),
+                            message: "Starting sign-in…".to_string(),
                             is_error: false,
                         });
                         self.step = AddStep::Waiting { auth_url: None };
@@ -835,7 +835,7 @@ impl LoginAddAccountState {
             AddStep::Choose { selected } => {
                 lines.push(Line::from("Choose how you’d like to add an account:"));
                 lines.push(Line::from(""));
-                let options = ["ChatGPT sign-in", "API key"];
+                let options = ["Sign in", "API key"];
                 for (idx, option) in options.iter().enumerate() {
                     let mut spans = Vec::new();
                     if idx == *selected {
@@ -860,7 +860,7 @@ impl LoginAddAccountState {
                 ]));
             }
             AddStep::ApiKey { field } => {
-                lines.push(Line::from("Paste your OpenAI API key:"));
+                lines.push(Line::from("Paste your API key:"));
                 lines.push(Line::from(field.render_line()));
                 lines.push(Line::from(""));
                 lines.push(Line::from(vec![
@@ -871,7 +871,7 @@ impl LoginAddAccountState {
                 ]));
             }
             AddStep::Waiting { auth_url } => {
-                lines.push(Line::from("Finish signing in with ChatGPT in your browser."));
+                lines.push(Line::from("Finish signing in from your browser."));
                 lines.push(Line::from(vec![
                     Span::styled("Not seeing a browser? ", Style::default().fg(crate::colors::text_dim())),
                     Span::styled(
@@ -975,8 +975,8 @@ impl LoginAddAccountState {
     pub fn on_chatgpt_complete(&mut self, result: Result<(), String>) {
         match result {
             Ok(()) => {
-        self.feedback = Some(Feedback { message: "ChatGPT account connected".to_string(), is_error: false });
-        self.send_tail("ChatGPT account connected".to_string());
+        self.feedback = Some(Feedback { message: "Account connected".to_string(), is_error: false });
+        self.send_tail("Account connected".to_string());
                 self.app_event_tx
                     .send(AppEvent::LoginUsingChatGptChanged { using_chatgpt_auth: true });
                 self.finish_and_show_accounts();
@@ -991,7 +991,7 @@ impl LoginAddAccountState {
     pub fn cancel_active_flow(&mut self) {
         let message = match self.step {
             AddStep::DeviceCode(_) => "Cancelled code authentication",
-            AddStep::Waiting { .. } => "Cancelled ChatGPT login",
+            AddStep::Waiting { .. } => "Cancelled sign-in",
             _ => "Cancelled login",
         };
         self.step = AddStep::Choose { selected: 0 };

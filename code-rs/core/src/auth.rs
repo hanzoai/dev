@@ -1014,6 +1014,15 @@ pub struct AuthDotJson {
 
 // Shared constant for token refresh (client id used for oauth token refresh flow)
 pub const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+
+/// Hanzo IAM's OIDC issuer. hanzo.id serves OIDC under `/v1/iam`, so
+/// `{issuer}/oauth/device` and `{issuer}/oauth/token` resolve to the endpoints
+/// advertised by `hanzo.id/.well-known/openid-configuration`.
+pub const HANZO_ISSUER: &str = "https://hanzo.id/v1/iam";
+/// The public client registered for the device grant. It holds no secret, which
+/// is what a CLI needs: `hanzo-app` is confidential and answers an
+/// unauthenticated device request with `invalid_client`.
+pub const HANZO_CLIENT_ID: &str = "hanzo-cli";
 const CHATGPT_ACCESS_TOKEN_REFRESH_WINDOW_MINUTES: i64 = 5;
 
 use std::sync::RwLock;

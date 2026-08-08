@@ -2095,6 +2095,22 @@ impl App<'_> {
                             flow.join_handle.abort();
                         }
 
+                        // Hanzo IAM registers no loopback redirect for its CLI
+                        // client, so its sign-in is the device grant. The popup
+                        // renders whichever the provider answers with.
+                        if self.config.model_provider_id == code_core::HANZO_PROVIDER_ID {
+                            widget.notify_login_device_code_pending();
+                            let join_handle = spawn_device_grant(
+                                ServerOptions::hanzo(
+                                    self.config.code_home.clone(),
+                                    self.config.responses_originator_header.clone(),
+                                ),
+                                self.app_event_tx.clone(),
+                            );
+                            self.login_flow = Some(LoginFlowState { shutdown: None, join_handle });
+                            continue 'main;
+                        }
+
                         let opts = ServerOptions::new(
                             self.config.code_home.clone(),
                             code_login::CLIENT_ID.to_string(),
@@ -2140,26 +2156,38 @@ impl App<'_> {
                         }
                         widget.notify_login_device_code_pending();
 
-                        let opts = ServerOptions::new(
-                            self.config.code_home.clone(),
-                            code_login::CLIENT_ID.to_string(),
-                            self.config.responses_originator_header.clone(),
-                        );
                         let tx = self.app_event_tx.clone();
-                        let join_handle = tokio::spawn(async move {
-                            match code_login::DeviceCodeSession::start(opts).await {
-                                Ok(session) => {
-                                    let authorize_url = session.authorize_url();
-                                    let user_code = session.user_code().to_string();
-                                    let _ = tx.send(AppEvent::LoginDeviceCodeReady { authorize_url, user_code });
-                                    let result = session.wait_for_tokens().await.map_err(|e| e.to_string());
-                                    let _ = tx.send(AppEvent::LoginDeviceCodeComplete { result });
+                        let join_handle = if self.config.model_provider_id
+                            == code_core::HANZO_PROVIDER_ID
+                        {
+                            spawn_device_grant(
+                                ServerOptions::hanzo(
+                                    self.config.code_home.clone(),
+                                    self.config.responses_originator_header.clone(),
+                                ),
+                                tx,
+                            )
+                        } else {
+                            let opts = ServerOptions::new(
+                                self.config.code_home.clone(),
+                                code_login::CLIENT_ID.to_string(),
+                                self.config.responses_originator_header.clone(),
+                            );
+                            tokio::spawn(async move {
+                                match code_login::DeviceCodeSession::start(opts).await {
+                                    Ok(session) => {
+                                        let authorize_url = session.authorize_url();
+                                        let user_code = session.user_code().to_string();
+                                        let _ = tx.send(AppEvent::LoginDeviceCodeReady { authorize_url, user_code });
+                                        let result = session.wait_for_tokens().await.map_err(|e| e.to_string());
+                                        let _ = tx.send(AppEvent::LoginDeviceCodeComplete { result });
+                                    }
+                                    Err(err) => {
+                                        let _ = tx.send(AppEvent::LoginDeviceCodeFailed { message: err.to_string() });
+                                    }
                                 }
-                                Err(err) => {
-                                    let _ = tx.send(AppEvent::LoginDeviceCodeFailed { message: err.to_string() });
-                                }
-                            }
-                        });
+                            })
+                        };
                         self.login_flow = Some(LoginFlowState { shutdown: None, join_handle });
                     }
                 }
@@ -2458,6 +2486,29 @@ impl App<'_> {
         )
     }
 
+}
+
+/// Run an RFC 8628 device grant, reporting the code to show and then the
+/// outcome over the same events the OpenAI device flow reports on.
+fn spawn_device_grant(
+    opts: ServerOptions,
+    tx: crate::app_event_sender::AppEventSender,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        match code_login::DeviceGrant::start(opts).await {
+            Ok(grant) => {
+                tx.send(AppEvent::LoginDeviceCodeReady {
+                    authorize_url: grant.link().to_string(),
+                    user_code: grant.user_code().to_string(),
+                });
+                let result = grant.wait().await.map_err(|e| e.to_string());
+                tx.send(AppEvent::LoginDeviceCodeComplete { result });
+            }
+            Err(err) => {
+                tx.send(AppEvent::LoginDeviceCodeFailed { message: err.to_string() });
+            }
+        }
+    })
 }
 
 fn is_image_clipboard_paste_shortcut(key_event: &KeyEvent) -> bool {

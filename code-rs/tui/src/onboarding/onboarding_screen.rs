@@ -69,6 +69,8 @@ impl OnboardingScreen {
             show_login_screen,
             login_status,
         } = args;
+        let hanzo = chat_widget_args.config.model_provider_id == code_core::HANZO_PROVIDER_ID;
+        let env_key = chat_widget_args.config.model_provider.env_key.clone();
         let shared_chat_args = Arc::new(Mutex::new(chat_widget_args));
 
         let mut steps: Vec<Step> = vec![Step::Welcome(WelcomeWidget {
@@ -77,6 +79,8 @@ impl OnboardingScreen {
         if show_login_screen {
             steps.push(Step::Auth(AuthModeWidget {
                 event_tx: event_tx.clone(),
+                // Row 0 — signing in to the configured provider, which the
+                // default `hanzo` makes Hanzo IAM.
                 highlighted_mode: AuthMode::ChatGPT,
                 error: None,
                 sign_in_state: SignInState::PickMode,
@@ -84,6 +88,8 @@ impl OnboardingScreen {
                 login_status,
                 preferred_auth_method: code_login::AuthMode::ApiKey,
                 chat_widget_args: shared_chat_args.clone(),
+                hanzo,
+                env_key,
             }))
         }
         let is_git_repo = get_git_repo_root(&cwd).is_some();
@@ -119,8 +125,8 @@ impl OnboardingScreen {
         if let Some(Step::Auth(state)) = current_step {
             match result {
                 Ok(()) => {
-                    state.apply_chatgpt_login_side_effects();
-                    state.sign_in_state = SignInState::ChatGptSuccessMessage;
+                    state.apply_login_side_effects();
+                    state.sign_in_state = SignInState::SuccessMessage;
                     self.event_tx.send(AppEvent::RequestRedraw);
                     let tx1 = self.event_tx.clone();
                     let tx2 = self.event_tx.clone();

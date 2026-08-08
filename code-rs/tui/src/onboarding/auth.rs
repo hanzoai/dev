@@ -1,4 +1,5 @@
 use code_login::CLIENT_ID;
+use code_login::DeviceGrant;
 use code_login::ServerOptions;
 use code_login::ShutdownHandle;
 use code_login::run_login_server;
@@ -38,9 +39,11 @@ use super::onboarding_screen::StepState;
 #[derive(Debug)]
 pub(crate) enum SignInState {
     PickMode,
-    ChatGptContinueInBrowser(ContinueInBrowserState),
-    ChatGptSuccessMessage,
-    ChatGptSuccess,
+    ContinueInBrowser(ContinueInBrowserState),
+    /// RFC 8628: the issuer named a code the user confirms on its own page.
+    DeviceCode(DeviceCodeState),
+    SuccessMessage,
+    Success,
     EnvVarMissing,
     EnvVarFound,
 }
@@ -61,6 +64,19 @@ impl Drop for ContinueInBrowserState {
     }
 }
 
+/// The link and code to display, once the issuer has named them.
+#[derive(Debug)]
+pub(crate) struct DeviceCodeState {
+    prompt: Arc<Mutex<Option<(String, String)>>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for DeviceCodeState {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
 impl KeyboardHandler for AuthModeWidget {
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event.code {
@@ -71,24 +87,25 @@ impl KeyboardHandler for AuthModeWidget {
                 self.highlighted_mode = AuthMode::ApiKey;
             }
             KeyCode::Char('1') => {
-                self.start_chatgpt_login();
+                self.start_login();
             }
             KeyCode::Char('2') => self.verify_api_key(),
             KeyCode::Enter => match self.sign_in_state {
                 SignInState::PickMode => match self.highlighted_mode {
-                    AuthMode::ChatGPT => self.start_chatgpt_login(),
-                    AuthMode::ChatgptAuthTokens => self.start_chatgpt_login(),
-                    AuthMode::Headers => self.start_chatgpt_login(),
+                    AuthMode::ChatGPT => self.start_login(),
+                    AuthMode::ChatgptAuthTokens => self.start_login(),
+                    AuthMode::Headers => self.start_login(),
                     AuthMode::ApiKey => self.verify_api_key(),
                 },
                 SignInState::EnvVarMissing => self.sign_in_state = SignInState::PickMode,
-                SignInState::ChatGptSuccessMessage => {
-                    self.sign_in_state = SignInState::ChatGptSuccess
-                }
+                SignInState::SuccessMessage => self.sign_in_state = SignInState::Success,
                 _ => {}
             },
             KeyCode::Esc => {
-                if matches!(self.sign_in_state, SignInState::ChatGptContinueInBrowser(_)) {
+                if matches!(
+                    self.sign_in_state,
+                    SignInState::ContinueInBrowser(_) | SignInState::DeviceCode(_)
+                ) {
                     self.sign_in_state = SignInState::PickMode;
                 }
             }
@@ -107,17 +124,28 @@ pub(crate) struct AuthModeWidget {
     pub login_status: LoginStatus,
     pub preferred_auth_method: AuthMode,
     pub chat_widget_args: Arc<Mutex<ChatWidgetArgs>>,
+    /// The configured provider is Hanzo, so sign-in means Hanzo IAM.
+    pub hanzo: bool,
+    /// The variable the configured provider reads its key from.
+    pub env_key: Option<String>,
 }
 
 impl AuthModeWidget {
+    /// What the account being signed into is called.
+    fn brand(&self) -> &'static str {
+        if self.hanzo { "Hanzo" } else { "ChatGPT" }
+    }
+
     fn render_pick_mode(&self, area: Rect, buf: &mut Buffer) {
+        let headline = if self.hanzo {
+            "Sign in with Hanzo to use your Hanzo Cloud account".to_string()
+        } else {
+            "Sign in with ChatGPT to use your paid OpenAI plan".to_string()
+        };
         let mut lines: Vec<Line> = vec![
             Line::from(vec![
                 Span::raw("> "),
-                Span::styled(
-                    "Sign in with ChatGPT to use your paid OpenAI plan",
-                    Style::default().add_modifier(Modifier::BOLD),
-                ),
+                Span::styled(headline, Style::default().add_modifier(Modifier::BOLD)),
             ]),
             Line::from(vec![
                 Span::raw("  "),
@@ -142,7 +170,7 @@ impl AuthModeWidget {
                 let to_label = |mode: AuthMode| match mode {
                     AuthMode::ApiKey => "API key",
                     AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens | AuthMode::Headers => {
-                        "ChatGPT"
+                        self.brand()
                     }
                 };
                 let msg = format!(
@@ -189,22 +217,22 @@ impl AuthModeWidget {
 
             vec![line1, line2]
         };
-        let chatgpt_label = if matches!(
+        let signed_in = matches!(
             self.login_status,
             LoginStatus::AuthMode(
                 AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens | AuthMode::Headers
             )
-        ) {
-            "Continue using ChatGPT"
-        } else {
-            "Sign in with ChatGPT"
-        };
-
+        );
+        let verb = if signed_in { "Continue with" } else { "Sign in with" };
         lines.extend(create_mode_item(
             0,
             AuthMode::ChatGPT,
-            chatgpt_label,
-            "Usage included with Plus, Pro, and Team plans",
+            &format!("{verb} {}", self.brand()),
+            if self.hanzo {
+                "hanzo.id — a one-time code, so it works over SSH too"
+            } else {
+                "Usage included with Plus, Pro, and Team plans"
+            },
         ));
         let api_key_label = if matches!(self.login_status, LoginStatus::AuthMode(AuthMode::ApiKey))
         {
@@ -216,7 +244,10 @@ impl AuthModeWidget {
             1,
             AuthMode::ApiKey,
             api_key_label,
-            "Pay for what you use",
+            &match &self.env_key {
+                Some(key) => format!("Pay for what you use — reads {key}"),
+                None => "Pay for what you use".to_string(),
+            },
         ));
         lines.push(Line::from(""));
         lines.push(
@@ -247,7 +278,7 @@ impl AuthModeWidget {
             )));
         spans.extend(shimmer_spans("Finish signing in via your browser"));
         let mut lines = vec![Line::from(spans), Line::from("")];
-        if let SignInState::ChatGptContinueInBrowser(state) = &self.sign_in_state {
+        if let SignInState::ContinueInBrowser(state) = &self.sign_in_state {
             if !state.auth_url.is_empty() {
                 lines.push(Line::from("  If the link doesn't open automatically, open the following link to authenticate:"));
                 lines.push(Line::from(vec![
@@ -269,9 +300,68 @@ impl AuthModeWidget {
             .render(area, buf);
     }
 
-    fn render_chatgpt_success_message(&self, area: Rect, buf: &mut Buffer) {
+    /// Waiting on the user to approve the device code at the issuer.
+    fn render_device_code(&self, area: Rect, buf: &mut Buffer) {
+        let mut spans = vec![Span::from("> ")];
+        // Schedule a follow-up frame to keep the shimmer animation going.
+        self.event_tx
+            .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(
+                100,
+            )));
+        spans.extend(shimmer_spans(&format!(
+            "Finish signing in with {}",
+            self.brand()
+        )));
+        let mut lines = vec![Line::from(spans), Line::from("")];
+
+        let prompt = match &self.sign_in_state {
+            SignInState::DeviceCode(state) => {
+                state.prompt.lock().ok().and_then(|slot| slot.clone())
+            }
+            _ => None,
+        };
+        if let Some((link, code)) = prompt {
+            lines.push(Line::from("  Open this link and sign in:"));
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                link.fg(crate::colors::info()).underlined(),
+            ]));
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::raw("  Confirm this one-time code matches the page: "),
+                code.fg(crate::colors::info()).bold(),
+            ]));
+            lines.push(
+                Line::from("  Device codes are a common phishing target. Never share this code.")
+                    .style(Style::default().fg(crate::colors::text_dim())),
+            );
+            lines.push(Line::from(""));
+        }
+
+        lines.push(
+            Line::from("  Press Esc to cancel").style(Style::default().add_modifier(Modifier::DIM)),
+        );
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .render(area, buf);
+    }
+
+    fn render_success_message(&self, area: Rect, buf: &mut Buffer) {
+        // Rate limits and training-data preferences are a ChatGPT plan's terms;
+        // they say nothing true about a Hanzo account.
+        let plan_terms = if self.hanzo {
+            Line::from("  Uses your Hanzo Cloud account")
+        } else {
+            Line::from(vec![
+                Span::raw("  Uses your plan's rate limits and "),
+                Span::styled(
+                    "\u{1b}]8;;https://chatgpt.com/#settings\u{7}training data preferences\u{1b}]8;;\u{7}",
+                    Style::default().add_modifier(Modifier::UNDERLINED),
+                ),
+            ])
+        };
         let lines = vec![
-            Line::from("✓ Signed in with your ChatGPT account")
+            Line::from(format!("✓ Signed in with your {} account", self.brand()))
                 .fg(crate::colors::success()),
             Line::from(""),
             Line::from("> Before you start:"),
@@ -290,15 +380,8 @@ impl AuthModeWidget {
             Line::from("  Review the code it writes and commands it runs")
                 .style(Style::default().add_modifier(Modifier::DIM)),
             Line::from(""),
-            Line::from("  Powered by your ChatGPT account"),
-            Line::from(vec![
-                Span::raw("  Uses your plan's rate limits and "),
-                Span::styled(
-                    "\u{1b}]8;;https://chatgpt.com/#settings\u{7}training data preferences\u{1b}]8;;\u{7}",
-                    Style::default().add_modifier(Modifier::UNDERLINED),
-                ),
-            ])
-            .style(Style::default().add_modifier(Modifier::DIM)),
+            Line::from(format!("  Powered by your {} account", self.brand())),
+            plan_terms.style(Style::default().add_modifier(Modifier::DIM)),
             Line::from(""),
             Line::from("  Press Enter to continue").fg(crate::colors::info()),
         ];
@@ -308,8 +391,11 @@ impl AuthModeWidget {
             .render(area, buf);
     }
 
-    fn render_chatgpt_success(&self, area: Rect, buf: &mut Buffer) {
-        let lines = vec![Line::from("✓ Signed in with your ChatGPT account").fg(crate::colors::success())];
+    fn render_success(&self, area: Rect, buf: &mut Buffer) {
+        let lines = vec![
+            Line::from(format!("✓ Signed in with your {} account", self.brand()))
+                .fg(crate::colors::success()),
+        ];
 
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
@@ -317,7 +403,13 @@ impl AuthModeWidget {
     }
 
     fn render_env_var_found(&self, area: Rect, buf: &mut Buffer) {
-        let lines = vec![Line::from("✓ Using OPENAI_API_KEY").fg(crate::colors::success())];
+        let lines = vec![
+            Line::from(match &self.env_key {
+                Some(key) => format!("✓ Using {key}"),
+                None => "✓ Using your API key".to_string(),
+            })
+            .fg(crate::colors::success()),
+        ];
 
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
@@ -325,10 +417,18 @@ impl AuthModeWidget {
     }
 
     fn render_env_var_missing(&self, area: Rect, buf: &mut Buffer) {
+        let api = if self.hanzo {
+            "the Hanzo Cloud"
+        } else {
+            "the OpenAI API"
+        };
         let lines = vec![
-            Line::from(
-                "  To use Hanzo Dev with the OpenAI API, set OPENAI_API_KEY in your environment",
-            )
+            Line::from(match &self.env_key {
+                Some(key) => {
+                    format!("  To use Hanzo Dev with {api}, set {key} in your environment")
+                }
+                None => format!("  To use Hanzo Dev with {api}, set an API key in your environment"),
+            })
             .style(Style::default().fg(crate::colors::info())),
             Line::from(""),
             Line::from("  Press Enter to return")
@@ -340,22 +440,60 @@ impl AuthModeWidget {
             .render(area, buf);
     }
 
-    fn start_chatgpt_login(&mut self) {
-        // If we're already authenticated with ChatGPT, don't start a new login –
-        // just proceed to the success message flow.
+    fn start_login(&mut self) {
+        // Already signed in — skip straight to the success message.
         if matches!(
             self.login_status,
             LoginStatus::AuthMode(
                 AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens | AuthMode::Headers
             )
         ) {
-            self.apply_chatgpt_login_side_effects();
-            self.sign_in_state = SignInState::ChatGptSuccess;
+            self.apply_login_side_effects();
+            self.sign_in_state = SignInState::Success;
             self.event_tx.send(AppEvent::RequestRedraw);
             return;
         }
 
         self.error = None;
+        if self.hanzo {
+            self.start_device_grant();
+        } else {
+            self.start_browser_login();
+        }
+    }
+
+    /// Hanzo IAM registers no loopback redirect for its CLI client, so its
+    /// sign-in is the RFC 8628 device grant — which also survives SSH.
+    fn start_device_grant(&mut self) {
+        let opts = ServerOptions::hanzo(
+            self.code_home.clone(),
+            code_core::default_client::DEFAULT_ORIGINATOR.to_string(),
+        );
+        let prompt = Arc::new(Mutex::new(None));
+        let slot = prompt.clone();
+        let event_tx = self.event_tx.clone();
+        let task = tokio::spawn(async move {
+            let result = match DeviceGrant::start(opts).await {
+                Ok(grant) => {
+                    if let Ok(mut slot) = slot.lock() {
+                        *slot = Some((
+                            grant.link().to_string(),
+                            grant.user_code().to_string(),
+                        ));
+                    }
+                    event_tx.send(AppEvent::RequestRedraw);
+                    grant.wait().await.map_err(|e| e.to_string())
+                }
+                Err(e) => Err(e.to_string()),
+            };
+            event_tx.send(AppEvent::OnboardingAuthComplete(result));
+        });
+
+        self.sign_in_state = SignInState::DeviceCode(DeviceCodeState { prompt, task });
+        self.event_tx.send(AppEvent::RequestRedraw);
+    }
+
+    fn start_browser_login(&mut self) {
         let opts = ServerOptions::new(
             self.code_home.clone(),
             CLIENT_ID.to_string(),
@@ -371,12 +509,11 @@ impl AuthModeWidget {
                 let join_handle = tokio::spawn(async move {
                     spawn_completion_poller(child, event_tx).await;
                 });
-                self.sign_in_state =
-                    SignInState::ChatGptContinueInBrowser(ContinueInBrowserState {
-                        auth_url,
-                        shutdown_handle: Some(shutdown_handle),
-                        _login_wait_handle: Some(join_handle),
-                    });
+                self.sign_in_state = SignInState::ContinueInBrowser(ContinueInBrowserState {
+                    auth_url,
+                    shutdown_handle: Some(shutdown_handle),
+                    _login_wait_handle: Some(join_handle),
+                });
                 self.event_tx.send(AppEvent::RequestRedraw);
             }
             Err(e) => {
@@ -400,8 +537,13 @@ impl AuthModeWidget {
         self.event_tx.send(AppEvent::RequestRedraw);
     }
 
-    pub(crate) fn apply_chatgpt_login_side_effects(&mut self) {
+    pub(crate) fn apply_login_side_effects(&mut self) {
         self.login_status = LoginStatus::AuthMode(AuthMode::ChatGPT);
+        // A Hanzo account is not a ChatGPT plan: neither the flag nor the model
+        // swap below says anything true about it.
+        if self.hanzo {
+            return;
+        }
         if let Ok(mut args) = self.chat_widget_args.lock() {
             args.config.using_chatgpt_auth = true;
             if args
@@ -440,9 +582,10 @@ impl StepStateProvider for AuthModeWidget {
         match &self.sign_in_state {
             SignInState::PickMode
             | SignInState::EnvVarMissing
-            | SignInState::ChatGptContinueInBrowser(_)
-            | SignInState::ChatGptSuccessMessage => StepState::InProgress,
-            SignInState::ChatGptSuccess | SignInState::EnvVarFound => StepState::Complete,
+            | SignInState::ContinueInBrowser(_)
+            | SignInState::DeviceCode(_)
+            | SignInState::SuccessMessage => StepState::InProgress,
+            SignInState::Success | SignInState::EnvVarFound => StepState::Complete,
         }
     }
 }
@@ -453,14 +596,17 @@ impl WidgetRef for AuthModeWidget {
             SignInState::PickMode => {
                 self.render_pick_mode(area, buf);
             }
-            SignInState::ChatGptContinueInBrowser(_) => {
+            SignInState::ContinueInBrowser(_) => {
                 self.render_continue_in_browser(area, buf);
             }
-            SignInState::ChatGptSuccessMessage => {
-                self.render_chatgpt_success_message(area, buf);
+            SignInState::DeviceCode(_) => {
+                self.render_device_code(area, buf);
             }
-            SignInState::ChatGptSuccess => {
-                self.render_chatgpt_success(area, buf);
+            SignInState::SuccessMessage => {
+                self.render_success_message(area, buf);
+            }
+            SignInState::Success => {
+                self.render_success(area, buf);
             }
             SignInState::EnvVarMissing => {
                 self.render_env_var_missing(area, buf);

@@ -5,8 +5,10 @@ use code_core::auth::CLIENT_ID;
 use code_core::auth::OPENAI_API_KEY_ENV_VAR;
 use code_core::auth::login_with_api_key;
 use code_core::auth::logout;
+use code_core::HANZO_PROVIDER_ID;
 use code_core::config::Config;
 use code_core::config::ConfigOverrides;
+use code_login::DeviceGrant;
 use code_login::ServerOptions;
 use code_login::run_device_code_login;
 use code_login::run_login_server;
@@ -15,7 +17,21 @@ use std::io::IsTerminal;
 use std::io::Read;
 use std::path::PathBuf;
 
-pub async fn login_with_chatgpt(code_home: PathBuf, originator: String) -> std::io::Result<()> {
+/// Report the outcome of a login and leave.
+fn finish(result: std::io::Result<()>) -> ! {
+    match result {
+        Ok(()) => {
+            eprintln!("Successfully logged in");
+            std::process::exit(0);
+        }
+        Err(e) => {
+            eprintln!("Error logging in: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn browser_login(code_home: PathBuf, originator: String) -> std::io::Result<()> {
     let opts = ServerOptions::new(code_home, CLIENT_ID.to_string(), originator);
     let server = run_login_server(opts)?;
 
@@ -27,23 +43,17 @@ pub async fn login_with_chatgpt(code_home: PathBuf, originator: String) -> std::
     server.block_until_done().await
 }
 
-pub async fn run_login_with_chatgpt(cli_config_overrides: CliConfigOverrides) -> ! {
+/// Sign in to the configured provider. Hanzo IAM registers no loopback redirect
+/// for its CLI client, so the device grant is how you reach it — headless or
+/// not. Every other provider keeps the browser loopback flow.
+pub async fn run_login(cli_config_overrides: CliConfigOverrides) -> ! {
     let config = load_config_or_exit(cli_config_overrides);
+    let originator = config.responses_originator_header.clone();
 
-    match login_with_chatgpt(
-        config.code_home,
-        config.responses_originator_header.clone(),
-    )
-    .await
-    {
-        Ok(_) => {
-            eprintln!("Successfully logged in");
-            std::process::exit(0);
-        }
-        Err(e) => {
-            eprintln!("Error logging in: {e}");
-            std::process::exit(1);
-        }
+    if config.model_provider_id == HANZO_PROVIDER_ID {
+        finish(DeviceGrant::run(ServerOptions::hanzo(config.code_home, originator)).await)
+    } else {
+        finish(browser_login(config.code_home, originator).await)
     }
 }
 
@@ -52,17 +62,7 @@ pub async fn run_login_with_api_key(
     api_key: String,
 ) -> ! {
     let config = load_config_or_exit(cli_config_overrides);
-
-    match login_with_api_key(&config.code_home, &api_key) {
-        Ok(_) => {
-            eprintln!("Successfully logged in");
-            std::process::exit(0);
-        }
-        Err(e) => {
-            eprintln!("Error logging in: {e}");
-            std::process::exit(1);
-        }
-    }
+    finish(login_with_api_key(&config.code_home, &api_key))
 }
 
 pub fn read_api_key_from_stdin() -> String {
@@ -70,7 +70,7 @@ pub fn read_api_key_from_stdin() -> String {
 
     if stdin.is_terminal() {
         eprintln!(
-            "--with-api-key expects the API key on stdin. Try piping it, e.g. `printenv OPENAI_API_KEY | dev login --with-api-key`."
+            "--with-api-key expects the API key on stdin. Try piping it, e.g. `printenv HANZO_USER_KEY | dev login --with-api-key`."
         );
         std::process::exit(1);
     }
@@ -92,31 +92,35 @@ pub fn read_api_key_from_stdin() -> String {
     api_key
 }
 
-/// Login using the OAuth device code flow.
+/// Login using a device code. Hanzo IAM speaks RFC 8628; OpenAI speaks its own
+/// `/api/accounts/deviceauth` scheme. The issuer and client overrides carry a
+/// sibling brand's IAM (e.g. `https://lux.id/v1/iam` with `lux-cli`).
 pub async fn run_login_with_device_code(
     cli_config_overrides: CliConfigOverrides,
     issuer_base_url: Option<String>,
     client_id: Option<String>,
 ) -> ! {
     let config = load_config_or_exit(cli_config_overrides);
-    let mut opts = ServerOptions::new(
-        config.code_home,
-        client_id.unwrap_or(CLIENT_ID.to_string()),
-        config.responses_originator_header.clone(),
-    );
+    let originator = config.responses_originator_header.clone();
+    let hanzo = config.model_provider_id == HANZO_PROVIDER_ID;
+
+    let mut opts = if hanzo {
+        ServerOptions::hanzo(config.code_home, originator)
+    } else {
+        ServerOptions::new(config.code_home, CLIENT_ID.to_string(), originator)
+    };
+    if let Some(id) = client_id {
+        opts.client_id = id;
+    }
     if let Some(iss) = issuer_base_url {
         opts.issuer = iss;
     }
-    match run_device_code_login(opts).await {
-        Ok(()) => {
-            eprintln!("Successfully logged in");
-            std::process::exit(0);
-        }
-        Err(e) => {
-            eprintln!("Error logging in with device code: {e}");
-            std::process::exit(1);
-        }
-    }
+
+    finish(if hanzo {
+        DeviceGrant::run(opts).await
+    } else {
+        run_device_code_login(opts).await
+    })
 }
 
 pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
@@ -147,7 +151,12 @@ pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
                 }
             },
             AuthMode::ChatGPT | AuthMode::ChatgptAuthTokens | AuthMode::Headers => {
-                eprintln!("Logged in using ChatGPT");
+                let brand = if config.model_provider_id == HANZO_PROVIDER_ID {
+                    "Hanzo"
+                } else {
+                    "ChatGPT"
+                };
+                eprintln!("Logged in with your {brand} account");
                 std::process::exit(0);
             }
         },
