@@ -48,6 +48,7 @@ async fn collect_tool_identifiers_for_model(model: &str) -> Vec<String> {
     let resp_mock = mount_sse_once(&server, sse).await;
 
     let model_provider = ModelProviderInfo {
+        alt_env_keys: Vec::new(),
         base_url: Some(format!("{}/v1", server.uri())),
         ..built_in_model_providers(None)["openai"].clone()
     };

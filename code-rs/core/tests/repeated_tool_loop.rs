@@ -120,6 +120,7 @@ async fn repeated_identical_tool_cycle_stops_with_visible_error() {
     config.approval_policy = AskForApproval::Never;
     config.sandbox_policy = SandboxPolicy::DangerFullAccess;
     config.model_provider = ModelProviderInfo {
+        alt_env_keys: Vec::new(),
         base_url: Some(format!("{}/v1", server.uri())),
         ..built_in_model_providers(None)["openai"].clone()
     };
