@@ -103,7 +103,7 @@ impl UpdateSettingsView {
             let Some(latest) = state.latest_version.clone() else {
                 self.app_event_tx.send_background_event_with_ticket(
                     &self.ticket,
-                    "✅ Code is already up to date.".to_string(),
+                    "✅ Hanzo Dev is already up to date.".to_string(),
                 );
                 return;
             };
@@ -129,7 +129,7 @@ impl UpdateSettingsView {
         self.app_event_tx.send_background_event_with_ticket(
             &self.ticket,
             format!(
-                "↻ Complete the guided terminal steps for `{}` then restart Code to finish upgrading to {}.",
+                "↻ Complete the guided terminal steps for `{}` then restart Hanzo Dev to finish upgrading to {}.",
                 display, latest
             ),
         );

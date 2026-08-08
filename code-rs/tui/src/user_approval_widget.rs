@@ -96,14 +96,14 @@ impl UserApprovalWidget<'_> {
                 command, reason, ..
             } => {
                 let cmd = strip_bash_lc_and_escape(command);
-                // Present a single-line summary without cwd: "codex wants to run: <cmd>"
+                // Present a single-line summary without cwd: "Hanzo Dev wants to run <cmd>"
                 let mut cmd_span: Span = cmd.clone().into();
                 cmd_span.style = cmd_span.style.add_modifier(Modifier::DIM);
                 let mut contents: Vec<Line> = vec![
                     Line::from(""), // extra spacing above the prompt
                     Line::from(vec![
                         "? ".fg(crate::colors::info()),
-                        "Code wants to run ".bold(),
+                        "Hanzo Dev wants to run ".bold(),
                         cmd_span,
                     ]),
                     Line::from(""),

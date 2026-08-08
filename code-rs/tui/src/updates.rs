@@ -199,9 +199,9 @@ pub fn resolve_upgrade_resolution() -> UpgradeResolution {
                     command: vec![
                         "brew".to_string(),
                         "upgrade".to_string(),
-                        "code".to_string(),
+                        "hanzo-dev".to_string(),
                     ],
-                    display: "brew upgrade code".to_string(),
+                    display: "brew upgrade hanzo-dev".to_string(),
                 };
             }
         }
