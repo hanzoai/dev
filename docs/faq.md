@@ -1,28 +1,28 @@
 ## FAQ
 
-### OpenAI released a model called Codex in 2021 - is this related?
-
-Only by name. The 2021 Codex model was deprecated in March 2023. Every Code is a community fork of the `openai/codex` CLI and continues to evolve separately.
-
 ### Which models are supported?
 
-We recommend the built-in Code presets that wrap GPT-5.4 (for example `code-gpt-5.4`). The default reasoning level is medium, and you can upgrade to high for complex tasks with `/model`.
+The default is `zen5-coder`. The built-in presets also cover `zen5`, `zen5-pro`,
+`zen5-flash`, `zen5-mini`, and the `enso` family. Pick one with `/model` in the
+TUI or `--model` on the command line; the default reasoning level is medium.
 
-You can also use older models by using API-based auth and launching Code with the `--model` flag.
+The gateway is the authority on the catalog — there is no allowlist in the
+client — so `curl https://catalog.hanzo.ai/v1/models` lists everything you can
+pass to `--model`.
 
 ### Why does `o3` or `o4-mini` not work for me?
 
 It's possible that your [API account needs to be verified](https://help.openai.com/en/articles/10910291-api-organization-verification) in order to start streaming responses and seeing chain of thought summaries from the API. If you're still running into issues, please let us know!
 
-### How do I stop Code from editing my files?
+### How do I stop Dev from editing my files?
 
-By default, Code can modify files in your current working directory (Auto mode). To prevent edits, run `code` in read-only mode with the CLI flag `--sandbox read-only`. Alternatively, you can change the approval level mid-conversation with `/approvals`.
+By default, Dev can modify files in your current working directory (Auto mode). To prevent edits, run `dev` in read-only mode with the CLI flag `--sandbox read-only`. Alternatively, you can change the approval level mid-conversation with `/approvals`.
 
 ### Does it work on Windows?
 
-Running Code directly on Windows may work, but is not officially supported. We recommend using [Windows Subsystem for Linux (WSL2)](https://learn.microsoft.com/en-us/windows/wsl/install).
+Running Dev directly on Windows may work, but is not officially supported. We recommend using [Windows Subsystem for Linux (WSL2)](https://learn.microsoft.com/en-us/windows/wsl/install).
 
-### Why can't Code find my agents on Windows?
+### Why can't Dev find my agents on Windows?
 
 On Windows, agent discovery can be affected by PATH configuration and file extensions. If you see errors like `Agent 'xyz' could not be found`, try these solutions:
 
@@ -74,6 +74,6 @@ If npm's directory isn't in your PATH, you can either:
 
 **4. Check file extensions:**
 
-On Windows, Code looks for executables with these extensions: `.exe`, `.cmd`, `.bat`, `.com`. Ensure your agent command includes the correct extension when using absolute paths.
+On Windows, Dev looks for executables with these extensions: `.exe`, `.cmd`, `.bat`, `.com`. Ensure your agent command includes the correct extension when using absolute paths.
 
-**Related:** See the [Agent Configuration Guide](https://github.com/hanzoai/dev/blob/main/code-rs/config.md#agents) for more details.
+**Related:** See [agents](./config.md#agents) in the configuration reference.

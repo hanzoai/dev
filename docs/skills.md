@@ -2,20 +2,20 @@
 
 > **Warning:** This is an experimental and non-stable feature. If you depend on it, please expect breaking changes over the coming weeks and understand that there is currently no guarantee that this works well. Use at your own risk!
 
-Codex can automatically discover reusable "skills" you keep on disk. A skill is a small bundle with a name, a short description (what it does and when to use it), and an optional body of instructions you can open when needed. Codex injects only the name, description, and file path into the runtime context; the body stays on disk.
+Dev can automatically discover reusable "skills" you keep on disk. A skill is a small bundle with a name, a short description (what it does and when to use it), and an optional body of instructions you can open when needed. Dev injects only the name, description, and file path into the runtime context; the body stays on disk.
 
 ## Enable skills
 
 Skills are behind the experimental `skills` feature flag and are enabled by default.
 
-- Disable in config (preferred): add the following to `$CODEX_HOME/config.toml` (usually `~/.codex/config.toml`) and restart Codex:
+- Disable in config (preferred): add the following to `$CODE_HOME/config.toml` (usually `~/.code/config.toml`) and restart Dev:
 
   ```toml
   [features]
   skills = false
   ```
 
-- Override for a single run when disabled in config: launch Codex with `codex --enable skills`
+- Override for a single run when disabled in config: `dev -c features.skills=true`
 
 ## Where skills live
 
@@ -23,8 +23,8 @@ Skills are behind the experimental `skills` feature flag and are enabled by defa
   - Repo: `.agents/skills/**/SKILL.md` from the current working directory up to the repo root.
   - Repo (legacy): `.codex/skills/**/SKILL.md` from the current working directory up to the repo root.
   - User: `$HOME/.agents/skills/**/SKILL.md`.
-  - User (legacy): `$CODEX_HOME/skills/**/SKILL.md` (usually `~/.code/skills`; legacy `~/.codex/skills` is still read for compatibility).
-  - System: bundled skills under `$CODEX_HOME/skills/.system/**/SKILL.md`.
+  - User (legacy): `$CODE_HOME/skills/**/SKILL.md` (usually `~/.code/skills`; legacy `~/.codex/skills` is still read for compatibility).
+  - System: bundled skills under `$CODE_HOME/skills/.system/**/SKILL.md`.
   - Admin (optional): `/etc/codex/skills/**/SKILL.md`.
 - Discovery is recursive and only files named exactly `SKILL.md` count.
 - Hidden entries are skipped.
@@ -36,14 +36,14 @@ Skills are behind the experimental `skills` feature flag and are enabled by defa
 
 - YAML frontmatter + body.
   - Required:
-    - `name` (non-empty, ≤100 chars, sanitized to one line)
-    - `description` (non-empty, ≤500 chars, sanitized to one line)
+    - `name` (non-empty, ≤64 chars, sanitized to one line)
+    - `description` (non-empty, ≤1024 chars, sanitized to one line)
   - Extra keys are ignored. The body can contain any Markdown; it is not injected into context.
 
 ## Loading and rendering
 
 - Loaded once at startup.
-- If valid skills exist, Codex appends a runtime-only `## Skills` section after `AGENTS.md`, one bullet per skill: `- <name>: <description> (file: /absolute/path/to/SKILL.md)`.
+- If valid skills exist, Dev appends a runtime-only `## Skills` section after `AGENTS.md`, one bullet per skill: `- <name>: <description> (file: /absolute/path/to/SKILL.md)`.
 - If no valid skills exist, the section is omitted. On-disk files are never modified.
 
 ## Using skills
@@ -57,7 +57,7 @@ Skills are behind the experimental `skills` feature flag and are enabled by defa
 
 ## Create a skill
 
-1. Create `~/.codex/skills/<skill-name>/`.
+1. Create `~/.code/skills/<skill-name>/`.
 2. Add `SKILL.md`:
 
    ```
@@ -71,13 +71,13 @@ Skills are behind the experimental `skills` feature flag and are enabled by defa
    ```
 
 3. Keep `name`/`description` within the limits; avoid newlines in those fields.
-4. Restart Codex to load the new skill.
+4. Restart Dev to load the new skill.
 
 ## Example
 
 ```
-mkdir -p ~/.codex/skills/pdf-processing
-cat <<'SKILL_EXAMPLE' > ~/.codex/skills/pdf-processing/SKILL.md
+mkdir -p ~/.code/skills/pdf-processing
+cat <<'SKILL_EXAMPLE' > ~/.code/skills/pdf-processing/SKILL.md
 ---
 name: pdf-processing
 description: Extract text and tables from PDFs; use when PDFs, forms, or document extraction are mentioned.

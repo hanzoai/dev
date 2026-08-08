@@ -140,7 +140,7 @@ session's key.
 - [Configuration](docs/config.md)
 - [Authentication](docs/authentication.md)
 - [Sandboxing](docs/sandbox.md)
-- [Themes](docs/THEME_CONFIG.md)
+- [Settings overlay](docs/settings.md)
 - [Hanzo docs](https://docs.hanzo.ai/docs)
 
 ## Building from source
@@ -152,8 +152,8 @@ cd dev
 ```
 
 `./build-fast.sh` is the required check — it must pass cleanly, warnings
-included. See [DEVELOPING.md](DEVELOPING.md) and [LLM.md](LLM.md) for the
-workspace layout and the rules that apply inside it.
+included. See [LLM.md](LLM.md) for the workspace layout and the rules that
+apply inside it.
 
 ## Contributing
 

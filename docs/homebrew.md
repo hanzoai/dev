@@ -1,30 +1,20 @@
 Homebrew (macOS)
 
-This repository now includes a helper script to generate a Homebrew formula
-from the latest GitHub release artifacts. Publishing to Homebrew requires a
-tap repository (for example, `hanzoai/homebrew-tap`). Once a tap exists,
-you can generate and publish the formula like so:
+`scripts/generate-homebrew-formula.sh` generates a Homebrew formula from the
+latest GitHub release artifacts. It writes `Formula/hanzo-dev.rb` in the repo
+root; the release workflow copies that into the `hanzoai/homebrew-tap` tap.
 
-1) Generate the formula for the latest version:
-
-```
-scripts/generate-homebrew-formula.sh
-```
-
-2) Copy the generated `Code.rb` into your tap repo under `Formula/Code.rb`
-and update the `url`/`sha256` if needed.
-
-3) Users can then install with:
+Users install with:
 
 ```
 brew tap hanzoai/tap
-brew install code
+brew install hanzo-dev
 ```
 
 Notes
 
-- The formula expects release assets named like:
-  - `code-aarch64-apple-darwin.tar.gz`
-  - `code-x86_64-apple-darwin.tar.gz`
-- The CLI is installed as `code` and `coder` shims for compatibility.
-
+- The formula expects release assets named `dev-<target-triple>.tar.gz`, e.g.
+  `dev-aarch64-apple-darwin.tar.gz` and `dev-x86_64-unknown-linux-musl.tar.gz`.
+- The CLI is installed as `dev`. The formula deliberately installs no other
+  shim, so it cannot collide with `hanzo.rb` (the Hanzo CLI, a different
+  program).

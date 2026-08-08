@@ -1,6 +1,6 @@
 # TUI Settings Overlay
 
-Full-screen settings panel for Every Code’s TUI. Use it to change models, themes, Auto Drive defaults, agents, notifications, and more without leaving the chat.
+Full-screen settings panel for Hanzo Dev’s TUI. Use it to change models, themes, Auto Drive defaults, agents, notifications, and more without leaving the chat.
 
 ## Open & navigate
 - `/settings` opens the overview; `/settings <section>` jumps directly (section names below). `/auto settings` and `/update` route into their sections.

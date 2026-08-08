@@ -1,10 +1,10 @@
 # Auto Drive
 
-What Auto Drive is, how to start it, and how it behaves in Every Code.
+What Auto Drive is, how to start it, and how it behaves in Hanzo Dev.
 
 ## Start points
-- TUI: `/auto <goal>`. If you omit the goal and there is recent history, Code proposes one for you. `/auto settings` jumps straight to the Auto Drive pane.
-- CLI: `code exec --auto "<goal>"` or `code exec "/auto <goal>"`. A goal is required when launching headless.
+- TUI: `/auto <goal>`. If you omit the goal and there is recent history, Dev proposes one for you. `/auto settings` jumps straight to the Auto Drive pane.
+- CLI: `dev exec --auto "<goal>"` or `dev exec "/auto <goal>"`. A goal is required when launching headless.
 - Precondition: Full Auto mode (danger-full-access + approval=never) must be selected in the TUI; otherwise you’ll see a warning and Auto Drive will not start.
 
 ## Goal handling
@@ -43,8 +43,8 @@ What Auto Drive is, how to start it, and how it behaves in Every Code.
 
 ## Crash diagnostics
 - Set `CODEX_TUI_RECORD_SESSION=1` to persist a per-session JSONL trace of inbound TUI events, including Auto Drive coordinator decisions, countdowns, token metrics, and panic records.
-- Optionally set `CODEX_TUI_SESSION_LOG_PATH=/absolute/path/session.jsonl` to choose the output file; otherwise Code writes under its normal log directory (typically `~/.code/debug_logs/`, and `code-dev` defaults to `~/.code/debug_logs/code-dev/`).
-- When the TUI panics, Code now records the panic payload and captured backtrace in both the session JSONL log and the regular error log.
+- Optionally set `CODEX_TUI_SESSION_LOG_PATH=/absolute/path/session.jsonl` to choose the output file; otherwise Dev writes under its normal log directory (typically `~/.code/debug_logs/`, and `code-dev` defaults to `~/.code/debug_logs/code-dev/`).
+- When the TUI panics, Dev now records the panic payload and captured backtrace in both the session JSONL log and the regular error log.
 
 ## Models
 - Defaults: model `gpt-5.1`, reasoning effort `high`.
@@ -71,6 +71,6 @@ What Auto Drive is, how to start it, and how it behaves in Every Code.
 - All of these can be changed from `/auto settings` in the TUI or directly in `config.toml`.
 
 ## Tips
-- Stay in the TUI if you want countdowns and visual status; use `code exec --auto` for CI or scripted flows.
+- Stay in the TUI if you want countdowns and visual status; use `dev exec --auto` for CI or scripted flows.
 - If Auto Drive stops because it couldn’t derive a goal, rerun `/auto <goal>` with a short, specific instruction.
 - Turn off agents in `/auto settings` if you want a single-model run.

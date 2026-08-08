@@ -2,32 +2,30 @@
 
 <!-- markdownlint-disable MD012 MD013 MD028 MD033 -->
 
-Every Code supports several mechanisms for setting config values:
+Hanzo Dev supports several mechanisms for setting config values:
 
 - Config-specific command-line flags, such as `--model o3` (highest precedence).
 - A generic `-c`/`--config` flag that takes a `key=value` pair, such as `--config model="o3"`.
   - The key can contain dots to set a value deeper than the root, e.g. `--config model_providers.openai.wire_api="chat"`.
   - For consistency with `config.toml`, values are a string in TOML format rather than JSON format, so use `key='{a = 1, b = 2}'` rather than `key='{"a": 1, "b": 2}'`.
-    - The quotes around the value are necessary, as without them your shell would split the config argument on spaces, resulting in `code` receiving `-c key={a` with (invalid) additional arguments `=`, `1,`, `b`, `=`, `2}`.
+    - The quotes around the value are necessary, as without them your shell would split the config argument on spaces, resulting in `dev` receiving `-c key={a` with (invalid) additional arguments `=`, `1,`, `b`, `=`, `2}`.
   - Values can contain any TOML object, such as `--config shell_environment_policy.include_only='["PATH", "HOME", "USER"]'`.
   - If `value` cannot be parsed as a valid TOML value, it is treated as a string value. This means that `-c model='"o3"'` and `-c model=o3` are equivalent.
     - In the first case, the value is the TOML string `"o3"`, while in the second the value is `o3`, which is not valid TOML and therefore treated as the TOML string `"o3"`.
     - Because quotes are interpreted by one's shell, `-c key="true"` will be correctly interpreted in TOML as `key = true` (a boolean) and not `key = "true"` (a string). If for some reason you needed the string `"true"`, you would need to use `-c key='"true"'` (note the two sets of quotes).
-- The `$CODE_HOME/config.toml` configuration file. `CODE_HOME` defaults to `~/.code`; Every Code (Code) also reads from `$CODEX_HOME`/`~/.codex` for backwards compatibility but only writes to `~/.code`. (Logs and other state use the same directory.)
-
-- https://developers.openai.com/codex/config-reference
+- The `$CODE_HOME/config.toml` configuration file. `CODE_HOME` defaults to `~/.code`; Hanzo Dev also reads from `$CODEX_HOME`/`~/.codex` for backwards compatibility but only writes to `~/.code`. (Logs and other state use the same directory.)
 
 ## model
 
-The model that Code should use.
+The model that Dev should use.
 
 ```toml
-model = "o3"  # overrides the default of "gpt-5.1-codex"
+model = "zen5-coder"  # the default on the `hanzo` provider
 ```
 
 ## model_providers
 
-This option lets you override and amend the default set of model providers bundled with Code. This value is a map where the key is the value to use with `model_provider` to select the corresponding provider. Providers must expose an OpenAI-compatible HTTP API (Chat Completions or Responses); native Anthropic/Gemini APIs are not supported directly without a proxy.
+This option lets you override and amend the default set of model providers bundled with Dev. This value is a map where the key is the value to use with `model_provider` to select the corresponding provider. Providers must expose an OpenAI-compatible HTTP API (Chat Completions or Responses); native Anthropic/Gemini APIs are not supported directly without a proxy.
 
 For example, if you wanted to add a provider that uses the OpenAI 4o model via the chat completions API, then you could add the following configuration:
 
@@ -37,13 +35,13 @@ model = "gpt-4o"
 model_provider = "openai-chat-completions"
 
 [model_providers.openai-chat-completions]
-# Name of the provider that will be displayed in the Code UI.
+# Name of the provider that will be displayed in the Dev UI.
 name = "OpenAI using Chat Completions"
 # The path `/chat/completions` will be amended to this URL to make the POST
 # request for the chat completions.
 base_url = "https://api.openai.com/v1"
 # If `env_key` is set, identifies an environment variable that must be set when
-# using Code with this provider. The value of the environment variable must be
+# using Dev with this provider. The value of the environment variable must be
 # non-empty and will be used in the `Bearer TOKEN` HTTP header for the POST request.
 env_key = "OPENAI_API_KEY"
 # Valid values for wire_api are "chat" and "responses". Defaults to "chat" if omitted.
@@ -53,7 +51,7 @@ wire_api = "chat"
 query_params = {}
 ```
 
-Note this makes it possible to use the Code CLI with non-OpenAI models, so long as they use a wire API that is compatible with the OpenAI chat completions API. For example, you could define the following provider to use Code CLI with Ollama running locally:
+Note this makes it possible to use Dev with non-OpenAI models, so long as they use a wire API that is compatible with the OpenAI chat completions API. For example, you could define the following provider to use Dev with Ollama running locally:
 
 ```toml
 [model_providers.ollama]
@@ -88,7 +86,7 @@ requires_openai_auth = false
 
 [OmniRoute](https://github.com/diegosouzapw/OmniRoute) exposes OpenAI-compatible
 `/v1/chat/completions` and `/v1/responses` endpoints. Configure it as a custom
-provider so Code sends the OmniRoute API key in a Bearer header and does not try
+provider so Dev sends the OmniRoute API key in a Bearer header and does not try
 to use ChatGPT authentication:
 
 ```toml
@@ -103,13 +101,13 @@ wire_api = "responses" # Use "chat" when targeting /v1/chat/completions.
 requires_openai_auth = false
 ```
 
-Start Code with `OMNIROUTE_API_KEY` set in the environment. The `base_url` is
-the `/v1` root because Code appends `/responses` or `/chat/completions` for the
+Start Dev with `OMNIROUTE_API_KEY` set in the environment. The `base_url` is
+the `/v1` root because Dev appends `/responses` or `/chat/completions` for the
 selected `wire_api`. With OmniRoute, `auto` (and other `auto/*` model IDs) lets
 the gateway choose a connected model; replace it with a concrete model ID when
 you need deterministic routing.
 
-Code's remote model discovery is limited to its ChatGPT backend, so custom
+Dev's remote model discovery is limited to its ChatGPT backend, so custom
 providers such as OmniRoute do not populate the model picker from `/v1/models`.
 Set `model` explicitly in `config.toml` or pass `--model` when using a custom
 provider. Function tools and streamed responses use the selected OpenAI wire
@@ -146,7 +144,7 @@ query_params = { api-version = "2025-04-01-preview" }
 wire_api = "responses"
 ```
 
-Export your key before launching Code: `export AZURE_OPENAI_API_KEY=…`
+Export your key before launching Dev: `export AZURE_OPENAI_API_KEY=…`
 
 ### Per-provider network tuning
 
@@ -167,19 +165,19 @@ stream_idle_timeout_ms = 300000    # 5m idle timeout
 
 #### request_max_retries
 
-How many times Code will retry a failed HTTP request to the model provider. Defaults to `4`.
+How many times Dev will retry a failed HTTP request to the model provider. Defaults to `4`.
 
 #### stream_max_retries
 
-Number of times Code will attempt to reconnect when a streaming response is interrupted. Defaults to `5`.
+Number of times Dev will attempt to reconnect when a streaming response is interrupted. Defaults to `5`.
 
 #### stream_idle_timeout_ms
 
-How long Code will wait for activity on a streaming response before treating the connection as lost. Defaults to `300_000` (5 minutes).
+How long Dev will wait for activity on a streaming response before treating the connection as lost. Defaults to `300_000` (5 minutes).
 
 ## model_provider
 
-Identifies which provider to use from the `model_providers` map. Defaults to `"openai"`. You can override the `base_url` for the built-in `openai` provider via the `OPENAI_BASE_URL` environment variable and force the wire protocol (`"responses"` or `"chat"`) with `OPENAI_WIRE_API`.
+Identifies which provider to use from the `model_providers` map. Defaults to `"hanzo"`. You can override the `base_url` for the built-in `openai` provider via the `OPENAI_BASE_URL` environment variable and force the wire protocol (`"responses"` or `"chat"`) with `OPENAI_WIRE_API`.
 
 Note that if you override `model_provider`, then you likely want to override
 `model`, as well. For example, if you are running ollama with Mistral locally,
@@ -192,11 +190,11 @@ model = "mistral"
 
 ## approval_policy
 
-Determines when the user should be prompted to approve whether Code can execute a command:
+Determines when the user should be prompted to approve whether Dev can execute a command:
 
 ```toml
-# Code has hardcoded logic that defines a set of "trusted" commands.
-# Setting the approval_policy to `untrusted` means that Code will prompt the
+# Dev has hardcoded logic that defines a set of "trusted" commands.
+# Setting the approval_policy to `untrusted` means that Dev will prompt the
 # user before running a command not in the "trusted" set.
 #
 # A configurable trusted-command list is planned; for now the built-in set is fixed.
@@ -206,7 +204,7 @@ approval_policy = "untrusted"
 If you want to be notified whenever a command fails, use "on-failure":
 
 ```toml
-# If the command fails when run in the sandbox, Code asks for permission to
+# If the command fails when run in the sandbox, Dev asks for permission to
 # retry the command outside the sandbox.
 approval_policy = "on-failure"
 ```
@@ -221,16 +219,16 @@ approval_policy = "on-request"
 Alternatively, you can have the model run until it is done, and never ask to run a command with escalated permissions:
 
 ```toml
-# User is never prompted: if the command fails, Code will automatically try
+# User is never prompted: if the command fails, Dev will automatically try
 # something out. Note the `exec` subcommand always uses this mode.
 approval_policy = "never"
 ```
 
 ## agents
 
-Use `[[agents]]` blocks to register additional CLI programs that Code can launch as peers. Each block maps a short `name` (referenced elsewhere in the config) to the command to execute, optional default flags, and environment variables.
+Use `[[agents]]` blocks to register additional CLI programs that Dev can launch as peers. Each block maps a short `name` (referenced elsewhere in the config) to the command to execute, optional default flags, and environment variables.
 
-> **Note:** Built-in model slugs (for example `code-gpt-5.5`, `claude-sonnet-4.6`) automatically inject the correct `--model` or `-m` flag. To avoid conflicting arguments, Code strips any `--model`/`-m` flags you place in `args`, `args_read_only`, or `args_write` before launching the agent. If you need a new model variant, add a slug in `code-rs/core/src/agent_defaults.rs` (or set an environment variable consumed by the CLI) rather than pinning the flag here.
+> **Note:** Built-in model slugs (for example `code-gpt-5.5`, `claude-sonnet-4.6`) automatically inject the correct `--model` or `-m` flag. To avoid conflicting arguments, Dev strips any `--model`/`-m` flags you place in `args`, `args_read_only`, or `args_write` before launching the agent. If you need a new model variant, add a slug in `code-rs/core/src/agent_defaults.rs` (or set an environment variable consumed by the CLI) rather than pinning the flag here.
 
 ```toml
 [[agents]]
@@ -245,9 +243,9 @@ env = { GEMINI_API_KEY = "..." }
 
 ## notice
 
-Code stores acknowledgement flags for one-time upgrade prompts inside a `[notice]`
+Dev stores acknowledgement flags for one-time upgrade prompts inside a `[notice]`
 table. These booleans allow you to suppress specific dialogs globally. When set
-to `true`, Code will no longer prompt about that migration.
+to `true`, Dev will no longer prompt about that migration.
 
 ```toml
 [notice]
@@ -302,7 +300,7 @@ Users can specify config values at multiple levels. Order of precedence is as fo
 1. custom command-line argument, e.g., `--model o3`
 2. as part of a profile, where the `--profile` is specified via a CLI (or in the config file itself)
 3. as an entry in `config.toml`, e.g., `model = "o3"`
-4. the default value that comes with Code CLI (i.e., Code CLI defaults to `gpt-5.1-codex`)
+4. the default value that comes with Dev (i.e., `zen5-coder` on the `hanzo` provider)
 
 ## model_reasoning_effort
 
@@ -337,7 +335,7 @@ Controls output length/detail on GPT‑5 family models when using the Responses 
 - `"medium"` (default when omitted)
 - `"high"`
 
-When set, Code includes a `text` object in the request payload with the configured verbosity, for example: `"text": { "verbosity": "low" }`.
+When set, Dev includes a `text` object in the request payload with the configured verbosity, for example: `"text": { "verbosity": "low" }`.
 
 Example:
 
@@ -358,7 +356,7 @@ model_supports_reasoning_summaries = true
 
 ## sandbox_mode
 
-Code executes model-generated shell commands inside an OS-level sandbox.
+Dev executes model-generated shell commands inside an OS-level sandbox.
 
 In most cases you can pick the desired behaviour with a single option:
 
@@ -370,9 +368,9 @@ sandbox_mode = "read-only"
 The default policy is `read-only`, which means commands can read any file on
 disk, but attempts to write a file or access the network will be blocked.
 
-A more relaxed policy is `workspace-write`. When specified, the current working directory for the Code task will be writable (as well as `$TMPDIR` on macOS). Note that the CLI defaults to using the directory where it was spawned as `cwd`, though this can be overridden using `--cwd/-C`.
+A more relaxed policy is `workspace-write`. When specified, the current working directory for the Dev task will be writable (as well as `$TMPDIR` on macOS). Note that the CLI defaults to using the directory where it was spawned as `cwd`, though this can be overridden using `--cwd/-C`.
 
-Historically, Code allowed writes inside the top‑level `.git/` folder when using `workspace-write`. That permissive behavior is the default again. If you want to protect `.git` under `workspace-write`, you can opt out via `[sandbox_workspace_write].allow_git_writes = false`.
+Historically, Dev allowed writes inside the top‑level `.git/` folder when using `workspace-write`. That permissive behavior is the default again. If you want to protect `.git` under `workspace-write`, you can opt out via `[sandbox_workspace_write].allow_git_writes = false`.
 
 ```toml
 # same as `--sandbox workspace-write`
@@ -380,7 +378,7 @@ sandbox_mode = "workspace-write"
 
 # Extra settings that only apply when `sandbox = "workspace-write"`.
 [sandbox_workspace_write]
-# By default, the cwd for the Code session will be writable as well as $TMPDIR
+# By default, the cwd for the Dev session will be writable as well as $TMPDIR
 # (if set) and /tmp (if it exists). Setting the respective options to `true`
 # will override those defaults.
 exclude_tmpdir_env_var = false
@@ -404,30 +402,30 @@ To disable sandboxing altogether, specify `danger-full-access` like so:
 sandbox_mode = "danger-full-access"
 ```
 
-This is reasonable to use if Code is running in an environment that provides its own sandboxing (such as a Docker container) such that further sandboxing is unnecessary.
+This is reasonable to use if Dev is running in an environment that provides its own sandboxing (such as a Docker container) such that further sandboxing is unnecessary.
 
-Though using this option may also be necessary if you try to use Code in environments where its native sandboxing mechanisms are unsupported, such as older Linux kernels or on Windows.
+Though using this option may also be necessary if you try to use Dev in environments where its native sandboxing mechanisms are unsupported, such as older Linux kernels or on Windows.
 
 ## Approval presets
 
-Code provides three main Approval Presets:
+Dev provides three main Approval Presets:
 
-- Read Only: Code can read files and answer questions; edits, running commands, and network access require approval.
-- Auto: Code can read files, make edits, and run commands in the workspace without approval; asks for approval outside the workspace or for network access.
+- Read Only: Dev can read files and answer questions; edits, running commands, and network access require approval.
+- Auto: Dev can read files, make edits, and run commands in the workspace without approval; asks for approval outside the workspace or for network access.
 - Full Access: Full disk and network access without prompts; extremely risky.
 
-You can further customize how Code runs at the command line using the `--ask-for-approval` and `--sandbox` options.
+You can further customize how Dev runs at the command line using the `--ask-for-approval` and `--sandbox` options.
 
 ## MCP Servers
 
-You can configure Code to use [MCP servers](https://modelcontextprotocol.io/about) to give Code access to external applications, resources, or services such as [Playwright](https://github.com/microsoft/playwright-mcp), [Figma](https://www.figma.com/blog/design-context-everywhere-you-build/), [documentation](https://context7.com/), and [more](https://github.com/mcp?utm_source=blog-source&utm_campaign=mcp-registry-server-launch-2025).
+You can configure Dev to use [MCP servers](https://modelcontextprotocol.io/about) to give Dev access to external applications, resources, or services such as [Playwright](https://github.com/microsoft/playwright-mcp), [Figma](https://www.figma.com/blog/design-context-everywhere-you-build/), [documentation](https://context7.com/), and [more](https://github.com/mcp?utm_source=blog-source&utm_campaign=mcp-registry-server-launch-2025).
 
 ### Server transport configuration
 
-Each server may set `startup_timeout_sec` to adjust how long Code waits for it to start and respond to a tools listing. The default is `10` seconds.
-Similarly, `tool_timeout_sec` limits how long individual tool calls may run (default: `60` seconds), and Code will fall back to the default when this value is omitted.
+Each server may set `startup_timeout_sec` to adjust how long Dev waits for it to start and respond to a tools listing. The default is `10` seconds.
+Similarly, `tool_timeout_sec` limits how long individual tool calls may run (default: `60` seconds), and Dev will fall back to the default when this value is omitted.
 
-This config option is comparable to how Claude and Cursor define `mcpServers` in their respective JSON config files, though because Code uses TOML for its config language, the format is slightly different. For example, the following config in JSON:
+This config option is comparable to how Claude and Cursor define `mcpServers` in their respective JSON config files, though because Dev uses TOML for its config language, the format is slightly different. For example, the following config in JSON:
 
 ```json
 {
@@ -443,7 +441,7 @@ This config option is comparable to how Claude and Cursor define `mcpServers` in
 }
 ```
 
-Should be represented as follows in `~/.code/config.toml` (Code will also read the legacy `~/.codex/config.toml` if it exists):
+Should be represented as follows in `~/.code/config.toml` (Dev will also read the legacy `~/.codex/config.toml` if it exists):
 
 ```toml
 # The top-level table name must be `mcp_servers`
@@ -479,9 +477,9 @@ tool_timeout_sec = 30
 
 ## subagents
 
-Sub-agents are orchestrated helper workflows you can trigger with slash commands (for example `/plan`, `/solve`, `/code`). Each entry under `[[subagents.commands]]` defines the slash command name, whether spawned agents run in read-only mode, which `agents` to launch, and extra guidance for both the orchestrator (Code) and the individual agents.
+Sub-agents are orchestrated helper workflows you can trigger with slash commands (for example `/plan`, `/solve`, `/code`). Each entry under `[[subagents.commands]]` defines the slash command name, whether spawned agents run in read-only mode, which `agents` to launch, and extra guidance for both the orchestrator (Dev) and the individual agents.
 
-By default (when no `[[agents]]` are configured) Code advertises these model slugs for multi-agent runs: `code-gpt-5.5`, `code-gpt-5.4`, `code-gpt-5.4-mini`, `claude-opus-4.8`, `gemini-3.1-pro`, `claude-sonnet-4.6`, `gemini-3.5-flash`, `claude-haiku-4.5`, and `qwen-3-coder`. The cloud counterpart, `cloud-gpt-5.1-codex-max`, only appears when `CODE_ENABLE_CLOUD_AGENT_MODEL=1` is set. (The Gemini built-ins are Antigravity-backed; `gemini` resolves to `gemini-3.5-flash`.) You can override the list by defining `[[agents]]` entries or by specifying `agents = [ … ]` on a given `[[subagents.commands]]` entry.
+By default (when no `[[agents]]` are configured) Dev advertises these model slugs for multi-agent runs: `code-gpt-5.5`, `code-gpt-5.4`, `code-gpt-5.4-mini`, `claude-opus-4.8`, `gemini-3.1-pro`, `claude-sonnet-4.6`, `gemini-3.5-flash`, `claude-haiku-4.5`, and `qwen-3-coder`. The cloud counterpart, `cloud-gpt-5.1-codex-max`, only appears when `CODE_ENABLE_CLOUD_AGENT_MODEL=1` is set. (The Gemini built-ins are Antigravity-backed; `gemini` resolves to `gemini-3.5-flash`.) You can override the list by defining `[[agents]]` entries or by specifying `agents = [ … ]` on a given `[[subagents.commands]]` entry.
 
 ```toml
 [[subagents.commands]]
@@ -492,7 +490,7 @@ orchestrator-instructions = "Coordinate a context sweep before coding. Ask each 
 agent-instructions = "Summarize the repository areas most relevant to the user's request. List file paths, rationale, and suggested follow-up scripts to run. Keep the reply under 2,000 tokens."
 ```
 
-With the example above you can run `/context` inside the TUI to create a summary cell that the main `/code` turn can reference later. Because `context-collector` is an ordinary agent, any command-line static analysis utilities it invokes (such as your blast radius tool) should be described in the `agent-instructions` so the orchestrator launches the right workflow. You can also customise the built-in commands by providing an entry with the same `name` (`plan`, `solve`, or `code`) and pointing their `agents` list at your long-context helper.
+With the example above you can run `/context` inside the TUI to create a summary cell that the main `/code` turn can reference later. Because `context-collector` is an ordinary agent, any command-line static analysis utilities it invokes (such as your blast radius tool) should be described in the `agent-instructions` so the orchestrator launches the right workflow. You can also customise the built-in commands by providing an entry with the same `name` (`plan`, `solve`, or `dev`) and pointing their `agents` list at your long-context helper.
 
 ## validation
 
@@ -527,7 +525,7 @@ Functional checks stay enabled by default to catch regressions in the touched
 code, while stylistic linters default to off so teams can opt in when they want
 formatting feedback.
 
-With functional checks enabled, Code automatically detects the languages
+With functional checks enabled, Dev automatically detects the languages
 affected by a patch and schedules the appropriate tools:
 
 - `cargo-check` for Rust workspaces (scoped to touched manifests)
@@ -540,7 +538,7 @@ affected by a patch and schedules the appropriate tools:
 Each entry under `[validation.tools]` can be toggled to disable a specific tool
 or to opt particular checks back in after disabling the entire group.
 
-When enabled, Code can also run `actionlint` against modified workflows. This
+When enabled, Dev can also run `actionlint` against modified workflows. This
 is configured under `[github]`:
 
 ```toml
@@ -552,13 +550,13 @@ actionlint_path = "/usr/local/bin/actionlint"
 
 ## disable_response_storage
 
-By default, Code disables server-side Responses storage so Zero Data Retention (ZDR) accounts can run without an extra config change:
+By default, Dev disables server-side Responses storage so Zero Data Retention (ZDR) accounts can run without an extra config change:
 
 ```toml
 disable_response_storage = true
 ```
 
-Set this to `false` only if you explicitly want Code to request stored Responses for providers that support them.
+Set this to `false` only if you explicitly want Dev to request stored Responses for providers that support them.
 
 ### Managing MCP servers from CLI (experimental)
 
@@ -566,29 +564,29 @@ You can also manage these entries from the CLI:
 
 ```shell
 # Add a server (env can be repeated; `--` separates the launcher command)
-code mcp add docs -- docs-server --port 4000
+dev mcp add docs -- docs-server --port 4000
 
 # List configured servers (pretty table or JSON)
-code mcp list
-code mcp list --json
+dev mcp list
+dev mcp list --json
 
 # Show one server (table or JSON)
-code mcp get docs
-code mcp get docs --json
+dev mcp get docs
+dev mcp get docs --json
 
 # Remove a server
-code mcp remove docs
+dev mcp remove docs
 
 # Log in to a streamable HTTP server that supports oauth
-code mcp login SERVER_NAME
+dev mcp login SERVER_NAME
 
 # Log out from a streamable HTTP server that supports oauth
-code mcp logout SERVER_NAME
+dev mcp logout SERVER_NAME
 ```
 
 ## shell_environment_policy
 
-Code spawns subprocesses (e.g. when executing a `local_shell` tool-call suggested by the assistant). By default it now passes **your full environment** to those subprocesses. You can tune this behavior via the **`shell_environment_policy`** block in `config.toml`:
+Dev spawns subprocesses (e.g. when executing a `local_shell` tool-call suggested by the assistant). By default it now passes **your full environment** to those subprocesses. You can tune this behavior via the **`shell_environment_policy`** block in `config.toml`:
 
 ```toml
 [shell_environment_policy]
@@ -607,7 +605,7 @@ include_only = ["PATH", "HOME"]
 | Field                     | Type                 | Default | Description                                                                                                                                     |
 | ------------------------- | -------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | `inherit`                 | string               | `all`   | Starting template for the environment:<br>`all` (clone full parent env), `core` (`HOME`, `PATH`, `USER`, …), or `none` (start empty).           |
-| `ignore_default_excludes` | boolean              | `true`  | When `false`, Code removes any var whose **name** contains `KEY`, `SECRET`, or `TOKEN` (case-insensitive) before other rules run; defaults to `true` so this filter is disabled by default.              |
+| `ignore_default_excludes` | boolean              | `true`  | When `false`, Dev removes any var whose **name** contains `KEY`, `SECRET`, or `TOKEN` (case-insensitive) before other rules run; defaults to `true` so this filter is disabled by default.              |
 | `exclude`                 | array<string>        | `[]`    | Case-insensitive glob patterns to drop after the default filter.<br>Examples: `"AWS_*"`, `"AZURE_*"`.                                           |
 | `set`                     | table<string,string> | `{}`    | Explicit key/value overrides or additions – always win over inherited values.                                                                   |
 | `include_only`            | array<string>        | `[]`    | If non-empty, a whitelist of patterns; only variables that match _one_ pattern survive the final step. (Generally used with `inherit = "all"`.) |
@@ -630,7 +628,7 @@ Currently, `CODEX_SANDBOX_NETWORK_DISABLED=1` is also added to the environment, 
 
 ## otel
 
-Code can emit [OpenTelemetry](https://opentelemetry.io/) **log events** that
+Dev can emit [OpenTelemetry](https://opentelemetry.io/) **log events** that
 describe each run: outbound API requests, streamed responses, user input,
 tool-approval decisions, and the result of every tool invocation. Export is
 **disabled by default** so local runs remain self-contained. Opt in by adding an
@@ -643,7 +641,7 @@ exporter = "none"          # defaults to "none"; set to otlp-http or otlp-grpc t
 log_user_prompt = false    # defaults to false; redact prompt text unless explicitly enabled
 ```
 
-Code tags every exported event with `service.name = $ORIGINATOR` (the same
+Dev tags every exported event with `service.name = $ORIGINATOR` (the same
 value sent in the `originator` header, `code_cli_rs` by default), the CLI
 version, and an `env` attribute so downstream collectors can distinguish
 dev/staging/prod traffic. Only telemetry produced inside the `code_otel`
@@ -656,7 +654,7 @@ Every event shares a common set of metadata fields: `event.timestamp`,
 `conversation.id`, `app.version`, `auth_mode` (when available),
 `user.account_id` (when available), `terminal.type`, `model`, and `slug`.
 
-With OTEL enabled Code emits the following event types (in addition to the
+With OTEL enabled Dev emits the following event types (in addition to the
 metadata above):
 
 - `codex.conversation_starts`
@@ -750,14 +748,14 @@ If the exporter is `none` nothing is written anywhere; otherwise you must run or
 own collector. All exporters run on a background batch worker that is flushed on
 shutdown.
 
-If you build Code from source the OTEL crate is still behind an `otel` feature
+If you build Dev from source the OTEL crate is still behind an `otel` feature
 flag; the official prebuilt binaries ship with the feature enabled. When the
 feature is disabled the telemetry hooks become no-ops so the CLI continues to
 function without the extra dependencies.
 
 ## notify
 
-Specify a program that will be executed to get notified about events generated by Code. Note that the program will receive the notification argument as a string of JSON, e.g.:
+Specify a program that will be executed to get notified about events generated by Dev. Note that the program will receive the notification argument as a string of JSON, e.g.:
 
 ```json
 {
@@ -794,9 +792,9 @@ def main() -> int:
         case "agent-turn-complete":
             assistant_message = notification.get("last-assistant-message")
             if assistant_message:
-                title = f"Code: {assistant_message}"
+                title = f"Dev: {assistant_message}"
             else:
-                title = "Code: Turn Complete!"
+                title = "Dev: Turn Complete!"
             input_messages = notification.get("input_messages", [])
             message = " ".join(input_messages)
             title += message
@@ -812,7 +810,7 @@ def main() -> int:
             "-message",
             message,
             "-group",
-            "code",
+            "dev",
             "-ignoreDnD",
             "-activate",
             "com.googlecode.iterm2",
@@ -826,18 +824,18 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-To have Code use this script for notifications, you would configure it via `notify` in `~/.code/config.toml` (legacy `~/.codex/config.toml` is still read) using the appropriate path to `notify.py` on your computer:
+To have Dev use this script for notifications, you would configure it via `notify` in `~/.code/config.toml` (legacy `~/.codex/config.toml` is still read) using the appropriate path to `notify.py` on your computer:
 
 ```toml
 notify = ["python3", "/Users/mbolin/.code/notify.py"]
 ```
 
 > [!NOTE]
-> Use `notify` for automation and integrations: Code invokes your external program with a single JSON argument for each event, independent of the TUI. If you only want lightweight desktop notifications while using the TUI, prefer `tui.notifications`, which uses terminal escape codes and requires no external program. You can enable both; `tui.notifications` covers in‑TUI alerts (e.g., approval prompts), while `notify` is best for system‑level hooks or custom notifiers. Currently, `notify` emits only `agent-turn-complete`, whereas `tui.notifications` supports `agent-turn-complete` and `approval-requested` with optional filtering.
+> Use `notify` for automation and integrations: Dev invokes your external program with a single JSON argument for each event, independent of the TUI. If you only want lightweight desktop notifications while using the TUI, prefer `tui.notifications`, which uses terminal escape codes and requires no external program. You can enable both; `tui.notifications` covers in‑TUI alerts (e.g., approval prompts), while `notify` is best for system‑level hooks or custom notifiers. Currently, `notify` emits only `agent-turn-complete`, whereas `tui.notifications` supports `agent-turn-complete` and `approval-requested` with optional filtering.
 
 ## history
 
-By default, the Code CLI records messages sent to the model in `$CODE_HOME/history.jsonl` (legacy `$CODEX_HOME/history.jsonl` is also read). On UNIX, the file permissions are set to `o600`, so it should only be readable and writable by the owner.
+By default, Dev records messages sent to the model in `$CODE_HOME/history.jsonl` (legacy `$CODEX_HOME/history.jsonl` is also read). On UNIX, the file permissions are set to `o600`, so it should only be readable and writable by the owner.
 
 To disable this behavior, configure `[history]` as follows:
 
@@ -850,7 +848,7 @@ persistence = "none"  # "save-all" is the default value
 
 The structured environment context timeline (baseline + deltas + browser
 snapshots) is gated behind the `CTX_UI` environment flag. Set `CTX_UI=1`
-before launching Code to exercise the preview flow. Outside of this
+before launching Dev to exercise the preview flow. Outside of this
 developer flag the classic `== System Status ==` payload remains in place.
 
 ## file_opener
@@ -867,11 +865,11 @@ Note this is **not** a general editor setting (like `$EDITOR`), as it only accep
 - `"cursor"`
 - `"none"` to explicitly disable this feature
 
-Currently, `"vscode"` is the default, though Code does not verify VS Code is installed. As such, `file_opener` may default to `"none"` or something else in the future.
+Currently, `"vscode"` is the default, though Dev does not verify VS Code is installed. As such, `file_opener` may default to `"none"` or something else in the future.
 
 ## hide_agent_reasoning
 
-Code intermittently emits "reasoning" events that show the model's internal "thinking" before it produces a final answer. Some users may find these events distracting, especially in CI logs or minimal terminal output.
+Dev intermittently emits "reasoning" events that show the model's internal "thinking" before it produces a final answer. Some users may find these events distracting, especially in CI logs or minimal terminal output.
 
 Setting `hide_agent_reasoning` to `true` suppresses these events in **both** the TUI as well as the headless `exec` sub-command:
 
@@ -898,7 +896,7 @@ show_raw_agent_reasoning = true  # defaults to false
 
 The size of the context window for the model, in tokens.
 
-In general, Code knows the context window for the most common OpenAI models, but if you are using a new model with an old version of the Code CLI, then you can use `model_context_window` to tell Code what value to use to determine how much context is left during a conversation.
+In general, Dev knows the context window for the most common OpenAI models, but if you are using a new model with an old version of Dev, then you can use `model_context_window` to tell Dev what value to use to determine how much context is left during a conversation.
 
 ## model_max_output_tokens
 
@@ -938,17 +936,22 @@ notifications = [ "agent-turn-complete", "approval-requested" ]
 
 # Enable desktop notifications for approval requests only
 notifications = [ "approval-requested" ]
+
+# Draw into the terminal's alternate screen buffer. Defaults to true. Ctrl+T
+# toggles it at runtime and persists the choice. See
+# ./tui-alternate-screen.md for why you would turn it off.
+alternate_screen = true
 ```
 
 > [!NOTE]
-> Code emits desktop notifications using terminal escape codes. Not all terminals support these (notably, macOS Terminal.app and VS Code's terminal do not support custom notifications. iTerm2, Ghostty and WezTerm do support these notifications).
+> Dev emits desktop notifications using terminal escape codes. Not all terminals support these (notably, macOS Terminal.app and VS Code's terminal do not support custom notifications. iTerm2, Ghostty and WezTerm do support these notifications).
 
 > [!NOTE]
 > `tui.notifications` is built‑in and limited to the TUI session. For programmatic or cross‑environment notifications—or to integrate with OS‑specific notifiers—use the top-level `notify` option to run an external program that receives event JSON. The two settings are independent and can be used together.
 
 ### Auto Drive Observer
 
-Code keeps long-running Auto Drive sessions in check with a lightweight observer thread. Configure its cadence with the top-level `auto_drive_observer_cadence` key (default `5`). After every *n* completed requests the observer reviews the coordinator/CLI transcript, emits telemetry, and—if necessary—suggests a corrected prompt or follow-up guidance. Setting the value to `0` disables the observer entirely.
+Dev keeps long-running Auto Drive sessions in check with a lightweight observer thread. Configure its cadence with the top-level `auto_drive_observer_cadence` key (default `5`). After every *n* completed requests the observer reviews the coordinator/CLI transcript, emits telemetry, and—if necessary—suggests a corrected prompt or follow-up guidance. Setting the value to `0` disables the observer entirely.
 
 ```toml
 # Run the observer after every third Auto Drive request
@@ -1009,9 +1012,9 @@ Hook commands run inside the same sandbox mode as the session and appear in the 
 
 When multiple `user.prompt_submit` or `stop` hooks are configured, their model-visible outputs are applied in configuration order. This keeps prompt context and stop continuation prompts deterministic for integrations that depend on lifecycle interception rather than best-effort notification.
 
-The `stop` hook includes `stop_hook_active` in its payload. Code allows at most one stop-driven continuation per turn; if a second stop continuation is requested while one is already active, the request is ignored and a background warning is emitted.
+The `stop` hook includes `stop_hook_active` in its payload. Dev allows at most one stop-driven continuation per turn; if a second stop continuation is requested while one is already active, the request is ignored and a background warning is emitted.
 
-In the TUI, the primary surface for a blocked `user.prompt_submit` hook is the hook's own exec cell, which shows the hook exit code and stderr text. Code may also emit a background summary when it can do so without interfering with turn startup.
+In the TUI, the primary surface for a blocked `user.prompt_submit` hook is the hook's own exec cell, which shows the hook exit code and stderr text. Dev may also emit a background summary when it can do so without interfering with turn startup.
 
 Example `tool.after` payload:
 
@@ -1038,7 +1041,7 @@ Example `user.prompt_submit` payload:
   "turn_id": "42",
   "transcript_path": "/Users/me/.code/sessions/rollout-2026-05-06T12-00-00-0195f3f5-0dcb-7f5c-8dc5-7b4b24f8f0aa.jsonl",
   "cwd": "/Users/me/src/my-app",
-  "model": "gpt-5.1-codex",
+  "model": "zen5-coder",
   "prompt": "please finish this task"
 }
 ```
@@ -1052,7 +1055,7 @@ Example `stop` payload:
   "turn_id": "42",
   "transcript_path": "/Users/me/.code/sessions/rollout-2026-05-06T12-00-00-0195f3f5-0dcb-7f5c-8dc5-7b4b24f8f0aa.jsonl",
   "cwd": "/Users/me/src/my-app",
-  "model": "gpt-5.1-codex",
+  "model": "zen5-coder",
   "stop_hook_active": false,
   "last_assistant_message": "Implementation is complete and tests are green."
 }
@@ -1073,14 +1076,14 @@ name = "unit"
 run = "cargo test --lib"
 ```
 
-Project commands appear in the TUI via `/cmd <name>` and run through the standard execution pipeline. During execution Code sets `CODE_PROJECT_COMMAND_NAME`, `CODE_PROJECT_COMMAND_DESCRIPTION` (when provided), and `CODE_SESSION_CWD` so scripts can tailor their behaviour.
+Project commands appear in the TUI via `/cmd <name>` and run through the standard execution pipeline. During execution Dev sets `CODE_PROJECT_COMMAND_NAME`, `CODE_PROJECT_COMMAND_DESCRIPTION` (when provided), and `CODE_SESSION_CWD` so scripts can tailor their behaviour.
 
 ## Config reference
 
 | Key | Type / Values | Notes |
 | --- | --- | --- |
-| `model` | string | Model to use (e.g., `gpt-5.1-codex`). |
-| `model_provider` | string | Provider id from `model_providers` (default: `openai`). |
+| `model` | string | Model to use (e.g., `zen5-coder`). |
+| `model_provider` | string | Provider id from `model_providers` (default: `hanzo`). |
 | `model_context_window` | number | Context window tokens. |
 | `model_max_output_tokens` | number | Max output tokens. |
 | `approval_policy` | `untrusted` \| `on-failure` \| `on-request` \| `never` | When to prompt for approval. |
