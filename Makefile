@@ -16,7 +16,7 @@ export PATH            := $(HOME)/.cargo/bin:$(PATH)
 export BUILD_FAST_BINS := dev
 export RUST_MIN_STACK  := 8388608
 
-.PHONY: all build install uninstall run test clippy clean help
+.PHONY: all build install uninstall run check test clippy clean help
 
 all: build
 
@@ -37,6 +37,12 @@ uninstall:
 ## run: build, then start the TUI
 run: build
 	@./$(bin)
+
+## check: what CI gates on — build, then compile every test target
+##        `build` alone links binaries, so a test file that does not parse
+##        sails past it and fails in the release preflight instead.
+check: build
+	@cd code-rs && $(cargo) test --workspace --no-run --locked
 
 ## test: run the workspace suite
 test:
