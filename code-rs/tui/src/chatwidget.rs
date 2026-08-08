@@ -1345,7 +1345,7 @@ const AUTO_REVIEW_MAX_RAW_DIFF_CHARS: usize = 120_000;
 const AUTO_REVIEW_ESTIMATED_BYTES_PER_TOKEN: u64 = 4;
 const AUTO_REVIEW_PROMPT_TOKEN_LIMIT_DIVISOR: u64 = 2;
 const AUTO_REVIEW_SCOPE_EXCLUDED_PREFIXES: [&str; 5] = [
-    "codex-rs/",
+    "vendor/",
     "node_modules/",
     "target/",
     ".git/",
@@ -8215,43 +8215,6 @@ impl ChatWidget<'_> {
         }
     }
 
-    /// Format model name with proper capitalization (e.g., "gpt-4" -> "GPT-4")
-    fn format_model_name(&self, model_name: &str) -> String {
-        fn format_segment(segment: &str) -> String {
-            if segment.eq_ignore_ascii_case("codex") {
-                return "Codex".to_string();
-            }
-
-            let mut chars = segment.chars();
-            match chars.next() {
-                Some(first) if first.is_ascii_alphabetic() => {
-                    let mut formatted = String::new();
-                    formatted.push(first.to_ascii_uppercase());
-                    formatted.push_str(chars.as_str());
-                    formatted
-                }
-                Some(first) => {
-                    let mut formatted = String::new();
-                    formatted.push(first);
-                    formatted.push_str(chars.as_str());
-                    formatted
-                }
-                None => String::new(),
-            }
-        }
-
-        if let Some(rest) = model_name.strip_prefix("gpt-") {
-            let formatted_rest = rest
-                .split('-')
-                .map(format_segment)
-                .collect::<Vec<_>>()
-                .join("-");
-            format!("GPT-{}", formatted_rest)
-        } else {
-            model_name.to_string()
-        }
-    }
-
     /// Calculate the maximum scroll offset based on current content size
     #[allow(dead_code)]
     fn calculate_max_scroll_offset(&self, content_area_height: u16) -> u16 {
@@ -12946,7 +12909,7 @@ impl ChatWidget<'_> {
             }
         } else {
             lines.push(
-                "Snapshots are currently disabled. Resolve the Git issue and restart Code to re-enable them.".to_string(),
+                "Snapshots are currently disabled. Resolve the Git issue and restart Hanzo Dev to re-enable them.".to_string(),
             );
         }
 
@@ -23087,44 +23050,6 @@ Have we met every part of this goal and is there no further work to do?"#
         self.request_redraw();
     }
 
-    fn curated_model_presets(presets: Vec<ModelPreset>) -> Vec<ModelPreset> {
-        const MODEL_PICKER_ORDER: [&str; 5] = [
-            "gpt-5.5",
-            "gpt-5.6-terra",
-            "gpt-5.6-luna",
-            "gpt-5.3-codex",
-            "gpt-5.3-codex-spark",
-        ];
-
-        let mut curated: Vec<ModelPreset> = MODEL_PICKER_ORDER
-            .into_iter()
-            .filter_map(|model| {
-                presets.iter().find(|preset| {
-                    preset.model.eq_ignore_ascii_case(model)
-                        || preset.id.eq_ignore_ascii_case(model)
-                })
-            })
-            .cloned()
-            .collect();
-
-        let curated_slugs: std::collections::HashSet<String> = curated
-            .iter()
-            .flat_map(|preset| {
-                [
-                    preset.id.to_ascii_lowercase(),
-                    preset.model.to_ascii_lowercase(),
-                ]
-            })
-            .collect();
-
-        curated.extend(presets.iter().filter(|preset| {
-            !curated_slugs.contains(&preset.id.to_ascii_lowercase())
-                && !curated_slugs.contains(&preset.model.to_ascii_lowercase())
-        }).cloned());
-
-        if curated.is_empty() { presets } else { curated }
-    }
-
     fn all_model_presets(&self) -> Vec<ModelPreset> {
         if let Some(presets) = self.remote_model_presets.as_ref() {
             return presets.clone();
@@ -23141,7 +23066,7 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     fn available_model_presets(&self) -> Vec<ModelPreset> {
-        Self::curated_model_presets(self.all_model_presets())
+        self.all_model_presets()
     }
 
     pub(crate) fn update_model_presets(
@@ -23153,13 +23078,9 @@ Have we met every part of this goal and is there no further work to do?"#
             return;
         }
 
-        let curated_presets = Self::curated_model_presets(presets.clone());
-        if curated_presets.is_empty() {
-            return;
-        }
-
+        self.bottom_pane
+            .update_model_selection_presets(presets.clone());
         self.remote_model_presets = Some(presets);
-        self.bottom_pane.update_model_selection_presets(curated_presets);
 
         if let Some(default_model) = default_model {
             self.maybe_apply_remote_default_model(default_model);
@@ -28434,7 +28355,7 @@ Have we met every part of this goal and is there no further work to do?"#
         );
 
         let visible_message = format!(
-            "🤖 Handing /browser failure ({}) to Code. Error: {}",
+            "🤖 Handing /browser failure ({}) to Hanzo Dev. Error: {}",
             failure_context,
             truncated
         );
@@ -30311,7 +30232,7 @@ Have we met every part of this goal and is there no further work to do?"#
                            include_dir: bool,
                            dir_display: &str| {
             let mut spans: Vec<Span> = Vec::new();
-            let model_display = self.format_model_name(&self.config.model);
+            let model_display = self.config.model.clone();
             let mut model_suffix_parts: Vec<String> = Vec::new();
             if include_reasoning {
                 model_suffix_parts
@@ -30966,7 +30887,6 @@ impl Drop for AutoReviewStubGuard {
     use crate::chatwidget::message::UserMessage;
     use crate::chatwidget::smoke_helpers::{enter_test_runtime_guard, ChatWidgetHarness};
     use crate::history_cell::{self, ExploreAggregationCell, HistoryCellType};
-    use code_common::model_presets::ReasoningEffortPreset;
     use code_auto_drive_core::{
         AutoContinueMode,
         AutoRunPhase,
@@ -31332,53 +31252,7 @@ use code_core::protocol::OrderMeta;
         assert!(summary_text.chars().count() <= 280);
     }
 
-    #[test]
-    fn format_model_name_capitalizes_codex_mini() {
-        let mut harness = ChatWidgetHarness::new();
-        let formatted = harness.chat().format_model_name("gpt-5.1-codex-mini");
-        assert_eq!(formatted, "GPT-5.1-Codex-Mini");
-    }
 
-    #[test]
-    fn curated_model_presets_falls_back_when_shortlist_missing() {
-        let presets = vec![ModelPreset {
-            id: "custom-model".to_string(),
-            model: "custom-model".to_string(),
-            display_name: "custom-model".to_string(),
-            description: "custom".to_string(),
-            default_reasoning_effort: ReasoningEffort::Medium.into(),
-            supported_reasoning_efforts: vec![ReasoningEffortPreset {
-                effort: ReasoningEffort::Medium.into(),
-                description: "balanced".to_string(),
-            }],
-            supported_text_verbosity: &[TextVerbosity::Medium],
-            is_default: false,
-            upgrade: None,
-            pro_only: false,
-            show_in_picker: true,
-        }];
-
-        let curated = ChatWidget::curated_model_presets(presets.clone());
-        assert_eq!(curated.len(), 1);
-        assert_eq!(curated[0].id, presets[0].id);
-    }
-
-    #[test]
-    fn curated_model_presets_includes_gpt_5_6_variants_when_present() {
-        let presets: Vec<ModelPreset> = builtin_model_presets(Some(AuthMode::ChatGPT), true)
-            .into_iter()
-            .filter(|preset| {
-                matches!(
-                    preset.id.as_str(),
-                    "gpt-5.6-terra" | "gpt-5.6-luna" | "gpt-5.3-codex"
-                )
-            })
-            .collect();
-
-        let curated = ChatWidget::curated_model_presets(presets);
-        let ids: Vec<&str> = curated.iter().map(|preset| preset.id.as_str()).collect();
-        assert_eq!(ids, vec!["gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.3-codex"]);
-    }
 
     #[test]
     fn builtin_model_presets_include_gpt_5_5() {
@@ -31386,69 +31260,27 @@ use code_core::protocol::OrderMeta;
         assert!(presets.iter().any(|preset| preset.id == "gpt-5.5"));
     }
 
+    /// The picker used to hoist a hardcoded five-slug OpenAI shortlist to the
+    /// front, so the model `dev` actually runs was never the one it offered
+    /// first. Order is the catalog's job now, and this is what that buys.
     #[test]
-    fn curated_model_presets_appends_new_remote_models() {
-        let mut gpt_5_5 = builtin_model_presets(Some(AuthMode::ChatGPT), true)
-            .into_iter()
-            .find(|preset| preset.id == "gpt-5.6-terra")
-            .expect("expected gpt-5.6-terra builtin preset");
-        gpt_5_5.id = "gpt-5.5".to_string();
-        gpt_5_5.model = "gpt-5.5".to_string();
-        gpt_5_5.display_name = "GPT-5.5".to_string();
+    fn the_model_picker_leads_with_our_default() {
+        let _runtime_guard = enter_test_runtime_guard();
+        let mut harness = ChatWidgetHarness::new();
+        let chat = harness.chat();
 
-        let presets = vec![
-            gpt_5_5,
-            ModelPreset {
-                id: "gpt-5.6-terra".to_string(),
-                model: "gpt-5.6-terra".to_string(),
-                display_name: "GPT-5.6 Terra".to_string(),
-                description: "Frontier flagship model.".to_string(),
-                default_reasoning_effort: ReasoningEffort::Medium.into(),
-                supported_reasoning_efforts: vec![ReasoningEffortPreset {
-                    effort: ReasoningEffort::Medium.into(),
-                    description: "balanced".to_string(),
-                }],
-                supported_text_verbosity: &[TextVerbosity::Medium],
-                is_default: false,
-                upgrade: None,
-                pro_only: false,
-                show_in_picker: true,
-            },
-        ];
+        let presets = chat.available_model_presets();
+        let first = presets.first().expect("the picker must offer something");
 
-        let curated = ChatWidget::curated_model_presets(presets);
-        let ids: Vec<&str> = curated.iter().map(|preset| preset.id.as_str()).collect();
-        assert_eq!(ids, vec!["gpt-5.5", "gpt-5.6-terra"]);
+        assert_eq!(
+            first.model, code_core::config::HANZO_DEFAULT_MODEL,
+            "the picker leads with `{}`, not the default `{}`",
+            first.model,
+            code_core::config::HANZO_DEFAULT_MODEL
+        );
     }
 
-    #[test]
-    fn curated_model_presets_deduplicates_alias_slugs() {
-        let canonical = ModelPreset {
-            id: "alias/gpt-5.5".to_string(),
-            model: "gpt-5.5".to_string(),
-            display_name: "GPT-5.5".to_string(),
-            description: "Frontier flagship model.".to_string(),
-            default_reasoning_effort: ReasoningEffort::Medium.into(),
-            supported_reasoning_efforts: vec![ReasoningEffortPreset {
-                effort: ReasoningEffort::Medium.into(),
-                description: "balanced".to_string(),
-            }],
-            supported_text_verbosity: &[TextVerbosity::Medium],
-            is_default: false,
-            upgrade: None,
-            pro_only: false,
-            show_in_picker: true,
-        };
-        let duplicate = ModelPreset {
-            id: "gpt-5.5".to_string(),
-            model: "gpt-5.5".to_string(),
-            ..canonical.clone()
-        };
 
-        let curated = ChatWidget::curated_model_presets(vec![canonical, duplicate]);
-        let ids: Vec<&str> = curated.iter().map(|preset| preset.id.as_str()).collect();
-        assert_eq!(ids, vec!["alias/gpt-5.5"]);
-    }
 
     #[test]
     fn model_command_accepts_supported_non_curated_builtin_model() {

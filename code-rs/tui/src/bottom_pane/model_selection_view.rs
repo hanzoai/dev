@@ -21,7 +21,12 @@ use std::cmp::Ordering;
 /// Flattened preset entry combining a model with a specific reasoning effort.
 #[derive(Clone, Debug)]
 struct FlatPreset {
+    /// Position of the model in the catalog. The catalog decides what a user
+    /// should see first; the view renders that order rather than guessing one
+    /// from how the slug is spelled.
+    rank: usize,
     model: String,
+    model_description: String,
     effort: ReasoningEffort,
     label: String,
     description: String,
@@ -34,13 +39,27 @@ struct ModelLine {
 }
 
 impl FlatPreset {
-    fn from_model_preset(preset: &ModelPreset) -> Vec<Self> {
+    /// Flatten the catalog into one entry per (model, reasoning effort), keeping
+    /// catalog order and lifting the default model to the front.
+    fn flatten(presets: &[ModelPreset]) -> Vec<Self> {
+        let mut ordered: Vec<&ModelPreset> = presets.iter().collect();
+        ordered.sort_by_key(|preset| !preset.is_default);
+        ordered
+            .into_iter()
+            .enumerate()
+            .flat_map(|(rank, preset)| Self::from_model_preset(rank, preset))
+            .collect()
+    }
+
+    fn from_model_preset(rank: usize, preset: &ModelPreset) -> Vec<Self> {
         preset
             .supported_reasoning_efforts
             .iter()
             .map(|effort_preset| {
                 FlatPreset {
+                    rank,
                     model: preset.model.to_string(),
+                    model_description: preset.description.to_string(),
                     effort: effort_preset.effort.clone().into(),
                     label: format!(
                         "{} {}",
@@ -169,10 +188,7 @@ impl ModelSelectionView {
         target: ModelSelectionTarget,
         app_event_tx: AppEventSender,
     ) -> Self {
-        let flat_presets: Vec<FlatPreset> = presets
-            .iter()
-            .flat_map(FlatPreset::from_model_preset)
-            .collect();
+        let flat_presets = FlatPreset::flatten(&presets);
 
         let initial_index = Self::initial_selection(
             target.supports_fast_mode(),
@@ -206,10 +222,7 @@ impl ModelSelectionView {
         let previous_selected = previous_entries.get(self.selected_index).copied();
         let previous_flat = self.flat_presets.clone();
 
-        self.flat_presets = presets
-            .iter()
-            .flat_map(FlatPreset::from_model_preset)
-            .collect();
+        self.flat_presets = FlatPreset::flatten(&presets);
 
         let mut next_selected: Option<usize> = None;
         match previous_selected {
@@ -794,10 +807,10 @@ impl ModelSelectionView {
                     )]),
                     is_selected: false,
                 });
-                if let Some(desc) = Self::model_description(&flat_preset.model) {
+                if !flat_preset.model_description.is_empty() {
                     lines.push(ModelLine {
                         line: Line::from(vec![Span::styled(
-                            desc.to_string(),
+                            flat_preset.model_description.clone(),
                             Style::default().fg(crate::colors::text_dim()),
                         )]),
                         is_selected: false,
@@ -883,7 +896,7 @@ impl ModelSelectionView {
                     lines = lines.saturating_add(1);
                 }
                 lines = lines.saturating_add(1);
-                if Self::model_description(&flat_preset.model).is_some() {
+                if !flat_preset.model_description.is_empty() {
                     lines = lines.saturating_add(1);
                 }
                 previous_model = Some(&flat_preset.model);
@@ -902,9 +915,9 @@ impl ModelSelectionView {
     }
 
     fn compare_presets(a: &FlatPreset, b: &FlatPreset) -> Ordering {
-        let model_name_rank = Self::compare_model_names(&a.model, &b.model);
-        if model_name_rank != Ordering::Equal {
-            return model_name_rank;
+        let rank = a.rank.cmp(&b.rank);
+        if rank != Ordering::Equal {
+            return rank;
         }
 
         let effort_rank = Self::effort_rank(a.effort).cmp(&Self::effort_rank(b.effort));
@@ -913,77 +926,6 @@ impl ModelSelectionView {
         }
 
         a.label.cmp(&b.label)
-    }
-
-    fn compare_model_names(a: &str, b: &str) -> Ordering {
-        let a_lower = a.to_ascii_lowercase();
-        let b_lower = b.to_ascii_lowercase();
-        match (
-            Self::parse_model_version_components(&a_lower),
-            Self::parse_model_version_components(&b_lower),
-        ) {
-            (Some(a_components), Some(b_components)) => {
-                let component_rank = b_components.cmp(&a_components);
-                if component_rank != Ordering::Equal {
-                    return component_rank;
-                }
-                a_lower.cmp(&b_lower)
-            }
-            (Some(_), None) => Ordering::Less,
-            (None, Some(_)) => Ordering::Greater,
-            (None, None) => a_lower.cmp(&b_lower),
-        }
-    }
-
-    fn parse_model_version_components(model: &str) -> Option<Vec<u32>> {
-        let canonical = model.rsplit('/').next().unwrap_or(model);
-        let mut components = Vec::new();
-
-        for segment in canonical.split('-') {
-            let first = segment.chars().next()?;
-            if !first.is_ascii_digit() {
-                continue;
-            }
-
-            for part in segment.split('.') {
-                if part.is_empty() || !part.chars().all(|ch| ch.is_ascii_digit()) {
-                    return None;
-                }
-                components.push(part.parse().ok()?);
-            }
-
-            return (!components.is_empty()).then_some(components);
-        }
-
-        None
-    }
-
-    fn model_description(model: &str) -> Option<&'static str> {
-        if model.eq_ignore_ascii_case("gpt-5.5") {
-            Some("Frontier model for complex coding, research, and real-world work.")
-        } else if model.eq_ignore_ascii_case("gpt-5.4") {
-            Some("Brings together flagship reasoning, coding, and tool use in a single frontier model.")
-        } else if model.eq_ignore_ascii_case("gpt-5.4-mini") {
-            Some("Smaller GPT-5.4 variant tuned for faster coding loops.")
-        } else if model.eq_ignore_ascii_case("gpt-5.3-codex") {
-            Some("Frontier agentic coding, 25% faster than previous models.")
-        } else if model.eq_ignore_ascii_case("gpt-5.3-codex-spark") {
-            Some("Fast codex variant tuned for responsive coding loops and smaller edits.")
-        } else if model.eq_ignore_ascii_case("gpt-5.2-codex") {
-            Some("Frontier agentic coding model.")
-        } else if model.eq_ignore_ascii_case("gpt-5.2") {
-            Some("Latest frontier model with improvements across knowledge, reasoning, and coding.")
-        } else if model.eq_ignore_ascii_case("gpt-5.1-codex-max") {
-            Some("Latest Codex-optimized flagship for deep and fast reasoning.")
-        } else if model.eq_ignore_ascii_case("gpt-5.1-codex") {
-            Some("Optimized for Code.")
-        } else if model.eq_ignore_ascii_case("gpt-5.1-codex-mini") {
-            Some("Optimized for Code. Cheaper, faster, but less capable.")
-        } else if model.eq_ignore_ascii_case("gpt-5.1") {
-            Some("Broad world knowledge with strong general reasoning.")
-        } else {
-            None
-        }
     }
 
     fn effort_rank(effort: ReasoningEffort) -> u8 {
@@ -1291,15 +1233,14 @@ mod tests {
         let lines = buffer_body_lines(&buf, width, height);
         let visible = lines.join("\n");
         let has_header = visible.contains("GPT-5.3-Codex");
-        let has_desc = visible.contains("Frontier agentic coding")
-            && visible.contains("25% faster than previous models.");
+        let has_desc = visible.contains("gpt-5.3-codex model");
 
         assert!(has_header);
         assert!(has_desc);
     }
 
     #[test]
-    fn model_selection_prioritizes_higher_versions_and_shows_fast_mode_toggle() {
+    fn model_selection_keeps_catalog_order_and_shows_fast_mode_toggle() {
         let mut gpt_5_5 = make_preset("gpt-5.5");
         gpt_5_5.supported_reasoning_efforts = vec![
             ReasoningEffortPreset {
@@ -1336,6 +1277,8 @@ mod tests {
             },
         ];
 
+        gpt_5_5.is_default = true;
+
         let presets = vec![
             make_preset("gpt-5.3-codex"),
             make_preset("gpt-5.3-codex-spark"),
@@ -1370,15 +1313,16 @@ mod tests {
             height,
         }, &mut buf);
 
+        // The default leads; everything else keeps the order the catalog gave.
         let order = sorted_model_order(&view);
         assert_eq!(
             order,
             vec![
                 "gpt-5.5".to_string(),
-                "gpt-5.4".to_string(),
-                "gpt-5.4-mini".to_string(),
                 "gpt-5.3-codex".to_string(),
                 "gpt-5.3-codex-spark".to_string(),
+                "gpt-5.4-mini".to_string(),
+                "gpt-5.4".to_string(),
             ]
         );
 

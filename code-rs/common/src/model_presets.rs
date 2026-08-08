@@ -47,8 +47,113 @@ const ALL_TEXT_VERBOSITY: &[TextVerbosityConfig] = &[
     TextVerbosityConfig::High,
 ];
 
+/// Reasoning levels offered on a model. A level means the same thing on every
+/// model, so it is worded once here rather than per preset.
+fn efforts(levels: &[ReasoningEffort]) -> Vec<ReasoningEffortPreset> {
+    levels
+        .iter()
+        .map(|effort| ReasoningEffortPreset {
+            effort: effort.clone(),
+            description: match effort {
+                ReasoningEffort::Low => "Fast responses with lighter reasoning",
+                ReasoningEffort::Medium => "Balances speed and reasoning depth for everyday tasks",
+                _ => "Greater reasoning depth for complex problems",
+            }
+            .to_string(),
+        })
+        .collect()
+}
+
+/// A model served by the default `hanzo` provider (api.hanzo.ai/v1). Ids and
+/// context windows come from `GET /v1/models`.
+fn hanzo(
+    model: &str,
+    display_name: &str,
+    description: &str,
+    levels: &[ReasoningEffort],
+) -> ModelPreset {
+    ModelPreset {
+        id: model.to_string(),
+        model: model.to_string(),
+        display_name: display_name.to_string(),
+        description: description.to_string(),
+        default_reasoning_effort: ReasoningEffort::Medium,
+        supported_reasoning_efforts: efforts(levels),
+        supported_text_verbosity: ALL_TEXT_VERBOSITY,
+        is_default: false,
+        upgrade: None,
+        pro_only: false,
+        show_in_picker: true,
+    }
+}
+
 static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
+    let deep = [
+        ReasoningEffort::Low,
+        ReasoningEffort::Medium,
+        ReasoningEffort::High,
+    ];
+    let quick = [ReasoningEffort::Low, ReasoningEffort::Medium];
+    let one = [ReasoningEffort::Medium];
+
     vec![
+        ModelPreset {
+            is_default: true,
+            ..hanzo(
+                "zen5-coder",
+                "Zen 5 Coder",
+                "Agentic coding. 1M context.",
+                &deep,
+            )
+        },
+        hanzo(
+            "zen5",
+            "Zen 5",
+            "General reasoning and chat, same size and price as zen5-coder. 1M context.",
+            &deep,
+        ),
+        hanzo(
+            "zen5-pro",
+            "Zen 5 Pro",
+            "Long sessions where output tokens dominate cost; cheaper per token than zen5. 1M context.",
+            &deep,
+        ),
+        hanzo(
+            "zen5-flash",
+            "Zen 5 Flash",
+            "Quick edits and short turns. 64K context.",
+            &quick,
+        ),
+        hanzo(
+            "zen5-mini",
+            "Zen 5 Mini",
+            "Cheapest Zen 5; batch and helper turns. 32K context.",
+            &quick,
+        ),
+        hanzo(
+            "enso",
+            "Enso",
+            "Long-context reasoning outside the Zen family. 1M context.",
+            &deep,
+        ),
+        hanzo(
+            "enso-ultra",
+            "Enso Ultra",
+            "The largest Enso; slowest and most expensive of the three. 1M context.",
+            &deep,
+        ),
+        hanzo(
+            "enso-flash",
+            "Enso Flash",
+            "The fastest Enso. 256K context.",
+            &quick,
+        ),
+        hanzo(
+            "best",
+            "Best",
+            "Lets the gateway pick the model for each request.",
+            &one,
+        ),
         ModelPreset {
             id: "gpt-5.5".to_string(),
             model: "gpt-5.5".to_string(),
@@ -75,7 +180,7 @@ static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
                 },
             ],
             supported_text_verbosity: ALL_TEXT_VERBOSITY,
-            is_default: true,
+            is_default: false,
             upgrade: None,
             pro_only: false,
             show_in_picker: true,
@@ -345,7 +450,7 @@ static PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
             id: "gpt-5.1-codex-max".to_string(),
             model: "gpt-5.1-codex-max".to_string(),
             display_name: "gpt-5.1-codex-max".to_string(),
-            description: "Latest Codex-optimized flagship for deep and fast reasoning.".to_string(),
+            description: "Prior Codex-optimized model, superseded by gpt-5.3-codex.".to_string(),
             default_reasoning_effort: ReasoningEffort::Medium,
             supported_reasoning_efforts: vec![
                 ReasoningEffortPreset {
@@ -667,6 +772,32 @@ mod tests {
     #[test]
     fn only_one_default_model_is_configured() {
         assert_eq!(PRESETS.iter().filter(|preset| preset.is_default).count(), 1);
+    }
+
+    #[test]
+    fn hanzo_catalog_is_selectable_and_zen5_coder_is_the_default() {
+        let presets = builtin_model_presets(Some(AuthMode::ApiKey), false);
+        let ids: Vec<&str> = presets.iter().map(|preset| preset.id.as_str()).collect();
+        for id in [
+            "zen5-coder",
+            "zen5",
+            "zen5-pro",
+            "zen5-flash",
+            "zen5-mini",
+            "enso",
+            "enso-ultra",
+            "enso-flash",
+            "best",
+        ] {
+            assert!(ids.contains(&id), "{id} is not offered by the picker");
+        }
+
+        let default = presets
+            .iter()
+            .find(|preset| preset.is_default)
+            .expect("a default preset");
+        assert_eq!(default.id, "zen5-coder");
+        assert_eq!(ids.first(), Some(&"zen5-coder"));
     }
 
     #[test]
