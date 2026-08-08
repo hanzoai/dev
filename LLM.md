@@ -119,8 +119,15 @@ The graphs are disjoint, so there is no merge base to discover — the just-ever
 commit our tree currently matches is recorded here, and nowhere else:
 
     upstream        just-every/code
-    synced-to       00910569e0  ("Complete image generation metadata backport")
+    synced-to       7d59424890  ("fix(deps): update js-yaml to 4.3.1")
     method          3-way apply of the delta (see below)
+
+Generate the delta with `git diff --binary`. Two schema fixtures under
+`codex-rs/app-server-protocol/schema/precomputed/` are `.zst` blobs, and
+`git apply` is atomic: without full index lines it rejects those two hunks and
+silently rolls back all 371 files, reporting "Applied patch … cleanly" for
+every other file on the way. A clean worktree after an apply that printed
+success means it failed.
 
 To sync: fetch just-every, then apply the delta `<synced-to>..<their-new-head>`
 onto our tree and update the SHA above. Conflicts concentrate in the TUI
