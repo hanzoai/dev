@@ -1599,7 +1599,10 @@ impl Config {
             .or_else(|| cfg.tui.as_ref().and_then(|t| t.auto_drive.clone()))
             .unwrap_or_else(|| {
                 let mut defaults = AutoDriveSettings::default();
-                if using_chatgpt_auth {
+                // Same rule as the default model above: the provider decides, not
+                // the auth mode. A Hanzo device login persists as `ChatGPT`, so
+                // reading auth alone here handed the Hanzo Cloud an OpenAI id.
+                if model_provider_id != HANZO_PROVIDER_ID && using_chatgpt_auth {
                     defaults.model = GPT_5_CODEX_MEDIUM_MODEL.to_string();
                     defaults.model_reasoning_effort = ReasoningEffort::XHigh;
                 }
