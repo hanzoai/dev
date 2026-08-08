@@ -2564,12 +2564,12 @@ fn agents_overlay_narrow_terminal_does_not_panic() {
 #[test]
 fn agents_toggle_claude_opus_persists_via_slash_command() {
     let _lock = ENV_LOCK.lock().unwrap();
-    let env = EnvGuard::new(&["HOME", "CODE_HOME", "CODEX_HOME"]);
+    let env = EnvGuard::new(&["HOME", "CODE_HOME", "DEV_HOME"]);
     let home_dir = TempDir::new().expect("temp home");
     let code_home = TempDir::new().expect("code home");
     env.set_path("HOME", home_dir.path());
     env.set_path("CODE_HOME", code_home.path());
-    env.remove("CODEX_HOME");
+    env.remove("DEV_HOME");
 
     let mut harness = ChatWidgetHarness::new();
 

@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use code_core::config::{Config, ConfigOverrides, ConfigToml};
 use code_core::protocol::EventMsg;
-use code_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use code_core::spawn::DEV_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use code_core::CodexConversation;
 use serde_json::Value;
 use tempfile::TempDir;
@@ -108,7 +108,7 @@ where
 
 /// Returns true when network-dependent tests should be skipped.
 pub fn skip_if_no_network() -> bool {
-    if std::env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
+    if std::env::var(DEV_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
         println!(
             "Skipping test because network access is disabled inside the sandbox."
         );

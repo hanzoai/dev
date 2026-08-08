@@ -252,7 +252,7 @@ def _make_adapter_launcher(
         adapter_command = subprocess.list2cmdline([sys.executable, str(adapter_script)])
         launcher.write_text(
             "@echo off\n"
-            f'set "CODEX_CONFORMANCE_REQUIRE_AUTOMATIC_AUTH={automatic_auth}"\n'
+            f'set "DEV_CONFORMANCE_REQUIRE_AUTOMATIC_AUTH={automatic_auth}"\n'
             f"{adapter_command} %*\n",
             encoding="utf-8",
         )
@@ -260,7 +260,7 @@ def _make_adapter_launcher(
         launcher = launcher_dir / "client"
         launcher.write_text(
             "#!/bin/sh\n"
-            f"export CODEX_CONFORMANCE_REQUIRE_AUTOMATIC_AUTH={automatic_auth}\n"
+            f"export DEV_CONFORMANCE_REQUIRE_AUTOMATIC_AUTH={automatic_auth}\n"
             f'exec {shlex.quote(sys.executable)} {shlex.quote(str(adapter_script))} "$@"\n',
             encoding="utf-8",
         )
@@ -388,9 +388,9 @@ def _run_scenario(
     env = dict(base_env)
     env.update(
         {
-            "CODEX_CONFORMANCE_BINARY": str(codex_binary),
-            "CODEX_CONFORMANCE_HOME": str(adapter_home),
-            "CODEX_CONFORMANCE_ADAPTER_REPORT": str(adapter_report),
+            "DEV_CONFORMANCE_BINARY": str(codex_binary),
+            "DEV_CONFORMANCE_HOME": str(adapter_home),
+            "DEV_CONFORMANCE_ADAPTER_REPORT": str(adapter_report),
         }
     )
     command = [
@@ -493,7 +493,7 @@ def run_official_mode(
 ) -> list[OfficialScenarioResult]:
     launcher = _make_adapter_launcher(
         adapter_script,
-        require_automatic_auth=base_env.get("CODEX_CONFORMANCE_REQUIRE_AUTOMATIC_AUTH")
+        require_automatic_auth=base_env.get("DEV_CONFORMANCE_REQUIRE_AUTOMATIC_AUTH")
         == "1",
     )
     try:

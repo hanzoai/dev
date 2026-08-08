@@ -19,7 +19,7 @@ use ratatui::widgets::Wrap;
 
 use code_login::AuthMode;
 
-use code_core::config::GPT_5_CODEX_MEDIUM_MODEL;
+use code_core::config::GPT_5_DEV_MEDIUM_MODEL;
 use code_core::model_family::{derive_default_model_family, find_family_for_model};
 
 use crate::LoginStatus;
@@ -551,7 +551,7 @@ impl AuthModeWidget {
                 .model
                 .eq_ignore_ascii_case("gpt-5.1")
             {
-                let new_model = GPT_5_CODEX_MEDIUM_MODEL.to_string();
+                let new_model = GPT_5_DEV_MEDIUM_MODEL.to_string();
                 args.config.model = new_model.clone();
 
                 let family = find_family_for_model(&new_model)

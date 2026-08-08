@@ -70,7 +70,7 @@ impl Shell {
                 // turn it into a PowerShell command.
                 let first = command.first().map(String::as_str);
                 if first != Some(ps.exe.as_str()) {
-                    // TODO (CODEX_2900): Handle escaping newlines.
+                    // TODO (DEV_2900): Handle escaping newlines.
                     if command.iter().any(|a| a.contains('\n') || a.contains('\r')) {
                         return Some(command);
                     }
@@ -716,7 +716,7 @@ mod tests_windows {
                 vec!["pwsh.exe", "-NoProfile", "-Command", "echo hello"],
             ),
             (
-                // TODO (CODEX_2900): Handle escaping newlines for powershell invocation.
+                // TODO (DEV_2900): Handle escaping newlines for powershell invocation.
                 Shell::PowerShell(PowerShellConfig {
                     exe: "powershell.exe".to_string(),
                     bash_exe_fallback: Some(PathBuf::from("bash.exe")),

@@ -298,10 +298,10 @@ mod tests {
     // Happy-path tests using a mock HTTP server; skip if sandbox network is disabled.
     #[tokio::test]
     async fn test_fetch_models_happy_path() {
-        if std::env::var(code_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
+        if std::env::var(code_core::spawn::DEV_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
             tracing::info!(
                 "{} is set; skipping test_fetch_models_happy_path",
-                code_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR
+                code_core::spawn::DEV_SANDBOX_NETWORK_DISABLED_ENV_VAR
             );
             return;
         }
@@ -329,10 +329,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_probe_server_happy_path_openai_compat_and_native() {
-        if std::env::var(code_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
+        if std::env::var(code_core::spawn::DEV_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
             tracing::info!(
                 "{} set; skipping test_probe_server_happy_path_openai_compat_and_native",
-                code_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR
+                code_core::spawn::DEV_SANDBOX_NETWORK_DISABLED_ENV_VAR
             );
             return;
         }
@@ -366,10 +366,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_from_oss_provider_ok_when_server_running() {
-        if std::env::var(code_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
+        if std::env::var(code_core::spawn::DEV_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
             tracing::info!(
                 "{} set; skipping test_try_from_oss_provider_ok_when_server_running",
-                code_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR
+                code_core::spawn::DEV_SANDBOX_NETWORK_DISABLED_ENV_VAR
             );
             return;
         }
@@ -390,10 +390,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_try_from_oss_provider_err_when_server_missing() {
-        if std::env::var(code_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
+        if std::env::var(code_core::spawn::DEV_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
             tracing::info!(
                 "{} set; skipping test_try_from_oss_provider_err_when_server_missing",
-                code_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR
+                code_core::spawn::DEV_SANDBOX_NETWORK_DISABLED_ENV_VAR
             );
             return;
         }

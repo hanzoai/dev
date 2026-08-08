@@ -37,7 +37,7 @@ pub fn enter_test_runtime_guard() -> tokio::runtime::EnterGuard<'static> {
 // literal "/snapshot" so the status header's `Directory: <cwd>` segment could
 // not leak the recording machine's checkout path into a snapshot. The goal was
 // right; the mechanism is redundant here and actively harmful. Redundant
-// because CODEX_TUI_FORCE_MINIMAL_HEADER below renders a header with no
+// because DEV_TUI_FORCE_MINIMAL_HEADER below renders a header with no
 // Directory segment at all, so no snapshot contains a path to begin with.
 // Harmful because "/snapshot" does not exist on disk, and the chatwidget tests
 // that resolve sandbox write permission against the working directory then
@@ -85,10 +85,10 @@ impl ChatWidgetHarness {
     pub fn new() -> Self {
         // Stabilize time-of-day dependent greeting so VT100 snapshots remain deterministic.
         // Safe: tests run single-threaded by design.
-        unsafe { std::env::set_var("CODEX_TUI_FAKE_HOUR", "12"); }
+        unsafe { std::env::set_var("DEV_TUI_FAKE_HOUR", "12"); }
 
         unsafe {
-            std::env::set_var("CODEX_TUI_FORCE_MINIMAL_HEADER", "1");
+            std::env::set_var("DEV_TUI_FORCE_MINIMAL_HEADER", "1");
         }
 
         unsafe {

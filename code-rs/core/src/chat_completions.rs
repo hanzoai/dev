@@ -370,7 +370,7 @@ pub(crate) async fn stream_chat_completions(
     // If an Ollama context override is present, propagate it. Some Ollama
     // builds honor `num_ctx` directly in OpenAI-compatible Chat Completions,
     // and others accept it under an `options` object – include both.
-    if let Ok(val) = std::env::var("CODEX_OLLAMA_NUM_CTX") {
+    if let Ok(val) = std::env::var("DEV_OLLAMA_NUM_CTX") {
         if let Ok(n) = val.parse::<u64>() {
             if let Some(obj) = payload.as_object_mut() {
                 obj.insert("num_ctx".to_string(), json!(n));

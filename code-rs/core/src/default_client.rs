@@ -1,4 +1,4 @@
-use crate::spawn::CODEX_SANDBOX_ENV_VAR;
+use crate::spawn::DEV_SANDBOX_ENV_VAR;
 use reqwest::header::HeaderMap;
 use reqwest::header::HeaderValue;
 use std::sync::LazyLock;
@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use std::sync::RwLock;
 
 pub const DEFAULT_ORIGINATOR: &str = "code_cli_rs";
-pub const CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR: &str = "CODEX_INTERNAL_ORIGINATOR_OVERRIDE";
+pub const DEV_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR: &str = "DEV_INTERNAL_ORIGINATOR_OVERRIDE";
 
 /// Optional suffix for the Codex User-Agent string.
 ///
@@ -31,7 +31,7 @@ pub enum SetOriginatorError {
 }
 
 fn get_originator_value(provided: Option<String>) -> Originator {
-    let value = std::env::var(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR)
+    let value = std::env::var(DEV_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR)
         .ok()
         .or(provided)
         .unwrap_or(DEFAULT_ORIGINATOR.to_string());
@@ -73,7 +73,7 @@ pub fn originator() -> Originator {
         return originator.clone();
     }
 
-    if std::env::var(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR).is_ok() {
+    if std::env::var(DEV_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR).is_ok() {
         let originator = get_originator_value(None);
         if let Ok(mut guard) = ORIGINATOR.write() {
             match guard.as_ref() {
@@ -210,7 +210,7 @@ pub fn create_client(originator: &str) -> reqwest::Client {
 }
 
 fn is_sandboxed() -> bool {
-    std::env::var(CODEX_SANDBOX_ENV_VAR).as_deref() == Ok("seatbelt")
+    std::env::var(DEV_SANDBOX_ENV_VAR).as_deref() == Ok("seatbelt")
 }
 
 #[cfg(test)]
@@ -224,19 +224,19 @@ mod tests {
 
     fn set_originator_env(value: &str) {
         unsafe {
-            std::env::set_var(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR, value);
+            std::env::set_var(DEV_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR, value);
         }
     }
 
     fn remove_originator_env() {
         unsafe {
-            std::env::remove_var(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR);
+            std::env::remove_var(DEV_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR);
         }
     }
 
     fn with_originator_env_cleared<F: FnOnce()>(f: F) {
         let _lock = ORIGINATOR_ENV_LOCK.lock().expect("originator env lock");
-        let previous = std::env::var(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR).ok();
+        let previous = std::env::var(DEV_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR).ok();
         remove_originator_env();
         f();
         match previous {
@@ -255,7 +255,7 @@ mod tests {
         Fut: Future<Output = ()>,
     {
         let _lock = ORIGINATOR_ENV_LOCK.lock().expect("originator env lock");
-        let previous = std::env::var(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR).ok();
+        let previous = std::env::var(DEV_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR).ok();
         remove_originator_env();
         f().await;
         match previous {

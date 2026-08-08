@@ -43,13 +43,13 @@ use code_cli::proto;
 use code_cli::proto::ProtoCli;
 
 const CLI_COMMAND_NAME: &str = "dev";
-pub(crate) const CODEX_SECURE_MODE_ENV_VAR: &str = "CODEX_SECURE_MODE";
+pub(crate) const DEV_SECURE_MODE_ENV_VAR: &str = "DEV_SECURE_MODE";
 
 /// As early as possible in the process lifecycle, apply hardening measures
-/// if the CODEX_SECURE_MODE environment variable is set to "1".
+/// if the DEV_SECURE_MODE environment variable is set to "1".
 #[ctor::ctor]
 fn pre_main_hardening() {
-    let secure_mode = match std::env::var(CODEX_SECURE_MODE_ENV_VAR) {
+    let secure_mode = match std::env::var(DEV_SECURE_MODE_ENV_VAR) {
         Ok(value) => value,
         Err(_) => return,
     };
@@ -60,7 +60,7 @@ fn pre_main_hardening() {
 
     // Always clear this env var so child processes don't inherit it.
     unsafe {
-        std::env::remove_var(CODEX_SECURE_MODE_ENV_VAR);
+        std::env::remove_var(DEV_SECURE_MODE_ENV_VAR);
     }
 }
 
@@ -1654,9 +1654,9 @@ where
         .unwrap_or_else(|poison| poison.into_inner());
         let temp_home = TempDir::new().expect("temp code home");
         let prev_code_home = std::env::var("CODE_HOME").ok();
-        let prev_codex_home = std::env::var("CODEX_HOME").ok();
+        let prev_codex_home = std::env::var("DEV_HOME").ok();
         set_env_var("CODE_HOME", temp_home.path());
-        remove_env_var("CODEX_HOME");
+        remove_env_var("DEV_HOME");
 
         let result = f(temp_home.path());
 
@@ -1665,8 +1665,8 @@ where
             None => remove_env_var("CODE_HOME"),
         }
         match prev_codex_home {
-            Some(val) => set_env_var("CODEX_HOME", val),
-            None => remove_env_var("CODEX_HOME"),
+            Some(val) => set_env_var("DEV_HOME", val),
+            None => remove_env_var("DEV_HOME"),
         }
 
         result

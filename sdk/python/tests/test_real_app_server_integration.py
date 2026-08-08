@@ -21,10 +21,10 @@ if root_str not in sys.path:
 
 from _runtime_setup import ensure_runtime_package_installed, pinned_runtime_version
 
-RUN_REAL_CODEX_TESTS = os.environ.get("RUN_REAL_CODEX_TESTS") == "1"
+RUN_REAL_DEV_TESTS = os.environ.get("RUN_REAL_DEV_TESTS") == "1"
 pytestmark = pytest.mark.skipif(
-    not RUN_REAL_CODEX_TESTS,
-    reason="set RUN_REAL_CODEX_TESTS=1 to run real Codex integration coverage",
+    not RUN_REAL_DEV_TESTS,
+    reason="set RUN_REAL_DEV_TESTS=1 to run real Codex integration coverage",
 )
 
 # 11_cli_mini_app is interactive; we still run it by feeding one prompt, then '/exit'.
@@ -96,7 +96,7 @@ def runtime_env(tmp_path_factory: pytest.TempPathFactory) -> PreparedRuntimeEnv:
 
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join([str(isolated_site), str(ROOT / "src")])
-    env["CODEX_PYTHON_SDK_DIR"] = str(ROOT)
+    env["DEV_PYTHON_SDK_DIR"] = str(ROOT)
     return PreparedRuntimeEnv(python=python, env=env, runtime_version=runtime_version)
 
 

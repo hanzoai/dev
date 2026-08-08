@@ -88,7 +88,7 @@ fn is_temporary_internal_launch_error_message(message: &str) -> bool {
 }
 
 fn chrome_logging_enabled() -> bool {
-    env_truthy("CODE_SUBAGENT_DEBUG") || env_truthy("CODEX_BROWSER_LOG")
+    env_truthy("CODE_SUBAGENT_DEBUG") || env_truthy("DEV_BROWSER_LOG")
 }
 
 fn env_truthy(key: &str) -> bool {
@@ -102,14 +102,14 @@ fn resolve_chrome_log_path() -> Option<PathBuf> {
         return None;
     }
 
-    if let Ok(path) = std::env::var("CODEX_BROWSER_LOG_PATH") {
+    if let Ok(path) = std::env::var("DEV_BROWSER_LOG_PATH") {
         let trimmed = path.trim();
         if !trimmed.is_empty() {
             return Some(PathBuf::from(trimmed));
         }
     }
 
-    let base = if let Ok(home) = std::env::var("CODE_HOME").or_else(|_| std::env::var("CODEX_HOME")) {
+    let base = if let Ok(home) = std::env::var("CODE_HOME").or_else(|_| std::env::var("DEV_HOME")) {
         PathBuf::from(home).join("debug_logs")
     } else if let Ok(home) = std::env::var("HOME") {
         PathBuf::from(home).join(".code").join("debug_logs")

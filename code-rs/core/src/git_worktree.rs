@@ -740,8 +740,8 @@ pub async fn copy_uncommitted_to_worktree(src_root: &Path, worktree_path: &Path)
     }
 
     // Opt-in: mirror modified submodule pointers into the worktree index (no checkout/network).
-    // Enable via CODEX_BRANCH_INCLUDE_SUBMODULES=1|true|yes.
-    let include_submods = std::env::var("CODEX_BRANCH_INCLUDE_SUBMODULES")
+    // Enable via DEV_BRANCH_INCLUDE_SUBMODULES=1|true|yes.
+    let include_submods = std::env::var("DEV_BRANCH_INCLUDE_SUBMODULES")
         .ok()
         .map(|v| v.to_ascii_lowercase())
         .map(|v| v == "1" || v == "true" || v == "yes")

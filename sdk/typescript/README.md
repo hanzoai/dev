@@ -55,7 +55,7 @@ for await (const event of events) {
 Threads are persisted in `~/.codex/sessions`. If you lose the in-memory `Thread` object, reconstruct it with `resumeThread()` and keep going.
 
 ```typescript
-const savedThreadId = process.env.CODEX_THREAD_ID!;
+const savedThreadId = process.env.DEV_THREAD_ID!;
 const thread = codex.resumeThread(savedThreadId);
 await thread.run("Implement the fix");
 ```

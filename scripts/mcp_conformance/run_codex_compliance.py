@@ -454,9 +454,9 @@ def _result_detail(
 
 def _isolated_environment(codex_home: Path) -> dict[str, str]:
     env = dict(os.environ)
-    env["CODEX_HOME"] = str(codex_home)
+    env["DEV_HOME"] = str(codex_home)
     # Direct app-server MCP calls do not need a model or credentials.
-    for name in ("CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "OPENAI_API_KEY"):
+    for name in ("HANZO_API_KEY", "DEV_ACCESS_TOKEN", "OPENAI_API_KEY"):
         env.pop(name, None)
     return env
 
@@ -495,7 +495,7 @@ def _registration_command(
     command = [str(codex_binary), "mcp", "add", TEST_SERVER_NAME]
     if transport == "stdio":
         if mode == MODERN_VERSION:
-            command.extend(["--env", f"CODEX_MCP_PROTOCOL_VERSION={MODERN_VERSION}"])
+            command.extend(["--env", f"DEV_MCP_PROTOCOL_VERSION={MODERN_VERSION}"])
         return [
             *command,
             "--",
@@ -531,7 +531,7 @@ def _validate_registration(
         env = value.get("env")
         modern_opt_in = (
             isinstance(env, dict)
-            and env.get("CODEX_MCP_PROTOCOL_VERSION") == MODERN_VERSION
+            and env.get("DEV_MCP_PROTOCOL_VERSION") == MODERN_VERSION
         )
         if mode == MODERN_VERSION and not modern_opt_in:
             return False, "modern stdio registration omitted its protocol opt-in"
@@ -1155,11 +1155,11 @@ def _run_official_case(
     case = CaseResult(transport="official-http", mode=mode)
     case_home.mkdir(parents=True)
     env = _isolated_environment(case_home)
-    env["CODEX_CONFORMANCE_TIMEOUT"] = str(timeout_seconds)
-    env["CODEX_CONFORMANCE_ENABLE_MODERN_FEATURE"] = (
+    env["DEV_CONFORMANCE_TIMEOUT"] = str(timeout_seconds)
+    env["DEV_CONFORMANCE_ENABLE_MODERN_FEATURE"] = (
         "1" if enable_modern_feature else "0"
     )
-    env["CODEX_CONFORMANCE_REQUIRE_AUTOMATIC_AUTH"] = (
+    env["DEV_CONFORMANCE_REQUIRE_AUTOMATIC_AUTH"] = (
         "1" if require_automatic_auth else "0"
     )
     results = run_official_mode(

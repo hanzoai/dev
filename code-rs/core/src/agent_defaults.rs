@@ -13,8 +13,8 @@ use std::sync::LazyLock;
 const CLAUDE_ALLOWED_TOOLS: &str = "Bash(ls:*), Bash(cat:*), Bash(grep:*), Bash(git status:*), Bash(git log:*), Bash(find:*), Read, Grep, Glob, LS, WebFetch, TodoRead, TodoWrite, WebSearch";
 const CLOUD_MODEL_ENV_FLAG: &str = "CODE_ENABLE_CLOUD_AGENT_MODEL";
 
-const CODE_GPT5_CODEX_READ_ONLY: &[&str] = &["-s", "read-only", "exec", "--skip-git-repo-check"];
-const CODE_GPT5_CODEX_WRITE: &[&str] = &["-s", "workspace-write", "--dangerously-bypass-approvals-and-sandbox", "exec", "--skip-git-repo-check"];
+const CODE_GPT5_DEV_READ_ONLY: &[&str] = &["-s", "read-only", "exec", "--skip-git-repo-check"];
+const CODE_GPT5_DEV_WRITE: &[&str] = &["-s", "workspace-write", "--dangerously-bypass-approvals-and-sandbox", "exec", "--skip-git-repo-check"];
 const CODE_GPT5_READ_ONLY: &[&str] = &["-s", "read-only", "exec", "--skip-git-repo-check"];
 const CODE_GPT5_WRITE: &[&str] = &["-s", "workspace-write", "--dangerously-bypass-approvals-and-sandbox", "exec", "--skip-git-repo-check"];
 const CLAUDE_SONNET_READ_ONLY: &[&str] = &["--allowedTools", CLAUDE_ALLOWED_TOOLS];
@@ -31,8 +31,8 @@ const COPILOT_READ_ONLY: &[&str] = &["--autopilot", "--allow-all-tools", "--no-a
 const COPILOT_WRITE: &[&str] = &["--autopilot", "--yolo", "--no-ask-user", "-s"];
 const QWEN_3_CODER_READ_ONLY: &[&str] = &[];
 const QWEN_3_CODER_WRITE: &[&str] = &["-y"];
-const CLOUD_GPT5_CODEX_READ_ONLY: &[&str] = &[];
-const CLOUD_GPT5_CODEX_WRITE: &[&str] = &[];
+const CLOUD_GPT5_DEV_READ_ONLY: &[&str] = &[];
+const CLOUD_GPT5_DEV_WRITE: &[&str] = &[];
 const MODELS_MANIFEST: &str = include_str!("../../../vendor/codex/models-manager/models.json");
 
 /// Canonical list of built-in agent model slugs used when no `[[agents]]`
@@ -122,8 +122,8 @@ const AGENT_MODEL_SPECS: &[AgentModelSpec] = &[
         slug: "code-gpt-5.6-luna",
         family: "code",
         cli: "coder",
-        read_only_args: CODE_GPT5_CODEX_READ_ONLY,
-        write_args: CODE_GPT5_CODEX_WRITE,
+        read_only_args: CODE_GPT5_DEV_READ_ONLY,
+        write_args: CODE_GPT5_DEV_WRITE,
         model_args: &["--model", "gpt-5.6-luna"],
         description: "Budget coding agent for small changes and quick refactors; use when speed and cost matter.",
         enabled_by_default: true,
@@ -145,8 +145,8 @@ const AGENT_MODEL_SPECS: &[AgentModelSpec] = &[
         slug: "code-gpt-5.3-codex",
         family: "code",
         cli: "coder",
-        read_only_args: CODE_GPT5_CODEX_READ_ONLY,
-        write_args: CODE_GPT5_CODEX_WRITE,
+        read_only_args: CODE_GPT5_DEV_READ_ONLY,
+        write_args: CODE_GPT5_DEV_WRITE,
         model_args: &["--model", "gpt-5.3-codex"],
         description: "Primary coding agent for implementation and multi-file edits; strong speed and reliability.",
         enabled_by_default: false,
@@ -169,8 +169,8 @@ const AGENT_MODEL_SPECS: &[AgentModelSpec] = &[
         slug: "code-gpt-5.3-codex-spark",
         family: "code",
         cli: "coder",
-        read_only_args: CODE_GPT5_CODEX_READ_ONLY,
-        write_args: CODE_GPT5_CODEX_WRITE,
+        read_only_args: CODE_GPT5_DEV_READ_ONLY,
+        write_args: CODE_GPT5_DEV_WRITE,
         model_args: &["--model", "gpt-5.3-codex-spark"],
         description: "Fast codex variant tuned for responsive coding loops and smaller edits.",
         enabled_by_default: false,
@@ -302,8 +302,8 @@ const AGENT_MODEL_SPECS: &[AgentModelSpec] = &[
         slug: "cloud-gpt-5.1-codex-max",
         family: "cloud",
         cli: "cloud",
-        read_only_args: CLOUD_GPT5_CODEX_READ_ONLY,
-        write_args: CLOUD_GPT5_CODEX_WRITE,
+        read_only_args: CLOUD_GPT5_DEV_READ_ONLY,
+        write_args: CLOUD_GPT5_DEV_WRITE,
         model_args: &["--model", "gpt-5.1-codex-max"],
         description: "Cloud-hosted gpt-5.1-codex-max agent; use for remote runs when enabled via CODE_ENABLE_CLOUD_AGENT_MODEL.",
         enabled_by_default: false,

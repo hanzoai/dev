@@ -7,7 +7,7 @@ use reqwest::cookie::CookieStore;
 use reqwest::cookie::Jar;
 use reqwest::header::HeaderValue;
 
-pub const CODEX_CA_CERTIFICATE_ENV_VAR: &str = "CODEX_CA_CERTIFICATE";
+pub const DEV_CA_CERTIFICATE_ENV_VAR: &str = "DEV_CA_CERTIFICATE";
 
 static SHARED_CHATGPT_CLOUDFLARE_COOKIE_STORE: LazyLock<Arc<ChatGptCloudflareCookieStore>> =
     LazyLock::new(|| Arc::new(ChatGptCloudflareCookieStore::default()));
@@ -130,7 +130,7 @@ pub fn apply_extra_root_certificates(
             .ok()
     }
 
-    let codex_ca_certificate = std::env::var(CODEX_CA_CERTIFICATE_ENV_VAR)
+    let codex_ca_certificate = std::env::var(DEV_CA_CERTIFICATE_ENV_VAR)
         .ok()
         .filter(|value| !value.trim().is_empty());
     let ssl_cert_file = std::env::var("SSL_CERT_FILE")
@@ -184,7 +184,7 @@ pub fn apply_extra_root_certificates(
 }
 
 /// Build a reqwest Client with optional extra root certificates loaded from
-/// common environment variables. `CODEX_CA_CERTIFICATE` takes precedence over
+/// common environment variables. `DEV_CA_CERTIFICATE` takes precedence over
 /// `SSL_CERT_FILE`, and other ecosystem-standard CA bundle variables continue
 /// to work as fallbacks.
 pub fn build_http_client() -> reqwest::Client {

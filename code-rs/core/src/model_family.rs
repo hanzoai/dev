@@ -17,11 +17,11 @@ use once_cell::sync::Lazy;
 const BASE_INSTRUCTIONS: &str = include_str!("../prompt.md");
 const BASE_INSTRUCTIONS_WITH_APPLY_PATCH: &str =
     include_str!("../prompt_with_apply_patch_instructions.md");
-const GPT_5_CODEX_INSTRUCTIONS: &str = include_str!("../gpt_5_codex_prompt.md");
+const GPT_5_DEV_INSTRUCTIONS: &str = include_str!("../gpt_5_codex_prompt.md");
 const GPT_5_1_INSTRUCTIONS: &str = include_str!("../gpt_5_1_prompt.md");
 const GPT_5_2_INSTRUCTIONS: &str = include_str!("../gpt_5_2_prompt.md");
-const GPT_5_1_CODEX_MAX_INSTRUCTIONS: &str = include_str!("../gpt-5.1-codex-max_prompt.md");
-const GPT_5_2_CODEX_INSTRUCTIONS: &str = include_str!("../gpt-5.2-codex_prompt.md");
+const GPT_5_1_DEV_MAX_INSTRUCTIONS: &str = include_str!("../gpt-5.1-codex-max_prompt.md");
+const GPT_5_2_DEV_INSTRUCTIONS: &str = include_str!("../gpt-5.2-codex_prompt.md");
 const DEFAULT_PERSONALITY_HEADER: &str = "You are Hanzo Dev, a coding agent. You and the user share the same workspace and collaborate to achieve the user's goals.";
 const LOCAL_FRIENDLY_TEMPLATE: &str =
     "You optimize for team morale and being a supportive teammate as much as code quality.";
@@ -328,7 +328,7 @@ pub fn find_family_for_model(slug: &str) -> Option<ModelFamily> {
         model_family!(
             slug, slug,
             supports_reasoning_summaries: true,
-            base_instructions: GPT_5_CODEX_INSTRUCTIONS.to_string(),
+            base_instructions: GPT_5_DEV_INSTRUCTIONS.to_string(),
             apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
             supports_parallel_tool_calls: true,
             default_reasoning_effort: Some(ReasoningEffort::Medium),
@@ -339,7 +339,7 @@ pub fn find_family_for_model(slug: &str) -> Option<ModelFamily> {
         model_family!(
             slug, slug,
             supports_reasoning_summaries: true,
-            base_instructions: GPT_5_2_CODEX_INSTRUCTIONS.to_string(),
+            base_instructions: GPT_5_2_DEV_INSTRUCTIONS.to_string(),
             apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
             supports_parallel_tool_calls: true,
             truncation_policy: TruncationPolicy::Tokens(10_000),
@@ -357,7 +357,7 @@ pub fn find_family_for_model(slug: &str) -> Option<ModelFamily> {
         model_family!(
             slug, slug,
             supports_reasoning_summaries: true,
-            base_instructions: GPT_5_1_CODEX_MAX_INSTRUCTIONS.to_string(),
+            base_instructions: GPT_5_1_DEV_MAX_INSTRUCTIONS.to_string(),
             apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
             context_window: Some(CONTEXT_WINDOW_272K),
             max_output_tokens: Some(MAX_OUTPUT_DEFAULT),
@@ -370,7 +370,7 @@ pub fn find_family_for_model(slug: &str) -> Option<ModelFamily> {
         model_family!(
             slug, slug,
             supports_reasoning_summaries: true,
-            base_instructions: GPT_5_CODEX_INSTRUCTIONS.to_string(),
+            base_instructions: GPT_5_DEV_INSTRUCTIONS.to_string(),
             apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
             context_window: Some(CONTEXT_WINDOW_272K),
             max_output_tokens: Some(MAX_OUTPUT_DEFAULT),
@@ -381,7 +381,7 @@ pub fn find_family_for_model(slug: &str) -> Option<ModelFamily> {
         model_family!(
             slug, slug,
             supports_reasoning_summaries: true,
-            base_instructions: GPT_5_2_CODEX_INSTRUCTIONS.to_string(),
+            base_instructions: GPT_5_2_DEV_INSTRUCTIONS.to_string(),
             apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
             supports_parallel_tool_calls: true,
             context_window: Some(CONTEXT_WINDOW_272K),
@@ -393,7 +393,7 @@ pub fn find_family_for_model(slug: &str) -> Option<ModelFamily> {
         model_family!(
             slug, slug,
             supports_reasoning_summaries: true,
-            base_instructions: GPT_5_2_CODEX_INSTRUCTIONS.to_string(),
+            base_instructions: GPT_5_2_DEV_INSTRUCTIONS.to_string(),
             apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
             supports_parallel_tool_calls: true,
             context_window: Some(CONTEXT_WINDOW_272K),
@@ -404,7 +404,7 @@ pub fn find_family_for_model(slug: &str) -> Option<ModelFamily> {
         model_family!(
             slug, slug,
             supports_reasoning_summaries: true,
-            base_instructions: GPT_5_2_CODEX_INSTRUCTIONS.to_string(),
+            base_instructions: GPT_5_2_DEV_INSTRUCTIONS.to_string(),
             apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
             supports_parallel_tool_calls: true,
             context_window: Some(CONTEXT_WINDOW_272K),

@@ -179,7 +179,7 @@ fn version_filepath(config: &Config) -> PathBuf {
 }
 
 pub fn resolve_upgrade_resolution() -> UpgradeResolution {
-    if std::env::var_os("CODEX_MANAGED_BY_NPM").is_some() {
+    if std::env::var_os("DEV_MANAGED_BY_NPM").is_some() {
         return UpgradeResolution::Command {
             command: vec![
                 "npm".to_string(),

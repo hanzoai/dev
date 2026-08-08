@@ -233,7 +233,7 @@ def test_shipping_legacy_registration_preserves_the_reserved_protocol_environmen
         "add",
         "mcp_spec_fixture",
         "--env",
-        f"CODEX_MCP_PROTOCOL_VERSION={LEGACY_ENVIRONMENT_SENTINEL}",
+        f"DEV_MCP_PROTOCOL_VERSION={LEGACY_ENVIRONMENT_SENTINEL}",
         "--",
         sys.executable,
         "/src/server.py",
@@ -256,7 +256,7 @@ def test_modern_registration_explicitly_opts_into_the_modern_protocol() -> None:
         http_url=None,
     )
 
-    assert f"CODEX_MCP_PROTOCOL_VERSION={MODERN_VERSION}" in command
+    assert f"DEV_MCP_PROTOCOL_VERSION={MODERN_VERSION}" in command
 
 
 def test_http_review_registration_requires_a_real_fixture_url() -> None:

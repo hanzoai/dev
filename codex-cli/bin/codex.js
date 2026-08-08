@@ -145,7 +145,7 @@ const updatedPath = getUpdatedPath(additionalDirs);
 
 const child = spawn(binaryPath, process.argv.slice(2), {
   stdio: "inherit",
-  env: { ...process.env, PATH: updatedPath, CODEX_MANAGED_BY_NPM: "1" },
+  env: { ...process.env, PATH: updatedPath, DEV_MANAGED_BY_NPM: "1" },
 });
 
 child.on("error", (err) => {

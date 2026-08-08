@@ -52,7 +52,7 @@ const SEARCH_TOOL_DEVELOPER_INSTRUCTIONS: &str =
     include_str!("../../templates/search_tool/developer_instructions.md");
 const TOOL_SEARCH_TOOL_NAME: &str = "tool_search";
 const LEGACY_SEARCH_TOOL_BM25_TOOL_NAME: &str = "search_tool_bm25";
-const CODEX_APPS_TOOL_PREFIX: &str = "mcp__codex_apps__";
+const DEV_APPS_TOOL_PREFIX: &str = "mcp__codex_apps__";
 const GENERATED_IMAGE_ARTIFACTS_DIR: &str = "generated_images";
 const AUTO_CONTEXT_JUDGE_MIN_TOKENS: u64 = 150_000;
 const AUTO_CONTEXT_FORCE_COMPACT_MARGIN_TOKENS: u64 = 20_000;
@@ -3666,7 +3666,7 @@ fn select_mcp_tools_for_turn(
     mcp_tools
         .into_iter()
         .filter(|(name, _tool)| {
-            if !name.starts_with(CODEX_APPS_TOOL_PREFIX) {
+            if !name.starts_with(DEV_APPS_TOOL_PREFIX) {
                 return true;
             }
             selected.contains(name)
@@ -14329,7 +14329,7 @@ pub(super) fn debug_history(label: &str, items: &[ResponseItem]) {
         })
         .collect();
     let rendered = preview.join(" | ");
-    if std::env::var_os("CODEX_COMPACT_TRACE").is_some() {
+    if std::env::var_os("DEV_COMPACT_TRACE").is_some() {
         eprintln!("[compact_history] {} => [{}]", label, rendered);
     }
     info!(target = "code_core::compact_history", "{} => [{}]", label, rendered);

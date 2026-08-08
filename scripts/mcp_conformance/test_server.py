@@ -891,7 +891,7 @@ def test_review_protocol_env_is_available_to_a_legacy_client() -> None:
     assert any(tool["name"] == "review_protocol_env" for tool in tools["tools"])
 
     with patch.dict(
-        "os.environ", {"CODEX_MCP_PROTOCOL_VERSION": "legacy-review-sentinel"}
+        "os.environ", {"DEV_MCP_PROTOCOL_VERSION": "legacy-review-sentinel"}
     ):
         plan = server.handle(
             request(
@@ -913,7 +913,7 @@ def test_review_protocol_env_is_available_to_the_shipping_legacy_client() -> Non
     assert any(tool["name"] == "review_protocol_env" for tool in tools["tools"])
 
     with patch.dict(
-        "os.environ", {"CODEX_MCP_PROTOCOL_VERSION": "shipping-legacy-sentinel"}
+        "os.environ", {"DEV_MCP_PROTOCOL_VERSION": "shipping-legacy-sentinel"}
     ):
         plan = server.handle(
             request(
@@ -929,7 +929,7 @@ def test_review_protocol_env_is_available_to_the_shipping_legacy_client() -> Non
 def test_review_protocol_env_is_available_to_a_modern_client() -> None:
     server = ProtocolServer(MODERN_VERSION, profile=REVIEW_PROFILE)
 
-    with patch.dict("os.environ", {"CODEX_MCP_PROTOCOL_VERSION": MODERN_VERSION}):
+    with patch.dict("os.environ", {"DEV_MCP_PROTOCOL_VERSION": MODERN_VERSION}):
         plan = server.handle(
             request(
                 "tools/call",

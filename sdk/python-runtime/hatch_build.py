@@ -20,7 +20,7 @@ class RuntimeBuildHook(BuildHookInterface):
             )
 
         platform_tag = self.config.get("platform-tag") or os.environ.get(
-            "CODEX_CLI_BIN_PLATFORM_TAG"
+            "DEV_CLI_BIN_PLATFORM_TAG"
         )
         if not isinstance(platform_tag, str) or not platform_tag:
             platform_tag = _platform_tag()

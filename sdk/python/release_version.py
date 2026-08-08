@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Sequence
 
 _PYTHON_RUNTIME_VERSION_PATTERN = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+(?:a[0-9]+(?:\.post[0-9]+)?)?")
-_NORMALIZED_CODEX_VERSION_PATTERN = re.compile(
+_NORMALIZED_DEV_VERSION_PATTERN = re.compile(
     r"[0-9]+(?:\.[0-9]+)*(?:(?:a|b|rc)[0-9]+)?(?:\.post[0-9]+)?"
 )
 
@@ -77,7 +77,7 @@ def normalize_codex_version(version: str) -> str:
     normalized = re.sub(r"-beta\.?([0-9]+)$", r"b\1", normalized)
     normalized = re.sub(r"-rc\.?([0-9]+)$", r"rc\1", normalized)
 
-    if _NORMALIZED_CODEX_VERSION_PATTERN.fullmatch(normalized) is None:
+    if _NORMALIZED_DEV_VERSION_PATTERN.fullmatch(normalized) is None:
         raise RuntimeError(f"Could not normalize Codex version {version!r} to a PEP 440 version")
     return normalized
 

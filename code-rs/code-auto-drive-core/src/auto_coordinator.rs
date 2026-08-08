@@ -1825,7 +1825,7 @@ pub fn start_auto_coordinator(
     debug_enabled: bool,
     derive_goal_from_history: bool,
 ) -> Result<AutoCoordinatorHandle> {
-    if std::env::var_os("CODEX_DEBUG_AUTO_COORDINATOR").is_some() {
+    if std::env::var_os("DEV_DEBUG_AUTO_COORDINATOR").is_some() {
         eprintln!(
             "start_auto_coordinator invoked\n{:?}",
             std::backtrace::Backtrace::force_capture()

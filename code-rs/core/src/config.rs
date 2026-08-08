@@ -155,7 +155,7 @@ pub const HANZO_DEFAULT_REVIEW_MODEL: &str = "zen5-coder";
 /// provider. They are not `dev`'s defaults.
 pub(crate) const OPENAI_DEFAULT_MODEL: &str = "gpt-5.5";
 const OPENAI_DEFAULT_REVIEW_MODEL: &str = "gpt-5.5";
-pub const GPT_5_CODEX_MEDIUM_MODEL: &str = "gpt-5.5";
+pub const GPT_5_DEV_MEDIUM_MODEL: &str = "gpt-5.5";
 pub(crate) const DEFAULT_SUBAGENT_MAX_DEPTH: i32 = 1;
 
 /// Maximum number of bytes of the documentation that will be embedded. Larger
@@ -419,7 +419,7 @@ pub struct Config {
     pub project_doc_fallback_filenames: Vec<String>,
 
     /// Directory containing all Codex state (defaults to `~/.code`; can be
-    /// overridden by the `CODE_HOME` or `CODEX_HOME` environment variables).
+    /// overridden by the `CODE_HOME` or `DEV_HOME` environment variables).
     pub code_home: PathBuf,
 
     /// Settings that govern if and what will be written to `~/.code/history.jsonl`
@@ -1331,7 +1331,7 @@ impl Config {
         let default_model_slug = if model_provider_id == HANZO_PROVIDER_ID {
             HANZO_DEFAULT_MODEL
         } else if using_chatgpt_auth {
-            GPT_5_CODEX_MEDIUM_MODEL
+            GPT_5_DEV_MEDIUM_MODEL
         } else {
             OPENAI_DEFAULT_MODEL
         };
@@ -1603,7 +1603,7 @@ impl Config {
                 // the auth mode. A Hanzo device login persists as `ChatGPT`, so
                 // reading auth alone here handed the Hanzo Cloud an OpenAI id.
                 if model_provider_id != HANZO_PROVIDER_ID && using_chatgpt_auth {
-                    defaults.model = GPT_5_CODEX_MEDIUM_MODEL.to_string();
+                    defaults.model = GPT_5_DEV_MEDIUM_MODEL.to_string();
                     defaults.model_reasoning_effort = ReasoningEffort::XHigh;
                 }
                 defaults
@@ -2171,12 +2171,12 @@ theme = "catppuccin-mocha"
 
         let _home_guard = EnvVarGuard::new("HOME");
         let _code_home_guard = EnvVarGuard::new("CODE_HOME");
-        let _codex_home_guard = EnvVarGuard::new("CODEX_HOME");
+        let _codex_home_guard = EnvVarGuard::new("DEV_HOME");
 
         unsafe {
             std::env::set_var("HOME", legacy_home.path());
             std::env::remove_var("CODE_HOME");
-            std::env::remove_var("CODEX_HOME");
+            std::env::remove_var("DEV_HOME");
         }
 
         let loaded = Config::load_instructions(Some(code_home.path()));

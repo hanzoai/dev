@@ -643,7 +643,7 @@ impl Session {
                     .map(|auth| auth.mode);
 
                 let default_model_slug = if auth_mode.is_some_and(code_app_server_protocol::AuthMode::is_chatgpt) {
-                    crate::config::GPT_5_CODEX_MEDIUM_MODEL
+                    crate::config::GPT_5_DEV_MEDIUM_MODEL
                 } else {
                     crate::config::OPENAI_DEFAULT_MODEL
                 };
