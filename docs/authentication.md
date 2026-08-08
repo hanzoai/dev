@@ -1,8 +1,24 @@
 # Authentication
 
-## Usage-based billing alternative: Use an OpenAI API key
+## Signing in
 
-If you prefer to pay-as-you-go, you can still authenticate with your OpenAI API key by setting it as an environment variable:
+Dev talks to the Hanzo gateway (`api.hanzo.ai/v1`) by default. Sign in once and
+the machine is linked to your account:
+
+```shell
+hanzo auth login
+```
+
+That fills in `HANZO_USER_KEY`. You can also set it yourself from a key minted at
+https://hanzo.ai/settings/keys. A service that runs Dev unattended sets
+`HANZO_API_KEY` or `HANZO_MACHINE_TOKEN` instead.
+
+## Using the `openai` provider
+
+Everything below applies only when you point `model_provider` at `openai` — see
+[Configuration](./config.md#model_providers).
+
+Authenticate with an API key:
 
 ```shell
 export OPENAI_API_KEY="your-api-key-here"
@@ -11,77 +27,53 @@ export OPENAI_API_KEY="your-api-key-here"
 Alternatively, read from a file:
 
 ```shell
-code login --with-api-key < my_key.txt
+dev login --with-api-key < my_key.txt
 ```
 
-The legacy `--api-key` flag now exits with an error instructing you to use `--with-api-key` so that the key never appears in shell history or process listings.
+The key must, at minimum, have write access to the Responses API. The legacy
+`--api-key` flag exits with an error pointing at `--with-api-key`, so the key
+never appears in shell history or process listings.
 
-This key must, at minimum, have write access to the Responses API.
+To switch from an API key to a ChatGPT plan, delete `~/.code/auth.json` (and the
+legacy `~/.codex/auth.json` if it exists; on Windows both live under
+`C:\Users\USERNAME\`) and run `dev login` again.
 
-## Migrating to ChatGPT login from API key
+### Forcing a specific auth method
 
-If you've used the Code CLI before with usage-based billing via an API key and want to switch to using your ChatGPT plan, follow these steps:
-
-1. Update the CLI and ensure `code --version` is `0.5.0` or later
-2. Delete `~/.code/auth.json` (and remove the legacy `~/.codex/auth.json` if it exists; on Windows these live under `C:\\Users\\USERNAME\\.code\\auth.json` and `C:\\Users\\USERNAME\\.codex\\auth.json`)
-3. Run `code login` again
-
-## Forcing a specific auth method (advanced)
-
-You can explicitly choose which authentication Code should prefer when both are available.
-
-- To always use your API key (even when ChatGPT auth exists), set:
+When both are available, choose which one wins:
 
 ```toml
-# ~/.code/config.toml (Code also reads legacy ~/.codex/config.toml)
-preferred_auth_method = "apikey"
+# ~/.code/config.toml (a legacy ~/.codex/config.toml is also read)
+preferred_auth_method = "apikey"   # or "chatgpt" (default)
 ```
 
-Or override ad-hoc via CLI:
+Or ad-hoc: `dev --config preferred_auth_method="apikey"`.
 
-```bash
-code --config preferred_auth_method="apikey"
-```
+With `"apikey"` and a key available, the login screen is skipped. With
+`"chatgpt"`, ChatGPT auth wins if present and the API key is the fallback;
+some account types require API-key mode regardless. `/status` in the TUI reports
+which one the session is using, and the chat footer shows an “Auth: API key”
+badge when a key is in play.
 
-- To prefer ChatGPT auth (default), set:
+### Project `.env` safety
 
-```toml
-# ~/.code/config.toml (Code also reads legacy ~/.codex/config.toml)
-preferred_auth_method = "chatgpt"
-```
+Dev does not read `OPENAI_API_KEY` or `AZURE_OPENAI_API_KEY` from a project's
+local `.env` — many repos keep a key there for unrelated tooling, which would
+silently spend against the key instead of your plan. There is no opt-in.
 
-Notes:
+`~/.code/.env` (or `~/.codex/.env`) is loaded first and may hold a global
+`OPENAI_API_KEY`, and a shell-exported one is honored.
 
-- When `preferred_auth_method = "apikey"` and an API key is available, the login screen is skipped.
-- When `preferred_auth_method = "chatgpt"` (default), Code prefers ChatGPT auth if present; if only an API key is present, it will use the API key. Certain account types may also require API-key mode.
-- To check which auth method is being used during a session, use the `/status` command in the TUI.
+## Connecting on a "headless" machine
 
-## Project .env safety (OPENAI_API_KEY)
+`dev login` runs a server on `localhost:1455`. In a Docker container or over
+`ssh`, your local browser cannot reach it, so use one of these.
 
-By default, Code will no longer read `OPENAI_API_KEY` or `AZURE_OPENAI_API_KEY` from a project’s local `.env` file.
+### Copy credentials from a machine that has a browser
 
-Why: many repos include an API key in `.env` for unrelated tooling, which could cause Code to silently use the API key instead of your ChatGPT plan in that folder.
-
-What still works:
-
-- `~/.code/.env` (or `~/.codex/.env`) is loaded first and may contain your `OPENAI_API_KEY` for global use.
-- A shell-exported `OPENAI_API_KEY` is honored.
-
-Project `.env` provider keys are always ignored — there is no opt‑in.
-
-UI clarity:
-
-- When Code is using an API key, the chat footer shows a bold “Auth: API key” badge so it’s obvious which mode you’re in.
-
-## Connecting on a "Headless" Machine
-
-Today, the login process entails running a server on `localhost:1455`. If you are on a "headless" server, such as a Docker container or are `ssh`'d into a remote machine, loading `localhost:1455` in the browser on your local machine will not automatically connect to the webserver running on the _headless_ machine, so you must use one of the following workarounds:
-
-### Authenticate locally and copy your credentials to the "headless" machine
-
-The easiest solution is likely to run through the `code login` process on your local machine such that `localhost:1455` _is_ accessible in your web browser. When you complete the authentication process, an `auth.json` file should be available at `$CODE_HOME/auth.json` (defaults to `~/.code/auth.json`; Code will still read `$CODEX_HOME`/`~/.codex/auth.json` if present).
-
-Because the `auth.json` file is not tied to a specific host, once you complete the authentication flow locally, you can copy the `$CODE_HOME/auth.json` file to the headless machine and then `code` should "just work" on that machine. Note to copy a file to a Docker container, you can do:
+Complete `dev login` locally, then copy the resulting `$CODE_HOME/auth.json`
+(defaults to `~/.code/auth.json`) across — it is not tied to a host. Into a
+container:
 
 ```shell
 # substitute MY_CONTAINER with the name or id of your Docker container:
@@ -90,26 +82,18 @@ docker exec MY_CONTAINER mkdir -p "$CONTAINER_HOME/.code"
 docker cp auth.json MY_CONTAINER:"$CONTAINER_HOME/.code/auth.json"
 ```
 
-whereas if you are `ssh`'d into a remote machine, you likely want to use [`scp`](https://en.wikipedia.org/wiki/Secure_copy_protocol):
-
-```shell
-ssh user@remote 'mkdir -p ~/.code'
-scp ~/.code/auth.json user@remote:~/.code/auth.json
-```
-
-or try this one-liner:
+Or onto a remote host:
 
 ```shell
 ssh user@remote 'mkdir -p ~/.code && cat > ~/.code/auth.json' < ~/.code/auth.json
 ```
 
-### Connecting through VPS or remote
-
-If you run Code on a remote machine (VPS/server) without a local browser, the login helper starts a server on `localhost:1455` on the remote host. To complete login in your local browser, forward that port to your machine before starting the login flow:
+### Forward the login port
 
 ```bash
 # From your local machine
 ssh -L 1455:localhost:1455 <user>@<remote-host>
 ```
 
-Then, in that SSH session, run `code` and select "Sign in with ChatGPT". When prompted, open the printed URL (it will be `http://localhost:1455/...`) in your local browser. The traffic will be tunneled to the remote server.
+Then run `dev login` in that SSH session and open the printed
+`http://localhost:1455/...` URL locally. The traffic is tunneled to the remote.

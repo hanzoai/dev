@@ -1,6 +1,6 @@
 # Slash Commands
 
-The Code CLI supports a set of slash commands you can type at the start of the
+Dev supports a set of slash commands you can type at the start of the
 composer input. These commands provide quick actions, toggles, or expand into
 full prompts. This document lists all built‑in commands and what they do.
 
@@ -19,21 +19,21 @@ Notes
 - `/clear`: clear the terminal and start a new chat.
 - `/resume`: resume a past session for this folder.
 - `/rename <name>`: rename the current session (shown in the resume list).
-- `/quit`: exit Code.
-- `/exit`: exit Code.
-- `/logout`: log out of Code.
-- `/login`: manage Code sign-ins (select, add, or disconnect accounts).
+- `/quit`: exit Dev.
+- `/exit`: exit Dev.
+- `/logout`: log out of Dev.
+- `/login`: manage Dev sign-ins (select, add, or disconnect accounts).
 - `/settings [section]`: open the settings panel. Optional section argument
   jumps directly to `model`, `theme`, `agents`, `skills`, `auto`, `review`,
   `validation`, `limits`, `chrome`, `mcp`, or `notifications`.
 
 ## Workspace & Git
 
-- `/init`: create an `AGENTS.md` file with instructions for Code.
+- `/init`: create an `AGENTS.md` file with instructions for Dev.
 - `/diff`: show `git diff` (including untracked files).
 - `/copy`: copy the last assistant response as markdown.
 - `/undo`: open a snapshot picker so you can restore workspace files to a
-  previous Code snapshot and optionally rewind the conversation to that point.
+  previous Dev snapshot and optionally rewind the conversation to that point.
 - `/branch [task]`: create a worktree branch and switch to it. If a
   task/description is provided, it is used when naming the branch. Must be run
   from the repository root (not inside another branch worktree). Set
@@ -42,7 +42,7 @@ Notes
   directories are copied automatically.
 - `/merge`: merge the current worktree branch back into the default branch and
   remove the worktree. Run this from inside the worktree created by `/branch`.
-- `/push`: tell Code to commit, push, and monitor workflows with guarded
+- `/push`: tell Dev to commit, push, and monitor workflows with guarded
   instructions. If no workflows appear right away, wait briefly and check again
   before concluding none were triggered. Skips cleanup or GitHub monitoring
   steps automatically when the workspace is already clean or required
@@ -51,9 +51,9 @@ Notes
   the workspace, a specific commit, compare against another branch, or enter
   custom instructions. With a focus argument, skips the picker and uses your
   text directly. Configure Auto Resolve and the max re-reviews (defaults to 5)
-  from `/settings review` when you want Code to rerun fixes and follow-up
+  from `/settings review` when you want Dev to rerun fixes and follow-up
   checks automatically.
-- `/cloud`: browse Code Cloud tasks, view details, apply patches, and create
+- `/cloud`: browse Dev Cloud tasks, view details, apply patches, and create
   new tasks from the TUI.
 - `/cmd <name>`: run a project command defined for the current workspace.
 

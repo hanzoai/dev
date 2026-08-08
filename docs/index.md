@@ -1,6 +1,6 @@
-# Every Code Documentation
+# Hanzo Dev Documentation
 
-Use these docs to install, configure, and operate Every Code (Code).
+Use these docs to install, configure, and operate Hanzo Dev.
 
 ## Start Here
 - [Getting started](getting-started.md)
@@ -8,19 +8,20 @@ Use these docs to install, configure, and operate Every Code (Code).
 - [Authentication](authentication.md)
 - [FAQ](faq.md)
 
-## Using Code
+## Using Dev
 - [Executing commands](exec.md)
-- [Execution policy](execpolicy.md)
 - [Slash commands](slash-commands.md)
 - [Auto Drive](auto-drive.md)
 - [Agents & Subagents](agents.md)
 - [Settings overlay](settings.md)
 - [Prompts](prompts.md)
+- [Skills](skills.md)
 - [Advanced usage](advanced.md)
 - [Zed integration](integration-zed.md)
 
 ## Configuration & Security
 - [Configuration](config.md)
+- [Sample configuration](example-config.md)
 - [Sandboxing overview](sandbox.md)
 - [Platform sandboxing](platform-sandboxing.md)
 - [Windows sandbox security](platform-sandboxing.md#windows)

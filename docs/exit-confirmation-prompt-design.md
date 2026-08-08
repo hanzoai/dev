@@ -1,8 +1,7 @@
 # Exit and shutdown flow (tui)
 
-This document describes how exit, shutdown, and interruption work in the Rust TUI (`codex-rs/tui`).
-It is intended for Codex developers and Codex itself when reasoning about future exit/shutdown
-changes.
+This document describes how exit, shutdown, and interruption work in the Rust TUI (`code-rs/tui`).
+It is intended for anyone reasoning about future exit/shutdown changes.
 
 This doc replaces earlier separate history and design notes. High-level history is summarized
 below; full details are captured in PR #8936.
@@ -91,6 +90,6 @@ At a minimum, we want coverage for:
 
 ## History (high level)
 
-Codex has historically mixed "exit immediately" and "shutdown-first" across quit gestures, largely
+The TUI has historically mixed "exit immediately" and "shutdown-first" across quit gestures, largely
 due to incremental changes and regressions in state tracking. This doc reflects the current
 unified, shutdown-first approach. See PR #8936 for the detailed history and rationale.
