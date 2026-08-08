@@ -1,5 +1,5 @@
 {
-  "_comment": "code-rs/** is the workspace that SHIPS. The codex-rs/** entries below guard the vendored upstream copy; the code-rs/** entries guard the product. Files carrying Hanzo identity (default provider, default model, binary name, login command) are listed explicitly so an upstream merge cannot take them back. code-rs/core/tests/hanzo_identity.rs asserts the same invariants and fails the build if it does.",
+  "_comment": "code-rs/** is the workspace that SHIPS. The vendor/codex/** entries below guard the vendored upstream copy; the code-rs/** entries guard the product. Files carrying Hanzo identity (default provider, default model, binary name, login command) are listed explicitly so an upstream merge cannot take them back. code-rs/core/tests/hanzo_identity.rs asserts the same invariants and fails the build if it does.",
   "prefer_ours_globs": [
     "code-rs/core/src/model_provider_info.rs",
     "code-rs/core/src/config.rs",
@@ -10,13 +10,13 @@
     "code-rs/exec/src/event_processor_with_human_output.rs",
     "code-rs/mcp-server/src/message_processor.rs",
     "code-rs/tui/**",
-    "codex-rs/tui/**",
+    "vendor/codex/tui/**",
     "codex-cli/**",
-    "codex-rs/core/src/openai_tools.rs",
-    "codex-rs/core/src/codex.rs",
-    "codex-rs/core/src/agent_tool.rs",
-    "codex-rs/core/src/default_client.rs",
-    "codex-rs/protocol/src/models.rs",
+    "vendor/codex/core/src/openai_tools.rs",
+    "vendor/codex/core/src/codex.rs",
+    "vendor/codex/core/src/agent_tool.rs",
+    "vendor/codex/core/src/default_client.rs",
+    "vendor/codex/protocol/src/models.rs",
     ".github/workflows/**",
     "docs/**",
     "AGENTS.md",
@@ -24,9 +24,9 @@
     "CHANGELOG.md"
   ],
   "prefer_theirs_globs": [
-    "codex-rs/common/**",
-    "codex-rs/exec/**",
-    "codex-rs/file-search/**"
+    "vendor/codex/common/**",
+    "vendor/codex/exec/**",
+    "vendor/codex/file-search/**"
   ],
   "purge_globs": [
     ".github/codex-cli-*.png",

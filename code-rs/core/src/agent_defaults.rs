@@ -33,7 +33,7 @@ const QWEN_3_CODER_READ_ONLY: &[&str] = &[];
 const QWEN_3_CODER_WRITE: &[&str] = &["-y"];
 const CLOUD_GPT5_CODEX_READ_ONLY: &[&str] = &[];
 const CLOUD_GPT5_CODEX_WRITE: &[&str] = &[];
-const MODELS_MANIFEST: &str = include_str!("../../../codex-rs/models-manager/models.json");
+const MODELS_MANIFEST: &str = include_str!("../../../vendor/codex/models-manager/models.json");
 
 /// Canonical list of built-in agent model slugs used when no `[[agents]]`
 /// entries are configured. The ordering here controls priority for legacy

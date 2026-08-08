@@ -329,13 +329,13 @@ jobs:
             echo "## Fork-relevant non-merge commits"
             echo
             git log --no-merges --no-color --format='* %h %s (%an)' --abbrev=8 "$RANGE" -- \
-              ':!codex-rs/**' \
+              ':!vendor/codex/**' \
               ':!codex-cli/.pack/**' \
               ':!docs/release-notes/**' \
               ':!CHANGELOG.md' \
               | sed -n '1,160p' || true
             total=$(git log --no-merges --format='%H' "$RANGE" -- \
-              ':!codex-rs/**' \
+              ':!vendor/codex/**' \
               ':!codex-cli/.pack/**' \
               ':!docs/release-notes/**' \
               ':!CHANGELOG.md' \
@@ -348,7 +348,7 @@ jobs:
             echo "## First-parent changed files"
             echo
             git diff --stat "$RANGE" -- \
-              ':!codex-rs/**' \
+              ':!vendor/codex/**' \
               ':!codex-cli/.pack/**' \
               ':!docs/release-notes/**' \
               ':!CHANGELOG.md' \

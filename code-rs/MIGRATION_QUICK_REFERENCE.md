@@ -21,7 +21,7 @@ find <crate-name>/src -name '*.rs' -exec sed -i 's/codex_core/code_core/g' {} +
 find <crate-name>/src -name '*.rs' -exec sed -i 's/codex_<old_name>/code_<new_name>/g' {} +
 
 # 6. Remove from workspace Cargo.toml
-vim Cargo.toml  # Delete the codex-<crate> = { path = "../codex-rs/..." } line
+vim Cargo.toml  # Delete the codex-<crate> = { path = "../vendor/codex/..." } line
 
 # 7. Build and verify
 cargo build -p code-<crate-name>

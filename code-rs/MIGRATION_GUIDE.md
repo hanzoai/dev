@@ -4,7 +4,7 @@ This guide documents the process for moving shared crates from `codex-rs` into `
 
 ## Overview
 
-The `code-rs` repository currently contains thin wrapper crates that re-export functionality from their `codex-rs` counterparts. This creates a cross-repository dependency via relative paths (`../codex-rs/...`). The migration process moves the implementation into `code-rs` so that the crate owns its code and no longer depends on `codex-rs`.
+The `code-rs` repository currently contains thin wrapper crates that re-export functionality from their `codex-rs` counterparts. This creates a cross-repository dependency via relative paths (`../vendor/codex/...`). The migration process moves the implementation into `code-rs` so that the crate owns its code and no longer depends on `codex-rs`.
 
 ## Case Study: linux-sandbox Migration
 
@@ -20,7 +20,7 @@ We successfully migrated `code-linux-sandbox` as a representative example. This 
 ### 1. Pre-Migration Analysis
 
 Before starting, understand:
-- **Source crate location**: `/home/azureuser/code/codex-rs/<crate-name>/`
+- **Source crate location**: `/home/azureuser/code/vendor/codex/<crate-name>/`
 - **Destination crate location**: `/home/azureuser/code/code-rs/<crate-name>/`
 - **Current wrapper structure**: Usually just `pub use codex_<crate>::*;`
 - **Dependencies**: What other crates does this depend on?
@@ -32,11 +32,11 @@ Copy all implementation files from codex-rs to code-rs:
 
 ```bash
 # Source modules (excluding lib.rs which needs special handling)
-cp codex-rs/<crate>/src/*.rs code-rs/<crate>/src/
+cp vendor/codex/<crate>/src/*.rs code-rs/<crate>/src/
 # Exception: main.rs will need modification
 
 # Tests (if they exist)
-cp -r codex-rs/<crate>/tests/ code-rs/<crate>/tests/
+cp -r vendor/codex/<crate>/tests/ code-rs/<crate>/tests/
 ```
 
 **Files to copy:**
@@ -104,7 +104,7 @@ pub fn run_main() -> ! {
 ```
 
 **Key considerations:**
-- Copy the exact module structure from `codex-rs/<crate>/src/lib.rs`
+- Copy the exact module structure from `vendor/codex/<crate>/src/lib.rs`
 - Keep platform-specific conditional compilation (`#[cfg(...)]`)
 - Preserve all public exports
 - Update any codex-specific naming to code-specific
@@ -162,7 +162,7 @@ Remove the cross-repository dependency reference.
 ```toml
 [workspace.dependencies]
 # ...
-codex-linux-sandbox = { path = "../codex-rs/linux-sandbox" }
+codex-linux-sandbox = { path = "../vendor/codex/linux-sandbox" }
 # ...
 ```
 

@@ -87,13 +87,13 @@ the Linux host. The cross-platform build dependency means they only run in Bazel
 For core integration tests:
 
 ```sh
-bazel test //codex-rs/core:core-all-wine-exec-test
+bazel test //vendor/codex/core:core-all-wine-exec-test
 ```
 
 For app-server integration tests:
 
 ```sh
-bazel test //codex-rs/app-server:app-server-all-wine-exec-test
+bazel test //vendor/codex/app-server:app-server-all-wine-exec-test
 ```
 
 ## Devboxes

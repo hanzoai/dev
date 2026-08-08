@@ -2,7 +2,7 @@ load("@crates//:defs.bzl", "all_crate_deps")
 load("@rules_rust//rust:defs.bzl", "rust_binary")
 load("//:defs.bzl", "workspace_root_test")
 
-_WORKSPACE_ROOT_MARKER = "//codex-rs/utils/cargo-bin:repo_root.marker"
+_WORKSPACE_ROOT_MARKER = "//vendor/codex/utils/cargo-bin:repo_root.marker"
 
 def codex_e2e_benchmark(name, binaries = [], data = [], deps = []):
     """Defines a Bazel-only Divan end-to-end benchmark.

@@ -36,7 +36,7 @@ const CONTEXT_WINDOW_1M: u64 = 1_047_576;
 const MAX_OUTPUT_DEFAULT: u64 = 128_000;
 
 static UPSTREAM_MODELS: Lazy<Vec<ModelInfo>> = Lazy::new(|| {
-    serde_json::from_str::<ModelsResponse>(include_str!("../../../codex-rs/models-manager/models.json"))
+    serde_json::from_str::<ModelsResponse>(include_str!("../../../vendor/codex/models-manager/models.json"))
         .map(|response| response.models)
         .unwrap_or_else(|err| panic!("failed to parse upstream models.json: {err}"))
 });
