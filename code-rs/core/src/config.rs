@@ -2977,15 +2977,15 @@ model_verbosity = "high"
         assert_eq!(config.auto_drive.model_routing_entries.len(), 2);
         assert_eq!(
             config.auto_drive.model_routing_entries[0].model,
-            "gpt-5.5"
+            "zen5-pro"
         );
         assert_eq!(
             config.auto_drive.model_routing_entries[0].reasoning_levels,
-            vec![ReasoningEffort::High, ReasoningEffort::XHigh]
+            vec![ReasoningEffort::High]
         );
         assert_eq!(
             config.auto_drive.model_routing_entries[1].model,
-            "gpt-5.4-mini"
+            "zen5-flash"
         );
         assert_eq!(
             config.auto_drive.model_routing_entries[1].reasoning_levels,
