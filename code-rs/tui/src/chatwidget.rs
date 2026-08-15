@@ -7282,6 +7282,7 @@ impl ChatWidget<'_> {
             w.welcome_shown = true;
             w.insert_resume_placeholder();
         }
+        w.announce_free();
         if w.test_mode {
             w.bottom_pane.set_task_running(false);
             w.bottom_pane.update_status_text(String::new());
@@ -7633,6 +7634,7 @@ impl ChatWidget<'_> {
         if show_welcome {
             w.history_push_top_next_req(history_cell::new_animated_welcome());
         }
+        w.announce_free();
         if w.test_mode {
             w.bottom_pane.set_task_running(false);
             w.bottom_pane.update_status_text(String::new());
@@ -7641,6 +7643,15 @@ impl ChatWidget<'_> {
         }
         w.maybe_start_auto_upgrade_task();
         w
+    }
+
+    /// Say what a free run costs and shares, above the first turn that uses it.
+    fn announce_free(&mut self) {
+        if code_core::free::anonymous() {
+            self.history_push_top_next_req(history_cell::new_background_event(
+                code_core::free::NOTICE.to_string(),
+            ));
+        }
     }
 
     fn auto_drive_lines_to_string(lines: Vec<Line<'static>>) -> String {
