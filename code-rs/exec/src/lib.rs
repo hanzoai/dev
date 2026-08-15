@@ -496,6 +496,11 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
             .map_err(|e| anyhow::anyhow!("OSS setup failed: {e}"))?;
     }
 
+    // Say what a free run costs and shares before it starts, not after.
+    if code_core::free::anonymous() {
+        eprintln!("{}", code_core::free::NOTICE);
+    }
+
     // Print the effective configuration and prompt so users can see what Codex
     // is using.
     let default_cwd = config.cwd.to_path_buf();

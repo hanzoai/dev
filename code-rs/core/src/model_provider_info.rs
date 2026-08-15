@@ -422,13 +422,14 @@ impl ModelProviderInfo {
         match self.api_key() {
             Ok(Some(key)) => Ok(Some(CodexAuth::from_api_key(&key))),
             Ok(None) => Ok(auth.clone()),
-            Err(err) => {
-                if auth.is_some() {
-                    Ok(auth.clone())
-                } else {
-                    Err(err)
-                }
-            }
+            Err(err) => match auth.clone() {
+                Some(auth) => Ok(Some(auth)),
+                // No account, and the Hanzo Cloud answers without one.
+                None => match self.free_key() {
+                    Some(key) => Ok(Some(CodexAuth::from_api_key(&key))),
+                    None => Err(err),
+                },
+            },
         }
     }
 
@@ -608,6 +609,16 @@ impl ModelProviderInfo {
         }))
     }
 
+    /// The credential this provider answers to without an account, if it has
+    /// one. Only the Hanzo Cloud does; every other provider still asks for a
+    /// key, which is why this reads the provider's own bearer rather than a
+    /// name or a URL that a config file can rewrite.
+    fn free_key(&self) -> Option<String> {
+        (self.env_key.as_deref() == Some(crate::free::USER_KEY))
+            .then(crate::free::key)
+            .flatten()
+    }
+
     /// Effective maximum number of request retries for this provider.
     pub fn request_max_retries(&self) -> u64 {
         self.request_max_retries
@@ -780,8 +791,9 @@ pub fn provider_from_env() -> String {
 const HANZO_BASE_URL: &str = "https://api.hanzo.ai/v1";
 
 /// The bearer `dev` reads. `hanzo code` sets it on the child process, and
-/// `hanzo auth login` is how a human fills it in.
-const HANZO_ENV_KEY: &str = "HANZO_USER_KEY";
+/// `hanzo auth login` is how a human fills it in. `free` owns the name, so the
+/// account half and the free half of the pair cannot drift apart.
+const HANZO_ENV_KEY: &str = crate::free::USER_KEY;
 const ANTHROPIC_ENV_KEY: &str = "ANTHROPIC_API_KEY";
 const OPENAI_ENV_KEY: &str = "OPENAI_API_KEY";
 

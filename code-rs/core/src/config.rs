@@ -1333,7 +1333,19 @@ impl Config {
         // meaningful to the endpoint that serves it. Asking the Hanzo Cloud for
         // an OpenAI id is a 400, and vice versa.
         let default_model_slug = if model_provider_id == HANZO_PROVIDER_ID {
-            HANZO_DEFAULT_MODEL
+            // Without an account the free pool is what answers, and it is the
+            // only thing the free credential may ask for — a coding model would
+            // be refused, so the pair moves together.
+            //
+            // A stored session counts as an account even though it sets no
+            // bearer in the environment: the request builder prefers it over the
+            // free key, so choosing the free model on its behalf would ask the
+            // wrong model with the right credential.
+            if crate::free::anonymous() && !Self::has_stored_auth(&code_home) {
+                crate::free::MODEL
+            } else {
+                HANZO_DEFAULT_MODEL
+            }
         } else if using_chatgpt_auth {
             GPT_5_DEV_MEDIUM_MODEL
         } else {
@@ -1806,6 +1818,19 @@ impl Config {
     }
 
     /// Check if we're using ChatGPT authentication
+    /// Whether a signed-in session is stored on disk, in any mode. The request
+    /// builder reaches for it before the free key, so the model default has to
+    /// see it too.
+    fn has_stored_auth(code_home: &Path) -> bool {
+        use code_app_server_protocol::AuthMode;
+        use crate::CodexAuth;
+
+        matches!(
+            CodexAuth::from_code_home(code_home, AuthMode::ApiKey, "code_cli_rs"),
+            Ok(Some(_))
+        )
+    }
+
     fn is_using_chatgpt_auth(code_home: &Path) -> bool {
         use code_app_server_protocol::AuthMode;
         use crate::CodexAuth;

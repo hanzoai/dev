@@ -1297,8 +1297,16 @@ pub enum LoginStatus {
     AuthMode(AuthMode),
 }
 
-/// Determine current login status based on auth.json presence.
+/// Determine current login status.
+///
+/// A Hanzo bearer counts before `auth.json` does. `hanzo code` sets one on the
+/// child and the free pool answers with a built-in one, so in both cases there
+/// is a credential and no file — and neither belongs on a screen offering to
+/// sign the user in to OpenAI.
 pub fn get_login_status(config: &Config) -> LoginStatus {
+    if code_core::free::signed_in() || code_core::free::anonymous() {
+        return LoginStatus::AuthMode(AuthMode::ApiKey);
+    }
     let code_home = config.code_home.clone();
     match CodexAuth::from_code_home(&code_home, AuthMode::ChatGPT, &config.responses_originator_header) {
         Ok(Some(auth)) => LoginStatus::AuthMode(auth.mode),

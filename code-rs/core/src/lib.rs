@@ -56,6 +56,7 @@ mod exec_command;
 pub mod exec_env;
 pub mod external_agent_config;
 mod flags;
+pub mod free;
 pub mod git_info;
 pub mod landlock;
 pub mod http_client;
