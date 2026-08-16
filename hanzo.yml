@@ -1,8 +1,9 @@
 # hanzoai/dev — the `dev` CLI (Rust workspace under code-rs/: core, tui, exec,
 # app-server, mcp client/server, and ~30 more crates).
 #
-# Gate only. This repo ships signed per-platform binaries and an npm wrapper
-# from .github/workflows/release.yml; there is no image and nothing to deploy.
+# Gate only: no image, nothing to deploy. The release — five per-platform
+# binaries, npm, Homebrew — is .hanzo/workflows/release.yml, one job on the
+# macOS host runner.
 #
 # THE GATE IS THE COMPILE, because for this repo nothing else is. There is no
 # meaningful lint-only proxy: the workspace is where the product lives, and a
@@ -23,6 +24,30 @@
 # found` (exit 127) and never reads a single crate. --default-toolchain none
 # leaves the choice to code-rs/rust-toolchain.toml, which pins 1.90.0.
 test:
+  # Cheap, and first, so a 300 KB blob fails in seconds rather than after the
+  # workspace compiles. This is .github/workflows/blob-size-policy.yml, which
+  # the fork added deliberately and which the canonical lane would otherwise
+  # have dropped on the floor.
+  #
+  # The base is computed here instead of read from a PR event: the old workflow
+  # took HEAD^1/HEAD^2 off GitHub's synthetic merge commit, which only exists
+  # for a pull_request run. merge-base against origin/main is the same question
+  # asked in a way that has an answer on a push too — where it resolves to HEAD
+  # and the check is a no-op, which is correct, since main's blobs already
+  # passed on the way in.
+  #
+  # The allowlist lives at .github/blob-size-allowlist.txt and stays there;
+  # only .github/workflows went away.
+  - name: blob-size
+    run: |
+      set -euo pipefail
+      git fetch --quiet --unshallow origin main 2>/dev/null || git fetch --quiet origin main
+      base=$(git merge-base origin/main HEAD)
+      python3 scripts/check_blob_size.py \
+        --base "$base" --head HEAD \
+        --max-bytes 512000 \
+        --allowlist .github/blob-size-allowlist.txt
+
   - name: cargo-check
     run: |
       set -euo pipefail

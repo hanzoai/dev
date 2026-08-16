@@ -34,7 +34,7 @@ these are contract, not preference:
 | Default model | `zen5-coder` (Zen family) | `code-rs/core/src/config.rs` |
 | Login command | `hanzo auth login` | `code-rs/core/src/auth.rs` `LOGIN_COMMAND` |
 | Canonical binary | `dev` (declared first; `code` is an alias to the same program) | `code-rs/cli/Cargo.toml` |
-| npm | `@hanzo/dev` + `@hanzo/dev-<target>` | `codex-cli/package.json`, `.github/workflows/release.yml` |
+| npm | `@hanzo/dev` + `@hanzo/dev-<target>` | `codex-cli/package.json`, `.hanzo/workflows/release.yml` |
 | Homebrew | `hanzoai/homebrew-tap`, `Formula/hanzo-dev.rb`, assets `dev-<triple>` | `scripts/generate-homebrew-formula.sh` |
 | Release repo | `hanzoai/dev` | `code-rs/tui/src/updates.rs`, `codex-cli/postinstall.js` |
 
@@ -85,7 +85,7 @@ There are exactly four places, and they must move together:
 | Update check | `code-rs/tui/src/updates.rs` `LATEST_RELEASE_URL` | `api.github.com/repos/hanzoai/dev/releases/latest` |
 | Release page | `code-rs/tui/src/updates.rs` `CODE_RELEASE_URL` | `github.com/hanzoai/dev/releases/latest` |
 | Binary download | `codex-cli/postinstall.js` `downloadUrl` | `github.com/hanzoai/dev/releases/download/v${version}/…` |
-| Asset upload | `.github/workflows/release.yml` | GitHub release assets |
+| Asset upload | `.hanzo/workflows/release.yml` | GitHub release assets, and the same files on the forge release |
 
 The forge serves its API at `/v1/`, **not** `/api/v1/` — so the update check
 becomes `git.hanzo.ai/v1/repos/hanzoai/dev/releases/latest`, and the JSON it
@@ -290,11 +290,21 @@ This architecture separates concerns between execution logic (core), UI state ma
   - `cargo test -p code-tui --test vt100_chatwidget_snapshot --features test-helpers -- --nocapture`
 - When you intentionally change rendering, review the `.snap.new` files that appear in `code-rs/tui/tests/snapshots/` and accept them with `cargo insta review` / `cargo insta accept` (limit to this test where possible).
 
-### Monitor Release Workflows After Pushing
+### The release lane
 
-- Use `scripts/wait-for-gh-run.sh` to follow GitHub Actions releases without spamming manual `gh` commands.
-- Typical release check right after a push: `scripts/wait-for-gh-run.sh --workflow Release --branch main`.
-- If you already know the run ID (e.g., from webhook output), run `scripts/wait-for-gh-run.sh --run <run-id>`.
-- Adjust the poll cadence via `--interval <seconds>` (defaults to 8). The script exits 0 on success and 1 on failure, so it can gate local automation.
-- Pass `--failure-logs` to automatically dump logs for any job that does not finish successfully.
-- Dependencies: GitHub CLI (`gh`) and `jq` must be available in `PATH`.
+CI runs on the forge (`git.hanzo.ai/hanzoai/dev`), from `.hanzo/workflows/`;
+`.github/workflows/` no longer exists. `cicd.yml` is the compile gate on the
+linux pool. `release.yml` is the release: one job on the macOS host runner
+(`runs-on: [self-hosted, macos, arm64]` — dbc-metal), every push to `main`,
+building all five targets on that one host — darwin natively, linux-musl via
+`cargo zigbuild`, windows-msvc via `cargo xwin` — then GitHub Release, forge
+release, npm (`@hanzo/dev` + five platform packages), Homebrew tap, and last the
+`chore(release): X.Y.Z [skip ci]` bump + `vX.Y.Z` tag pushed to both remotes.
+The version is the next patch above the newest tag and the newest npm package,
+so a run that dies half-published never reuses a number.
+
+Push `main` to both remotes (`origin` = GitHub, the forge = what runs CI); the
+release job pushes its bump commit to both as well.
+
+Every push to `main` on GitHub is not a release — only the forge runs the lane.
+Follow a run in the forge UI, or read `action_run` on the git database.

@@ -129,8 +129,12 @@ fn classify_poll(is_success: bool, body: &str) -> io::Result<Poll> {
         }
     }
 
-    let err: OAuthError = serde_json::from_str(body)
-        .map_err(|_| io::Error::other(format!("unexpected token response: {body}")))?;
+    // A body that is not an OAuth error is the edge answering for the issuer
+    // — a 502 page mid-wait. The grant is still pending there; keep polling
+    // and let the device code's own lifetime end it.
+    let Ok(err) = serde_json::from_str::<OAuthError>(body) else {
+        return Ok(Poll::Pending);
+    };
 
     match err.error.as_str() {
         "authorization_pending" => Ok(Poll::Pending),
@@ -413,10 +417,18 @@ mod tests {
         assert!(other.to_string().contains("nope"));
     }
 
+    /// The edge answered instead of the issuer — Cloudflare's 502 page mid-wait
+    /// killed a login that would have succeeded on the next poll. Anything that
+    /// is not an OAuth error keeps polling; the device code's lifetime ends it.
     #[test]
-    fn classify_unparseable_is_error() {
-        assert!(classify_poll(false, "<html>502</html>").is_err());
-        // A 200 with no access_token and no error shape is also an error.
-        assert!(classify_poll(true, r#"{"foo":"bar"}"#).is_err());
+    fn classify_unparseable_keeps_polling() {
+        assert!(matches!(
+            classify_poll(false, "<!DOCTYPE html><html>502</html>"),
+            Ok(Poll::Pending)
+        ));
+        assert!(matches!(
+            classify_poll(true, r#"{"foo":"bar"}"#),
+            Ok(Poll::Pending)
+        ));
     }
 }
