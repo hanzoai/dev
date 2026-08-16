@@ -1408,6 +1408,22 @@ fn sanitize_json_schema(value: &mut JsonValue) {
             if let Some(items) = map.get_mut("items") {
                 sanitize_json_schema(items);
             }
+            // `anyOf: [T, {type: null}]` is how MCP servers spell an optional
+            // T. The null arm says nothing about a value the model may send,
+            // so it goes; T alone stays, and being optional is already the
+            // caller's `required` list.
+            for combiner in ["oneOf", "anyOf"] {
+                if let Some(JsonValue::Array(arms)) = map.get_mut(combiner) {
+                    let typed: Vec<JsonValue> = arms
+                        .iter()
+                        .filter(|arm| arm.get("type").and_then(|t| t.as_str()) != Some("null"))
+                        .cloned()
+                        .collect();
+                    if !typed.is_empty() {
+                        *arms = typed;
+                    }
+                }
+            }
             // Some schemas use oneOf/anyOf/allOf - sanitize their entries
             for combiner in ["oneOf", "anyOf", "allOf", "prefixItems"] {
                 if let Some(v) = map.get_mut(combiner) {
@@ -1416,7 +1432,11 @@ fn sanitize_json_schema(value: &mut JsonValue) {
             }
 
             // Normalize/ensure type
-            let mut ty = map.get("type").and_then(|v| v.as_str()).map(str::to_string);
+            let mut ty = map
+                .get("type")
+                .and_then(|v| v.as_str())
+                .filter(|t| *t != "null")
+                .map(str::to_string);
 
             // If type is an array (union), pick first supported; else leave to inference
             if ty.is_none() {
@@ -2690,6 +2710,40 @@ mod tests {
                 strict: false,
             })
         );
+    }
+
+    /// The Hanzo MCP server spells every optional argument as
+    /// `anyOf: [T, {type: null}]`. Twenty of its tools were dropped at the
+    /// door for that null arm.
+    #[test]
+    fn test_mcp_tool_nullable_any_of_keeps_the_typed_arm() {
+        let tool = mcp_tool_to_openai_tool(
+            "hanzo__zsh".to_string(),
+            mcp_types::Tool {
+                name: "zsh".to_string(),
+                input_schema: ToolInputSchema {
+                    properties: Some(serde_json::json!({
+                        "cwd": { "anyOf": [ { "type": "string" }, { "type": "null" } ] },
+                        "timeout": { "type": ["integer", "null"] },
+                        "env": { "type": "null" }
+                    })),
+                    required: None,
+                    r#type: "object".to_string(),
+                },
+                output_schema: None,
+                title: None,
+                annotations: None,
+                description: None,
+            },
+        )
+        .expect("nullable arguments convert");
+        let parameters = serde_json::to_value(&tool.parameters).expect("serializes");
+        assert_eq!(
+            parameters["properties"]["cwd"],
+            serde_json::json!({ "anyOf": [ { "type": "string" } ] })
+        );
+        assert_eq!(parameters["properties"]["timeout"]["type"], "number");
+        assert_eq!(parameters["properties"]["env"]["type"], "string");
     }
 
     #[test]
