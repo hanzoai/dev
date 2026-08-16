@@ -497,7 +497,7 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     }
 
     // Say what a free run costs and shares before it starts, not after.
-    if code_core::free::anonymous() {
+    if code_core::free::runs(&config) {
         eprintln!("{}", code_core::free::NOTICE);
     }
 

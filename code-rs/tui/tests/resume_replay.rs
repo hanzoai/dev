@@ -12,15 +12,12 @@ use code_protocol::models::{ContentItem, ResponseItem};
 use code_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
 use serde_json::to_value;
 
+/// Every replayed assistant message in these tests says "Working"; a
+/// duplicate shows up as a second line that starts with it.
 fn assistant_cell_count(screen: &str) -> usize {
     screen
         .lines()
-        .filter(|line| line.trim_start().starts_with("• "))
-        .filter(|line| {
-            let trimmed = line.trim_start();
-            !(trimmed.contains("How can I help you today?")
-                || trimmed.contains("I can help with various tasks"))
-        })
+        .filter(|line| line.trim_start().starts_with("Working"))
         .count()
 }
 

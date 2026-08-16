@@ -114,8 +114,6 @@ impl HeightManager {
         // Optional target height for HUD computed by caller (e.g., stacked/collapsed layout).
         // When None, a default aspect-based calculation is used.
         hud_target_override: Option<u16>,
-        // When false, do not reserve rows for the status bar.
-        status_enabled: bool,
     ) -> Vec<Rect> {
         #[cfg(debug_assertions)]
         {
@@ -127,9 +125,6 @@ impl HeightManager {
             self.record_event(HeightEvent::Resize);
             self.last_area = Some(area);
         }
-
-        // Status bar height is fixed at 3 when enabled.
-        let status_h = if status_enabled { 3u16 } else { 0u16 };
 
         // Cap the bottom pane to a percentage of screen height, with a minimum of 5 rows.
         let percent_cap: u16 = ((area.height as u32).saturating_mul(self.cfg.bottom_percent_cap as u32) / 100) as u16;
@@ -188,10 +183,9 @@ impl HeightManager {
                 ((number / denom) as u16).saturating_add(1) // include borders budget
             };
 
-            // Keep within budget: reserve space for status + bottom + >=1 row history.
+            // Keep within budget: reserve space for bottom + >=1 row history.
             let vertical_budget = area
                 .height
-                .saturating_sub(status_h)
                 .saturating_sub(bottom_h)
                 .saturating_sub(1);
             let min_height = if override_target { 3 } else { 4 };
@@ -221,7 +215,7 @@ impl HeightManager {
 
         // Ensure the history area has at least one row; reduce HUD first if needed.
         let min_history = 1u16;
-        let total_non_history = status_h + bottom_h + hud_h;
+        let total_non_history = bottom_h + hud_h;
         if total_non_history.saturating_add(min_history) > area.height {
             let overflow = total_non_history.saturating_add(min_history) - area.height;
             if hud_h > 0 {
@@ -233,21 +227,16 @@ impl HeightManager {
         // Build rects in the same order used by ChatWidget::layout_areas.
         if hud_h > 0 {
             Layout::vertical([
-                Constraint::Length(status_h),
                 Constraint::Length(hud_h),
-                Constraint::Fill(1),
-                Constraint::Length(bottom_h),
-            ])
-            .areas::<4>(area)
-            .to_vec()
-        } else {
-            Layout::vertical([
-                Constraint::Length(status_h),
                 Constraint::Fill(1),
                 Constraint::Length(bottom_h),
             ])
             .areas::<3>(area)
             .to_vec()
+        } else {
+            Layout::vertical([Constraint::Fill(1), Constraint::Length(bottom_h)])
+                .areas::<2>(area)
+                .to_vec()
         }
     }
 

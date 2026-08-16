@@ -36,7 +36,7 @@ pub(crate) use assistant::{
     AssistantLayoutCache,
     AssistantMarkdownCell,
 };
-pub(crate) use animated::{AnimatedWelcomeCell, new_animated_welcome};
+pub(crate) use animated::new_animated_welcome;
 pub(crate) use background::{
     new_background_event,
     new_connecting_mcp_status,
@@ -46,7 +46,6 @@ pub(crate) use context::ContextCell;
 pub(crate) use core::{
     CommandOutput,
     ExecKind,
-    gutter_symbol_for_kind,
     HistoryCell,
     HistoryCellType,
     PatchEventType,

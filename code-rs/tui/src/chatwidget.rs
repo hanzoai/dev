@@ -21,7 +21,6 @@ use std::str::FromStr;
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 
 use ratatui::style::{Modifier, Style};
-use crate::header_wave::HeaderWaveEffect;
 use crate::auto_drive_strings;
 use crate::auto_drive_style::AutoDriveVariant;
 use crate::spinner;
@@ -884,7 +883,6 @@ const STATUS_CONTENT_PREFIX: &str = "    ";
 const RESUME_PLACEHOLDER_MESSAGE: &str = "Resuming previous session...";
 const RESUME_NO_HISTORY_NOTICE: &str =
     "No saved messages for this session. Start typing to continue.";
-const ENABLE_WARP_STRIPES: bool = false;
 
 fn auto_continue_from_config(mode: AutoDriveContinueMode) -> AutoContinueMode {
     match mode {
@@ -1941,7 +1939,6 @@ pub(crate) struct ChatWidget<'a> {
     idle_spinner_clear_started_at: Option<Instant>,
     idle_spinner_recheck_scheduled: bool,
     live_builder: RowBuilder,
-    header_wave: HeaderWaveEffect,
     browser_overlay_visible: bool,
     browser_overlay_state: BrowserOverlayState,
     // Store pending image paths keyed by their placeholder text
@@ -1960,7 +1957,6 @@ pub(crate) struct ChatWidget<'a> {
 
     // Cached cell size (width,height) in pixels
     cached_cell_size: std::cell::OnceCell<(u16, u16)>,
-    git_branch_cache: RefCell<GitBranchCache>,
 
     // Terminal information from startup
     terminal_info: crate::tui::TerminalInfo,
@@ -2314,13 +2310,6 @@ impl GhostSnapshotRequest {
 enum GhostSnapshotJobHandle {
     Scheduled(u64),
     Skipped,
-}
-
-#[derive(Default)]
-struct GitBranchCache {
-    value: Option<String>,
-    last_head_mtime: Option<SystemTime>,
-    last_refresh: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -5328,17 +5317,6 @@ impl ChatWidget<'_> {
         self.render_request_cache_dirty.set(true);
     }
 
-    fn update_welcome_height_hint(&self, height: u16) {
-        for cell in self.history_cells.iter() {
-            if let Some(welcome) = cell
-                .as_any()
-                .downcast_ref::<crate::history_cell::AnimatedWelcomeCell>()
-            {
-                welcome.set_available_height(height);
-            }
-        }
-    }
-
     fn is_frozen_cell(cell: &dyn HistoryCell) -> bool {
         cell.as_any().downcast_ref::<FrozenHistoryCell>().is_some()
     }
@@ -7040,15 +7018,6 @@ impl ChatWidget<'_> {
             // Use max width to disable wrapping during streaming
             // Text will be properly wrapped when displayed based on terminal width
             live_builder: RowBuilder::new(usize::MAX),
-            header_wave: {
-                let effect = HeaderWaveEffect::new();
-                if ENABLE_WARP_STRIPES {
-                    effect.set_enabled(true, Instant::now());
-                } else {
-                    effect.set_enabled(false, Instant::now());
-                }
-                effect
-            },
             browser_overlay_visible: false,
             browser_overlay_state: BrowserOverlayState::default(),
             pending_images: HashMap::new(),
@@ -7059,7 +7028,6 @@ impl ChatWidget<'_> {
             cached_image_protocol: RefCell::new(None),
             cached_picker: RefCell::new(terminal_info.picker.clone()),
             cached_cell_size: std::cell::OnceCell::new(),
-            git_branch_cache: RefCell::new(GitBranchCache::default()),
             terminal_info,
             active_agents: Vec::new(),
             agents_ready_to_start: false,
@@ -7431,15 +7399,6 @@ impl ChatWidget<'_> {
             idle_spinner_clear_started_at: None,
             idle_spinner_recheck_scheduled: false,
             live_builder: RowBuilder::new(usize::MAX),
-            header_wave: {
-                let effect = HeaderWaveEffect::new();
-                if ENABLE_WARP_STRIPES {
-                    effect.set_enabled(true, Instant::now());
-                } else {
-                    effect.set_enabled(false, Instant::now());
-                }
-                effect
-            },
             browser_overlay_visible: false,
             browser_overlay_state: BrowserOverlayState::default(),
             pending_images: HashMap::new(),
@@ -7450,7 +7409,6 @@ impl ChatWidget<'_> {
             cached_image_protocol: RefCell::new(None),
             cached_picker: RefCell::new(terminal_info.picker.clone()),
             cached_cell_size: std::cell::OnceCell::new(),
-            git_branch_cache: RefCell::new(GitBranchCache::default()),
             terminal_info,
             active_agents: Vec::new(),
             agents_ready_to_start: false,
@@ -7646,8 +7604,11 @@ impl ChatWidget<'_> {
     }
 
     /// Say what a free run costs and shares, above the first turn that uses it.
+    /// Whether a run is free is read from the environment, so a test render
+    /// leaves it out — a snapshot must not depend on who is signed in on the
+    /// machine that renders it.
     fn announce_free(&mut self) {
-        if code_core::free::anonymous() {
+        if !self.test_mode && code_core::free::runs(&self.config) {
             self.history_push_top_next_req(history_cell::new_background_event(
                 code_core::free::NOTICE.to_string(),
             ));
@@ -12723,7 +12684,7 @@ impl ChatWidget<'_> {
                     _ => (
                         format!("Snapshots disabled after Git error: {err}"),
                         Some(
-                            "Restart Code after resolving the issue to re-enable snapshots.".to_string(),
+                            "Restart Hanzo Dev after resolving the issue to re-enable snapshots.".to_string(),
                         ),
                     ),
                 };
@@ -12940,7 +12901,7 @@ impl ChatWidget<'_> {
             Some(
                 "Restores workspace files only. Conversation history remains unchanged.".to_string(),
             ),
-            Some("Snapshots appear once Code captures a Git checkpoint.".to_string()),
+            Some("Snapshots appear once Hanzo Dev captures a Git checkpoint.".to_string()),
             vec![
                 "No snapshot is available to restore.".to_string(),
                 "Run a command that modifies files to create the first snapshot.".to_string(),
@@ -20077,9 +20038,6 @@ Have we met every part of this goal and is there no further work to do?"#
                         self.auto_state.last_completion_explanation.clone(),
                     );
                     self.auto_turn_review_state = None;
-                    if ENABLE_WARP_STRIPES {
-                        self.header_wave.set_enabled(false, Instant::now());
-                    }
                     self.auto_request_session_summary();
                 }
                 AutoControllerEffect::TransientPause {
@@ -21681,7 +21639,7 @@ Have we met every part of this goal and is there no further work to do?"#
 
         let launch = TerminalLaunch {
             id,
-            title: "Upgrade Code".to_string(),
+            title: "Upgrade Hanzo Dev".to_string(),
             command: Vec::new(),
             command_display: display_label,
             controller: Some(controller.clone()),
@@ -30030,7 +29988,7 @@ Have we met every part of this goal and is there no further work to do?"#
     }
 
     /// Export transcript for buffer-mode mirroring: omit internal sentinels
-    /// and include gutter icons and a blank line between items for readability.
+    /// and put a blank line between items for readability.
     pub(crate) fn export_transcript_lines_for_buffer(&self) -> Vec<ratatui::text::Line<'static>> {
         let mut out: Vec<ratatui::text::Line<'static>> = Vec::new();
         for (idx, cell) in self.history_cells.iter().enumerate() {
@@ -30044,12 +30002,8 @@ Have we met every part of this goal and is there no further work to do?"#
             .map(|r| ratatui::text::Line::from(r.text))
             .collect::<Vec<_>>();
         if !streaming_lines.is_empty() {
-            // Apply gutter to streaming preview (first line gets " • ", continuations get 3 spaces)
-            if let Some(first) = streaming_lines.first_mut() {
-                first.spans.insert(0, ratatui::text::Span::raw(" • "));
-            }
-            for line in streaming_lines.iter_mut().skip(1) {
-                line.spans.insert(0, ratatui::text::Span::raw("   "));
+            for line in streaming_lines.iter_mut() {
+                line.spans.insert(0, ratatui::text::Span::raw(" "));
             }
             out.extend(streaming_lines);
             out.push(ratatui::text::Line::from(""));
@@ -30057,32 +30011,16 @@ Have we met every part of this goal and is there no further work to do?"#
         out
     }
 
-    /// Render a single history cell into terminal-friendly lines:
-    /// - Prepend a gutter icon (symbol + space) to the first line when defined.
-    /// - Add a single blank line after the cell as a separator.
+    /// Render a single history cell into terminal-friendly lines, one column
+    /// in from the edge, with a blank line after the cell as a separator.
     fn render_lines_for_terminal(
         &self,
         idx: usize,
         cell: &dyn crate::history_cell::HistoryCell,
     ) -> Vec<ratatui::text::Line<'static>> {
         let mut lines = self.cell_lines_for_terminal_index(idx, cell);
-        let _has_icon = cell.gutter_symbol().is_some();
-        let first_prefix = if let Some(sym) = cell.gutter_symbol() {
-            format!(" {} ", sym) // one space, icon, one space
-        } else {
-            "   ".to_string() // three spaces when no icon
-        };
-        if let Some(first) = lines.first_mut() {
-            first
-                .spans
-                .insert(0, ratatui::text::Span::raw(first_prefix));
-        }
-        // For wrapped/subsequent lines, use a 3-space gutter to maintain alignment
-        if lines.len() > 1 {
-            for (_idx, line) in lines.iter_mut().enumerate().skip(1) {
-                // Always 3 spaces for continuation lines
-                line.spans.insert(0, ratatui::text::Span::raw("   "));
-            }
+        for line in lines.iter_mut() {
+            line.spans.insert(0, ratatui::text::Span::raw(" "));
         }
         lines.push(ratatui::text::Line::from(""));
         lines
@@ -30112,11 +30050,7 @@ Have we met every part of this goal and is there no further work to do?"#
             return None;
         }
         let layout_areas = self.layout_areas(area);
-        let bottom_pane_area = if layout_areas.len() == 4 {
-            layout_areas[3]
-        } else {
-            layout_areas[2]
-        };
+        let bottom_pane_area = *layout_areas.last().unwrap_or(&area);
         self.bottom_pane.cursor_pos(bottom_pane_area)
     }
 
@@ -30142,286 +30076,6 @@ Have we met every part of this goal and is there no further work to do?"#
 
             size
         })
-    }
-
-    fn get_git_branch(&self) -> Option<String> {
-        use std::fs;
-        use std::path::Path;
-
-        let head_path = self.config.cwd.join(".git/HEAD");
-        let mut cache = self.git_branch_cache.borrow_mut();
-        let now = Instant::now();
-
-        let needs_refresh = match cache.last_refresh {
-            Some(last) => now.duration_since(last) >= Duration::from_millis(500),
-            None => true,
-        };
-
-        if needs_refresh {
-            let modified = fs::metadata(&head_path)
-                .and_then(|meta| meta.modified())
-                .ok();
-
-            let metadata_changed = cache.last_head_mtime != modified || cache.last_refresh.is_none();
-
-            if metadata_changed {
-                cache.value = fs::read_to_string(&head_path)
-                    .ok()
-                    .and_then(|head_contents| {
-                        let head = head_contents.trim();
-
-                        if let Some(rest) = head.strip_prefix("ref: ") {
-                            return Path::new(rest)
-                                .file_name()
-                                .and_then(|s| s.to_str())
-                                .filter(|s| !s.is_empty())
-                                .map(|name| name.to_string());
-                        }
-
-                        if head.len() >= 7
-                            && head.as_bytes().iter().all(|byte| byte.is_ascii_hexdigit())
-                        {
-                            return Some(format!("detached: {}", &head[..7]));
-                        }
-
-                        None
-                    });
-                cache.last_head_mtime = modified;
-            }
-
-            cache.last_refresh = Some(now);
-        }
-
-        cache.value.clone()
-    }
-
-    fn render_status_bar(&self, area: Rect, buf: &mut Buffer) {
-        use crate::exec_command::relativize_to_home;
-        use ratatui::layout::Margin;
-        use ratatui::style::Modifier;
-        use ratatui::style::Style;
-        use ratatui::text::Line;
-        use ratatui::text::Span;
-        use ratatui::widgets::Block;
-        use ratatui::widgets::Borders;
-        use ratatui::widgets::Paragraph;
-
-        // Add same horizontal padding as the Message input (2 chars on each side)
-        let horizontal_padding = 1u16;
-        let padded_area = Rect {
-            x: area.x + horizontal_padding,
-            y: area.y,
-            width: area.width.saturating_sub(horizontal_padding * 2),
-            height: area.height,
-        };
-
-        // Get current working directory string
-        let cwd_str = match relativize_to_home(&self.config.cwd) {
-            Some(rel) if !rel.as_os_str().is_empty() => format!("~/{}", rel.display()),
-            Some(_) => "~".to_string(),
-            None => self.config.cwd.display().to_string(),
-        };
-
-        let cwd_short_str = cwd_str
-            .rsplit(|c| c == '/' || c == '\\')
-            .find(|segment| !segment.is_empty())
-            .unwrap_or(cwd_str.as_str())
-            .to_string();
-
-        // Build status line spans with dynamic elision based on width.
-        // Removal priority when space is tight:
-        //   1) Reasoning level
-        //   2) Model
-        //   3) Branch
-        //   4) Directory
-        let branch_opt = self.get_git_branch();
-
-        // Helper to assemble spans based on include flags
-        let build_spans = |include_reasoning: bool,
-                           include_model: bool,
-                           include_branch: bool,
-                           include_dir: bool,
-                           dir_display: &str| {
-            let mut spans: Vec<Span> = Vec::new();
-            let model_display = self.config.model.clone();
-            let mut model_suffix_parts: Vec<String> = Vec::new();
-            if include_reasoning {
-                model_suffix_parts
-                    .push(Self::format_reasoning_effort(self.config.model_reasoning_effort).to_string());
-            }
-            if matches!(self.config.service_tier, Some(ServiceTier::Fast)) {
-                model_suffix_parts.push("Fast".to_string());
-            }
-            let model_label = if model_suffix_parts.is_empty() {
-                model_display
-            } else {
-                format!("{} ({})", model_display, model_suffix_parts.join(", "))
-            };
-
-            // Title follows theme text color
-            spans.push(Span::styled(
-                "Hanzo Dev",
-                Style::default()
-                    .fg(crate::colors::text())
-                    .add_modifier(Modifier::BOLD),
-            ));
-
-            if include_model {
-                spans.push(Span::styled(
-                    "  •  ",
-                    Style::default().fg(crate::colors::text_dim()),
-                ));
-                spans.push(Span::styled(
-                    "Model: ",
-                    Style::default().fg(crate::colors::text_dim()),
-                ));
-                spans.push(Span::styled(
-                    model_label,
-                    Style::default().fg(crate::colors::info()),
-                ));
-            }
-
-            if include_dir {
-                spans.push(Span::styled(
-                    "  •  ",
-                    Style::default().fg(crate::colors::text_dim()),
-                ));
-                spans.push(Span::styled(
-                    "Directory: ",
-                    Style::default().fg(crate::colors::text_dim()),
-                ));
-                spans.push(Span::styled(
-                    dir_display.to_string(),
-                    Style::default().fg(crate::colors::info()),
-                ));
-            }
-
-            if include_branch {
-                if let Some(branch) = &branch_opt {
-                    spans.push(Span::styled(
-                        "  •  ",
-                        Style::default().fg(crate::colors::text_dim()),
-                    ));
-                    spans.push(Span::styled(
-                        "Branch: ",
-                        Style::default().fg(crate::colors::text_dim()),
-                    ));
-                    spans.push(Span::styled(
-                        branch.clone(),
-                        Style::default().fg(crate::colors::success_green()),
-                    ));
-                }
-            }
-
-            // Footer already shows the Ctrl+R hint; avoid duplicating it here.
-
-            spans
-        };
-
-        // Start with all items in production; tests can opt-in to a minimal header via env flag.
-        let minimal_header = std::env::var_os("DEV_TUI_FORCE_MINIMAL_HEADER").is_some();
-        let demo_mode = self.config.demo_developer_message.is_some();
-        let mut include_reasoning = !minimal_header;
-        let mut include_model = !minimal_header;
-        let mut include_branch = !minimal_header && branch_opt.is_some();
-        let mut include_dir = !minimal_header && !demo_mode;
-        let mut use_short_dir = false;
-        let mut status_spans = build_spans(
-            include_reasoning,
-            include_model,
-            include_branch,
-            include_dir,
-            &cwd_str,
-        );
-
-        // Now recompute exact available width inside the border + padding before measuring
-        // Render a bordered status block and explicitly fill its background.
-        // Without a background fill, some terminals blend with prior frame
-        // contents, which is especially noticeable on dark themes as dark
-        // "caps" at the edges. Match the app background for consistency.
-        let status_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(crate::colors::border()))
-            .style(Style::default().bg(crate::colors::background()));
-        let inner_area = status_block.inner(padded_area);
-        let padded_inner = inner_area.inner(Margin::new(1, 0));
-        let inner_width = padded_inner.width as usize;
-
-        // Helper to measure current spans width
-        let measure =
-            |spans: &Vec<Span>| -> usize { spans.iter().map(|s| s.content.chars().count()).sum() };
-
-        if include_dir && !use_short_dir && measure(&status_spans) > inner_width {
-            use_short_dir = true;
-            status_spans = build_spans(
-                include_reasoning,
-                include_model,
-                include_branch,
-                include_dir,
-                &cwd_short_str,
-            );
-        }
-
-        // Elide items in priority order until content fits
-        while measure(&status_spans) > inner_width {
-            if include_reasoning {
-                include_reasoning = false;
-            } else if include_model {
-                include_model = false;
-            } else if include_branch {
-                include_branch = false;
-            } else if include_dir {
-                include_dir = false;
-            } else {
-                break;
-            }
-            status_spans = build_spans(
-                include_reasoning,
-                include_model,
-                include_branch,
-                include_dir,
-                if use_short_dir { &cwd_short_str } else { &cwd_str },
-            );
-        }
-
-        // Note: The reasoning visibility hint is appended inside `build_spans`
-        // so it participates in width measurement and elision. Do not append
-        // it again here to avoid overflow that caused corrupted glyph boxes on
-        // some terminals.
-
-        let status_line = Line::from(status_spans);
-
-        let now = Instant::now();
-        let mut frame_needed = false;
-        if ENABLE_WARP_STRIPES && self.header_wave.schedule_if_needed(now) {
-            frame_needed = true;
-        }
-        if frame_needed {
-            self.app_event_tx
-                .send(AppEvent::ScheduleFrameIn(HeaderWaveEffect::FRAME_INTERVAL));
-        }
-
-        // Render the block first
-        status_block.render(padded_area, buf);
-        let wave_enabled = self.header_wave.is_enabled();
-        if wave_enabled {
-            self.header_wave.render(padded_area, buf, now);
-        }
-
-        // Then render the text inside with padding, centered
-        let effect_enabled = wave_enabled;
-        let status_style = if effect_enabled {
-            Style::default().fg(crate::colors::text())
-        } else {
-            Style::default()
-                .bg(crate::colors::background())
-                .fg(crate::colors::text())
-        };
-
-        let status_widget = Paragraph::new(vec![status_line])
-            .alignment(ratatui::layout::Alignment::Center)
-            .style(status_style);
-        ratatui::widgets::Widget::render(status_widget, padded_inner, buf);
     }
 
     fn render_screenshot_highlevel(&self, path: &PathBuf, area: Rect, buf: &mut Buffer) {
@@ -42102,19 +41756,13 @@ impl WidgetRef for &ChatWidget<'_> {
         self.layout.last_frame_width.set(area.width);
 
         let layout_areas = self.layout_areas(area);
-        let status_bar_area = layout_areas.get(0).copied().unwrap_or(area);
-        let history_area = layout_areas.get(1).copied().unwrap_or(area);
-        let bottom_pane_area = layout_areas.get(2).copied().unwrap_or(area);
+        let history_area = layout_areas.get(0).copied().unwrap_or(area);
+        let bottom_pane_area = layout_areas.get(1).copied().unwrap_or(area);
 
         // Record the effective bottom pane height for buffer-mode scrollback inserts.
         self.layout
             .last_bottom_reserved_rows
             .set(bottom_pane_area.height);
-
-        // Render status bar and HUD only in full TUI mode
-        if !self.standard_terminal_mode {
-            self.render_status_bar(status_bar_area, buf);
-        }
 
         // In standard-terminal mode, do not paint the history region: committed
         // content is appended to the terminal's own scrollback via
@@ -42138,7 +41786,6 @@ impl WidgetRef for &ChatWidget<'_> {
             height: history_area.height,
         };
 
-        self.update_welcome_height_hint(content_area.height);
 
         // Reset the full history region to the baseline theme background once per frame.
         // Individual cells only repaint when their visuals differ (e.g., assistant tint),
@@ -42736,9 +42383,7 @@ impl WidgetRef for &ChatWidget<'_> {
             let item = visible
                 .cell
                 .expect("visible cell missing backing cell for render");
-            // Calculate height with reduced width due to gutter
-            const GUTTER_WIDTH: u16 = 2;
-            let content_width = content_area.width.saturating_sub(GUTTER_WIDTH);
+            let content_width = content_area.width;
             let maybe_assistant = item
                 .as_any()
                 .downcast_ref::<crate::history_cell::AssistantMarkdownCell>();
@@ -42821,21 +42466,10 @@ impl WidgetRef for &ChatWidget<'_> {
 
 
             if visible_height > 0 {
-                // Define gutter width (2 chars: symbol + space)
-                const GUTTER_WIDTH: u16 = 2;
-
-                // Split area into gutter and content
-                let gutter_area = Rect {
+                let item_area = Rect {
                     x: content_area.x,
                     y: screen_y,
-                    width: GUTTER_WIDTH.min(content_area.width),
-                    height: visible_height,
-                };
-
-                let item_area = Rect {
-                    x: content_area.x + GUTTER_WIDTH.min(content_area.width),
-                    y: screen_y,
-                    width: content_area.width.saturating_sub(GUTTER_WIDTH),
+                    width: content_area.width,
                     height: visible_height,
                 };
 
@@ -42864,176 +42498,6 @@ impl WidgetRef for &ChatWidget<'_> {
                         animating = item.is_animating(),
                         "history cell render",
                     );
-                }
-
-                // Paint gutter background. For Assistant and Auto Review, extend the tint under the
-                // gutter and also one extra column to the left (so the • has color on both sides),
-                // without changing layout or symbol positions.
-                let is_assistant =
-                    matches!(item.kind(), crate::history_cell::HistoryCellType::Assistant);
-                let is_auto_review = ChatWidget::is_auto_review_cell(item);
-                let auto_review_bg = crate::history_cell::PlainHistoryCell::auto_review_bg();
-                let gutter_bg = if is_assistant {
-                    crate::colors::assistant_bg()
-                } else if is_auto_review {
-                    auto_review_bg
-                } else {
-                    crate::colors::background()
-                };
-
-                // Paint gutter background for assistant/auto-review cells so the tinted
-                // strip appears contiguous with the message body. This avoids
-                // the light "hole" seen after we reduced redraws. For other
-                // cell types keep the default background (already painted by
-                // the frame bg fill above).
-                if (is_assistant || is_auto_review) && gutter_area.width > 0 && gutter_area.height > 0 {
-                    let _perf_gutter_start = if self.perf_state.enabled {
-                        Some(std::time::Instant::now())
-                    } else {
-                        None
-                    };
-                    let style = Style::default().bg(gutter_bg);
-                    let mut tint_x = gutter_area.x;
-                    let mut tint_width = gutter_area.width;
-                    if content_area.x > history_area.x {
-                        tint_x = content_area.x.saturating_sub(1);
-                        tint_width = tint_width.saturating_add(1);
-                    }
-                    let tint_rect = Rect::new(tint_x, gutter_area.y, tint_width, gutter_area.height);
-                    fill_rect(buf, tint_rect, Some(' '), style);
-                    // Also tint one column immediately to the right of the content area
-                    // so the assistant block is visually bookended. This column lives in the
-                    // right padding stripe; when the scrollbar is visible it will draw over
-                    // the far-right edge, which is fine.
-                    let right_col_x = content_area.x.saturating_add(content_area.width);
-                    let history_right = history_area.x.saturating_add(history_area.width);
-                    if right_col_x < history_right {
-                        let right_rect = Rect::new(right_col_x, item_area.y, 1, item_area.height);
-                        fill_rect(buf, right_rect, Some(' '), style);
-                    }
-                    if let Some(t0) = _perf_gutter_start {
-                        let dt = t0.elapsed().as_nanos();
-                        let mut p = self.perf_state.stats.borrow_mut();
-                        p.ns_gutter_paint = p.ns_gutter_paint.saturating_add(dt);
-                        // Rough accounting: area of gutter rectangle (clamped to u64)
-                        let area_cells: u64 =
-                            (gutter_area.width as u64).saturating_mul(gutter_area.height as u64);
-                        p.cells_gutter_paint = p.cells_gutter_paint.saturating_add(area_cells);
-                    }
-                }
-
-                // Render gutter symbol if present
-                if let Some(symbol) = item.gutter_symbol() {
-                    // Choose color based on symbol/type
-                    let color = if is_auto_review {
-                        crate::colors::success()
-                    } else if symbol == "❯" {
-                        // Executed arrow – color reflects exec state
-                        if let Some(exec) = item
-                            .as_any()
-                            .downcast_ref::<crate::history_cell::ExecCell>()
-                        {
-                            match &exec.output {
-                                None => crate::colors::text(), // Running...
-                                // Successful runs use the theme success color so the arrow stays visible on all themes
-                                Some(o) if o.exit_code == 0 => crate::colors::text(),
-                                Some(_) => crate::colors::error(),
-                            }
-                        } else {
-                            // Handle merged exec cells (multi-block "Ran") the same as single execs
-                            match item.kind() {
-                                crate::history_cell::HistoryCellType::Exec {
-                                    kind: crate::history_cell::ExecKind::Run,
-                                    status: crate::history::state::ExecStatus::Success,
-                                } => crate::colors::text(),
-                                crate::history_cell::HistoryCellType::Exec {
-                                    kind: crate::history_cell::ExecKind::Run,
-                                    status: crate::history::state::ExecStatus::Error,
-                                } => crate::colors::error(),
-                                crate::history_cell::HistoryCellType::Exec { .. } => {
-                                    crate::colors::text()
-                                }
-                                _ => crate::colors::text(),
-                            }
-                        }
-                    } else if symbol == "↯" {
-                        // Patch/Updated arrow color – match the header text color
-                        match item.kind() {
-                            crate::history_cell::HistoryCellType::Patch {
-                                kind: crate::history_cell::PatchKind::ApplySuccess,
-                            } => crate::colors::success(),
-                            crate::history_cell::HistoryCellType::Patch {
-                                kind: crate::history_cell::PatchKind::ApplyBegin,
-                            } => crate::colors::success(),
-                            crate::history_cell::HistoryCellType::Patch {
-                                kind: crate::history_cell::PatchKind::Proposed,
-                            } => crate::colors::primary(),
-                            crate::history_cell::HistoryCellType::Patch {
-                                kind: crate::history_cell::PatchKind::ApplyFailure,
-                            } => crate::colors::error(),
-                            _ => crate::colors::primary(),
-                        }
-                    } else if matches!(symbol, "◐" | "◓" | "◑" | "◒")
-                        && item
-                            .as_any()
-                            .downcast_ref::<crate::history_cell::RunningToolCallCell>()
-                            .map_or(false, |cell| cell.has_title("Waiting"))
-                    {
-                        crate::colors::text_bright()
-                    } else if matches!(symbol, "○" | "◔" | "◑" | "◕" | "●") {
-                        if let Some(plan_cell) = item
-                            .as_any()
-                            .downcast_ref::<crate::history_cell::PlanUpdateCell>()
-                        {
-                            if plan_cell.is_complete() {
-                                crate::colors::success()
-                            } else {
-                                crate::colors::info()
-                            }
-                        } else {
-                            crate::colors::success()
-                        }
-                    } else {
-                        match symbol {
-                            "›" => crate::colors::text(),        // user
-                            "⋮" => crate::colors::primary(),     // thinking
-                            "•" => crate::colors::text_bright(), // codex/agent
-                            "⚙" => crate::colors::info(),        // tool working
-                            "✔" => crate::colors::success(),     // tool complete
-                            "✖" => crate::colors::error(),       // error
-                            "⚠" => crate::colors::warning(),     // warning notice
-                            "★" => crate::colors::text_bright(), // notice/popular
-                            _ => crate::colors::text_dim(),
-                        }
-                    };
-
-                    // Draw the symbol anchored to the top of the message (not the viewport).
-                    // "Top of the message" accounts for any intentional top padding per cell type.
-                    // As you scroll past that anchor, the icon scrolls away with the message.
-                    if gutter_area.width >= 2 {
-                        // Anchor offset counted from the very start of the item's painted area
-                        // to the first line of its content that the icon should align with.
-                        let anchor_offset: u16 = match item.kind() {
-                            // Assistant messages render with one row of top padding so that
-                            // the content visually aligns; anchor to that second row.
-                            crate::history_cell::HistoryCellType::Assistant => 1,
-                            _ if is_auto_review => {
-                                crate::history_cell::PlainHistoryCell::auto_review_padding().0
-                            }
-                            _ => 0,
-                        };
-
-                        // If we've scrolled past the anchor line, don't render the icon.
-                        if skip_top <= anchor_offset {
-                            let rel = anchor_offset - skip_top; // rows from current viewport top
-                            let symbol_y = gutter_area.y.saturating_add(rel);
-                            if symbol_y < gutter_area.y.saturating_add(gutter_area.height) {
-                                let symbol_style = Style::default().fg(color).bg(gutter_bg);
-                                let symbol_x = gutter_area.x;
-                                buf.set_string(symbol_x, symbol_y, symbol, symbol_style);
-                            }
-                        }
-                    }
                 }
 
                 // Render only the visible window of the item using vertical skip

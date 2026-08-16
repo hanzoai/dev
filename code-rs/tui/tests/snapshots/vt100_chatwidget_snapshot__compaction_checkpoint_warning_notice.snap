@@ -2,22 +2,21 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: frame
 ---
- +----------------------------------------------------------------------------+
- |                                  Hanzo Dev                                 |
- +----------------------------------------------------------------------------+
+ Hello! How can I help you today?
 
 
 
- • I can help with various tasks including:
+ I can help with various tasks including:
 
-   - Writing code
-   - Reading files
-   - Running commands
+ - Writing code
+ - Reading files
+ - Running commands
 
 
- ★ History checkpoint: earlier conversation compacted.
+ History checkpoint: earlier conversation compacted.
 
- +----------------------------------------------------------------------------+
- | What can I code for you today?                                             |
- +----------------------------------------------------------------------------+
+
+
+  What would you like to work on?
+
  Read Only  (Shift+Tab change)                       Ctrl+G editor  •  API key

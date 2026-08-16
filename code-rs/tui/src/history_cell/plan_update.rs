@@ -130,10 +130,6 @@ impl HistoryCell for PlanUpdateCell {
 
         lines
     }
-
-    fn gutter_symbol(&self) -> Option<&'static str> {
-        Some(icon_symbol(&self.state.icon))
-    }
 }
 
 struct ProgressMeter {
@@ -153,22 +149,6 @@ fn progress_meter(progress: &PlanProgress, width: usize) -> ProgressMeter {
     ProgressMeter {
         filled: "█".repeat(filled_units),
         empty: "░".repeat(empty_units),
-    }
-}
-
-fn icon_symbol(icon: &PlanIcon) -> &'static str {
-    match icon {
-        PlanIcon::LightBulb => "💡",
-        PlanIcon::Rocket => "🚀",
-        PlanIcon::Clipboard => "📋",
-        PlanIcon::Custom(kind) => match kind.as_str() {
-            "progress-empty" => "○",
-            "progress-start" => "◔",
-            "progress-mid" => "◑",
-            "progress-late" => "◕",
-            "progress-complete" => "●",
-            _ => "•",
-        },
     }
 }
 

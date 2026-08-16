@@ -256,11 +256,6 @@ impl HistoryCell for CollapsibleReasoningCell {
             out
         }
     }
-
-    fn gutter_symbol(&self) -> Option<&'static str> {
-        None
-    }
-
     fn has_custom_render(&self) -> bool {
         true
     }

@@ -2,22 +2,19 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
- +----------------------------------------------------------------------------+
- |                                  Hanzo Dev                                 |
- +----------------------------------------------------------------------------+
- • I can help with various tasks including:
+ I can help with various tasks including:
 
-   - Writing code
-   - Reading files
-   - Running commands
+ - Writing code
+ - Reading files
+ - Running commands
 
 
- › /agents
+ /agents
 
- ✖ ⚠️  status_update: missing agent batch_id. tool=agent_status
-   agents=orphan-agent
+ ⚠️  status_update: missing agent batch_id. tool=agent_status
+ agents=orphan-agent
 
- +----------------------------- ✶ Using tools... -----------------------------+
- | What can I code for you today?                                             |
- +----------------------------------------------------------------------------+
+                                ✶ Using tools...
+  What would you like to work on?
+
  Read Only  (Shift+Tab change)                       Ctrl+G editor  •  API key

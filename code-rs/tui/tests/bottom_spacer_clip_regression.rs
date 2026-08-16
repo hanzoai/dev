@@ -65,27 +65,59 @@ fn bottom_spacer_skips_when_history_fits() {
     let _ = render_chat_widget_to_vt100(&mut harness, 120, 40);
     let metrics = layout_metrics(&harness);
 
-    assert!(
-        metrics.last_max_scroll >= 4,
-        "with the command header we intentionally reserve at least four spacer rows, got {}",
-        metrics.last_max_scroll
+    assert_eq!(
+        metrics.last_max_scroll, 0,
+        "a transcript that fits the viewport has nothing to scroll"
+    );
+    assert_eq!(
+        harness.bottom_spacer_lines(),
+        0,
+        "the spacer only exists to protect a last row the viewport would clip"
     );
 }
 
 #[test]
 fn bottom_spacer_hysteresis_requests_followup_frame() {
-    // First known viewport combo that reliably triggers the hysteresis path
-    // without exhausting file descriptors by brute-force searching.
-    let activate_h = 32;
-    let release_h = 18;
-
+    // The spacer shrinks one frame late on purpose. To see that, the first
+    // viewport must ask for two spacer rows (history height an exact multiple
+    // of the viewport) and the second for one — so both heights are derived
+    // from the transcript as rendered rather than assumed.
     let mut harness = ChatWidgetHarness::new();
     seed_overflow_wrapped_transcript(&mut harness);
 
+    // Grow the transcript one line at a time until some viewport height in
+    // range divides it exactly.
+    // The multiple is of the history viewport, which is the terminal minus
+    // the rows the composer keeps.
+    let probe_h = 24;
+    let (base, chrome, activate_h) = loop {
+        let _ = render_chat_widget_to_vt100(&mut harness, 100, probe_h);
+        let metrics = layout_metrics(&harness);
+        let chrome = probe_h - metrics.last_viewport_height;
+        let base = metrics.last_max_scroll + metrics.last_viewport_height
+            - harness.bottom_spacer_lines();
+        if let Some(h) = (chrome + 8..=probe_h)
+            .rev()
+            .find(|h| base % (h - chrome) == 0 && base > h - chrome)
+        {
+            break (base, chrome, h);
+        }
+        harness.push_assistant_markdown("One more line.");
+    };
+    let release_h = (chrome + 8..activate_h)
+        .rev()
+        .find(|h| {
+            let v = h - chrome;
+            let r = base % v;
+            r > 2 && r < v - 2
+        })
+        .expect("some viewport height leaves a middling remainder");
+
     let _ = render_chat_widget_to_vt100(&mut harness, 100, activate_h);
-    assert!(
-        harness.bottom_spacer_lines() > 0,
-        "spacer should activate for the overflowing transcript"
+    assert_eq!(
+        harness.bottom_spacer_lines(),
+        2,
+        "an exact multiple asks for two spacer rows"
     );
 
     harness.take_scheduled_frame_events();

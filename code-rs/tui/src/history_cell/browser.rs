@@ -1013,15 +1013,6 @@ impl HistoryCell for BrowserSessionCell {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-
-    fn gutter_symbol(&self) -> Option<&'static str> {
-        if self.completed {
-            Some("✔")
-        } else {
-            None
-        }
-    }
-
     fn kind(&self) -> HistoryCellType {
         let status = if self.completed {
             ToolCellStatus::Success

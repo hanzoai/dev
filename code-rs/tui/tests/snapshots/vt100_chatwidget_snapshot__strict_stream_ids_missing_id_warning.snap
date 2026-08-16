@@ -2,14 +2,14 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
- +----------------------------------------------------------------------------+
- |                                  Hanzo Dev                                 |
- +----------------------------------------------------------------------------+
+ - Writing code
+ - Reading files
+ - Running commands
 
 
- » Missing stream id for assistant answer delta
+ Missing stream id for assistant answer delta
 
- +----------------------------------------------------------------------------+
- | What can I code for you today?                                             |
- +----------------------------------------------------------------------------+
+
+  What would you like to work on?
+
  Read Only  (Shift+Tab change)                       Ctrl+G editor  •  API key

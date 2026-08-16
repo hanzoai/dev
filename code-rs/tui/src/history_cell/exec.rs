@@ -192,24 +192,6 @@ impl HistoryCell for ExecCell {
         let status = self.record.status;
         HistoryCellType::Exec { kind, status }
     }
-    fn gutter_symbol(&self) -> Option<&'static str> {
-        match self.kind() {
-            HistoryCellType::Exec {
-                kind: ExecKind::Run,
-                status,
-            } => {
-                if matches!(status, ExecStatus::Error) {
-                    Some("✖")
-                } else if self.has_bold_command {
-                    Some("❯")
-                } else {
-                    None
-                }
-            }
-            HistoryCellType::Exec { .. } => None,
-            _ => None,
-        }
-    }
     fn display_lines(&self) -> Vec<Line<'static>> {
         exec_command_lines(
             &self.command,

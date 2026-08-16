@@ -89,10 +89,6 @@ impl HistoryCell for ExploreAggregationCell {
             .try_into()
             .unwrap_or(0)
     }
-
-    fn gutter_symbol(&self) -> Option<&'static str> {
-        None
-    }
 }
 
 pub(crate) fn explore_record_push_from_parsed(
