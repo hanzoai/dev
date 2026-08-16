@@ -265,12 +265,13 @@ unwrap_used = "deny"
 ignored = ["openssl-sys", "code-utils-readiness"]
 
 [profile.release]
-lto = "fat"
+# Thin, not fat: a release is five of these binaries built one after another on
+# one Mac, and the fat-LTO single-unit link cost ~15 minutes per target for a
+# ~10% smaller file. Thin LTO links in a fraction of that.
+lto = "thin"
 # Because we bundle some of these executables with the TypeScript CLI, we
 # remove everything to make the binary as small as possible.
 strip = "symbols"
-
-# See https://github.com/openai/codex/issues/1411 for details.
 codegen-units = 1
 
 [patch.crates-io]
