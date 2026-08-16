@@ -1,0 +1,251 @@
+# Release — every push to main ships `dev`.
+#
+# One job, one host. A Mac builds all five targets: the two darwin ones
+# natively, both linux-musl through cargo-zigbuild, and windows-msvc through
+# cargo-xwin. Nothing crosses a job boundary, so there are no artifacts to hand
+# around and no partial matrix to publish by accident — either all five
+# binaries exist at the end of the build step or the run is red before it
+# publishes anything.
+#
+# Where things go, in the order they are written: GitHub Release (what the
+# updater, `postinstall.js`, `hanzo.sh` and the Homebrew formula fetch), the
+# same assets on the forge release, npm (`@hanzo/dev` and its five platform
+# packages), the Homebrew tap, then the version bump + tag on main. Publishing
+# to GitHub first is deliberate: it is the URL every installed copy already
+# has, so it must be complete before anything points at the new version.
+#
+# Runs on the dbc-metal host runner. Toolchain bootstraps into $HOME on first
+# run and is reused after; the cargo target dir lives outside the checkout so
+# a release is an incremental build, not a cold one.
+name: Release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: [self-hosted, macos, arm64]
+    timeout-minutes: 170
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      RUSTFLAGS: -Awarnings -C debuginfo=0 -C strip=symbols
+      TARGETS: aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Toolchain
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$HOME/.local/node/bin:$PATH"
+          command -v rustup >/dev/null || curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain none
+          CH=$(sed -n 's/^channel = "\(.*\)"/\1/p' code-rs/rust-toolchain.toml)
+          rustup toolchain install "$CH" --profile minimal
+          rustup target add --toolchain "$CH" $TARGETS
+          mkdir -p "$HOME/.local/bin"
+          if ! command -v zig >/dev/null; then
+            ZV=0.14.1
+            curl -fsSL "https://ziglang.org/download/$ZV/zig-macos-aarch64-$ZV.tar.xz" | tar -xJ -C "$HOME/.local"
+            ln -sf "$HOME/.local/zig-macos-aarch64-$ZV/zig" "$HOME/.local/bin/zig"
+          fi
+          command -v cargo-zigbuild >/dev/null || cargo install cargo-zigbuild --locked
+          command -v cargo-xwin >/dev/null || cargo install cargo-xwin --locked
+          if ! command -v clang-cl >/dev/null; then
+            LV=19.1.7
+            curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-$LV/LLVM-$LV-macOS-ARM64.tar.xz" | tar -xJ -C "$HOME/.local"
+            ln -sf "$HOME/.local/LLVM-$LV-macOS-ARM64/bin/clang-cl" "$HOME/.local/bin/clang-cl"
+            ln -sf "$HOME/.local/LLVM-$LV-macOS-ARM64/bin/lld-link" "$HOME/.local/bin/lld-link"
+            ln -sf "$HOME/.local/LLVM-$LV-macOS-ARM64/bin/llvm-lib" "$HOME/.local/bin/llvm-lib"
+          fi
+          if ! command -v node >/dev/null; then
+            NV=22.12.0
+            curl -fsSL "https://nodejs.org/dist/v$NV/node-v$NV-darwin-arm64.tar.gz" | tar -xz -C "$HOME/.local"
+            ln -sfn "$HOME/.local/node-v$NV-darwin-arm64" "$HOME/.local/node"
+          fi
+          command -v zstd >/dev/null || brew install zstd
+          command -v jq >/dev/null || brew install jq
+          echo "PATH=$PATH" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$HOME/.cache/hanzo-dev/target" >> "$GITHUB_ENV"
+          rustc --version; zig version; cargo xwin --version; clang-cl --version | head -1; node --version
+
+      # The version is the next patch above everything already published —
+      # the newest v* tag and the newest of the six npm packages — so a run
+      # that died after publishing some of them can never reuse the number.
+      - name: Version
+        id: v
+        run: |
+          set -euo pipefail
+          top() { printf '%s\n' "$@" | sort -V | tail -n1; }
+          tag=$(git tag --list 'v*' --sort=-v:refname | head -n1); tag=${tag#v}
+          npmv=""
+          for p in @hanzo/dev @hanzo/dev-darwin-arm64 @hanzo/dev-darwin-x64 @hanzo/dev-linux-x64-musl @hanzo/dev-linux-arm64-musl @hanzo/dev-win32-x64; do
+            npmv=$(top "${npmv:-0.0.0}" "$(npm view "$p" version 2>/dev/null || echo 0.0.0)")
+          done
+          base=$(top "${tag:-0.0.0}" "$npmv" "$(jq -r .version codex-cli/package.json)")
+          IFS=. read -r a b c <<<"$base"
+          v="$a.$b.$((c+1))"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "CODE_VERSION=$v" >> "$GITHUB_ENV"
+          echo "release v$v (tag v${tag:-none}, npm $npmv)"
+
+      - name: Build
+        working-directory: code-rs
+        run: |
+          set -euo pipefail
+          cargo build    --release --locked --target aarch64-apple-darwin       --bin dev
+          cargo build    --release --locked --target x86_64-apple-darwin        --bin dev
+          cargo zigbuild --release --locked --target x86_64-unknown-linux-musl  --bin dev
+          cargo zigbuild --release --locked --target aarch64-unknown-linux-musl --bin dev
+          cargo xwin build --release --locked --target x86_64-pc-windows-msvc   --bin dev
+          "$CARGO_TARGET_DIR/aarch64-apple-darwin/release/dev" --version | grep -qF "$CODE_VERSION"
+          for t in $TARGETS; do
+            bin="$CARGO_TARGET_DIR/$t/release/dev"; [ "$t" = x86_64-pc-windows-msvc ] && bin="$bin.exe"
+            test -s "$bin" || { echo "::error::no binary for $t"; exit 1; }
+          done
+
+      # Two names per file, both read by something: the target triple
+      # (updater, postinstall.js, Homebrew) and <os>-<arch> (hanzo.sh through
+      # hanzoai/cli/install.sh). Every archive has its .sha256 beside it.
+      - name: Package
+        run: |
+          set -euo pipefail
+          rm -rf dist && mkdir -p dist
+          pack() { # pack <triple> <os-arch>
+            local t=$1 short=$2 bin="$CARGO_TARGET_DIR/$1/release/dev" d
+            d=$(mktemp -d)
+            if [ "$t" = x86_64-pc-windows-msvc ]; then
+              cp "$bin.exe" "$d/dev-$t.exe"
+              (cd "$d" && zip -q "$OLDPWD/dist/dev-$t.exe.zip" "dev-$t.exe")
+              cp "$bin.exe" "$d/dev.exe"
+              tar -C "$d" -czf "dist/dev-$short.tar.gz" dev.exe
+            else
+              cp "$bin" "$d/dev-$t"
+              tar -C "$d" -czf "dist/dev-$t.tar.gz" "dev-$t"
+              zstd -q -19 -T0 "$d/dev-$t" -o "dist/dev-$t.zst"
+              cp "$bin" "$d/dev"
+              tar -C "$d" -czf "dist/dev-$short.tar.gz" dev
+            fi
+            rm -rf "$d"
+          }
+          pack aarch64-apple-darwin darwin-arm64
+          pack x86_64-apple-darwin darwin-amd64
+          pack x86_64-unknown-linux-musl linux-amd64
+          pack aarch64-unknown-linux-musl linux-arm64
+          pack x86_64-pc-windows-msvc windows-amd64
+          for f in dist/*; do (cd dist && shasum -a 256 "$(basename "$f")" > "$(basename "$f").sha256"); done
+          ls -la dist
+
+      # GitHub is where every installed copy looks; the forge gets the same
+      # bytes so a client pointed there later finds the same release.
+      - name: Publish release
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          FORGE_TOKEN: ${{ secrets.FORGE_TOKEN }}
+          V: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          publish() { # publish <api> <uploads> <token> <upload-shape: raw|form>
+            local api=$1 up=$2 tok=$3 shape=$4 rel
+            a() { curl -fsS -H "Authorization: Bearer $tok" -H 'Accept: application/json' "$@"; }
+            rel=$(a "$api/repos/hanzoai/dev/releases/tags/v$V" 2>/dev/null | jq -r '.id // empty' || true)
+            [ -n "$rel" ] || rel=$(a -X POST "$api/repos/hanzoai/dev/releases" -H 'Content-Type: application/json' \
+              -d "$(jq -nc --arg t "v$V" --arg n "Release v$V" '{tag_name:$t,name:$n,target_commitish:"main"}')" | jq -r .id)
+            for f in dist/*; do
+              n=$(basename "$f")
+              for id in $(a "$api/repos/hanzoai/dev/releases/$rel/assets" | jq -r --arg n "$n" '.[]?|select(.name==$n)|.id'); do
+                a -X DELETE "$api/repos/hanzoai/dev/releases/assets/$id" >/dev/null
+              done
+              if [ "$shape" = raw ]; then
+                a -X POST -H 'Content-Type: application/octet-stream' --data-binary @"$f" \
+                  "$up/repos/hanzoai/dev/releases/$rel/assets?name=$n" >/dev/null
+              else
+                a -X POST -F "attachment=@$f" "$up/repos/hanzoai/dev/releases/$rel/assets?name=$n" >/dev/null
+              fi
+            done
+            echo "published $(ls dist | wc -l | tr -d ' ') assets to $api release v$V"
+          }
+          # The tag must exist on GitHub before the release does — the API
+          # creates it from target_commitish only if it is missing, and the
+          # commit it points at must be reachable there.
+          git push "https://x-access-token:$GH_PAT@github.com/hanzoai/dev.git" "HEAD:refs/tags/v$V"
+          publish https://api.github.com https://uploads.github.com "$GH_PAT" raw
+          if [ -n "${FORGE_TOKEN:-}" ]; then
+            git push "https://x:$FORGE_TOKEN@git.hanzo.ai/hanzoai/dev.git" "HEAD:refs/tags/v$V" || true
+            publish https://git.hanzo.ai/v1 https://git.hanzo.ai/v1 "$FORGE_TOKEN" form || echo "::warning::forge release failed"
+          fi
+
+      - name: Publish npm
+        env:
+          KMS_CLIENT_ID: ${{ secrets.KMS_CLIENT_ID }}
+          KMS_CLIENT_SECRET: ${{ secrets.KMS_CLIENT_SECRET }}
+          V: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          KMS=${KMS_ENDPOINT:-https://api.hanzo.ai}
+          T=$(curl -sf "$KMS/v1/kms/auth/login" -H 'Content-Type: application/json' \
+            -d "{\"clientId\":\"$KMS_CLIENT_ID\",\"clientSecret\":\"$KMS_CLIENT_SECRET\"}" | jq -r '.accessToken // empty')
+          NPM_TOKEN=""
+          for path in secrets/NPM_TOKEN secrets/deploy/NPM_TOKEN orgs/hanzo/secrets/NPM_TOKEN orgs/hanzo/secrets/deploy/NPM_TOKEN; do
+            NPM_TOKEN=$(curl -sf "$KMS/v1/kms/$path?env=prod" -H "Authorization: Bearer $T" | jq -r '.value // .secret.value // empty')
+            [ -z "$NPM_TOKEN" ] || break
+          done
+          [ -n "$NPM_TOKEN" ] || { echo "::error::NPM_TOKEN not readable from KMS"; exit 1; }
+          export NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/.npmrc"
+          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > "$NPM_CONFIG_USERCONFIG"
+          stage=$RUNNER_TEMP/npm; rm -rf "$stage"; mkdir -p "$stage"
+          plat() { # plat <triple> <os> <cpu> <pkg>
+            local t=$1 d="$stage/${4##*/}" bin="$CARGO_TARGET_DIR/$1/release/dev" ext=""
+            [ "$t" = x86_64-pc-windows-msvc ] && ext=.exe
+            mkdir -p "$d/bin"; cp "$bin$ext" "$d/bin/dev-$t$ext"; chmod +x "$d/bin/dev-$t$ext"
+            jq -n --arg n "$4" --arg v "$V" --arg t "$t" --arg os "$2" --arg cpu "$3" \
+              '{name:$n,version:$v,license:"Apache-2.0",description:("Platform binary for @hanzo/dev ("+$t+")"),os:[$os],cpu:[$cpu],files:["bin/"]}' > "$d/package.json"
+            (cd "$d" && npm publish --access public)
+          }
+          plat aarch64-apple-darwin darwin arm64 @hanzo/dev-darwin-arm64
+          plat x86_64-apple-darwin darwin x64 @hanzo/dev-darwin-x64
+          plat x86_64-unknown-linux-musl linux x64 @hanzo/dev-linux-x64-musl
+          plat aarch64-unknown-linux-musl linux arm64 @hanzo/dev-linux-arm64-musl
+          plat x86_64-pc-windows-msvc win32 x64 @hanzo/dev-win32-x64
+          cp README.md codex-cli/README.md
+          cd codex-cli
+          npm version "$V" --no-git-tag-version --allow-same-version
+          jq --arg v "$V" '.optionalDependencies |= with_entries(.value=$v)' package.json > "$RUNNER_TEMP/p.json" && mv "$RUNNER_TEMP/p.json" package.json
+          CI=true npm publish --access public
+          git checkout -- README.md 2>/dev/null || true
+
+      - name: Publish Homebrew formula
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          V: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          RELEASE_ASSETS_DIR=dist scripts/generate-homebrew-formula.sh "$V"
+          tap=$RUNNER_TEMP/tap; rm -rf "$tap"
+          git clone --depth 1 "https://x-access-token:$GH_PAT@github.com/hanzoai/homebrew-tap.git" "$tap"
+          mkdir -p "$tap/Formula" && cp Formula/hanzo-dev.rb "$tap/Formula/hanzo-dev.rb"
+          cd "$tap"
+          git -c user.name=hanzo-dev -c user.email=dev@hanzo.ai commit -qam "hanzo-dev $V" && git push -q || echo "formula unchanged"
+
+      # Last, because it is the only step that changes main: the bump commit
+      # carries [skip ci] so it does not start the run that would ship it again.
+      - name: Bump
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          FORGE_TOKEN: ${{ secrets.FORGE_TOKEN }}
+          V: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          git -c user.name=hanzo-dev -c user.email=dev@hanzo.ai commit -qm "chore(release): $V [skip ci]" -- codex-cli/package.json
+          push() { # push <url> — main may have moved during the build; the bump rides on top of it
+            git push "$1" HEAD:main && return
+            git fetch "$1" main && git -c user.name=hanzo-dev -c user.email=dev@hanzo.ai rebase FETCH_HEAD && git push "$1" HEAD:main
+          }
+          push "https://x-access-token:$GH_PAT@github.com/hanzoai/dev.git"
+          [ -z "${FORGE_TOKEN:-}" ] || push "https://x:$FORGE_TOKEN@git.hanzo.ai/hanzoai/dev.git" || true

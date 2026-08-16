@@ -101,11 +101,7 @@ fn the_cli_builds_a_binary_named_dev() {
 /// namespace is not a style question — it hands them our distribution.
 #[test]
 fn the_release_pipeline_publishes_to_our_namespaces() {
-    let release_yml = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../.github/workflows/release.yml"
-    ))
-    .expect("read .github/workflows/release.yml");
+    let release_yml = repo_file(".hanzo/workflows/release.yml");
 
     for (needle, why) in [
         ("@just-every/", "npm packages must publish under @hanzo/"),
@@ -127,6 +123,22 @@ fn the_release_pipeline_publishes_to_our_namespaces() {
     assert!(
         release_yml.contains("--bin dev"),
         "the release must build the `dev` binary"
+    );
+    for pkg in [
+        "@hanzo/dev-darwin-arm64",
+        "@hanzo/dev-darwin-x64",
+        "@hanzo/dev-linux-x64-musl",
+        "@hanzo/dev-linux-arm64-musl",
+        "@hanzo/dev-win32-x64",
+    ] {
+        assert!(
+            release_yml.contains(pkg),
+            "the release must publish `{pkg}` — postinstall.js resolves it first"
+        );
+    }
+    assert!(
+        release_yml.contains("hanzoai/homebrew-tap"),
+        "the release must push the formula to hanzoai/homebrew-tap"
     );
 }
 
