@@ -83,7 +83,7 @@ jobs:
         run: |
           set -euo pipefail
           top() { printf '%s\n' "$@" | sort -V | tail -n1; }
-          tag=$(git tag --list 'v*' --sort=-v:refname | head -n1); tag=${tag#v}
+          tag=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1); tag=${tag#v}
           npmv=""
           for p in @hanzo/dev @hanzo/dev-darwin-arm64 @hanzo/dev-darwin-x64 @hanzo/dev-linux-x64-musl @hanzo/dev-linux-arm64-musl @hanzo/dev-win32-x64; do
             npmv=$(top "${npmv:-0.0.0}" "$(npm view "$p" version 2>/dev/null || echo 0.0.0)")
