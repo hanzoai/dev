@@ -58,10 +58,6 @@ impl HistoryCell for WaitStatusCell {
         lines.push(Line::from(""));
         lines
     }
-
-    fn gutter_symbol(&self) -> Option<&'static str> {
-        Some("◓")
-    }
 }
 
 fn render_header(header: &WaitStatusHeader, theme: &Theme) -> Line<'static> {

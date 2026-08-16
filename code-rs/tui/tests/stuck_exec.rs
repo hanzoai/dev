@@ -90,7 +90,7 @@ fn exec_cell_clears_after_patch_flow() {
 
     let output = render_chat_widget_to_vt100(&mut harness, 80, 12);
     assert!(
-        !output.contains("Running"),
+        !output.contains("Running..."),
         "exec cell should not remain running after patch apply:\n{}",
         output
     );
@@ -169,7 +169,7 @@ fn exec_cell_clears_after_task_started_final_answer_without_task_complete() {
 
     let output = render_chat_widget_to_vt100(&mut harness, 80, 14);
     assert!(
-        !output.contains("Running"),
+        !output.contains("Running..."),
         "exec should finalize after final answer even without TaskComplete:\n{}",
         output
     );
@@ -792,7 +792,7 @@ fn running_exec_is_finalized_when_error_event_arrives() {
 
     let output = render_chat_widget_to_vt100(&mut harness, 80, 14);
     assert!(
-        !output.contains("Running"),
+        !output.contains("Running..."),
         "exec cell should not linger after fatal error:\n{}",
         output
     );

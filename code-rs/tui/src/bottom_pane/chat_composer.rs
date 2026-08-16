@@ -651,9 +651,9 @@ impl ChatComposer {
         ])
         .areas(area);
 
-        // Get inner area of the bordered input box
-        let input_block = Block::default().borders(Borders::ALL);
-        let textarea_rect = input_block.inner(input_area);
+        // The row above the text carries the running status; the row below
+        // is breathing room. Same inset as render, so the cursor lands on the text.
+        let textarea_rect = input_area.inner(Margin::new(0, 1));
 
         // Apply the same inner padding as in render (horizontal only).
         let padded_textarea_rect = textarea_rect.inner(Margin::new(crate::layout_consts::COMPOSER_INNER_HPAD.into(), 0));
@@ -2906,8 +2906,9 @@ impl WidgetRef for ChatComposer {
         if let Some(area) = footer_area {
             self.render_footer(area, buf);
         }
-        // Draw border around input area with optional variant title when task is running
-        let mut input_block = Block::default().borders(Borders::ALL);
+        // No frame around the input. The block still carries the running
+        // status as its title, drawn on the row above the text.
+        let mut input_block = Block::default().borders(Borders::NONE);
         let mut auto_drive_border_gradient = None;
         if let Some(style) = self
             .auto_drive_style
@@ -2944,10 +2945,16 @@ impl WidgetRef for ChatComposer {
                 }
             } else {
                 use std::time::{SystemTime, UNIX_EPOCH};
-                let now_ms = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis();
+                // A test render holds the spinner on its first frame, so the
+                // row above the input is the same picture every time.
+                let now_ms = if crate::chatwidget::is_test_mode() {
+                    0
+                } else {
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis()
+                };
                 let def = crate::spinner::current_spinner();
                 let spinner_str = crate::spinner::frame_at_time(def, now_ms);
 
@@ -2964,7 +2971,7 @@ impl WidgetRef for ChatComposer {
             }
         }
 
-        let textarea_rect = input_block.inner(input_area);
+        let textarea_rect = input_area.inner(Margin::new(0, 1));
         input_block.render_ref(input_area, buf);
         if let Some(gradient) = auto_drive_border_gradient {
             apply_auto_drive_border_gradient(buf, input_area, gradient);

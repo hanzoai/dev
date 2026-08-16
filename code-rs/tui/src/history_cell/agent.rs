@@ -1299,11 +1299,6 @@ impl HistoryCell for AgentRunCell {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-
-    fn gutter_symbol(&self) -> Option<&'static str> {
-        None
-    }
-
     fn kind(&self) -> HistoryCellType {
         let status = if self.completed {
             if self.status_label == "Failed" {

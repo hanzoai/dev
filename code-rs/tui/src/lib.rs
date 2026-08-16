@@ -75,7 +75,6 @@ mod get_git_diff;
 mod glitch_animation;
 mod auto_drive_strings;
 mod auto_drive_style;
-mod header_wave;
 mod history_cell;
 mod history;
 mod insert_history;
@@ -1304,7 +1303,7 @@ pub enum LoginStatus {
 /// is a credential and no file — and neither belongs on a screen offering to
 /// sign the user in to OpenAI.
 pub fn get_login_status(config: &Config) -> LoginStatus {
-    if code_core::free::signed_in() || code_core::free::anonymous() {
+    if code_core::free::signed_in() || code_core::free::runs(config) {
         return LoginStatus::AuthMode(AuthMode::ApiKey);
     }
     let code_home = config.code_home.clone();

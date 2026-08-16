@@ -269,15 +269,6 @@ impl HistoryCell for AssistantMarkdownCell {
     fn kind(&self) -> HistoryCellType {
         HistoryCellType::Assistant
     }
-
-    fn gutter_symbol(&self) -> Option<&'static str> {
-        if self.state.mid_turn {
-            None
-        } else {
-            super::gutter_symbol_for_kind(self.kind())
-        }
-    }
-
     fn display_lines(&self) -> Vec<Line<'static>> {
         assistant_markdown_lines_with_context(&self.state, self.file_opener, &self.cwd)
     }

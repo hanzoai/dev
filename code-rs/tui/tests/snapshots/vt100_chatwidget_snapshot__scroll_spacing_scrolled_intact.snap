@@ -2,26 +2,26 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: scrolled
 ---
- +----------------------------------------------------------------------------+
- |                                  Hanzo Dev                                 |
- +----------------------------------------------------------------------------+
- •
-   Here is another paragraph to expand height.
+ scroll.
 
-   Yet another paragraph for good measure.
+ Assistant reply number two with multiple paragraphs.
 
- › Third user prompt to push history further.
+ Here is another paragraph to expand height.
 
-   Assistant reply number three, still going strong.
- •
-   - Bullet one
-   - Bullet two
-   - Bullet three
+ Yet another paragraph for good measure.
 
- › Fourth user prompt to guarantee overflow beyond the viewport height.
+ Third user prompt to push history further.
+
+ Assistant reply number three, still going strong.
+
+ - Bullet one
+ - Bullet two
+ - Bullet three
+
+ Fourth user prompt to guarantee overflow beyond the viewport height.
 
 
- +----------------------------------------------------------------------------+
- | What can I code for you today?                                             |
- +----------------------------------------------------------------------------+
+
+  What would you like to work on?
+
  Read Only  (Shift+Tab change)                       Ctrl+G editor  •  API key

@@ -2,14 +2,11 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: section_closed
 ---
- +------------------------------------------------------------------------------------------------+
- |                                            Hanzo Dev                                           |
- +------------------------------------------------------------------------------------------------+
  +Settings ▸ Model--------------------------------------------------------------------------------+
  |                                                                                                |
  | ›  Model              + Select Model & Reasoning --------------------------------------------+ |
  |    Theme              |                                                                      | |
- |    Updates            |  Current model: ZEN5-Coder                                           | |
+ |    Updates            |  Current model: GPT-5.5                                              | |
  |    Accounts           |  Reasoning effort: Medium                                            | |
  |    Agents             |                                                                      | |
  |    Prompts            |  Mode Settings                                                       | |
@@ -18,14 +15,17 @@ expression: section_closed
  |    Auto Drive         |    1M Context: unavailable                                           | |
  |    Review             |  Unavailable for this model. Saved settings apply automatically on s | |
  |    Planning           |                                                                      | |
- |    Validation         |  ↑↓ Navigate  Enter Select  Esc Cancel                               | |
- |    Chrome             |                                                                      | |
- |  ↓ MCP                +----------------------------------------------------------------------+ |
+ |    Validation         |  ZEN5-Coder                                                          | |
+ |    Chrome             |  Agentic coding. 1M context.                                         | |
+ |    MCP                |                                                                      | |
+ |    Notifications      |  ↑↓ Navigate  Enter Select  Esc Cancel                               | |
+ |    Limits             |                                                                      | |
+ |                       +----------------------------------------------------------------------+ |
  | ↑ ↓ Move    Enter Open    Esc Close    ? Help                                                  |
  |                                                                                                |
  +------------------------------------------------------------------------------------------------+
 
- +------------------------------------------------------------------------------------------------+
- | What can I code for you today?                                                                 |
- +------------------------------------------------------------------------------------------------+
+
+  What would you like to work on?
+
  Read Only  (Shift+Tab change)                                           Ctrl+G editor  •  API key

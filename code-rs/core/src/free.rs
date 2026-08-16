@@ -54,6 +54,14 @@ pub fn anonymous() -> bool {
     free_answers(env(USER_KEY).as_deref(), key().as_deref())
 }
 
+/// Whether this configured run is the free pool's: it asks the Hanzo Cloud for
+/// the pool's own model. Another provider's run is never free, whatever the
+/// environment holds.
+pub fn runs(config: &crate::config::Config) -> bool {
+    config.model_provider_id == crate::model_provider_info::HANZO_PROVIDER_ID
+        && config.model == MODEL
+}
+
 /// Said once at the top of a free run — what it costs, what it shares, and how
 /// to leave it. The same bargain hanzo.ai and hanzo.chat state in their own
 /// words.

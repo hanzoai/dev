@@ -163,12 +163,6 @@ impl RunningToolCallCell {
         Self::strip_zero_seconds_suffix(format_duration(duration)).replace(' ', "")
     }
 
-    fn spinner_frame(&self) -> &'static str {
-        const FRAMES: [&str; 4] = ["◐", "◓", "◑", "◒"];
-        let idx = ((self.start_clock.elapsed().as_millis() / 100) as usize) % FRAMES.len();
-        FRAMES[idx]
-    }
-
     fn is_gh_run_wait(&self) -> bool {
         self.state.title == "Gh Run Wait..."
     }
@@ -392,19 +386,6 @@ impl HistoryCell for RunningToolCallCell {
             status: super::ToolCellStatus::Running,
         }
     }
-
-    fn gutter_symbol(&self) -> Option<&'static str> {
-        if self.state.title == "Waiting" {
-            if self.state.wait_has_call_id {
-                None
-            } else {
-                Some(self.spinner_frame())
-            }
-        } else {
-            Some("⚙")
-        }
-    }
-
     fn is_animating(&self) -> bool {
         true
     }

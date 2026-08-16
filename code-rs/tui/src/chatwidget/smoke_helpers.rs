@@ -33,18 +33,10 @@ pub fn enter_test_runtime_guard() -> tokio::runtime::EnterGuard<'static> {
     TEST_RUNTIME.enter()
 }
 
-// There is deliberately no cwd override here. main once pinned cwd to a
-// literal "/snapshot" so the status header's `Directory: <cwd>` segment could
-// not leak the recording machine's checkout path into a snapshot. The goal was
-// right; the mechanism is redundant here and actively harmful. Redundant
-// because DEV_TUI_FORCE_MINIMAL_HEADER below renders a header with no
-// Directory segment at all, so no snapshot contains a path to begin with.
-// Harmful because "/snapshot" does not exist on disk, and the chatwidget tests
-// that resolve sandbox write permission against the working directory then
-// decide the workspace is not writable — `assertion failed: action.write` in
-// auto_handle_decision_launches_cli_agents_and_review and four of its
-// neighbours. If you reintroduce a cwd override, give it a directory that
-// actually exists, and run the code-tui lib tests, not just the snapshots.
+// There is deliberately no cwd override here. A literal "/snapshot" cwd does
+// not exist on disk, and the chatwidget tests that resolve sandbox write
+// permission against the working directory then decide the workspace is not
+// writable. Nothing rendered names the cwd, so nothing needs hiding.
 
 pub struct ChatWidgetHarness {
     chat: ChatWidget<'static>,
@@ -83,14 +75,6 @@ impl AutoContinueModeFixture {
 
 impl ChatWidgetHarness {
     pub fn new() -> Self {
-        // Stabilize time-of-day dependent greeting so VT100 snapshots remain deterministic.
-        // Safe: tests run single-threaded by design.
-        unsafe { std::env::set_var("DEV_TUI_FAKE_HOUR", "12"); }
-
-        unsafe {
-            std::env::set_var("DEV_TUI_FORCE_MINIMAL_HEADER", "1");
-        }
-
         unsafe {
             std::env::set_var("CODE_TUI_TEST_MODE", "1");
         }

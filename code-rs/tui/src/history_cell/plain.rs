@@ -281,20 +281,6 @@ impl HistoryCell for PlainHistoryCell {
     fn kind(&self) -> HistoryCellType {
         self.state.kind
     }
-
-    fn gutter_symbol(&self) -> Option<&'static str> {
-        if self.is_warning_notice() {
-            return Some("⚠");
-        }
-        if let Some(header) = self.state.header() {
-            let label = header.label.trim().to_lowercase();
-            if label == "auto review" {
-                return Some("•");
-            }
-        }
-        super::gutter_symbol_for_kind(self.kind())
-    }
-
     fn display_lines(&self) -> Vec<Line<'static>> {
         let theme = current_theme();
         let mut lines: Vec<Line<'static>> = Vec::new();

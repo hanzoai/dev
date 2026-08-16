@@ -42,41 +42,6 @@ pub(crate) enum HistoryCellType {
     Loading,
 }
 
-pub(crate) fn gutter_symbol_for_kind(kind: HistoryCellType) -> Option<&'static str> {
-    match kind {
-        HistoryCellType::Plain => None,
-        HistoryCellType::User => Some("›"),
-        // Restore assistant gutter icon
-        HistoryCellType::Assistant => Some("•"),
-        HistoryCellType::Reasoning => None,
-        HistoryCellType::Error => Some("✖"),
-        HistoryCellType::Tool { status } => Some(match status {
-            ToolCellStatus::Running => "⚙",
-            ToolCellStatus::Success => "✔",
-            ToolCellStatus::Failed => "✖",
-        }),
-        HistoryCellType::Exec { kind, status } => {
-            // Show ❯ only for Run executions; hide for read/search/list summaries
-            match (kind, status) {
-                (ExecKind::Run, ExecStatus::Error) => Some("✖"),
-                (ExecKind::Run, _) => Some("❯"),
-                _ => None,
-            }
-        }
-        HistoryCellType::Patch { .. } => Some("↯"),
-        // Plan updates supply their own gutter glyph dynamically.
-        HistoryCellType::PlanUpdate => None,
-        HistoryCellType::BackgroundEvent => Some("»"),
-        HistoryCellType::Notice => Some("★"),
-        HistoryCellType::CompactionSummary => Some("📍"),
-        HistoryCellType::Diff => Some("↯"),
-        HistoryCellType::Image => None,
-        HistoryCellType::Context => Some("◆"),
-        HistoryCellType::AnimatedWelcome => None,
-        HistoryCellType::Loading => None,
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ExecKind {
     Read,
@@ -238,12 +203,6 @@ pub(crate) trait HistoryCell {
     fn should_remove(&self) -> bool {
         false // Default: most cells should not be removed
     }
-
-    /// Returns the gutter symbol for this cell type
-    /// Returns None if no symbol should be displayed
-    fn gutter_symbol(&self) -> Option<&'static str> {
-        gutter_symbol_for_kind(self.kind())
-    }
 }
 
 // Allow Box<dyn HistoryCell> to implement HistoryCell
@@ -296,9 +255,5 @@ impl HistoryCell for Box<dyn HistoryCell> {
 
     fn should_remove(&self) -> bool {
         self.as_ref().should_remove()
-    }
-
-    fn gutter_symbol(&self) -> Option<&'static str> {
-        self.as_ref().gutter_symbol()
     }
 }

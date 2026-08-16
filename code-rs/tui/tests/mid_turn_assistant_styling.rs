@@ -1,13 +1,14 @@
-//! Regression test: mid-turn Answer outputs should not render assistant gutter/bold styling.
+//! Regression test: mid-turn Answer outputs are plain messages; only the final answer is the assistant message.
 
 #![cfg(test)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use code_core::protocol::{AgentMessageEvent, Event, EventMsg, OrderMeta};
+use code_core::history::state::HistoryRecord;
 use code_tui::test_helpers::{render_chat_widget_to_vt100, ChatWidgetHarness};
 
 #[test]
-fn mid_turn_answer_suppresses_bullet_gutter() {
+fn mid_turn_answer_renders_as_progress() {
     let mut harness = ChatWidgetHarness::new();
 
     // Start a turn.
@@ -60,15 +61,16 @@ fn mid_turn_answer_suppresses_bullet_gutter() {
     });
 
     let output = render_chat_widget_to_vt100(&mut harness, 80, 24);
-
     assert!(output.contains("Progress update"));
+    assert!(output.contains("Final answer"));
+
     assert!(
-        !output.contains(" • Progress update"),
-        "mid-turn assistant messages should not show bullet gutter"
+        is_mid_turn(&mut harness, "Progress update"),
+        "a mid-turn answer renders as a progress line, not the final word"
     );
     assert!(
-        output.contains(" • Final answer"),
-        "final assistant message should retain bullet gutter"
+        !is_mid_turn(&mut harness, "Final answer"),
+        "the final answer renders as the assistant message"
     );
 }
 
@@ -134,7 +136,22 @@ fn missing_task_complete_does_not_stick_mid_turn_across_turns() {
     });
 
     let output = render_chat_widget_to_vt100(&mut harness, 80, 24);
+    assert!(output.contains("First answer"));
+    assert!(output.contains("Second answer"));
+    assert!(!is_mid_turn(&mut harness, "First answer"));
+    assert!(!is_mid_turn(&mut harness, "Second answer"));
+}
 
-    assert!(output.contains(" • First answer"));
-    assert!(output.contains(" • Second answer"));
+/// Whether the assistant message carrying `text` is a mid-turn one — the
+/// kind that renders as a plain progress line rather than the answer.
+fn is_mid_turn(harness: &mut ChatWidgetHarness, text: &str) -> bool {
+    code_tui::test_helpers::history_records(harness)
+        .into_iter()
+        .find_map(|record| match record {
+            HistoryRecord::AssistantMessage(state) if state.markdown.contains(text) => {
+                Some(state.mid_turn)
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no assistant message containing {text:?}"))
 }

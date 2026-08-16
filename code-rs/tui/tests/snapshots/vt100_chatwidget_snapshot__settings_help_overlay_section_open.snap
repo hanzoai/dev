@@ -2,30 +2,30 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: section_open
 ---
- +------------------------------------------------------------------------------------------------+
- |                                            Hanzo Dev                                           |
- +------------------------------------------------------------------------------------------------+
  +Settings ▸ Model--------------------------------------------------------------------------------+
  |                                                                                                |
  | ›  Model              + Select Model & Reasoning --------------------------------------------+ |
  |    Theme              |                                                                      | |
- |    Updates            |  Curren+------------------------------+                              | |
- |    Accounts           |  Reason|Model Shortcuts               |                              | |
- |    Agents             |        |                              |                              | |
- |    Prompts            |  Mode S|• Esc    Return to overview   |                              | |
- |    Memories           |  Fast m|• Tab    Cycle sections       |t is available on supported m | |
- |    Skills             |  › Fast|• Shift+Tab  Cycle backwards  |                              | |
- |    Auto Drive         |    1M C|• ?      Toggle this help     |                              | |
- |    Review             |  Unavai|                              |ings apply automatically on s | |
- |    Planning           |        |Press Esc to close            |                              | |
- |    Validation         |  ↑↓ Nav+------------------------------+                              | |
- |    Chrome             |                                                                      | |
- |  ↓ MCP                +----------------------------------------------------------------------+ |
+ |    Updates            |  Current model: GPT-5.5                                              | |
+ |    Accounts           |  Reasoning effort: Medium                                            | |
+ |    Agents             |        +------------------------------+                              | |
+ |    Prompts            |  Mode S|Model Shortcuts               |                              | |
+ |    Memories           |  Fast m|                              |t is available on supported m | |
+ |    Skills             |  › Fast|• Esc    Return to overview   |                              | |
+ |    Auto Drive         |    1M C|• Tab    Cycle sections       |                              | |
+ |    Review             |  Unavai|• Shift+Tab  Cycle backwards  |ings apply automatically on s | |
+ |    Planning           |        |• ?      Toggle this help     |                              | |
+ |    Validation         |  ZEN5-C|                              |                              | |
+ |    Chrome             |  Agenti|Press Esc to close            |                              | |
+ |    MCP                |        +------------------------------+                              | |
+ |    Notifications      |  ↑↓ Navigate  Enter Select  Esc Cancel                               | |
+ |    Limits             |                                                                      | |
+ |                       +----------------------------------------------------------------------+ |
  | ↑ ↓ Move    Enter Open    Esc Close    ? Help                                                  |
  |                                                                                                |
  +------------------------------------------------------------------------------------------------+
 
- +------------------------------------------------------------------------------------------------+
- | What can I code for you today?                                                                 |
- +------------------------------------------------------------------------------------------------+
+
+  What would you like to work on?
+
  Read Only  (Shift+Tab change)                                           Ctrl+G editor  •  API key

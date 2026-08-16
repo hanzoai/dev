@@ -2,12 +2,9 @@
 source: tui/tests/vt100_chatwidget_snapshot.rs
 expression: output
 ---
- +------------------------------------------------------------------------------------------------+
- |                                            Hanzo Dev                                           |
- +------------------------------------------------------------------------------------------------+
  +Settings ▸ Overview-----------------------------------------------------------------------------+
  |                                                                                                |
- | › Model              Model: ZEN5-Coder (Medium)                                                |
+ | › Model              Model: GPT-5.5 (Medium)                                                   |
  |   + Choose the language model used for new completions.                                        |
  |                                                                                                |
  |   Theme              Theme: Light - Photon (16-color) · Spinner: Diamond                       |
@@ -21,11 +18,14 @@ expression: output
  |   Accounts           Auto-switch: On · API key fallback: Off                                   |
  |   + Configure account switching behavior under rate and usage limits.                          |
  |                                                                                                |
+ |   Agents             Enabled: 10/13                                                            |
+ |   + Configure linked agents and default task permissions.                                      |
+ |                                                                                                |
  | ↑ ↓ Move    Enter Open    Esc Close    ? Help                                                  |
  |                                                                                                |
  +------------------------------------------------------------------------------------------------+
 
- +------------------------------------------------------------------------------------------------+
- | What can I code for you today?                                                                 |
- +------------------------------------------------------------------------------------------------+
+
+  What would you like to work on?
+
  Read Only  (Shift+Tab change)                                           Ctrl+G editor  •  API key
