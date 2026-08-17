@@ -36,6 +36,11 @@ jobs:
     timeout-minutes: 330
     env:
       CARGO_INCREMENTAL: "0"
+      # The host has died mid-build three times, always at peak compile of the
+      # final crates — full parallelism on a shared Mac is what kills it. Eight
+      # jobs keeps the release under the machine's death threshold; it costs
+      # minutes, not the whole run.
+      CARGO_BUILD_JOBS: "8"
       # The host wraps rustc in a cache daemon that wedges under this load —
       # every stall is a killed daemon and an uncached retry. Plain rustc is
       # faster than that cycle, and the release must not depend on host state.
