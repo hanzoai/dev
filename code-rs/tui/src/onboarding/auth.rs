@@ -28,7 +28,6 @@ use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::StepStateProvider;
-use crate::shimmer::shimmer_spans;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -271,12 +270,12 @@ impl AuthModeWidget {
 
     fn render_continue_in_browser(&self, area: Rect, buf: &mut Buffer) {
         let mut spans = vec![Span::from("> ")];
-        // Schedule a follow-up frame to keep the shimmer animation going.
-        self.event_tx
-            .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(
-                100,
-            )));
-        spans.extend(shimmer_spans("Finish signing in via your browser"));
+        // A waiting screen holds still. The shimmer here redrew the whole
+        // frame ten times a second for as long as the sign-in took.
+        spans.push(Span::styled(
+            "Finish signing in via your browser",
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
         let mut lines = vec![Line::from(spans), Line::from("")];
         if let SignInState::ContinueInBrowser(state) = &self.sign_in_state {
             if !state.auth_url.is_empty() {
@@ -303,15 +302,10 @@ impl AuthModeWidget {
     /// Waiting on the user to approve the device code at the issuer.
     fn render_device_code(&self, area: Rect, buf: &mut Buffer) {
         let mut spans = vec![Span::from("> ")];
-        // Schedule a follow-up frame to keep the shimmer animation going.
-        self.event_tx
-            .send(AppEvent::ScheduleFrameIn(std::time::Duration::from_millis(
-                100,
-            )));
-        spans.extend(shimmer_spans(&format!(
-            "Finish signing in with {}",
-            self.brand()
-        )));
+        spans.push(Span::styled(
+            format!("Finish signing in with {}", self.brand()),
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
         let mut lines = vec![Line::from(spans), Line::from("")];
 
         let prompt = match &self.sign_in_state {
@@ -540,8 +534,27 @@ impl AuthModeWidget {
     pub(crate) fn apply_login_side_effects(&mut self) {
         self.login_status = LoginStatus::AuthMode(AuthMode::ChatGPT);
         // A Hanzo account is not a ChatGPT plan: neither the flag nor the model
-        // swap below says anything true about it.
+        // swap below says anything true about it. What a fresh Hanzo sign-in
+        // DOES say is which provider this session runs: if the shell's vendor
+        // key had picked one implicitly, the account the user just created
+        // wins, model and all.
         if self.hanzo {
+            if let Ok(mut args) = self.chat_widget_args.lock() {
+                if args.config.model_provider_id != code_core::HANZO_PROVIDER_ID {
+                    if let Some(provider) = code_core::built_in_model_providers(None)
+                        .get(code_core::HANZO_PROVIDER_ID)
+                        .cloned()
+                    {
+                        args.config.model_provider_id = code_core::HANZO_PROVIDER_ID.to_string();
+                        args.config.model_provider = provider;
+                        let model = code_core::config::HANZO_DEFAULT_MODEL.to_string();
+                        let family = find_family_for_model(&model)
+                            .unwrap_or_else(|| derive_default_model_family(&model));
+                        args.config.model = model;
+                        args.config.model_family = family;
+                    }
+                }
+            }
             return;
         }
         if let Ok(mut args) = self.chat_widget_args.lock() {
