@@ -107,11 +107,24 @@ jobs:
         working-directory: code-rs
         run: |
           set -euo pipefail
-          cargo build    --release --locked --target aarch64-apple-darwin       --bin dev
-          cargo build    --release --locked --target x86_64-apple-darwin        --bin dev
-          cargo zigbuild --release --locked --target x86_64-unknown-linux-musl  --bin dev
-          cargo zigbuild --release --locked --target aarch64-unknown-linux-musl --bin dev
-          cargo xwin build --release --locked --target x86_64-pc-windows-msvc   --bin dev
+          compile() {
+            case "$1" in
+              *apple-darwin) cargo build --release --locked --target "$1" --bin dev ;;
+              *linux-musl)   cargo zigbuild --release --locked --target "$1" --bin dev ;;
+              *windows-msvc) cargo xwin build --release --locked --target "$1" --bin dev ;;
+            esac
+          }
+          # The target dir outlives runs on purpose — and a run killed mid-write
+          # (timeout, host death) tears objects in it, which surfaces as a link
+          # failure in the NEXT run. A target that fails gets its cache cleared
+          # and one fresh chance before the run is allowed to be red.
+          for t in $TARGETS; do
+            compile "$t" || {
+              echo "::warning::$t failed — clearing its cache and retrying once (a killed run tears objects)"
+              rm -rf "$CARGO_TARGET_DIR/$t"
+              compile "$t"
+            }
+          done
           "$CARGO_TARGET_DIR/aarch64-apple-darwin/release/dev" --version | grep -qF "$CODE_VERSION"
           for t in $TARGETS; do
             bin="$CARGO_TARGET_DIR/$t/release/dev"; [ "$t" = x86_64-pc-windows-msvc ] && bin="$bin.exe"
