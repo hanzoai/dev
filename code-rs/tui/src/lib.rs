@@ -92,7 +92,6 @@ mod render;
 mod model_migration;
 // mod scroll_view; // Orphaned after trait-based HistoryCell migration
 mod session_log;
-mod shimmer;
 mod slash_command;
 mod rate_limits_view;
 pub mod resume;

@@ -293,6 +293,11 @@ pub struct Config {
     /// Key into the model_providers map that specifies which provider to use.
     pub model_provider_id: String,
 
+    /// Whether the provider was named by a flag, profile or config.toml, as
+    /// opposed to inferred from the environment. Onboarding reads this: an
+    /// inferred provider is not a decision, so sign-in still leads with Hanzo.
+    pub model_provider_explicit: bool,
+
     /// Info needed to make an API request to the model.
     pub model_provider: ModelProviderInfo,
 
@@ -1159,10 +1164,21 @@ impl Config {
         // its say, and only when all three decline does the environment answer.
         // The key you already hold picks the provider (provider_from_env), so a
         // person with ANTHROPIC_API_KEY and no config is not told to go get ours.
+        // A stored Hanzo session outranks a vendor key in the shell: signing in
+        // was an explicit act, an exported variable often is not.
+        let model_provider_explicit = model_provider.is_some()
+            || config_profile.model_provider.is_some()
+            || cfg.model_provider.is_some();
         let model_provider_id = model_provider
             .or(config_profile.model_provider)
             .or(cfg.model_provider)
-            .unwrap_or_else(crate::model_provider_info::provider_from_env);
+            .unwrap_or_else(|| {
+                if Self::has_stored_auth(&code_home) {
+                    HANZO_PROVIDER_ID.to_string()
+                } else {
+                    crate::model_provider_info::provider_from_env()
+                }
+            });
         let model_provider = model_providers
             .get(&model_provider_id)
             .ok_or_else(|| {
@@ -1685,6 +1701,7 @@ impl Config {
             model_auto_compact_token_limit,
             context_mode,
             model_provider_id,
+            model_provider_explicit,
             model_provider,
             cwd: resolved_cwd,
             approval_policy: effective_approval,
@@ -2128,6 +2145,31 @@ theme = "catppuccin-mocha"
         let parsed_bool = toml::from_str::<ConfigToml>(cfg_bool)
             .expect("boolean should deserialize");
         assert_eq!(parsed_bool.auto_upgrade_enabled, Some(true));
+    }
+
+    /// An exported vendor key picks the provider for a run, but it is not a
+    /// DECISION — onboarding reads this flag to keep sign-in Hanzo-first.
+    #[test]
+    fn a_provider_is_explicit_only_when_someone_named_it() -> std::io::Result<()> {
+        let code_home = TempDir::new()?;
+
+        let inferred = Config::load_from_base_config_with_overrides(
+            ConfigToml::default(),
+            ConfigOverrides::default(),
+            code_home.path().to_path_buf(),
+        )?;
+        assert!(!inferred.model_provider_explicit);
+
+        let named = Config::load_from_base_config_with_overrides(
+            ConfigToml {
+                model_provider: Some("openai".to_string()),
+                ..Default::default()
+            },
+            ConfigOverrides::default(),
+            code_home.path().to_path_buf(),
+        )?;
+        assert!(named.model_provider_explicit);
+        Ok(())
     }
 
     #[test]

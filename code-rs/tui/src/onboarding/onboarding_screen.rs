@@ -69,7 +69,11 @@ impl OnboardingScreen {
             show_login_screen,
             login_status,
         } = args;
-        let hanzo = chat_widget_args.config.model_provider_id == code_core::HANZO_PROVIDER_ID;
+        // Sign-in leads with Hanzo unless the user NAMED another provider. A
+        // vendor key exported in the shell picks the run's provider, but it is
+        // not a decision about whose account this product signs into.
+        let hanzo = chat_widget_args.config.model_provider_id == code_core::HANZO_PROVIDER_ID
+            || !chat_widget_args.config.model_provider_explicit;
         let env_key = chat_widget_args.config.model_provider.env_key.clone();
         let shared_chat_args = Arc::new(Mutex::new(chat_widget_args));
 
