@@ -18,9 +18,13 @@
 # run and is reused after; the cargo target dir lives outside the checkout so
 # a release is an incremental build, not a cold one.
 name: Release
+# DISPATCH-ONLY FOR NOW: the runner host has frozen five times in 24 hours,
+# every time under this workflow's compile load — at 16 jobs, at 8, with and
+# without the rustc wrapper. That is the machine, not the lane; a push trigger
+# turns every merge into another crash of someone's Mac. Restore the push
+# trigger when dbc's panic logs/thermals have been read and the host survives
+# a full dispatch run.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 concurrency:
   group: release
