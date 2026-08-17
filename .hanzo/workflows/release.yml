@@ -114,6 +114,12 @@ jobs:
         working-directory: code-rs
         run: |
           set -euo pipefail
+          # Thin LTO links open thousands of objects at once, and a LaunchAgent
+          # shell starts at macOS's default 256 descriptors — the linker died
+          # with ProcessFdQuotaExceeded on the first musl target, twice, wearing
+          # a "failed to open object" mask. Raise it as far as the host allows.
+          ulimit -n 65536 2>/dev/null || ulimit -n 10240 2>/dev/null || true
+          echo "fd limit: $(ulimit -n)"
           compile() {
             case "$1" in
               *apple-darwin) cargo build --release --locked --target "$1" --bin dev ;;
