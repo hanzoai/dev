@@ -58,11 +58,18 @@ jobs:
           rustup toolchain install "$CH" --profile minimal
           rustup target add --toolchain "$CH" $TARGETS
           mkdir -p "$HOME/.local/bin"
-          if ! command -v zig >/dev/null; then
-            ZV=0.14.1
-            curl -fsSL "https://ziglang.org/download/$ZV/zig-macos-aarch64-$ZV.tar.xz" | tar -xJ -C "$HOME/.local"
-            ln -sf "$HOME/.local/zig-macos-aarch64-$ZV/zig" "$HOME/.local/bin/zig"
+          # PINNED, and installed even when a zig is already on the host: the
+          # runner bootstrapped 0.14.1 once, and its linker fails on thin-LTO
+          # objects ("failed to open object …rcgu.o.rcgu.o") — deterministically,
+          # a clean rebuild reproduces it. 0.16.0 is the version the local
+          # release builds were proven on.
+          ZV=0.16.0
+          if [ ! -x "$HOME/.local/zig-$ZV/zig" ]; then
+            curl -fsSL "https://ziglang.org/download/$ZV/zig-aarch64-macos-$ZV.tar.xz" -o /tmp/zig.tar.xz               || curl -fsSL "https://ziglang.org/download/$ZV/zig-macos-aarch64-$ZV.tar.xz" -o /tmp/zig.tar.xz
+            tar -xJf /tmp/zig.tar.xz -C "$HOME/.local"
+            mv "$HOME/.local"/zig-*-"$ZV" "$HOME/.local/zig-$ZV"
           fi
+          ln -sf "$HOME/.local/zig-$ZV/zig" "$HOME/.local/bin/zig"
           command -v cargo-zigbuild >/dev/null || cargo install cargo-zigbuild --locked
           command -v cargo-xwin >/dev/null || cargo install cargo-xwin --locked
           if ! command -v clang-cl >/dev/null; then
