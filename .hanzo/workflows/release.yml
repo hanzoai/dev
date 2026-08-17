@@ -29,9 +29,17 @@ jobs:
   release:
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     runs-on: [self-hosted, macos, arm64]
-    timeout-minutes: 170
+    # Five release builds back to back on a shared host. The fat-LTO run blew
+    # a 170-minute budget at four targets and died mid-link with nothing
+    # published; the budget now covers the slow day, and thin LTO makes the
+    # ordinary day a fraction of it.
+    timeout-minutes: 330
     env:
       CARGO_INCREMENTAL: "0"
+      # The host wraps rustc in a cache daemon that wedges under this load —
+      # every stall is a killed daemon and an uncached retry. Plain rustc is
+      # faster than that cycle, and the release must not depend on host state.
+      RUSTC_WRAPPER: ""
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       RUSTFLAGS: -Awarnings -C debuginfo=0 -C strip=symbols
       TARGETS: aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-pc-windows-msvc
