@@ -206,6 +206,13 @@ jobs:
           done
           (cd dist && for s in *.sha256; do sha256sum -c "$s" >/dev/null; done)
           echo "28 assets present and checksum-clean"
+          # The release runs what it ships: the linux binary is native to this
+          # runner, so it answers for the whole matrix that the artifacts are
+          # programs, not just well-named bytes.
+          x=$(mktemp -d); tar -xzf dist/dev-linux-amd64.tar.gz -C "$x"
+          "$x/dev" --version | grep -qF "$V" || { echo "::error::the shipped binary does not say $V"; "$x/dev" --version; exit 1; }
+          "$x/dev" completion bash >/dev/null
+          echo "smoked: $("$x/dev" --version)"
           curl -s -X PATCH "${auth[@]}" "https://api.github.com/repos/hanzoai/dev/releases/$REL" \
             -d '{"draft":false}' | jq -r '"published: " + .html_url'
       - name: Mirror the release to the forge
