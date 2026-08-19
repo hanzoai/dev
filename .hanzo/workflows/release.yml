@@ -25,7 +25,10 @@ env:
   ZIG_VERSION: '0.16.0'
   ZIG_SHA256: '70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00'
   ZIGBUILD_VERSION: '0.23.0'
-  XWIN_VERSION: '0.23.1'
+  # Named away from XWIN_VERSION on purpose: cargo-xwin reads that env as its
+  # --xwin-version flag (the Windows SDK manifest), and a crate version there
+  # kills every msvc build with "invalid digit found in string".
+  XWIN_CRATE_VERSION: '0.23.1'
   MACOS_SDK_URL: 'https://github.com/phracker/MacOSX-SDKs/releases/download/11.3/MacOSX11.3.sdk.tar.xz'
   MACOS_SDK_SHA256: 'cd4f08a75577145b8f05245a2975f7c81401d75e9535dcffbb879ee1deefcbf4'
 jobs:
@@ -126,7 +129,7 @@ jobs:
             [ -n "$src" ] || { echo "::error::$t not provided by the llvm packages"; exit 1; }
             sudo ln -sf "$src" "/usr/local/bin/$t"
           done
-          cargo install cargo-xwin --version "${XWIN_VERSION}" --locked
+          cargo install cargo-xwin --version "${XWIN_CRATE_VERSION}" --locked
       - name: Build
         working-directory: code-rs
         run: |
