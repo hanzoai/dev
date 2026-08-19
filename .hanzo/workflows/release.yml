@@ -197,8 +197,11 @@ jobs:
           curl -s "${auth[@]}" "https://api.github.com/repos/hanzoai/dev/releases/$REL/assets?per_page=100" > /tmp/assets.json
           n=$(jq length /tmp/assets.json)
           [ "$n" -eq 28 ] || { echo "::error::draft holds $n assets, want 28 — a target is missing"; jq -r '.[].name' /tmp/assets.json; exit 1; }
+          # Bytes need octet-stream ALONE: the auth array's vnd.github Accept
+          # beside it made GitHub answer with asset metadata JSON, and every
+          # "downloaded" file was the same twenty lines of JSON.
           jq -r '.[] | "\(.id) \(.name)"' /tmp/assets.json | while read -r id name; do
-            curl -fsSL "${auth[@]}" -H "Accept: application/octet-stream" \
+            curl -fsSL -H "Authorization: Bearer $GH_PAT" -H "Accept: application/octet-stream" \
               "https://api.github.com/repos/hanzoai/dev/releases/assets/$id" -o "dist/$name"
           done
           (cd dist && for s in *.sha256; do sha256sum -c "$s" >/dev/null; done)
