@@ -8,6 +8,7 @@ import { get } from 'https';
 import { platform, arch, tmpdir } from 'os';
 import { execSync } from 'child_process';
 import { createRequire } from 'module';
+import { createHash } from 'crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -102,7 +103,7 @@ async function writeCacheAtomic(srcPath, cachePath) {
   try {
     if (existsSync(cachePath)) {
       const ok = validateDownloadedBinary(cachePath).ok;
-      if (ok) return;
+      if (ok && stamped(cachePath)) return;
     }
   } catch {}
   const dir = dirname(cachePath);
@@ -116,6 +117,7 @@ async function writeCacheAtomic(srcPath, cachePath) {
     try {
       if (existsSync(cachePath)) { try { unlinkSync(cachePath); } catch {} }
       renameSync(tmp, cachePath);
+      stamp(cachePath);
       return;
     } catch {
       await new Promise(r => setTimeout(r, delays[i]));
@@ -259,6 +261,52 @@ async function downloadBinary(url, dest, maxRedirects = 5, maxRetries = 3) {
   }
 }
 
+// Every release asset ships a sibling `<name>.sha256` written by the release
+// lane. This install downloads a binary and then runs it, so the file magic
+// check below — which only proves the bytes are *an* executable — is not the
+// last word. Read the published digest and compare.
+async function publishedDigest(url, dest) {
+  await downloadBinary(`${url}.sha256`, dest);
+  // sha256sum format: "<64 hex>  <filename>", possibly several lines.
+  const line = readFileSync(dest, 'utf8').split('\n').map(l => l.trim()).find(l => /^[0-9a-f]{64}\b/i.test(l));
+  try { unlinkSync(dest); } catch {}
+  if (!line) throw new Error('no checksum line in published .sha256');
+  return line.slice(0, 64).toLowerCase();
+}
+
+function digestOf(p) {
+  const h = createHash('sha256');
+  h.update(readFileSync(p));
+  return h.digest('hex');
+}
+
+// Throws unless the archive matches what the release published. A checksum
+// that is skipped when it cannot be fetched is not a checksum, so a missing
+// or unreadable digest fails the install too.
+async function matchPublished(url, archivePath) {
+  const want = await publishedDigest(url, stampOf(archivePath));
+  const got = digestOf(archivePath);
+  if (got !== want) {
+    throw new Error(`checksum mismatch for ${url}\n  published: ${want}\n  received:  ${got}`);
+  }
+  console.log(`Verified sha256 ${want.slice(0, 16)}...`);
+}
+
+// A cached binary is trusted only while a stamp beside it still matches its
+// bytes. The stamp is written after the published checksum verified the archive
+// it came from, so a cache hit carries that proof forward instead of resting on
+// file magic alone. The cache is keyed by version number, so without this a bad
+// binary under an already-cached version would survive every reinstall.
+function stampOf(p) { return `${p}.sha256`; }
+
+function stamp(p) {
+  try { writeFileSync(stampOf(p), digestOf(p)); } catch {}
+}
+
+function stamped(p) {
+  try { return readFileSync(stampOf(p), 'utf8').trim() === digestOf(p); } catch { return false; }
+}
+
 function validateDownloadedBinary(p) {
   try {
     const st = statSync(p);
@@ -361,7 +409,7 @@ export async function runPostinstall(options = {}) {
     try {
       if (existsSync(cachePath)) {
         const valid = validateDownloadedBinary(cachePath);
-        if (valid.ok) {
+        if (valid.ok && stamped(cachePath)) {
           // Avoid mirroring into node_modules on Windows or WSL-on-NTFS.
           const wsl = isWSL();
           const binDirReal = (() => { try { return realpathSync(binDir); } catch { return binDir; } })();
@@ -467,6 +515,7 @@ export async function runPostinstall(options = {}) {
       }
       const tmpPath = join(needsIsolation ? safeTempDir : binDir, `.${archiveName}.part`);
       await downloadBinary(downloadUrl, tmpPath);
+      await matchPublished(downloadUrl, tmpPath);
 
       if (isWin) {
         // Unzip to a temp directory, then move into the per-user cache.
