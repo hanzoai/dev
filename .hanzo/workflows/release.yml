@@ -217,12 +217,12 @@ jobs:
             -d '{"draft":false}' | jq -r '"published: " + .html_url'
       - name: Mirror the release to the forge
         env:
-          FORGE_TOKEN: ${{ secrets.FORGE_TOKEN }}
+          GIT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          [ -n "${FORGE_TOKEN:-}" ] || { echo "no FORGE_TOKEN — skipping forge mirror"; exit 0; }
-          git push "https://x:$FORGE_TOKEN@git.hanzo.ai/hanzoai/dev.git" "$GITHUB_SHA:refs/tags/v$V" || true
-          a() { curl -fsS -H "Authorization: token $FORGE_TOKEN" -H 'Accept: application/json' "$@"; }
+          [ -n "${GIT_TOKEN:-}" ] || { echo "no GIT_TOKEN — skipping forge mirror"; exit 0; }
+          git push "https://x:$GIT_TOKEN@git.hanzo.ai/hanzoai/dev.git" "$GITHUB_SHA:refs/tags/v$V" || true
+          a() { curl -fsS -H "Authorization: token $GIT_TOKEN" -H 'Accept: application/json' "$@"; }
           rel=$(a "https://git.hanzo.ai/v1/repos/hanzoai/dev/releases/tags/v$V" 2>/dev/null | jq -r '.id // empty' || true)
           [ -n "$rel" ] || rel=$(a -X POST "https://git.hanzo.ai/v1/repos/hanzoai/dev/releases" -H 'Content-Type: application/json' \
             -d "$(jq -nc --arg t "v$V" --arg n "Release v$V" '{tag_name:$t,name:$n}')" | jq -r .id)
@@ -277,7 +277,7 @@ jobs:
           git -c user.name=hanzo-dev -c user.email=dev@hanzo.ai commit -qam "hanzo-dev $V" && git push -q || echo "formula unchanged"
       - name: Bump
         env:
-          FORGE_TOKEN: ${{ secrets.FORGE_TOKEN }}
+          GIT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git add codex-cli/package.json codex-cli/package-lock.json Formula/hanzo-dev.rb 2>/dev/null || true
@@ -285,4 +285,4 @@ jobs:
           push() { git push "$1" HEAD:main && return
             git fetch "$1" main && git -c user.name=hanzo-dev -c user.email=dev@hanzo.ai rebase FETCH_HEAD && git push "$1" HEAD:main; }
           push "https://x-access-token:$GH_PAT@github.com/hanzoai/dev.git"
-          [ -z "${FORGE_TOKEN:-}" ] || push "https://x:$FORGE_TOKEN@git.hanzo.ai/hanzoai/dev.git" || true
+          [ -z "${GIT_TOKEN:-}" ] || push "https://x:$GIT_TOKEN@git.hanzo.ai/hanzoai/dev.git" || true
