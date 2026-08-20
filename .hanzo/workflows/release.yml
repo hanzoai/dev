@@ -215,19 +215,19 @@ jobs:
           echo "smoked: $("$x/dev" --version)"
           curl -s -X PATCH "${auth[@]}" "https://api.github.com/repos/hanzoai/dev/releases/$REL" \
             -d '{"draft":false}' | jq -r '"published: " + .html_url'
-      - name: Mirror the release to the forge
+      - name: Mirror the release to Hanzo Git
         env:
           GIT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          [ -n "${GIT_TOKEN:-}" ] || { echo "no GIT_TOKEN — skipping forge mirror"; exit 0; }
+          [ -n "${GIT_TOKEN:-}" ] || { echo "no GIT_TOKEN — skipping Hanzo Git mirror"; exit 0; }
           git push "https://x:$GIT_TOKEN@git.hanzo.ai/hanzoai/dev.git" "$GITHUB_SHA:refs/tags/v$V" || true
           a() { curl -fsS -H "Authorization: token $GIT_TOKEN" -H 'Accept: application/json' "$@"; }
           rel=$(a "https://git.hanzo.ai/v1/repos/hanzoai/dev/releases/tags/v$V" 2>/dev/null | jq -r '.id // empty' || true)
           [ -n "$rel" ] || rel=$(a -X POST "https://git.hanzo.ai/v1/repos/hanzoai/dev/releases" -H 'Content-Type: application/json' \
             -d "$(jq -nc --arg t "v$V" --arg n "Release v$V" '{tag_name:$t,name:$n}')" | jq -r .id)
           for f in dist/*; do a -X POST -F "attachment=@$f" "https://git.hanzo.ai/v1/repos/hanzoai/dev/releases/$rel/assets?name=$(basename "$f")" >/dev/null || true; done
-          echo "forge release mirrored"
+          echo "Hanzo Git release mirrored"
       - name: Publish npm
         env:
           KMS_CLIENT_ID: ${{ secrets.KMS_CLIENT_ID }}
