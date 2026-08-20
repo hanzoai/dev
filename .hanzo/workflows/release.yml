@@ -54,10 +54,17 @@ jobs:
           for p in @hanzo/dev @hanzo/dev-darwin-arm64 @hanzo/dev-darwin-x64 @hanzo/dev-linux-x64-musl @hanzo/dev-linux-arm64-musl @hanzo/dev-win32-x64; do
             npmv=$(top "${npmv:-0.0.0}" "$(curl -fsS "https://registry.npmjs.org/$(printf '%s' "$p" | sed 's,/,%2F,')" | jq -r '."dist-tags".latest // "0.0.0"')")
           done
-          base=$(top "${tag:-0.0.0}" "$npmv" "$(jq -r .version codex-cli/package.json)")
+          auth=(-H "Authorization: Bearer $GH_PAT" -H "Accept: application/vnd.github+json")
+          # A draft opened by a run still in flight is that run's claim on a
+          # number: the tag and the npm package only appear when it publishes,
+          # ~25 minutes later. Two runs that both skip this both pick the same
+          # version, and the second one dies at `npm publish` having already
+          # cross-built five targets.
+          held=$(curl -fsS "${auth[@]}" "https://api.github.com/repos/hanzoai/dev/releases?per_page=100" \
+            | jq -r '.[].tag_name' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//' | sort -V | tail -n1 || true)
+          base=$(top "${tag:-0.0.0}" "$npmv" "${held:-0.0.0}" "$(jq -r .version codex-cli/package.json)")
           IFS=. read -r a b c <<<"$base"
           v="$a.$b.$((c+1))"
-          auth=(-H "Authorization: Bearer $GH_PAT" -H "Accept: application/vnd.github+json")
           rel=$(curl -s -X POST "${auth[@]}" https://api.github.com/repos/hanzoai/dev/releases \
             -d "$(jq -nc --arg t "v$v" --arg n "Release v$v" --arg sha "$GITHUB_SHA" \
               '{tag_name:$t,name:$n,target_commitish:$sha,draft:true}')" | jq -r '.id // empty')
