@@ -11,7 +11,7 @@
 # and opens a DRAFT GitHub release; five `build` jobs each compile one target
 # and upload its assets into the draft by id; `publish` verifies all 28
 # assets, publishes the release (which mints the tag), mirrors it to the
-# forge, publishes npm (five platform packages, then @hanzo/dev), pushes the
+# Hanzo Git, publishes npm (five platform packages, then @hanzo/dev), pushes the
 # Homebrew formula, and lands the version-bump commit on main.
 name: Release
 on:
