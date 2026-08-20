@@ -1446,6 +1446,11 @@ async fn preview_main(args: PreviewArgs) -> anyhow::Result<()> {
     bail!("No recognized artifact content found.")
 }
 
+/// What to say when several installs of this agent answer to the same name.
+/// Held as one value so the identity test can read it; the names here are the
+/// real ones — formula `hanzo-dev`, package `@hanzo/dev`, binary `dev`.
+const ONE_INSTALL: &str = "\nIf versions differ, keep one install and drop the rest:\n  - Homebrew: brew uninstall hanzo-dev\n  - npm/pnpm: npm uninstall -g @hanzo/dev\n  - Bun: bun remove -g @hanzo/dev\n\nCall it 'dev'. 'code' is an alias for the same program and collides with VS Code's CLI.";
+
 async fn doctor_main() -> anyhow::Result<()> {
     use std::env;
     use std::process::Stdio;
@@ -1455,7 +1460,7 @@ async fn doctor_main() -> anyhow::Result<()> {
     let exe = std::env::current_exe()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "<unknown>".to_string());
-    println!("code version: {}", code_version::version());
+    println!("dev version: {}", code_version::version());
     println!("current_exe: {}", exe);
 
     // PATH
@@ -1535,18 +1540,18 @@ async fn doctor_main() -> anyhow::Result<()> {
         let bun_code = format!("{}/code", bun_bin);
         if code_paths.iter().any(|p| p == &bun_code) {
             println!("Bun shim detected for 'code': {}", bun_code);
-            println!("Suggestion: prefer 'coder' or remove Bun shim if it conflicts.");
+            println!("Suggestion: prefer 'dev' or remove the Bun shim if it conflicts.");
         }
     }
 
     // Detect Homebrew overshadow of VS Code
     #[cfg(target_os = "macos")]
     {
-        let brew_code = code_paths.iter().find(|p| p.contains("/homebrew/bin/code") || p.contains("/Cellar/code/"));
+        let brew_code = code_paths.iter().find(|p| p.contains("/homebrew/bin/code") || p.contains("/Cellar/hanzo-dev/") || p.contains("/Cellar/code/"));
         let vscode_code = code_paths.iter().find(|p| p.contains("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"));
         if brew_code.is_some() && vscode_code.is_some() {
             println!("\nHomebrew 'code' precedes VS Code CLI in PATH.");
-            println!("Suggestion: uninstall Homebrew formula 'code' (brew uninstall code) or reorder PATH so /usr/local/bin comes before /usr/local/homebrew/bin.");
+            println!("Suggestion: call this agent by its own name, 'dev' — 'code' is only an alias. Or reorder PATH so /usr/local/bin precedes /opt/homebrew/bin.");
         }
     }
 
@@ -1560,17 +1565,28 @@ async fn doctor_main() -> anyhow::Result<()> {
         println!("npm prefix -g: {}", npm_prefix);
     }
 
-    println!("\nIf versions differ, remove older installs and keep one package manager:");
-    println!("  - Bun: bun remove -g @hanzo/dev");
-    println!("  - npm/pnpm: npm uninstall -g @hanzo/dev");
-    println!("  - Homebrew: brew uninstall code");
-    println!("  - Prefer using 'coder' to avoid conflicts with VS Code's 'code'.");
+    println!("{ONE_INSTALL}");
 
     Ok(())
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `doctor` is the one place that tells a confused user which install to
+    /// remove, so it has to name the real formula, package and binary. Left as
+    /// prose it drifted back to `brew uninstall code` and `prefer 'coder'` —
+    /// advice to remove a formula that does not exist. See hanzo_identity.rs,
+    /// which guards the same contract for the defaults.
+    #[test]
+    fn doctor_names_the_things_that_actually_exist() {
+        assert!(ONE_INSTALL.contains("brew uninstall hanzo-dev"));
+        assert!(ONE_INSTALL.contains("npm uninstall -g @hanzo/dev"));
+        assert!(ONE_INSTALL.contains("Call it 'dev'"));
+        assert!(!ONE_INSTALL.contains("uninstall code"));
+        assert!(!ONE_INSTALL.contains("coder"));
+    }
+
     use std::io::Write;
     use std::path::{Path, PathBuf};
     use std::sync::Mutex;
