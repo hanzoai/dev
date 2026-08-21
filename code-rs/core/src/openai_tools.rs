@@ -1378,13 +1378,22 @@ fn parse_tool_input_schema(input_schema: &JsonValue) -> Result<JsonSchema, serde
     serde_json::from_value::<JsonSchema>(input_schema)
 }
 
+/// The six types [`JsonSchema`] can hold. One list, read by every path that
+/// resolves a `type` — a scalar and a `["string", "null"]` union both measure
+/// against it, so they cannot drift apart.
+const SCHEMA_TYPES: [&str; 6] = [
+    "object", "array", "string", "number", "integer", "boolean",
+];
+
 /// Sanitize a JSON Schema (as serde_json::Value) so it can fit our limited
 /// JsonSchema enum. This function:
-/// - Ensures every schema object has a "type". If missing, infers it from
-///   common keywords (properties => object, items => array, enum/const/format => string)
-///   and otherwise defaults to "string".
+/// - Ensures every schema object has a "type" drawn from [`SCHEMA_TYPES`]. If it
+///   is missing, or is one we cannot hold, infers it from common keywords
+///   (properties => object, items => array, enum/const/format => string) and
+///   otherwise defaults to "string".
 /// - Fills required child fields (e.g. array items, object properties) with
-///   permissive defaults when absent.
+///   permissive defaults when absent, and writes an empty `required` list where
+///   a schema omits one, which is JSON Schema's own reading of an absent list.
 fn sanitize_json_schema(value: &mut JsonValue) {
     match value {
         JsonValue::Bool(_) => {
@@ -1431,27 +1440,25 @@ fn sanitize_json_schema(value: &mut JsonValue) {
                 }
             }
 
-            // Normalize/ensure type
+            // Normalize/ensure type. A scalar is measured against SCHEMA_TYPES
+            // exactly as a union is, so the two cannot disagree about what we
+            // can hold: `null` and anything else outside the list fall through
+            // to inference below rather than reaching the parser, where one bad
+            // property took down the whole tool around it.
             let mut ty = map
                 .get("type")
-                .and_then(|v| v.as_str())
-                .filter(|t| *t != "null")
+                .and_then(JsonValue::as_str)
+                .filter(|t| SCHEMA_TYPES.contains(t))
                 .map(str::to_string);
 
             // If type is an array (union), pick first supported; else leave to inference
             if ty.is_none() {
                 if let Some(JsonValue::Array(types)) = map.get("type") {
-                    for t in types {
-                        if let Some(tt) = t.as_str() {
-                            if matches!(
-                                tt,
-                                "object" | "array" | "string" | "number" | "integer" | "boolean"
-                            ) {
-                                ty = Some(tt.to_string());
-                                break;
-                            }
-                        }
-                    }
+                    ty = types
+                        .iter()
+                        .filter_map(JsonValue::as_str)
+                        .find(|t| SCHEMA_TYPES.contains(t))
+                        .map(str::to_string);
                 }
             }
 
@@ -1493,6 +1500,14 @@ fn sanitize_json_schema(value: &mut JsonValue) {
                         "properties".to_string(),
                         JsonValue::Object(serde_json::Map::new()),
                     );
+                }
+                // JSON Schema reads an absent `required` as "nothing is
+                // required"; our Object serializer reads an absent one as
+                // "everything is". Write the empty list, so a server that omits
+                // it — every Pydantic tool whose arguments are all optional —
+                // is not sent to the model demanding all fifteen of them.
+                if !map.contains_key("required") {
+                    map.insert("required".to_string(), JsonValue::Array(Vec::new()));
                 }
                 // If additionalProperties is an object schema, sanitize it too.
                 // Leave booleans as-is, since JSON Schema allows boolean here.
@@ -2322,7 +2337,7 @@ mod tests {
                             },
                         ),
                     ]),
-                    required: None,
+                    required: Some(Vec::new()),
                     additional_properties: None,
                 },
                 description: "Do something cool".to_string(),
@@ -2457,7 +2472,7 @@ mod tests {
                             },
                         ),
                     ]),
-                    required: None,
+                    required: Some(Vec::new()),
                     additional_properties: None,
                 },
                 description: "Do something cool".to_string(),
@@ -2551,7 +2566,7 @@ mod tests {
                             allowed_values: None,
                         }
                     )]),
-                    required: None,
+                    required: Some(Vec::new()),
                     additional_properties: None,
                 },
                 description: "Search docs".to_string(),
@@ -2628,7 +2643,7 @@ mod tests {
                         "page".to_string(),
                         JsonSchema::Number { description: None }
                     )]),
-                    required: None,
+                    required: Some(Vec::new()),
                     additional_properties: None,
                 },
                 description: "Pagination".to_string(),
@@ -2703,7 +2718,7 @@ mod tests {
                             description: None
                         }
                     )]),
-                    required: None,
+                    required: Some(Vec::new()),
                     additional_properties: None,
                 },
                 description: "Tags".to_string(),
@@ -2744,6 +2759,68 @@ mod tests {
         );
         assert_eq!(parameters["properties"]["timeout"]["type"], "number");
         assert_eq!(parameters["properties"]["env"]["type"], "string");
+    }
+
+    fn convert_hanzo_tool(
+        properties: serde_json::Value,
+        required: Option<Vec<String>>,
+    ) -> JsonValue {
+        let tool = mcp_tool_to_openai_tool(
+            "hanzo__agent".to_string(),
+            mcp_types::Tool {
+                name: "agent".to_string(),
+                input_schema: ToolInputSchema {
+                    properties: Some(properties),
+                    required,
+                    r#type: "object".to_string(),
+                },
+                output_schema: None,
+                title: None,
+                annotations: None,
+                description: None,
+            },
+        )
+        .expect("a Pydantic schema is a JSON Schema and must convert");
+        serde_json::to_value(&tool.parameters).expect("serializes")
+    }
+
+    /// Pydantic omits `required` when every argument is optional, which is most
+    /// of the Hanzo MCP server: `agent` declares none of its fifteen. Reading
+    /// that as "all fifteen" tells the model a one-word call is malformed.
+    #[test]
+    fn test_mcp_tool_absent_required_requires_nothing() {
+        let parameters = convert_hanzo_tool(
+            serde_json::json!({
+                "action": { "type": "string" },
+                "prompt": { "anyOf": [ { "type": "string" }, { "type": "null" } ] },
+            }),
+            None,
+        );
+
+        assert_eq!(parameters["required"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn test_mcp_tool_declared_required_survives() {
+        let parameters = convert_hanzo_tool(
+            serde_json::json!({ "op": { "type": "string" } }),
+            Some(vec!["op".to_string()]),
+        );
+
+        assert_eq!(parameters["required"], serde_json::json!(["op"]));
+    }
+
+    /// A type outside [`SCHEMA_TYPES`] degrades to an accept-all string. It must
+    /// never reach the parser, where it would fail the whole tool it sits in
+    /// rather than the one argument it describes.
+    #[test]
+    fn test_mcp_tool_unheld_type_does_not_fail_the_tool() {
+        let parameters = convert_hanzo_tool(
+            serde_json::json!({ "weird": { "type": "int64" } }),
+            None,
+        );
+
+        assert_eq!(parameters["properties"]["weird"]["type"], "string");
     }
 
     #[test]
