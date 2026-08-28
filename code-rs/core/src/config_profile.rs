@@ -39,6 +39,7 @@ pub struct ConfigProfile {
     pub model_reasoning_summary: Option<ReasoningSummary>,
     pub model_text_verbosity: Option<TextVerbosity>,
     pub model_personality: Option<Personality>,
+    pub persona: Option<String>,
     pub context_mode: Option<ContextMode>,
     pub service_tier: Option<ServiceTier>,
     pub chatgpt_base_url: Option<String>,

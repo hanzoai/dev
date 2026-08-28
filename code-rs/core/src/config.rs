@@ -358,6 +358,10 @@ pub struct Config {
     /// Optional personality used to template gpt-5.2-codex base instructions.
     pub model_personality: Option<Personality>,
 
+    /// Name of the persona the session speaks as. Its system turn is read from
+    /// the Hanzo Cloud at startup and put in front of `user_instructions`.
+    pub persona: Option<String>,
+
     /// Optional override for the compaction prompt text.
     pub compact_prompt_override: Option<String>,
 
@@ -807,6 +811,7 @@ pub struct ConfigToml {
     pub model_reasoning_summary: Option<ReasoningSummary>,
     pub model_text_verbosity: Option<TextVerbosity>,
     pub model_personality: Option<Personality>,
+    pub persona: Option<String>,
     pub context_mode: Option<ContextMode>,
     pub service_tier: Option<ServiceTier>,
 
@@ -1379,6 +1384,8 @@ impl Config {
             .model_personality
             .or(cfg.model_personality);
 
+        let persona = config_profile.persona.clone().or(cfg.persona.clone());
+
         let service_tier = match config_profile.service_tier.or(cfg.service_tier) {
             Some(ServiceTier::Fast) => Some(ServiceTier::Fast),
             Some(ServiceTier::Flex) => Some(ServiceTier::Flex),
@@ -1723,6 +1730,7 @@ impl Config {
             demo_developer_message: None,
             base_instructions,
             model_personality,
+            persona,
             compact_prompt_override,
             mcp_servers: cfg.mcp_servers,
             experimental_client_tools: cfg.experimental_client_tools.clone(),
@@ -2900,6 +2908,42 @@ model_verbosity = "high"
             &gpt5_profile_config.model_providers
         );
 
+        Ok(())
+    }
+
+    /// A persona resolves like every other prompt-shaping key: a profile's
+    /// beats the config file's. `--persona` sits above both and is stamped onto
+    /// the loaded config by the CLI, next to `--demo`.
+    #[test]
+    fn persona_prefers_the_profile_over_the_config_file() -> std::io::Result<()> {
+        let fixture = create_test_fixture()?;
+        let mut cfg = fixture.cfg.clone();
+        cfg.persona = Some("feynman".to_string());
+
+        let config = Config::load_from_base_config_with_overrides(
+            cfg.clone(),
+            ConfigOverrides {
+                cwd: Some(fixture.cwd()),
+                ..Default::default()
+            },
+            fixture.code_home(),
+        )?;
+        assert_eq!(Some("feynman"), config.persona.as_deref());
+
+        cfg.profiles
+            .get_mut("o3")
+            .expect("o3 profile should exist")
+            .persona = Some("hopper".to_string());
+        let config = Config::load_from_base_config_with_overrides(
+            cfg,
+            ConfigOverrides {
+                config_profile: Some("o3".to_string()),
+                cwd: Some(fixture.cwd()),
+                ..Default::default()
+            },
+            fixture.code_home(),
+        )?;
+        assert_eq!(Some("hopper"), config.persona.as_deref());
         Ok(())
     }
 

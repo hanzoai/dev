@@ -237,6 +237,28 @@ It fails soft everywhere — evidence is not the work — so a broken capture is
 `debug!` line, never a failed turn. Most of it arrived in `bc20e6af40`, whose
 subject is about the Hanzo provider's machine credential and does not mention it.
 
+## Personas come from cloud, whole
+
+`--persona <name>` / `persona = "<name>"` (also per profile) resolves through
+`core/src/persona.rs`: one authenticated `GET {base}/persona/system?name=…` on
+the Hanzo provider, and the answer is used as written. Never rebuild the turn
+from a persona's fields — the composition lives in the server
+(`hanzoai/ai object/persona.go`), and a second copy in the client drifts.
+
+- **It lands in `config.user_instructions`, in front of what was there.**
+  `project_doc` already treats that field as the text preceding AGENTS.md, and
+  `submit_configure_session_op` re-sends the raw field on a model change — so a
+  persona folded in anywhere later silently disappears the first time the user
+  switches model. Not `base_instructions`: that slot replaces the coding harness.
+- **It is applied after the model-migration block in `tui/src/lib.rs`**, which
+  can reload the config and discard anything stamped before it.
+- **Unlike `shot/`, it does not fail soft.** A named persona is an explicit
+  instruction; an agent that silently isn't Feynman looks like a model ignoring
+  its prompt. An unresolvable name stops the run.
+- **`status`, not the HTTP code, says whether it worked.** The `/v1` envelope
+  answers 200 with `{"status":"error"}`; reading `data` without reading `status`
+  splices "The object does not exist" into the agent's instructions.
+
 ## Command Execution Architecture
 
 The command execution flow in Codex follows an event-driven pattern:

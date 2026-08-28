@@ -24,6 +24,10 @@ pub struct Cli {
     #[arg(long, short = 'm')]
     pub model: Option<String>,
 
+    /// Persona the agent should speak as, by name.
+    #[arg(long = "persona", value_name = "NAME")]
+    pub persona: Option<String>,
+
     /// Convenience flag to select the local open source model provider.
     /// Equivalent to -c model_provider=oss; verifies a local Ollama server is
     /// running.

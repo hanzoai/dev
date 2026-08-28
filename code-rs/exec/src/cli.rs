@@ -31,6 +31,10 @@ pub struct Cli {
     #[arg(long, short = 'm')]
     pub model: Option<String>,
 
+    /// Persona the agent should speak as, by name.
+    #[arg(long = "persona", value_name = "NAME")]
+    pub persona: Option<String>,
+
     #[arg(long = "oss", default_value_t = false)]
     pub oss: bool,
 

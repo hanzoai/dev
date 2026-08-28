@@ -311,6 +311,10 @@ pub async fn run_main(cli: Cli, code_linux_sandbox_exe: Option<PathBuf>) -> anyh
     config.max_run_seconds = max_seconds;
     config.max_run_deadline = run_deadline_std;
     config.demo_developer_message = cli.demo_developer_message.clone();
+    if cli.persona.is_some() {
+        config.persona = cli.persona.clone();
+    }
+    code_core::persona::adopt(&mut config).await?;
     config.timeboxed_exec_mode = timeboxed_auto_exec;
     if timeboxed_auto_exec {
         config.demo_developer_message = merge_developer_message(

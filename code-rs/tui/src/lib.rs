@@ -631,6 +631,20 @@ pub async fn run_main(
         }
     }
 
+    // The flag outranks the config key, and both are stamped here: the model
+    // migration above can reload the config, which would discard anything set
+    // before it. The persona's system turn goes in front of `user_instructions`
+    // so every path that carries that field carries the persona too, including
+    // the session reconfigure a model change sends.
+    if cli.persona.is_some() {
+        config.persona = cli.persona.clone();
+    }
+    #[allow(clippy::print_stderr)]
+    if let Err(err) = code_core::persona::adopt(&mut config).await {
+        eprintln!("Error: {err:#}");
+        std::process::exit(1);
+    }
+
     let startup_footer_notice = None;
 
     // we load config.toml here to determine project state.

@@ -20,6 +20,20 @@ The model that Codex should use.
 model = "o3"  # overrides the default of "gpt-5.1"
 ```
 
+## persona
+
+The persona the agent speaks as, by name. The composed system turn is read from
+the Hanzo Cloud at startup and placed in front of your own instructions, ahead
+of `AGENTS.md`.
+
+```toml
+persona = "feynman"
+```
+
+`--persona <NAME>` overrides it for a single run, and a profile may carry its
+own. A name that cannot be resolved — unknown, or nobody signed in — stops the
+run rather than starting a session that quietly has no persona.
+
 ## model_providers
 
 This option lets you override and amend the default set of model providers bundled with Codex. This value is a map where the key is the value to use with `model_provider` to select the corresponding provider. Providers must expose an OpenAI-compatible HTTP API (Chat Completions or Responses); native Anthropic/Gemini APIs are not supported directly without a proxy.
