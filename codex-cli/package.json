@@ -31,16 +31,16 @@
     "access": "public"
   },
   "dependencies": {
-    "@hanzo/mcp": "^2.4.4"
+    "@hanzo/mcp": "catalog:"
   },
   "devDependencies": {
     "prettier": "^3.3.3"
   },
   "optionalDependencies": {
-    "@hanzo/dev-darwin-arm64": "0.6.102",
-    "@hanzo/dev-darwin-x64": "0.6.102",
-    "@hanzo/dev-linux-x64-musl": "0.6.102",
-    "@hanzo/dev-linux-arm64-musl": "0.6.102",
-    "@hanzo/dev-win32-x64": "0.6.102"
+    "@hanzo/dev-darwin-arm64": "catalog:",
+    "@hanzo/dev-darwin-x64": "catalog:",
+    "@hanzo/dev-linux-x64-musl": "catalog:",
+    "@hanzo/dev-linux-arm64-musl": "catalog:",
+    "@hanzo/dev-win32-x64": "catalog:"
   }
 }

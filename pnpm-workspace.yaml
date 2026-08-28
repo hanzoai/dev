@@ -18,3 +18,11 @@ trustPolicyExclude: []
 allowBuilds:
   # Build only the official MCP conformance CLI pinned by the TypeScript SDK.
   "@modelcontextprotocol/conformance": true
+
+catalog:
+  '@hanzo/dev-darwin-arm64': 3.0.13
+  '@hanzo/dev-darwin-x64': 3.0.13
+  '@hanzo/dev-linux-arm64-musl': 3.0.13
+  '@hanzo/dev-linux-x64-musl': 3.0.13
+  '@hanzo/dev-win32-x64': 3.0.13
+  '@hanzo/mcp': 2.4.7
