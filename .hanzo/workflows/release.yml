@@ -34,7 +34,7 @@ env:
 jobs:
   version:
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
-    runs-on: hanzo-build-linux-amd64
+    runs-on: [hanzo-build-linux-amd64]
     outputs:
       version: ${{ steps.v.outputs.version }}
       release: ${{ steps.v.outputs.release }}
@@ -76,7 +76,7 @@ jobs:
   build:
     name: ${{ matrix.target.id }}
     needs: version
-    runs-on: hanzo-build-linux-amd64
+    runs-on: [hanzo-build-linux-amd64]
     timeout-minutes: 150
     strategy:
       fail-fast: false
@@ -180,7 +180,7 @@ jobs:
 
   publish:
     needs: [version, build]
-    runs-on: hanzo-build-linux-amd64
+    runs-on: [hanzo-build-linux-amd64]
     timeout-minutes: 60
     env:
       V: ${{ needs.version.outputs.version }}
