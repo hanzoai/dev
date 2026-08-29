@@ -34,7 +34,7 @@
     "@hanzo/mcp": "catalog:"
   },
   "devDependencies": {
-    "prettier": "^3.3.3"
+    "prettier": "catalog:"
   },
   "optionalDependencies": {
     "@hanzo/dev-darwin-arm64": "catalog:",

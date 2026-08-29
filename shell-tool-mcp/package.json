@@ -25,13 +25,13 @@
     "format:fix": "prettier --write ."
   },
   "devDependencies": {
-    "@types/jest": "^29.5.14",
-    "@types/node": "^20.19.18",
-    "jest": "^29.7.0",
-    "prettier": "^3.6.2",
-    "ts-jest": "^29.3.4",
-    "tsup": "^8.5.0",
-    "typescript": "^5.9.2"
+    "@types/jest": "catalog:",
+    "@types/node": "catalog:",
+    "jest": "catalog:",
+    "prettier": "catalog:",
+    "ts-jest": "catalog:",
+    "tsup": "catalog:",
+    "typescript": "catalog:"
   },
   "packageManager": "pnpm@10.29.3+sha512.498e1fb4cca5aa06c1dcf2611e6fafc50972ffe7189998c409e90de74566444298ffe43e6cd2acdc775ba1aa7cc5e092a8b7054c811ba8c5770f84693d33d2dc"
 }
