@@ -31,7 +31,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@hanzo/mcp": "^2.4.4"
+    "@hanzo/mcp": "^2.4.9"
   },
   "devDependencies": {
     "prettier": "^3.3.3"
