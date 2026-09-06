@@ -15,11 +15,22 @@ impl ChatWidget {
 
     /// Open a popup to choose the permissions mode.
     pub(crate) fn open_permissions_popup(&mut self) {
-        if self.config.explicit_permission_profile_mode {
-            self.open_permission_profiles_popup();
+        if self.config.explicit_permission_profile_mode
+            || self.permission_profiles_menu_opened
+            || self
+                .config
+                .permissions
+                .active_permission_profile()
+                .is_some_and(|profile| !profile.id.starts_with(':'))
+        {
+            self.request_permission_profiles();
             return;
         }
 
+        self.open_legacy_permissions_popup();
+    }
+
+    pub(super) fn open_legacy_permissions_popup(&mut self) {
         let include_read_only = cfg!(target_os = "windows");
         let current_approval =
             AskForApproval::from(self.config.permissions.approval_policy.value());
@@ -104,12 +115,17 @@ impl ChatWidget {
                         name: APPROVE_FOR_ME_LABEL.to_string(),
                         description: Some(AUTO_REVIEW_DESCRIPTION.to_string()),
                         is_current: current_review_policy == ApprovalsReviewer::AutoReview
-                            && Self::preset_matches_current(
+                            && (Self::preset_matches_current(
                                 current_approval,
                                 &current_permission_profile,
                                 self.config.cwd.as_path(),
                                 &preset,
-                            ),
+                            ) || (current_approval == AskForApproval::OnRequest
+                                && self
+                                    .config
+                                    .config_layer_stack
+                                    .requirements()
+                                    .auto_review_required_for_model(self.current_model()))),
                         actions: self.permission_mode_actions(
                             &preset,
                             APPROVE_FOR_ME_LABEL.to_string(),
@@ -174,7 +190,7 @@ impl ChatWidget {
         };
 
         let mut items = vec![SelectionItem {
-            name: "Command".to_string(),
+            name: "Action".to_string(),
             description: Some("Rationale".to_string()),
             is_disabled: true,
             search_value: Some(String::new()),
@@ -391,10 +407,8 @@ impl ChatWidget {
                 matches!(
                     current_permission_profile,
                     PermissionProfile::Managed { .. }
-                ) && file_system_policy.can_write_path_with_cwd(cwd, cwd)
+                ) && file_system_policy.can_write_local_path_with_cwd(cwd, cwd)
                     && !file_system_policy.has_full_disk_write_access()
-                    && current_permission_profile.network_sandbox_policy()
-                        == preset.permission_profile.network_sandbox_policy()
             }
             _ => current_permission_profile == &preset.permission_profile,
         }

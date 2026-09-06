@@ -1046,6 +1046,7 @@ pub enum AgentStatus {
 pub enum CodexErrorInfo {
     ContextWindowExceeded,
     UsageLimitExceeded,
+    RateLimitExceeded,
     CyberPolicy,
     ModelCap {
         model: String,

@@ -406,6 +406,7 @@
           "enum": [
             "contextWindowExceeded",
             "usageLimitExceeded",
+            "rateLimitExceeded",
             "cyberPolicy",
             "internalServerError",
             "unauthorized",
@@ -549,6 +550,7 @@
           "enum": [
             "context_window_exceeded",
             "usage_limit_exceeded",
+            "rate_limit_exceeded",
             "cyber_policy",
             "internal_server_error",
             "unauthorized",

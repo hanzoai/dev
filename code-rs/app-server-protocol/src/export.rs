@@ -603,15 +603,31 @@ fn json_files_in_recursive(dir: &Path) -> Result<Vec<PathBuf>> {
 
 fn ensure_trailing_newlines(paths: &[PathBuf]) -> Result<()> {
     for path in paths {
-        let mut content = fs::read_to_string(path)
+        let content = fs::read_to_string(path)
             .with_context(|| format!("Failed to read {path}", path = path.display()))?;
-        if !content.ends_with('\n') {
-            content.push('\n');
-            fs::write(path, content)
+        let normalized = normalize_generated_text(&content);
+        if normalized != content {
+            fs::write(path, normalized)
                 .with_context(|| format!("Failed to write {path}", path = path.display()))?;
         }
     }
     Ok(())
+}
+
+fn normalize_generated_text(content: &str) -> String {
+    let mut normalized = String::with_capacity(content.len());
+    for segment in content.split_inclusive('\n') {
+        if let Some(line) = segment.strip_suffix('\n') {
+            normalized.push_str(line.trim_end_matches([' ', '\t']));
+            normalized.push('\n');
+        } else {
+            normalized.push_str(segment.trim_end_matches([' ', '\t']));
+        }
+    }
+    if !normalized.ends_with('\n') {
+        normalized.push('\n');
+    }
+    normalized
 }
 
 fn read_json_value(path: &Path) -> Result<Value> {

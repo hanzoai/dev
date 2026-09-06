@@ -259,6 +259,12 @@ mod tests {
             _ => panic!("expected streamable http transport"),
         }
     }
+
+    #[test]
+    fn package_style_server_name_is_valid() {
+        assert!(validate_server_name("npm:@modelcontextprotocol/server-sequential.thinking").is_ok());
+        assert!(validate_server_name("npm:@scope/package name").is_err());
+    }
 }
 
 fn run_remove(config_overrides: &CliConfigOverrides, remove_args: RemoveArgs) -> Result<()> {
@@ -591,11 +597,11 @@ fn validate_server_name(name: &str) -> Result<()> {
     let is_valid = !name.is_empty()
         && name
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':' | '@' | '/' | '.'));
 
     if is_valid {
         Ok(())
     } else {
-        bail!("invalid server name '{name}' (use letters, numbers, '-', '_')");
+        bail!("invalid server name '{name}' (use letters, numbers, '-', '_', ':', '@', '/', '.')");
     }
 }

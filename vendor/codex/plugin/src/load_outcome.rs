@@ -120,18 +120,6 @@ impl<M: Clone> PluginLoadOutcome<M> {
         }
     }
 
-    pub fn effective_skill_roots(&self) -> Vec<AbsolutePathBuf> {
-        let mut skill_roots: Vec<AbsolutePathBuf> = self
-            .plugins
-            .iter()
-            .filter(|plugin| plugin.is_active())
-            .flat_map(|plugin| plugin.skill_roots.iter().cloned())
-            .collect();
-        skill_roots.sort_unstable();
-        skill_roots.dedup();
-        skill_roots
-    }
-
     pub fn effective_plugin_skill_roots(&self) -> Vec<PluginSkillRoot> {
         let mut skill_roots = Vec::new();
         let mut seen_paths = HashSet::new();
@@ -181,19 +169,27 @@ impl<M: Clone> PluginLoadOutcome<M> {
     }
 
     pub fn effective_plugin_hook_sources(&self) -> Vec<PluginHookSource> {
+        self.iter_effective_plugin_hook_sources().cloned().collect()
+    }
+
+    pub fn iter_effective_plugin_hook_sources(&self) -> impl Iterator<Item = &PluginHookSource> {
         self.plugins
             .iter()
             .filter(|plugin| plugin.is_active())
-            .flat_map(|plugin| plugin.hook_sources.iter().cloned())
-            .collect()
+            .flat_map(|plugin| plugin.hook_sources.iter())
     }
 
     pub fn effective_plugin_hook_warnings(&self) -> Vec<String> {
+        self.iter_effective_plugin_hook_warnings()
+            .cloned()
+            .collect()
+    }
+
+    pub fn iter_effective_plugin_hook_warnings(&self) -> impl Iterator<Item = &String> {
         self.plugins
             .iter()
             .filter(|plugin| plugin.is_active())
-            .flat_map(|plugin| plugin.hook_load_warnings.iter().cloned())
-            .collect()
+            .flat_map(|plugin| plugin.hook_load_warnings.iter())
     }
 
     pub fn capability_summaries(&self) -> &[PluginCapabilitySummary] {
@@ -202,24 +198,6 @@ impl<M: Clone> PluginLoadOutcome<M> {
 
     pub fn plugins(&self) -> &[LoadedPlugin<M>] {
         &self.plugins
-    }
-}
-
-/// Implemented by [`PluginLoadOutcome`] so callers (e.g. skills) can depend on `codex-plugin`
-/// without naming the MCP config type parameter.
-pub trait EffectiveSkillRoots {
-    fn effective_skill_roots(&self) -> Vec<AbsolutePathBuf>;
-
-    fn effective_plugin_skill_roots(&self) -> Vec<PluginSkillRoot>;
-}
-
-impl<M: Clone> EffectiveSkillRoots for PluginLoadOutcome<M> {
-    fn effective_skill_roots(&self) -> Vec<AbsolutePathBuf> {
-        PluginLoadOutcome::effective_skill_roots(self)
-    }
-
-    fn effective_plugin_skill_roots(&self) -> Vec<PluginSkillRoot> {
-        PluginLoadOutcome::effective_plugin_skill_roots(self)
     }
 }
 

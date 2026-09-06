@@ -92,6 +92,10 @@ pub enum CodexErr {
     #[error("stream disconnected before completion: {0}")]
     Stream(String, Option<RetryAfter>, Option<String>),
 
+    /// A retryable upstream rate limit received inside the response stream.
+    #[error("rate limit exceeded: {0}")]
+    RateLimitExceeded(String, Option<RetryAfter>, Option<String>),
+
     #[error("no conversation with id: {0}")]
     ConversationNotFound(Uuid),
 

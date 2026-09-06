@@ -2076,6 +2076,7 @@
           "enum": [
             "context_window_exceeded",
             "usage_limit_exceeded",
+            "rate_limit_exceeded",
             "cyber_policy",
             "internal_server_error",
             "unauthorized",
@@ -11071,6 +11072,29 @@
           }
         ]
       },
+      "AutoReviewRequirements": {
+        "properties": {
+          "ignoreRules": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "requiredOnModels": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
+      },
       "ByteRange": {
         "properties": {
           "end": {
@@ -11130,6 +11154,7 @@
             "enum": [
               "contextWindowExceeded",
               "usageLimitExceeded",
+              "rateLimitExceeded",
               "cyberPolicy",
               "internalServerError",
               "unauthorized",
@@ -12093,6 +12118,16 @@
             "type": [
               "array",
               "null"
+            ]
+          },
+          "autoReview": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/AutoReviewRequirements"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "enforceResidency": {
@@ -13391,6 +13426,13 @@
         ],
         "type": "string"
       },
+      "McpServerOauthClientRegistration": {
+        "enum": [
+          "auto",
+          "dcr"
+        ],
+        "type": "string"
+      },
       "McpServerOauthLoginCompletedNotification": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -13417,6 +13459,17 @@
       "McpServerOauthLoginParams": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
+          "clientRegistration": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/McpServerOauthClientRegistration"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Registration strategy for this login only; omission preserves automatic DCR."
+          },
           "name": {
             "type": "string"
           },

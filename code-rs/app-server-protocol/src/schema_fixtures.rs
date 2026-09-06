@@ -85,10 +85,26 @@ fn read_file_bytes(path: &Path) -> Result<Vec<u8>> {
         // fixture test is platform-independent.
         let text = String::from_utf8(bytes)
             .with_context(|| format!("expected UTF-8 TypeScript in {}", path.display()))?;
-        let text = text.replace("\r\n", "\n").replace('\r', "\n");
+        let text = normalize_generated_text(&text.replace("\r\n", "\n").replace('\r', "\n"));
         return Ok(text.into_bytes());
     }
     Ok(bytes)
+}
+
+fn normalize_generated_text(content: &str) -> String {
+    let mut normalized = String::with_capacity(content.len());
+    for segment in content.split_inclusive('\n') {
+        if let Some(line) = segment.strip_suffix('\n') {
+            normalized.push_str(line.trim_end_matches([' ', '\t']));
+            normalized.push('\n');
+        } else {
+            normalized.push_str(segment.trim_end_matches([' ', '\t']));
+        }
+    }
+    if !normalized.ends_with('\n') {
+        normalized.push('\n');
+    }
+    normalized
 }
 
 fn canonicalize_json(value: &Value) -> Value {
@@ -234,4 +250,3 @@ mod tests {
         assert_eq!(canonicalize_json(&value), expected);
     }
 }
-

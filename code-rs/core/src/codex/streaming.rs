@@ -27,6 +27,7 @@ use crate::auth_accounts;
 use crate::account_switching::RateLimitSwitchState;
 use crate::agent_tool::current_agent_spawn_depth;
 use crate::agent_tool::external_agent_command_exists;
+use crate::exec_env::inject_session_id_env;
 use crate::protocol::McpListToolsResponseEvent;
 use crate::protocol::TaskLifecycleEvent;
 use crate::protocol::TaskLifecyclePhase;
@@ -3493,7 +3494,9 @@ async fn run_turn(
                 // Use the configured provider-specific stream retry budget.
                 let max_retries = tc.client.get_provider().stream_max_retries();
                 let req_id = match &e {
-                    CodexErr::Stream(_, _, req) => req.clone(),
+                    CodexErr::Stream(_, _, req) | CodexErr::RateLimitExceeded(_, _, req) => {
+                        req.clone()
+                    }
                     _ => None,
                 };
                 let is_connectivity = is_connectivity_error(&e);
@@ -3606,7 +3609,8 @@ async fn run_turn(
                 if should_retry_stream_after_error(has_tool_responses, retries, max_retries) {
                     retries += 1;
                     let (delay, retry_eta) = match e {
-                        CodexErr::Stream(_, Some(ref retry_after), _) => {
+                        CodexErr::Stream(_, Some(ref retry_after), _)
+                        | CodexErr::RateLimitExceeded(_, Some(ref retry_after), _) => {
                             let eta = format_retry_eta(&retry_after);
                             (retry_after.delay, eta)
                         }
@@ -5257,15 +5261,19 @@ fn parse_apply_patch_arguments(
     call_id: &str,
 ) -> Result<ExecParams, Box<ResponseInputItem>> {
     match parse_apply_patch_input(&arguments) {
-        Ok(input) => Ok(ExecParams {
-            command: vec!["apply_patch".to_string(), input],
-            shell_script: None,
-            cwd: sess.get_cwd().to_path_buf(),
-            timeout_ms: None,
-            env: HashMap::new(),
-            with_escalated_permissions: None,
-            justification: None,
-        }),
+        Ok(input) => {
+            let mut env = HashMap::new();
+            inject_session_id_env(&mut env, sess.id);
+            Ok(ExecParams {
+                command: vec!["apply_patch".to_string(), input],
+                shell_script: None,
+                cwd: sess.get_cwd().to_path_buf(),
+                timeout_ms: None,
+                env,
+                with_escalated_permissions: None,
+                justification: None,
+            })
+        }
         Err(err) => {
             let output = ResponseInputItem::FunctionCallOutput {
                 call_id: call_id.to_string(),
@@ -8256,12 +8264,14 @@ fn to_exec_params(params: ShellToolCallParams, sess: &Session) -> ExecParams {
     let with_escalated_permissions = params
         .sandbox_permissions
         .and_then(|p| p.requires_escalated_permissions().then_some(true));
+    let mut env = create_env(&sess.shell_environment_policy);
+    inject_session_id_env(&mut env, sess.id);
     ExecParams {
         command: params.command,
         shell_script: None,
         cwd: sess.resolve_path(params.workdir.clone()),
         timeout_ms,
-        env: create_env(&sess.shell_environment_policy),
+        env,
         with_escalated_permissions,
         justification: params.justification,
     }
@@ -8273,6 +8283,8 @@ fn to_exec_params_from_shell_command(params: ShellCommandToolCallParams, sess: &
         .sandbox_permissions
         .and_then(|p| p.requires_escalated_permissions().then_some(true));
     let use_login_shell = params.login.unwrap_or(true);
+    let mut env = create_env(&sess.shell_environment_policy);
+    inject_session_id_env(&mut env, sess.id);
 
     ExecParams {
         command: vec![params.command.clone()],
@@ -8282,7 +8294,7 @@ fn to_exec_params_from_shell_command(params: ShellCommandToolCallParams, sess: &
         }),
         cwd: sess.resolve_path(params.workdir.clone()),
         timeout_ms,
-        env: create_env(&sess.shell_environment_policy),
+        env,
         with_escalated_permissions,
         justification: params.justification,
     }

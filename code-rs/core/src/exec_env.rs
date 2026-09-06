@@ -3,6 +3,22 @@ use crate::config_types::ShellEnvironmentPolicy;
 use crate::config_types::ShellEnvironmentPolicyInherit;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use uuid::Uuid;
+
+pub const CODEX_SESSION_ID_ENV_VAR: &str = "CODEX_SESSION_ID";
+pub const OPENAI_FEDERATION_RULE_ID_ENV_VAR: &str = "OPENAI_FEDERATION_RULE_ID";
+pub const OPENAI_IDENTITY_TOKEN_FILE_ENV_VAR: &str = "OPENAI_IDENTITY_TOKEN_FILE";
+
+const NON_INHERITABLE_ENV_VARS: &[&str] = &[
+    OPENAI_FEDERATION_RULE_ID_ENV_VAR,
+    OPENAI_IDENTITY_TOKEN_FILE_ENV_VAR,
+];
+
+pub fn is_non_inheritable_env_var(name: &str) -> bool {
+    NON_INHERITABLE_ENV_VARS
+        .iter()
+        .any(|restricted| restricted.eq_ignore_ascii_case(name))
+}
 
 /// Construct an environment map based on the rules in the specified policy. The
 /// resulting map can be passed directly to `Command::envs()` after calling
@@ -13,6 +29,11 @@ use std::collections::HashSet;
 /// for [`ShellEnvironmentPolicy`].
 pub fn create_env(policy: &ShellEnvironmentPolicy) -> HashMap<String, String> {
     populate_env(std::env::vars(), policy)
+}
+
+/// Exposes the shared session identity to model-reachable shell commands.
+pub(crate) fn inject_session_id_env(env: &mut HashMap<String, String>, session_id: Uuid) {
+    env.insert(CODEX_SESSION_ID_ENV_VAR.to_string(), session_id.to_string());
 }
 
 fn populate_env<I>(vars: I, policy: &ShellEnvironmentPolicy) -> HashMap<String, String>
@@ -94,6 +115,10 @@ where
         env_map.retain(|k, _| matches_any(k, &policy.include_only));
     }
 
+    // Restricted launch context must never reach model-executed child processes,
+    // even when inherited or restored through explicit shell environment overrides.
+    env_map.retain(|name, _| !is_non_inheritable_env_var(name));
+
     env_map
 }
 
@@ -167,6 +192,27 @@ mod tests {
     }
 
     #[test]
+    fn inject_session_id_env_overrides_policy_filtering() {
+        let session_id = Uuid::new_v4();
+        let mut env = populate_env(
+            make_vars(&[("PATH", "/usr/bin")]),
+            &ShellEnvironmentPolicy {
+                ignore_default_excludes: true,
+                include_only: vec![EnvironmentVariablePattern::new_case_insensitive("PATH")],
+                ..Default::default()
+            },
+        );
+
+        inject_session_id_env(&mut env, session_id);
+        let expected = session_id.to_string();
+
+        assert_eq!(
+            env.get(CODEX_SESSION_ID_ENV_VAR).map(String::as_str),
+            Some(expected.as_str())
+        );
+    }
+
+    #[test]
     fn test_set_overrides() {
         let vars = make_vars(&[("PATH", "/usr/bin")]);
 
@@ -199,7 +245,12 @@ mod tests {
 
     #[test]
     fn test_inherit_all() {
-        let vars = make_vars(&[("PATH", "/usr/bin"), ("FOO", "bar")]);
+        let vars = make_vars(&[
+            ("PATH", "/usr/bin"),
+            ("FOO", "bar"),
+            (OPENAI_FEDERATION_RULE_ID_ENV_VAR, "rule"),
+            (OPENAI_IDENTITY_TOKEN_FILE_ENV_VAR, "/tmp/token"),
+        ]);
 
         let policy = ShellEnvironmentPolicy {
             inherit: ShellEnvironmentPolicyInherit::All,
@@ -217,9 +268,37 @@ mod tests {
         expected.insert("DEBIAN_FRONTEND".to_string(), "noninteractive".to_string());
         expected.insert("LANG".to_string(), "C.UTF-8".to_string());
         expected.insert("LC_ALL".to_string(), "C.UTF-8".to_string());
+        expected.remove(OPENAI_FEDERATION_RULE_ID_ENV_VAR);
+        expected.remove(OPENAI_IDENTITY_TOKEN_FILE_ENV_VAR);
         #[cfg(unix)]
         expected.insert("GIT_ASKPASS".to_string(), "true".to_string());
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn non_inheritable_env_vars_cannot_be_restored_by_overrides() {
+        let vars = make_vars(&[
+            (OPENAI_FEDERATION_RULE_ID_ENV_VAR, "inherited-rule"),
+            (OPENAI_IDENTITY_TOKEN_FILE_ENV_VAR, "/tmp/inherited-token"),
+        ]);
+        let mut policy = ShellEnvironmentPolicy {
+            inherit: ShellEnvironmentPolicyInherit::All,
+            ignore_default_excludes: true,
+            ..Default::default()
+        };
+        policy.r#set.insert(
+            OPENAI_FEDERATION_RULE_ID_ENV_VAR.to_string(),
+            "override-rule".to_string(),
+        );
+        policy.r#set.insert(
+            OPENAI_IDENTITY_TOKEN_FILE_ENV_VAR.to_string(),
+            "/tmp/override-token".to_string(),
+        );
+
+        let result = populate_env(vars, &policy);
+
+        assert!(!result.contains_key(OPENAI_FEDERATION_RULE_ID_ENV_VAR));
+        assert!(!result.contains_key(OPENAI_IDENTITY_TOKEN_FILE_ENV_VAR));
     }
 
     #[test]

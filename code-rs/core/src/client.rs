@@ -218,11 +218,10 @@ fn is_quota_exceeded_http_error(status: StatusCode, error: &Error) -> bool {
 
 fn should_store_responses(
     prompt: &Prompt,
-    provider: &ModelProviderInfo,
+    _provider: &ModelProviderInfo,
     request_family: &ModelFamily,
 ) -> bool {
-    provider.is_azure_responses_endpoint()
-        || (!request_family.use_responses_lite && prompt.store)
+    !request_family.use_responses_lite && prompt.store
 }
 
 fn is_server_overloaded_error(error: &Error) -> bool {
@@ -878,9 +877,6 @@ impl ModelClient {
             if let Some(model_value) = payload_json.get_mut("model") {
                 *model_value = serde_json::Value::String(model_slug.to_string());
             }
-            if self.provider.is_azure_responses_endpoint() {
-                attach_item_ids(&mut payload_json, &input_with_instructions);
-            }
             if let Some(openrouter_cfg) = self.provider.openrouter_config() {
                 if let Some(obj) = payload_json.as_object_mut() {
                     if let Some(provider) = &openrouter_cfg.provider {
@@ -1327,15 +1323,6 @@ impl ModelClient {
             (_, None, None) => None,
         };
 
-        // In general, we want to explicitly send `store: false` when using the Responses API,
-        // but in practice, the Azure Responses API rejects `store: false`:
-        //
-        // - If store = false and id is sent an error is thrown that ID is not found
-        // - If store = false and id is not sent an error is thrown that ID is required
-        //
-        // For Azure, we send `store: true` and preserve reasoning item IDs.
-        let azure_workaround = self.provider.is_azure_responses_endpoint();
-
         let model_slug = request_model;
 
         let session_id = prompt
@@ -1399,9 +1386,6 @@ impl ModelClient {
             let mut payload_json = serde_json::to_value(&payload)?;
             if let Some(model_value) = payload_json.get_mut("model") {
                 *model_value = serde_json::Value::String(model_slug.to_string());
-            }
-            if azure_workaround {
-                attach_item_ids(&mut payload_json, &input_with_instructions);
             }
             if let Some(openrouter_cfg) = self.provider.openrouter_config() {
                 if let Some(obj) = payload_json.as_object_mut() {
@@ -2529,34 +2513,6 @@ struct ResponseCompletedOutputTokensDetails {
     reasoning_tokens: u64,
 }
 
-fn attach_item_ids(payload_json: &mut Value, original_items: &[ResponseItem]) {
-    let Some(input_value) = payload_json.get_mut("input") else {
-        return;
-    };
-    let serde_json::Value::Array(items) = input_value else {
-        return;
-    };
-
-    for (value, item) in items.iter_mut().zip(original_items.iter()) {
-        let id = match item {
-            ResponseItem::AdditionalTools { id, .. }
-            | ResponseItem::Reasoning { id, .. }
-            | ResponseItem::Message { id, .. }
-            | ResponseItem::WebSearchCall { id, .. }
-            | ResponseItem::FunctionCall { id, .. }
-            | ResponseItem::LocalShellCall { id, .. }
-            | ResponseItem::CustomToolCall { id, .. } => id.as_deref(),
-            ResponseItem::ImageGenerationCall { id, .. } => Some(id.as_str()),
-            _ => None,
-        }
-        .filter(|id| !id.is_empty());
-
-        if let (Some(id), Some(obj)) = (id, value.as_object_mut()) {
-            obj.insert("id".to_string(), Value::String(id.to_string()));
-        }
-    }
-}
-
 fn prepare_response_items_for_request(input: &mut [ResponseItem]) {
     for item in input {
         match item {
@@ -3082,6 +3038,14 @@ async fn process_sse<S>(
                                     ));
                                 } else if error.r#type.as_deref() == Some("usage_not_included") {
                                     response_error = Some(CodexErr::UsageNotIncluded);
+                                } else if error.code.as_deref() == Some("rate_limit_exceeded") {
+                                    let retry_after = try_parse_retry_after(&error, Utc::now());
+                                    let message = error.message.unwrap_or_default();
+                                    response_error = Some(CodexErr::RateLimitExceeded(
+                                        message,
+                                        retry_after,
+                                        Some(request_id.clone()),
+                                    ));
                                 } else if is_quota_exceeded_error(&error) {
                                     response_error = Some(CodexErr::QuotaExceeded);
                                 } else if is_server_overloaded_error(&error) {
@@ -3361,15 +3325,15 @@ mod tests {
     }
 
     #[test]
-    fn responses_storage_is_forced_for_azure_provider() {
+    fn responses_storage_is_not_forced_for_azure_provider() {
         let prompt = Prompt::default();
         let mut family = derive_default_model_family("gpt-test");
         let azure_provider = responses_test_provider("azure", WireApi::Responses);
 
-        assert!(should_store_responses(&prompt, &azure_provider, &family));
+        assert!(!should_store_responses(&prompt, &azure_provider, &family));
 
         family.use_responses_lite = true;
-        assert!(should_store_responses(&prompt, &azure_provider, &family));
+        assert!(!should_store_responses(&prompt, &azure_provider, &family));
     }
 
     #[test]
@@ -4054,7 +4018,7 @@ mod tests {
         assert_eq!(events.len(), 1);
 
         match &events[0] {
-            Err(CodexErr::Stream(msg, Some(retry), _)) => {
+            Err(CodexErr::RateLimitExceeded(msg, Some(retry), _)) => {
                 assert_eq!(
                     msg,
                     "Rate limit reached for gpt-5.1 in organization org-AAA on tokens per min (TPM): Limit 30000, Used 22999, Requested 12528. Please try again in 11.054s. Visit https://platform.openai.com/account/rate-limits to learn more."

@@ -74,7 +74,7 @@ impl ChatWidget {
         self.transcript.active_cell = Some(Box::new(history_cell::new_active_web_search_call(
             call_id,
             String::new(),
-            self.config.animations,
+            self.local_settings.tui.animations,
         )));
         self.bump_active_cell_revision();
         self.request_redraw();
@@ -184,7 +184,7 @@ impl ChatWidget {
                 tool,
                 arguments: Some(arguments),
             },
-            self.config.animations,
+            self.local_settings.tui.animations,
         )));
         self.bump_active_cell_revision();
         self.request_redraw();
@@ -197,6 +197,7 @@ impl ChatWidget {
             id,
             server,
             tool,
+            status,
             arguments,
             result,
             error,
@@ -219,7 +220,7 @@ impl ChatWidget {
                 Ok(codex_protocol::mcp::CallToolResult {
                     content: result.content,
                     structured_content: result.structured_content,
-                    is_error: Some(false),
+                    is_error: Some(status == codex_app_server_protocol::McpToolCallStatus::Failed),
                     meta: None,
                 })
             }
@@ -235,8 +236,11 @@ impl ChatWidget {
             Some(cell) if cell.call_id() == id => cell.complete(duration, result),
             _ => {
                 self.flush_active_cell();
-                let mut cell =
-                    history_cell::new_active_mcp_tool_call(id, invocation, self.config.animations);
+                let mut cell = history_cell::new_active_mcp_tool_call(
+                    id,
+                    invocation,
+                    self.local_settings.tui.animations,
+                );
                 let extra_cell = cell.complete(duration, result);
                 self.transcript.active_cell = Some(Box::new(cell));
                 extra_cell

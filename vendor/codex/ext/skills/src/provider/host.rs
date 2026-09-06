@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use codex_core_skills::SkillLoadOutcome;
+use crate::SkillLoadOutcome;
 use codex_skills::SkillMetadata;
 
 use crate::catalog::SkillAuthority;
@@ -46,7 +46,10 @@ impl SkillProvider for HostSkillProvider {
         })
     }
 
-    fn read(&self, request: SkillReadRequest) -> SkillProviderFuture<'_, SkillReadResult> {
+    fn read<'a>(
+        &'a self,
+        request: SkillReadRequest<'a>,
+    ) -> SkillProviderFuture<'a, SkillReadResult> {
         Box::pin(async move {
             let Some(host_snapshot) = request.host_snapshot else {
                 return Err(SkillProviderError::new(

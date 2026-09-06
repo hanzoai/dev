@@ -283,7 +283,7 @@ impl McpConnectionManager {
             // Validate server name before spawning
             if !is_valid_mcp_server_name(&server_name) {
                 let message = format!(
-                    "invalid server name '{server_name}': must match pattern ^[a-zA-Z0-9_-]+$"
+                    "invalid server name '{server_name}': must match pattern ^[a-zA-Z0-9_:@/.-]+$"
                 );
                 errors.insert(
                     server_name,
@@ -598,7 +598,7 @@ fn is_valid_mcp_server_name(server_name: &str) -> bool {
     !server_name.is_empty()
         && server_name
             .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | ':' | '@' | '/' | '.'))
 }
 
 #[cfg(test)]
@@ -630,6 +630,14 @@ mod tests {
                 title: None,
             },
         }
+    }
+
+    #[test]
+    fn package_style_server_name_is_valid() {
+        assert!(is_valid_mcp_server_name(
+            "npm:@modelcontextprotocol/server-sequential.thinking"
+        ));
+        assert!(!is_valid_mcp_server_name("npm:@scope/package name"));
     }
 
     #[test]

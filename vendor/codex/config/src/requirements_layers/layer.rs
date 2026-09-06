@@ -8,6 +8,14 @@ use toml::Value as TomlValue;
 
 use super::stack::RequirementsCompositionError;
 
+// Authentication requirements that cloud-managed layers cannot set.
+const LOCAL_ONLY_AUTH_REQUIREMENTS: &[&str] = &[
+    "allowed_login_methods",
+    "allowed_chatgpt_workspaces",
+    "cli_auth_credentials_store",
+    "chatgpt_base_url",
+];
+
 #[derive(Clone, Debug)]
 pub struct RequirementsLayerEntry {
     pub(super) source: RequirementSource,
@@ -82,8 +90,9 @@ impl ComposableRequirementsLayer {
 
             // These fields can only be set locally; ignore them before validating cloud policy.
             if matches!(source, RequirementSource::EnterpriseManaged { .. }) {
-                remove_top_level_field(&mut regular_toml, "allowed_login_methods");
-                remove_top_level_field(&mut regular_toml, "allowed_chatgpt_workspaces");
+                for field in LOCAL_ONLY_AUTH_REQUIREMENTS {
+                    remove_top_level_field(&mut regular_toml, field);
+                }
             }
 
             let requirements = parse_layer_requirements(
@@ -92,6 +101,13 @@ impl ComposableRequirementsLayer {
             )?;
             (regular_toml, requirements)
         };
+
+        // Merge aliases under one key after validating each individual layer.
+        if let Some(table) = regular_toml.as_table_mut()
+            && let Some(features) = table.remove("feature_requirements")
+        {
+            table.insert("features".to_string(), features);
+        }
 
         // Hostname lookup is configuration-driven and may block on DNS, so only
         // resolve it when this layer contains hostname-based sandbox selectors.
@@ -111,6 +127,7 @@ impl ComposableRequirementsLayer {
                 rules: requirements.rules,
                 hooks: requirements.hooks,
                 permissions: requirements.permissions,
+                auto_review: requirements.auto_review,
             },
         })
     }
@@ -121,6 +138,7 @@ pub(super) struct DomainMergedRequirementsFields {
     pub(super) rules: Option<RequirementsExecPolicyToml>,
     pub(super) hooks: Option<ManagedHooksRequirementsToml>,
     pub(super) permissions: Option<crate::config_requirements::PermissionsRequirementsToml>,
+    pub(super) auto_review: Option<crate::config_requirements::AutoReviewRequirementsToml>,
 }
 
 fn parse_layer_toml(
@@ -218,6 +236,7 @@ fn strip_special_fields(layer_toml: &mut TomlValue) {
     remove_top_level_field(layer_toml, "rules");
     remove_top_level_field(layer_toml, "hooks");
     remove_nested_field_and_prune_empty(layer_toml, &["permissions", "filesystem", "deny_read"]);
+    remove_nested_field_and_prune_empty(layer_toml, &["auto_review", "required_on_models"]);
 }
 
 fn remove_top_level_field(value: &mut TomlValue, key: &str) -> Option<TomlValue> {

@@ -44,6 +44,13 @@ unselected = "do not return"
     .await?;
 
     let environment = Environment::create_for_tests(Some(server.websocket_url().to_string()))?;
+    let environment_info = environment.info().await?;
+    assert!(environment_info.capabilities.environment_config_read);
+    assert_eq!(
+        environment_info.user_home_dir,
+        dirs::home_dir().and_then(|home_dir| PathUri::from_host_native_path(home_dir).ok()),
+    );
+
     let response = environment
         .read_environment_config(EnvironmentConfigReadParams {
             cwd: PathUri::from_abs_path(&project),

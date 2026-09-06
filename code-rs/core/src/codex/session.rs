@@ -309,6 +309,7 @@ pub(super) fn format_retry_eta(retry_after: &RetryAfter) -> Option<String> {
 pub(super) fn is_connectivity_error(err: &CodexErr) -> bool {
     match err {
         CodexErr::Reqwest(e) => e.is_connect() || e.is_timeout() || e.is_request(),
+        CodexErr::RateLimitExceeded(_, _, _) => false,
         CodexErr::Stream(msg, _, _) => {
             let lower = msg.to_ascii_lowercase();
             (msg.starts_with("[transport]")

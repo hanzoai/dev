@@ -21,6 +21,8 @@
 //! `TranscriptOverlay::sync_live_tail`. This preserves the invariant that the overlay reflects
 //! both committed history and in-flight activity without changing flush or coalescing behavior.
 
+mod legacy_input;
+
 use std::any::TypeId;
 use std::sync::Arc;
 
@@ -93,79 +95,7 @@ impl App {
         app_server: &mut AppServerSession,
         event: TuiEvent,
     ) -> Result<bool> {
-        if let TuiEvent::Key(key_event) = &event
-            && let Some(Overlay::Transcript(overlay)) = self.overlay.as_ref()
-            && (overlay.should_load_older(*key_event)
-                || (self.backtrack.overlay_preview_active
-                    && self.backtrack.nth_user_message == 0
-                    && matches!(key_event.code, KeyCode::Esc | KeyCode::Left)
-                    && matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)))
-            && let Some(thread_id) = self.chat_widget.thread_id()
-            && app_server.has_older_history(thread_id)
-            && self.request_older_history_page(app_server, thread_id)
-        {
-            if let Some(Overlay::Transcript(overlay)) = self.overlay.as_mut() {
-                overlay.set_history_state(if overlay.should_load_from_start(*key_event) {
-                    TranscriptHistoryState::LoadingBeginning
-                } else {
-                    TranscriptHistoryState::LoadingOlder
-                });
-            }
-            tui.frame_requester().schedule_frame();
-        }
-        if self.backtrack.overlay_preview_active {
-            match event {
-                TuiEvent::Key(KeyEvent {
-                    code: KeyCode::Esc,
-                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
-                    ..
-                }) => {
-                    self.overlay_step_backtrack(tui, event)?;
-                    Ok(true)
-                }
-                TuiEvent::Key(KeyEvent {
-                    code: KeyCode::Left,
-                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
-                    ..
-                }) => {
-                    self.overlay_step_backtrack(tui, event)?;
-                    Ok(true)
-                }
-                TuiEvent::Key(KeyEvent {
-                    code: KeyCode::Right,
-                    kind: KeyEventKind::Press | KeyEventKind::Repeat,
-                    ..
-                }) => {
-                    self.overlay_step_backtrack_forward(tui, event)?;
-                    Ok(true)
-                }
-                TuiEvent::Key(KeyEvent {
-                    code: KeyCode::Enter,
-                    kind: KeyEventKind::Press,
-                    ..
-                }) => {
-                    self.overlay_confirm_backtrack(tui);
-                    Ok(true)
-                }
-                _ => {
-                    self.overlay_forward_event(tui, event)?;
-                    Ok(true)
-                }
-            }
-        } else if let TuiEvent::Key(KeyEvent {
-            code: KeyCode::Esc,
-            kind: KeyEventKind::Press | KeyEventKind::Repeat,
-            ..
-        }) = event
-        {
-            // First Esc in transcript overlay: begin backtrack preview at latest user message.
-            self.begin_overlay_backtrack_preview(tui);
-            Ok(true)
-        } else {
-            // Not in backtrack mode: forward events to the overlay widget.
-            self.overlay_forward_event(tui, event)?;
-            Ok(true)
-        }
+        self.handle_legacy_transcript_event(tui, app_server, event)
     }
 
     /// Handle global Esc presses for backtracking when no overlay is present.
@@ -241,6 +171,11 @@ impl App {
             );
         }
         self.overlay = None;
+        if self.pending_thread_usage_history_refresh
+            && let Err(err) = self.refresh_thread_usage_history_tail(tui)
+        {
+            tracing::warn!(error = %err, "failed to refresh thread usage after closing overlay");
+        }
         self.backtrack.overlay_preview_active = false;
         tui.frame_requester().schedule_frame();
         if was_backtrack {
@@ -371,7 +306,7 @@ impl App {
     fn overlay_forward_event(&mut self, tui: &mut tui::Tui, event: TuiEvent) -> Result<()> {
         if matches!(
             &event,
-            TuiEvent::Draw | TuiEvent::Resume | TuiEvent::Resize(_)
+            TuiEvent::Draw | TuiEvent::Resume | TuiEvent::Resize(_) | TuiEvent::FocusGained
         ) && let Some(Overlay::Transcript(t)) = &mut self.overlay
         {
             let active_key = self.chat_widget.active_cell_transcript_key();
