@@ -42,7 +42,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
-        with:
           fetch-depth: 0
       - name: Next version, and the draft that will hold it
         id: v
@@ -195,7 +194,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: true
-        with:
           fetch-depth: 0
       - name: Tools
         run: |

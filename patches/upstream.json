@@ -67,8 +67,8 @@
   },
   {
     "file": "tui/src/cli.rs",
-    "old": "not recognized by this version of Codex.",
-    "new": "this version of Dev does not recognize.",
+    "old": "fields that are not recognized by this version of Codex.",
+    "new": "fields this version of Dev does not recognize.",
     "count": 1
   },
   {
@@ -121,8 +121,8 @@
   },
   {
     "file": "exec/src/cli.rs",
-    "old": "not recognized by this version of Codex.",
-    "new": "this version of Dev does not recognize.",
+    "old": "fields that are not recognized by this version of Codex.",
+    "new": "fields this version of Dev does not recognize.",
     "count": 1
   },
   {
