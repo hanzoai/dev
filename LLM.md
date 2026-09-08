@@ -1,121 +1,68 @@
-# Rust/codex-rs
+# Hanzo Dev
 
-In the codex-rs folder where the rust code lives:
+The `dev` command: a coding agent for the terminal.
 
-- Crate names are prefixed with `codex-`. For example, the `core` folder's crate is named `codex-core`
-- When using format! and you can inline variables into {}, always do that.
-- Treat `codex-rs` as a read-only mirror of `openai/codex:main`; edit Rust sources under `code-rs` instead.
+## Shape
 
-Completion/build step
+Hanzo owns the front door; upstream owns the engines.
 
-- Always validate using `./build-fast.sh` from the repo root. This is the single required check and must pass cleanly.
-- Policy: All errors AND all warnings must be fixed before you’re done. Treat any compiler warning as a failure and address it (rename unused vars with `_`, remove `mut`, delete dead code, etc.).
-- Do not run additional format/lint/test commands on completion (e.g., `just fmt`, `just fix`, `cargo test`) unless explicitly requested for a specific task.
-- ***NEVER run rustfmt***
+- `crates/hanzo-dev` is the binary. Its `main.rs` is the entire command
+  surface, and every subcommand hands off to a library. Nothing is generated
+  and no upstream source is compiled through an `include!`.
+- `crates/hanzo-config` picks the provider and the product home.
+  `crates/hanzo-tui` holds the strings and colors that make the interface ours.
+- `crates/hanzo-upstream` is a detached workspace, because the root workspace
+  cannot resolve until it has run. `make` drives it; it is never imported.
 
-Optional regression checks (recommended when touching the Rust workspace):
+## Upstream
 
-- `cargo nextest run --no-fail-fast` — runs all workspace tests with the TUI helpers automatically enabled. The suite is green after the resume fixtures/git-init fallback updates; older Git builds may print a warning when falling back from `--initial-branch`, but tests still pass.
-- Focused sweeps stay quick and green: `cargo test -p code-tui --features test-helpers`, `cargo test -p code-cloud-tasks --tests`, and `cargo test -p mcp-types --tests`.
+`upstream/codex` and `upstream/code` are submodules. The gitlink is the pin —
+no lockfile of hashes sits beside it. Crates are consumed straight from the
+checkout by ordinary path dependency.
 
-When debugging regressions or bugs, write a failing test (or targeted reproduction script) first and confirm it captures the issue before touching code—if it can’t fail, you can’t be confident the fix works.
+`patches/codex.json` carries the whole Hanzo delta: anchored substitutions that
+`make prepare` applies to the checkout in place. `git -C upstream/codex status`
+shows them, and that is the honest picture — the checkout is a build input we
+own, not a pristine mirror. `make reset` returns it.
 
-## Strict Ordering In The TUI History
+Every edit carries an exact match count. When upstream moves the ground under
+one, preparation fails and names the file rather than branding the wrong line.
+That is the signal to re-anchor, and it is why the delta is anchored strings
+rather than a diff.
 
-The TUI enforces strict, per‑turn ordering for all streamed content. Every
-stream insert (Answer or Reasoning) must be associated with a stable
-`(request_ordinal, output_index, sequence_number)` key provided by the model.
+Two of the edits are not branding: they publish `mcp_cmd`, `plugin_cmd` and
+`doctor` from upstream's library instead of leaving them in its binary. Those
+belong upstream as a pull request; landing them there shrinks this file.
 
-- A stream insert MUST carry a non‑empty stream id. The UI seeds an order key
-  for `(kind, id)` from the event's `OrderMeta` before any insert.
-- The TUI WILL NOT insert streaming content without a stream id. Any attempt to
-  insert without an id is dropped with an error log to make the issue visible
-  during development.
+## Never edit upstream by hand
 
-## Commit Messages
+Changes go in a `hanzo-*` crate, or in `patches/codex.json` when upstream
+hard-codes something that must be ours. A hand edit inside `upstream/` is lost
+at the next `make bump`.
 
-- Review staged changes before every commit: `git --no-pager diff --staged --stat` (and skim `git --no-pager diff --staged` if needed).
-- Write a descriptive subject that explains what changed and why. Avoid placeholders like "chore: commit local work".
-- Prefer Conventional Commits with an optional scope: `feat(tui/history): …`, `fix(core/exec): …`, `docs(agents): …`.
-- Keep the subject ≤ 72 chars; add a short body if rationale or context helps future readers.
-- Use imperative, present tense: "add", "fix", "update" (not "added", "fixes").
-- For merge commits, skip custom prefixes like `merge(main<-origin/main):`. Use a clear subject such as `Merge origin/main: <what changed and how conflicts were resolved>`.
+## The Code fork
 
-Examples:
+`upstream/code` is reference, not a build input. Its crates depend on its own
+fork of `codex-core`, so importing them would link two cores into one binary.
+Its additions worth having — Auto Drive, the browser bridge — get rebuilt as
+`hanzo-*` crates against `codex-core`. `migration/code-v1.patch` records what
+v1 carried, including the defects it was already carrying; see
+`migration/STATUS.md` before porting anything from it.
 
-- `feat(tui/history): show exit code and duration for Exec cells`
-- `fix(core/codex): handle SIGINT in on_exec_command_begin to avoid orphaned child`
-- `docs(agents): clarify commit-message expectations`
+## Working here
 
-## How to Git Push
+    make build          the dev binary
+    make test           the Hanzo suite
+    make test-upstream  the upstream suite against the pinned checkout
+    make bump           move the submodules forward
+    make help           everything
 
-### Merge-and-Push Policy (Do Not Rebase)
+`make build` is the check that must pass. Fix warnings as well as errors.
 
-When the user asks you to "push" local work:
+## House rules
 
-- Never rebase in this flow. Do not use `git pull --rebase` or attempt to replay local commits.
-- Prefer a simple merge of `origin/main` into the current branch, keeping our local history intact.
-- If the remote only has trivial release metadata changes (e.g., `codex-cli/package.json` version bumps), adopt the remote version for those files and keep ours for everything else unless the user specifies otherwise.
-- If in doubt or if conflicts touch non-trivial areas, pause and ask before resolving.
-
-Quick procedure (merge-only):
-
-- Commit your local work first:
-  - Review: `git --no-pager diff --stat` and `git --no-pager diff`
-  - Stage + commit: `git add -A && git commit -m "<descriptive message of local changes>"`
-- Fetch remote: `git fetch origin`
-- Merge without auto-commit: `git merge --no-ff --no-commit origin/main` (stops before committing so you can choose sides)
-- Resolve policy:
-  - Default to ours: `git checkout --ours .`
-  - Take remote for trivial package/version files as needed, e.g.: `git checkout --theirs codex-cli/package.json`
-- Stage and commit the merge with a descriptive message, e.g.:
-  - `git add -A && git commit -m "Merge origin/main: adopt remote version bumps; keep ours elsewhere (<areas>)"`
-- Run `./build-fast.sh` and then `git push`
-
-## Command Execution Architecture
-
-The command execution flow in Codex follows an event-driven pattern:
-
-1. **Core Layer** (`codex-core/src/codex.rs`):
-   - `on_exec_command_begin()` initiates command execution
-   - Creates `EventMsg::ExecCommandBegin` events with command details
-
-2. **TUI Layer** (`codex-tui/src/chatwidget.rs`):
-   - `handle_codex_event()` processes execution events
-   - Manages `RunningCommand` state for active commands
-   - Creates `HistoryCell::Exec` for UI rendering
-
-3. **History Cell** (`codex-tui/src/history_cell.rs`):
-   - `new_active_exec_command()` - Creates cell for running command
-   - `new_completed_exec_command()` - Updates with final output
-   - Handles syntax highlighting via `ParsedCommand`
-
-This architecture separates concerns between execution logic (core), UI state management (chatwidget), and rendering (history_cell).
-
-## Writing New UI Regression Tests
-
-- Start with `make_chatwidget_manual()` (or `make_chatwidget_manual_with_sender()`) to build a `ChatWidget` in isolation with in-memory channels.
-- Simulate user input by defining a small enum (`ScriptStep`) and feeding key events via `chat.handle_key_event()`; see `run_script()` in `tests.rs` for a ready-to-use helper that also pumps `AppEvent`s.
-- After the scripted interaction, render with a `ratatui::Terminal`/`TestBackend`, then use `buffer_to_string()` (wraps `strip_ansi_escapes`) to normalize ANSI output before asserting.
-- Prefer snapshot assertions (`assert_snapshot!`) or rich string comparisons so UI regressions are obvious. Keep snapshots deterministic by trimming trailing space and driving commit ticks just like the existing tests do.
-- When adding fixtures or updating snapshots, gate rewrites behind an opt-in env var (e.g., `UPDATE_IDEAL=1`) so baseline refreshes remain explicit.
-
-## VT100 Snapshot Harness
-
-- The VT100 harness lives under `code-rs/tui/tests/vt100_chatwidget_snapshot.rs`. It renders the live `ChatWidget` UI into a `Terminal<VT100Backend>` so snapshots capture the exact PTY output the user sees (including frame chrome, composer rows, and streaming inserts).
-- Use `ChatWidgetHarness` helpers from `code_tui::test_helpers` to seed history events and drain `AppEvent`s. Call `render_chat_widget_to_vt100(width, height)` for a single frame, or `render_chat_widget_frames_to_vt100(&[(w,h), ...])` to simulate successive draws while streaming.
-- The harness now exports `layout_metrics()` so tests can assert scroll offsets and viewport heights without spelunking through private fields.
-- Snapshots are deterministic: tests set `CODEX_TUI_FAKE_HOUR=12` automatically so greeting text (“What can I code for you today?”) doesn’t oscillate. If you need a different hour in a test, override the env var before constructing the harness.
-- To add a new scenario, push history/events onto the harness, call `render_*_to_vt100`, and either `insta::assert_snapshot!` the frame(s) or manually assert string contents. For multi-frame streaming, push deltas/events first, then capture frames in the order the UI would display them.
-- Run all VT100 snapshots via:
-  - `cargo test -p code-tui --test vt100_chatwidget_snapshot --features test-helpers -- --nocapture`
-- When you intentionally change rendering, review the `.snap.new` files that appear in `code-rs/tui/tests/snapshots/` and accept them with `cargo insta review` / `cargo insta accept` (limit to this test where possible).
-
-### Monitor Release Workflows After Pushing
-
-- Use `scripts/wait-for-gh-run.sh` to follow GitHub Actions releases without spamming manual `gh` commands.
-- Typical release check right after a push: `scripts/wait-for-gh-run.sh --workflow Release --branch main`.
-- If you already know the run ID (e.g., from webhook output), run `scripts/wait-for-gh-run.sh --run <run-id>`.
-- Adjust the poll cadence via `--interval <seconds>` (defaults to 8). The script exits 0 on success and 1 on failure, so it can gate local automation.
-- Pass `--failure-logs` to automatically dump logs for any job that does not finish successfully.
-- Dependencies: GitHub CLI (`gh`) and `jq` must be available in `PATH`.
+- Hanzo service APIs use `https://api.hanzo.ai/v1/` exclusively.
+- Keep the upstream interaction model and animation; the branding is ours.
+- Keep Linux, macOS, and Windows working.
+- Upstream project names appear only in `NOTICE` — never in the README, the
+  repository description, the CLI, or the interface.

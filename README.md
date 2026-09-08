@@ -1,19 +1,20 @@
 <p align="center">
-  <img src="docs/logo.png" alt="Hanzo Dev" width="400">
+  <img src="docs/images/logo.png" alt="Hanzo Dev" width="400">
 </p>
 
 # Hanzo Dev
 
 Hanzo Dev is our coding agent. It runs in your terminal, reads and edits the
 repository you point it at, runs commands in a sandbox, and drives a browser
-when a task needs one. Models are served by [Hanzo AI](https://hanzo.ai) —
-`enso` and the `zen5` family — over the metered gateway at `api.hanzo.ai`.
+when a task needs one. It reaches every model [Hanzo AI](https://hanzo.ai)
+serves — over 500 of them, `enso` and the `zen5` family included — through one
+metered gateway at `api.hanzo.ai`.
 
 It ships inside the Hanzo CLI. `hanzo dev` is the command.
 
-| <img src="docs/screenshots/simple.png" alt="A session in progress" width="100%"><br>A session in progress | <img src="docs/screenshots/diff.png" alt="Reviewing a diff" width="100%"><br>Reviewing a diff |
+| <img src="docs/images/simple.png" alt="A session in progress" width="100%"><br>A session in progress | <img src="docs/images/diff.png" alt="Reviewing a diff" width="100%"><br>Reviewing a diff |
 |:--:|:--:|
-| <img src="docs/screenshots/browser.png" alt="Driving a browser" width="100%"><br>Driving a browser | <img src="docs/screenshots/agents.png" alt="Several agents on one task" width="100%"><br>Several agents on one task |
+| <img src="docs/images/browser.png" alt="Driving a browser" width="100%"><br>Driving a browser | <img src="docs/images/agents.png" alt="Several agents on one task" width="100%"><br>Several agents on one task |
 
 ## Install
 
