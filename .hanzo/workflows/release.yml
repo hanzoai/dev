@@ -41,6 +41,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          submodules: true
+        with:
           fetch-depth: 0
       - name: Next version, and the draft that will hold it
         id: v
@@ -94,6 +96,8 @@ jobs:
       RUSTFLAGS: -Awarnings -C debuginfo=0 -C strip=symbols
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - name: Toolchain deps
         run: |
           set -euo pipefail
@@ -104,7 +108,7 @@ jobs:
           set -euo pipefail
           command -v rustup >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none; }
           export PATH="$HOME/.cargo/bin:$PATH"; echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          CH=$(sed -n 's/^channel = "\(.*\)"/\1/p' code-rs/rust-toolchain.toml)
+          CH=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
           rustup toolchain install "$CH" --profile minimal
           rustup target add --toolchain "$CH" ${{ matrix.target.rust }}
       - name: Zig (the cross-linker)
@@ -137,8 +141,9 @@ jobs:
             sudo ln -sf "$src" "/usr/local/bin/$t"
           done
           cargo install cargo-xwin --version "${XWIN_CRATE_VERSION}" --locked
+      - name: Apply the owned edits to the pinned upstream
+        run: make prepare
       - name: Build
-        working-directory: code-rs
         run: |
           set -euo pipefail
           ulimit -n 65536 2>/dev/null || ulimit -n 10240 2>/dev/null || true
@@ -150,7 +155,7 @@ jobs:
         run: |
           set -euo pipefail
           t=${{ matrix.target.rust }}; short=${{ matrix.target.id }}
-          bin="code-rs/target/$t/release/dev"; mkdir -p dist; d=$(mktemp -d)
+          bin="target/$t/release/dev"; mkdir -p dist; d=$(mktemp -d)
           if [ "$short" = windows-amd64 ]; then
             cp "$bin.exe" "$d/dev-$t.exe"; (cd "$d" && zip -q "$OLDPWD/dist/dev-$t.exe.zip" "dev-$t.exe")
             cp "$bin.exe" "$d/dev.exe"; tar -C "$d" -czf "dist/dev-$short.tar.gz" dev.exe
@@ -188,6 +193,8 @@ jobs:
       GH_PAT: ${{ secrets.GH_PAT }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
         with:
           fetch-depth: 0
       - name: Tools

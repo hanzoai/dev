@@ -1,5 +1,5 @@
-# hanzoai/dev — the `dev` CLI (Rust workspace under code-rs/: core, tui, exec,
-# app-server, mcp client/server, and ~30 more crates).
+# hanzoai/dev — the `dev` CLI. Hanzo owns the command surface in crates/;
+# the engines are pinned upstream submodules under upstream/.
 #
 # Gate only: no image, nothing to deploy. The release — five per-platform
 # binaries, npm, Homebrew — is .hanzo/workflows/release.yml, one job on the
@@ -22,7 +22,7 @@
 # a Cargo.toml sits at the repo ROOT, and this workspace lives one directory
 # down — so without these three lines the gate dies at `cargo: command not
 # found` (exit 127) and never reads a single crate. --default-toolchain none
-# leaves the choice to code-rs/rust-toolchain.toml, which pins 1.90.0.
+# leaves the choice to rust-toolchain.toml, which pins 1.90.0.
 test:
   # Cheap, and first, so a 300 KB blob fails in seconds rather than after the
   # workspace compiles. This is .github/workflows/blob-size-policy.yml, which
@@ -56,5 +56,5 @@ test:
           | sh -s -- -y --profile minimal --default-toolchain none
       fi
       export PATH="$HOME/.cargo/bin:$PATH"
-      cd code-rs
+      make prepare
       cargo check --workspace --locked

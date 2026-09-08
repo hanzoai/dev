@@ -1,0 +1,98 @@
+[
+  {
+    "file": "tui/Cargo.toml",
+    "old": "[dependencies]",
+    "new": "[dependencies]\nhanzo-tui = { path = \"../../../../crates/hanzo-tui\" }",
+    "count": 1
+  },
+  {
+    "file": "tui/src/history_cell/session.rs",
+    "old": "Span::from(\"OpenAI Codex\")",
+    "new": "Span::from(hanzo_tui::PRODUCT_NAME)",
+    "count": 1
+  },
+  {
+    "file": "tui/src/history_cell/session.rs",
+    "old": "format!(\"OpenAI Codex (v{})\", self.version)",
+    "new": "format!(\"{} (v{})\", hanzo_tui::PRODUCT_NAME, self.version)",
+    "count": 1
+  },
+  {
+    "file": "tui/src/chatwidget.rs",
+    "old": "const PLACEHOLDER: &str = \"Ask Codex to do anything\";",
+    "new": "const PLACEHOLDER: &str = hanzo_tui::INPUT_PLACEHOLDER;",
+    "count": 1
+  },
+  {
+    "file": "tui/src/version.rs",
+    "old": "env!(\"CARGO_PKG_VERSION\")",
+    "new": "hanzo_tui::VERSION",
+    "count": 1
+  },
+  {
+    "file": "tui/src/style.rs",
+    "old": "    let (top, alpha) = if is_light(terminal_bg) {\n        ((0, 0, 0), 0.04)\n    } else {\n        ((255, 255, 255), 0.12)\n    };\n    blend(top, terminal_bg, alpha)",
+    "new": "    hanzo_tui::input_background(terminal_bg, is_light(terminal_bg))",
+    "count": 1
+  },
+  {
+    "file": "tui/src/startup_draft.rs",
+    "old": "\"Ask Codex to do anything\".to_string()",
+    "new": "hanzo_tui::INPUT_PLACEHOLDER.to_string()",
+    "count": 1
+  },
+  {
+    "file": "tui/src/keymap_setup.rs",
+    "old": "\"Ask Codex to do anything\".to_string()",
+    "new": "hanzo_tui::INPUT_PLACEHOLDER.to_string()",
+    "count": 1
+  },
+  {
+    "file": "tui/src/onboarding/welcome.rs",
+    "old": "\"Codex\".bold()",
+    "new": "hanzo_tui::PRODUCT_NAME.bold()",
+    "count": 1
+  },
+  {
+    "file": "tui/src/onboarding/welcome.rs",
+    "old": "\", OpenAI's command-line coding agent\".into()",
+    "new": "\", your Hanzo coding agent\".into()",
+    "count": 1
+  },
+  {
+    "file": "tui/src/tooltips.rs",
+    "old": "pub(crate) fn get_tooltip(plan: Option<PlanType>, fast_mode_enabled: bool) -> Option<String> {",
+    "new": "pub(crate) fn get_tooltip(plan: Option<PlanType>, fast_mode_enabled: bool) -> Option<String> {\n    if plan.is_none() {\n        return Some(hanzo_tui::STARTUP_TIP.to_string());\n    }",
+    "count": 1
+  },
+  {
+    "file": "tui/src/cli.rs",
+    "old": "not recognized by this version of Codex.",
+    "new": "this version of Dev does not recognize.",
+    "count": 1
+  },
+  {
+    "file": "cli/src/lib.rs",
+    "old": "pub(crate) mod debug_sandbox;\nmod exit_status;\npub(crate) mod login;",
+    "new": "#![allow(dead_code)]\npub(crate) mod debug_sandbox;\nmod exit_status;\npub(crate) mod login;\n// Upstream declares these in its binary, which puts them out of reach of\n// any other front end. They are self-contained; publishing them from the\n// library is the whole of the change.\n#[cfg(any(target_os = \"macos\", target_os = \"windows\"))]\npub mod app_cmd;\npub mod cloud_config;\n#[cfg(any(target_os = \"macos\", target_os = \"windows\"))]\npub mod desktop_app;\npub mod doctor;\npub mod marketplace_cmd;\npub mod mcp_cmd;\npub mod migrate_rollouts;\npub mod plugin_cmd;\npub mod remote_control_cmd;",
+    "count": 1
+  },
+  {
+    "file": "cli/src/doctor/output.rs",
+    "old": "bold(\"Codex Doctor\", options)",
+    "new": "bold(\"Hanzo Dev Doctor\", options)",
+    "count": 1
+  },
+  {
+    "file": "cli/src/cloud_config.rs",
+    "old": "pub(crate) async fn load_config(",
+    "new": "pub async fn load_config(",
+    "count": 1
+  },
+  {
+    "file": "Cargo.toml",
+    "old": "version = \"0.0.0\"",
+    "new": "version = \"0.7.0-dev.1\"",
+    "count": 1
+  }
+]
