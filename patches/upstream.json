@@ -148,5 +148,83 @@
     "old": "Codex Cloud",
     "new": "Hanzo Tasks",
     "count": 2
+  },
+  {
+    "file": "cli/src/lib.rs",
+    "old": "Layer $CODEX_HOME/<name>.config.toml on top of the base user config",
+    "new": "Layer $DEV_HOME/<name>.config.toml on top of the base user config",
+    "count": 3
+  },
+  {
+    "file": "cli/src/main.rs",
+    "old": "Layer $CODEX_HOME/<name>.config.toml on top of the base user config",
+    "new": "Layer $DEV_HOME/<name>.config.toml on top of the base user config",
+    "count": 1
+  },
+  {
+    "file": "utils/cli/src/shared_options.rs",
+    "old": "Layer $CODEX_HOME/<name>.config.toml on top of the base user config",
+    "new": "Layer $DEV_HOME/<name>.config.toml on top of the base user config",
+    "count": 1
+  },
+  {
+    "file": "exec/src/cli.rs",
+    "old": "Do not load `$CODEX_HOME/config.toml`; auth still uses `CODEX_HOME`",
+    "new": "Do not load `$DEV_HOME/config.toml`; auth still uses `DEV_HOME`",
+    "count": 1
+  },
+  {
+    "file": "cli/src/doctor.rs",
+    "old": "Fix the reported config error, then rerun codex doctor.",
+    "new": "Fix the reported config error, then rerun dev doctor.",
+    "count": 1
+  },
+  {
+    "file": "cli/src/doctor/output.rs",
+    "old": "Run codex doctor without --summary for detailed diagnostics.",
+    "new": "Run dev doctor without --summary for detailed diagnostics.",
+    "count": 3
+  },
+  {
+    "file": "cli/src/doctor.rs",
+    "old": "CODEX_HOME was resolved without config",
+    "new": "DEV_HOME was resolved without config",
+    "count": 1
+  },
+  {
+    "file": "cli/src/doctor.rs",
+    "old": "CODEX_HOME could not be resolved",
+    "new": "DEV_HOME could not be resolved",
+    "count": 1
+  },
+  {
+    "file": "cli/src/doctor.rs",
+    "old": "CODEX_HOME: {}",
+    "new": "DEV_HOME: {}",
+    "count": 2
+  },
+  {
+    "file": "cli/src/doctor.rs",
+    "old": "path_readiness(&mut details, \"CODEX_HOME\"",
+    "new": "path_readiness(&mut details, \"DEV_HOME\"",
+    "count": 1
+  },
+  {
+    "file": "cli/src/doctor.rs",
+    "old": "    codex_version: String,\n    checks: Vec<DoctorCheck>,",
+    "new": "    #[serde(rename = \"devVersion\")]\n    codex_version: String,\n    checks: Vec<DoctorCheck>,",
+    "count": 1
+  },
+  {
+    "file": "cli/src/doctor.rs",
+    "old": "    codex_version: String,\n    checks: BTreeMap<String, JsonDoctorCheck>,",
+    "new": "    #[serde(rename = \"devVersion\")]\n    codex_version: String,\n    checks: BTreeMap<String, JsonDoctorCheck>,",
+    "count": 1
+  },
+  {
+    "file": "cli/src/lib.rs",
+    "old": "JSON value from `codex/sandbox-state-meta` to apply directly",
+    "new": "JSON value from the MCP sandbox state capability to apply directly",
+    "count": 1
   }
 ]
