@@ -27,6 +27,7 @@ pub fn initialize() -> std::io::Result<()> {
         std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")),
     )?;
     initialize_home(&home)?;
+    share_credential(&home);
     provider::load_hanzo_credentials(&home);
     // This function is only invoked before upstream starts threads.
     std::env::set_var("CODEX_HOME", home);
@@ -38,8 +39,44 @@ fn product_home(explicit: Option<OsString>, user: Option<OsString>) -> std::io::
         return Ok(PathBuf::from(home));
     }
     user.filter(|home| !home.is_empty())
-        .map(|home| PathBuf::from(home).join(".hanzo/dev2"))
+        .map(|home| PathBuf::from(home).join(".hanzo/dev"))
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "set DEV_HOME or HOME to a Hanzo profile directory"))
+}
+
+/// One account across the Hanzo tools, so signing in to any of them signs in to
+/// all of them. Dev keeps its own sessions and settings; only the credential is
+/// shared, and only when the profile is the default one under `~/.hanzo`.
+fn share_credential(home: &Path) {
+    let (Some(hanzo), Some(name)) = (home.parent(), home.file_name()) else {
+        return;
+    };
+    if name != "dev" || !hanzo.ends_with(".hanzo") {
+        return; // An explicit DEV_HOME is its own island.
+    }
+    let shared = hanzo.join("auth.json");
+    let ours = home.join("auth.json");
+    match std::fs::symlink_metadata(&ours) {
+        // A real file here predates the shared credential; leave the user's alone.
+        Ok(metadata) if !metadata.is_symlink() => return,
+        Ok(_) => {
+            if std::fs::read_link(&ours).is_ok_and(|target| target == shared) {
+                return;
+            }
+            let _ = std::fs::remove_file(&ours);
+        }
+        Err(_) => {}
+    }
+    let _ = link(&shared, &ours);
+}
+
+#[cfg(unix)]
+fn link(target: &Path, at: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, at)
+}
+
+#[cfg(windows)]
+fn link(target: &Path, at: &Path) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_file(target, at)
 }
 
 fn initialize_home(home: &Path) -> std::io::Result<()> {
