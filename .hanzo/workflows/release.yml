@@ -44,27 +44,41 @@ jobs:
           submodules: true
           fetch-depth: 0
       - name: GitHub credential, from KMS
-        # The forge org carries KMS_CLIENT_ID/SECRET and nothing else, so
-        # `secrets.GH_PAT` expanded to empty and every call went out as
-        # `Authorization: Bearer `. GitHub answered 401, the draft was never
-        # opened, and all five platform jobs skipped behind it — a release train
-        # stopped by a header with nothing after the space.
+        # The forge org carries KMS_CLIENT_ID/SECRET and nothing else, so the old
+        # `secrets.GH_PAT` expanded to empty and every call left as
+        # "Authorization: Bearer " — GitHub answered 401, the draft was never
+        # opened, and all five platform jobs skipped behind it.
         #
-        # KMS is where this estate keeps secrets, and the publish job already
-        # reads NPM_TOKEN this way; the token now arrives by the same road.
+        # No jq: this step runs before any toolchain is provisioned, and the first
+        # version of it died on `set -e` at a bare curl exit 22 that said nothing
+        # about why. Text tools are always there, and each failure names itself.
         env:
           KMS_CLIENT_ID: ${{ secrets.KMS_CLIENT_ID }}
           KMS_CLIENT_SECRET: ${{ secrets.KMS_CLIENT_SECRET }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           KMS=${KMS_ENDPOINT:-https://api.hanzo.ai}
-          T=$(curl -sf "$KMS/v1/kms/auth/login" -H 'Content-Type: application/json' \
-            -d "{\"clientId\":\"$KMS_CLIENT_ID\",\"clientSecret\":\"$KMS_CLIENT_SECRET\"}" | jq -r '.accessToken // empty')
+          [ -n "${KMS_CLIENT_ID:-}" ] || { echo "::error::KMS_CLIENT_ID is empty"; exit 1; }
+          [ -n "${KMS_CLIENT_SECRET:-}" ] || { echo "::error::KMS_CLIENT_SECRET is empty"; exit 1; }
+          field() { sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1; }
+          code=$(curl -s -o /tmp/kms.json -w '%{http_code}' "$KMS/v1/kms/auth/login" \
+            -H 'Content-Type: application/json' \
+            -d "{\"clientId\":\"$KMS_CLIENT_ID\",\"clientSecret\":\"$KMS_CLIENT_SECRET\"}")
+          if [ "$code" != 200 ]; then
+            echo "::error::KMS login answered $code"
+            sed -e 's/[A-Za-z0-9_.-]\{16,\}/<redacted>/g' /tmp/kms.json
+            exit 1
+          fi
+          T=$(field accessToken < /tmp/kms.json)
+          [ -n "$T" ] || { echo "::error::KMS login returned no accessToken"; exit 1; }
           tok=""
           for path in secrets/GITHUB_TOKEN secrets/deploy/GITHUB_TOKEN orgs/hanzo/secrets/GITHUB_TOKEN; do
-            tok=$(curl -sf "$KMS/v1/kms/$path?env=prod" -H "Authorization: Bearer $T" | jq -r '.value // .secret.value // empty'); [ -z "$tok" ] || break
+            c=$(curl -s -o /tmp/sec.json -w '%{http_code}' "$KMS/v1/kms/$path?env=prod" -H "Authorization: Bearer $T")
+            if [ "$c" != 200 ]; then echo "  $path -> $c"; continue; fi
+            tok=$(field value < /tmp/sec.json)
+            if [ -n "$tok" ]; then echo "  $path -> ok"; break; fi
           done
-          [ -n "$tok" ] || { echo "::error::GITHUB_TOKEN not readable from KMS"; exit 1; }
+          [ -n "$tok" ] || { echo "::error::no GITHUB_TOKEN readable from KMS on any path"; exit 1; }
           echo "::add-mask::$tok"
           echo "GH_PAT=$tok" >> "$GITHUB_ENV"
       - name: Next version, and the draft that will hold it
@@ -188,27 +202,41 @@ jobs:
           (cd dist && for f in *; do case "$f" in *.sha256) ;; *) sha256sum "$f" > "$f.sha256";; esac; done)
           ls -la dist
       - name: GitHub credential, from KMS
-        # The forge org carries KMS_CLIENT_ID/SECRET and nothing else, so
-        # `secrets.GH_PAT` expanded to empty and every call went out as
-        # `Authorization: Bearer `. GitHub answered 401, the draft was never
-        # opened, and all five platform jobs skipped behind it — a release train
-        # stopped by a header with nothing after the space.
+        # The forge org carries KMS_CLIENT_ID/SECRET and nothing else, so the old
+        # `secrets.GH_PAT` expanded to empty and every call left as
+        # "Authorization: Bearer " — GitHub answered 401, the draft was never
+        # opened, and all five platform jobs skipped behind it.
         #
-        # KMS is where this estate keeps secrets, and the publish job already
-        # reads NPM_TOKEN this way; the token now arrives by the same road.
+        # No jq: this step runs before any toolchain is provisioned, and the first
+        # version of it died on `set -e` at a bare curl exit 22 that said nothing
+        # about why. Text tools are always there, and each failure names itself.
         env:
           KMS_CLIENT_ID: ${{ secrets.KMS_CLIENT_ID }}
           KMS_CLIENT_SECRET: ${{ secrets.KMS_CLIENT_SECRET }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           KMS=${KMS_ENDPOINT:-https://api.hanzo.ai}
-          T=$(curl -sf "$KMS/v1/kms/auth/login" -H 'Content-Type: application/json' \
-            -d "{\"clientId\":\"$KMS_CLIENT_ID\",\"clientSecret\":\"$KMS_CLIENT_SECRET\"}" | jq -r '.accessToken // empty')
+          [ -n "${KMS_CLIENT_ID:-}" ] || { echo "::error::KMS_CLIENT_ID is empty"; exit 1; }
+          [ -n "${KMS_CLIENT_SECRET:-}" ] || { echo "::error::KMS_CLIENT_SECRET is empty"; exit 1; }
+          field() { sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1; }
+          code=$(curl -s -o /tmp/kms.json -w '%{http_code}' "$KMS/v1/kms/auth/login" \
+            -H 'Content-Type: application/json' \
+            -d "{\"clientId\":\"$KMS_CLIENT_ID\",\"clientSecret\":\"$KMS_CLIENT_SECRET\"}")
+          if [ "$code" != 200 ]; then
+            echo "::error::KMS login answered $code"
+            sed -e 's/[A-Za-z0-9_.-]\{16,\}/<redacted>/g' /tmp/kms.json
+            exit 1
+          fi
+          T=$(field accessToken < /tmp/kms.json)
+          [ -n "$T" ] || { echo "::error::KMS login returned no accessToken"; exit 1; }
           tok=""
           for path in secrets/GITHUB_TOKEN secrets/deploy/GITHUB_TOKEN orgs/hanzo/secrets/GITHUB_TOKEN; do
-            tok=$(curl -sf "$KMS/v1/kms/$path?env=prod" -H "Authorization: Bearer $T" | jq -r '.value // .secret.value // empty'); [ -z "$tok" ] || break
+            c=$(curl -s -o /tmp/sec.json -w '%{http_code}' "$KMS/v1/kms/$path?env=prod" -H "Authorization: Bearer $T")
+            if [ "$c" != 200 ]; then echo "  $path -> $c"; continue; fi
+            tok=$(field value < /tmp/sec.json)
+            if [ -n "$tok" ]; then echo "  $path -> ok"; break; fi
           done
-          [ -n "$tok" ] || { echo "::error::GITHUB_TOKEN not readable from KMS"; exit 1; }
+          [ -n "$tok" ] || { echo "::error::no GITHUB_TOKEN readable from KMS on any path"; exit 1; }
           echo "::add-mask::$tok"
           echo "GH_PAT=$tok" >> "$GITHUB_ENV"
       - name: Upload into the draft
@@ -240,27 +268,41 @@ jobs:
           submodules: true
           fetch-depth: 0
       - name: GitHub credential, from KMS
-        # The forge org carries KMS_CLIENT_ID/SECRET and nothing else, so
-        # `secrets.GH_PAT` expanded to empty and every call went out as
-        # `Authorization: Bearer `. GitHub answered 401, the draft was never
-        # opened, and all five platform jobs skipped behind it — a release train
-        # stopped by a header with nothing after the space.
+        # The forge org carries KMS_CLIENT_ID/SECRET and nothing else, so the old
+        # `secrets.GH_PAT` expanded to empty and every call left as
+        # "Authorization: Bearer " — GitHub answered 401, the draft was never
+        # opened, and all five platform jobs skipped behind it.
         #
-        # KMS is where this estate keeps secrets, and the publish job already
-        # reads NPM_TOKEN this way; the token now arrives by the same road.
+        # No jq: this step runs before any toolchain is provisioned, and the first
+        # version of it died on `set -e` at a bare curl exit 22 that said nothing
+        # about why. Text tools are always there, and each failure names itself.
         env:
           KMS_CLIENT_ID: ${{ secrets.KMS_CLIENT_ID }}
           KMS_CLIENT_SECRET: ${{ secrets.KMS_CLIENT_SECRET }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           KMS=${KMS_ENDPOINT:-https://api.hanzo.ai}
-          T=$(curl -sf "$KMS/v1/kms/auth/login" -H 'Content-Type: application/json' \
-            -d "{\"clientId\":\"$KMS_CLIENT_ID\",\"clientSecret\":\"$KMS_CLIENT_SECRET\"}" | jq -r '.accessToken // empty')
+          [ -n "${KMS_CLIENT_ID:-}" ] || { echo "::error::KMS_CLIENT_ID is empty"; exit 1; }
+          [ -n "${KMS_CLIENT_SECRET:-}" ] || { echo "::error::KMS_CLIENT_SECRET is empty"; exit 1; }
+          field() { sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1; }
+          code=$(curl -s -o /tmp/kms.json -w '%{http_code}' "$KMS/v1/kms/auth/login" \
+            -H 'Content-Type: application/json' \
+            -d "{\"clientId\":\"$KMS_CLIENT_ID\",\"clientSecret\":\"$KMS_CLIENT_SECRET\"}")
+          if [ "$code" != 200 ]; then
+            echo "::error::KMS login answered $code"
+            sed -e 's/[A-Za-z0-9_.-]\{16,\}/<redacted>/g' /tmp/kms.json
+            exit 1
+          fi
+          T=$(field accessToken < /tmp/kms.json)
+          [ -n "$T" ] || { echo "::error::KMS login returned no accessToken"; exit 1; }
           tok=""
           for path in secrets/GITHUB_TOKEN secrets/deploy/GITHUB_TOKEN orgs/hanzo/secrets/GITHUB_TOKEN; do
-            tok=$(curl -sf "$KMS/v1/kms/$path?env=prod" -H "Authorization: Bearer $T" | jq -r '.value // .secret.value // empty'); [ -z "$tok" ] || break
+            c=$(curl -s -o /tmp/sec.json -w '%{http_code}' "$KMS/v1/kms/$path?env=prod" -H "Authorization: Bearer $T")
+            if [ "$c" != 200 ]; then echo "  $path -> $c"; continue; fi
+            tok=$(field value < /tmp/sec.json)
+            if [ -n "$tok" ]; then echo "  $path -> ok"; break; fi
           done
-          [ -n "$tok" ] || { echo "::error::GITHUB_TOKEN not readable from KMS"; exit 1; }
+          [ -n "$tok" ] || { echo "::error::no GITHUB_TOKEN readable from KMS on any path"; exit 1; }
           echo "::add-mask::$tok"
           echo "GH_PAT=$tok" >> "$GITHUB_ENV"
       - name: Tools
