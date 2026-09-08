@@ -43,10 +43,32 @@ jobs:
         with:
           submodules: true
           fetch-depth: 0
+      - name: GitHub credential, from KMS
+        # The forge org carries KMS_CLIENT_ID/SECRET and nothing else, so
+        # `secrets.GH_PAT` expanded to empty and every call went out as
+        # `Authorization: Bearer `. GitHub answered 401, the draft was never
+        # opened, and all five platform jobs skipped behind it — a release train
+        # stopped by a header with nothing after the space.
+        #
+        # KMS is where this estate keeps secrets, and the publish job already
+        # reads NPM_TOKEN this way; the token now arrives by the same road.
+        env:
+          KMS_CLIENT_ID: ${{ secrets.KMS_CLIENT_ID }}
+          KMS_CLIENT_SECRET: ${{ secrets.KMS_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          KMS=${KMS_ENDPOINT:-https://api.hanzo.ai}
+          T=$(curl -sf "$KMS/v1/kms/auth/login" -H 'Content-Type: application/json' \
+            -d "{\"clientId\":\"$KMS_CLIENT_ID\",\"clientSecret\":\"$KMS_CLIENT_SECRET\"}" | jq -r '.accessToken // empty')
+          tok=""
+          for path in secrets/GITHUB_TOKEN secrets/deploy/GITHUB_TOKEN orgs/hanzo/secrets/GITHUB_TOKEN; do
+            tok=$(curl -sf "$KMS/v1/kms/$path?env=prod" -H "Authorization: Bearer $T" | jq -r '.value // .secret.value // empty'); [ -z "$tok" ] || break
+          done
+          [ -n "$tok" ] || { echo "::error::GITHUB_TOKEN not readable from KMS"; exit 1; }
+          echo "::add-mask::$tok"
+          echo "GH_PAT=$tok" >> "$GITHUB_ENV"
       - name: Next version, and the draft that will hold it
         id: v
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           set -euo pipefail
           top() { printf '%s\n' "$@" | sort -V | tail -n1; }
@@ -165,9 +187,32 @@ jobs:
           fi
           (cd dist && for f in *; do case "$f" in *.sha256) ;; *) sha256sum "$f" > "$f.sha256";; esac; done)
           ls -la dist
+      - name: GitHub credential, from KMS
+        # The forge org carries KMS_CLIENT_ID/SECRET and nothing else, so
+        # `secrets.GH_PAT` expanded to empty and every call went out as
+        # `Authorization: Bearer `. GitHub answered 401, the draft was never
+        # opened, and all five platform jobs skipped behind it — a release train
+        # stopped by a header with nothing after the space.
+        #
+        # KMS is where this estate keeps secrets, and the publish job already
+        # reads NPM_TOKEN this way; the token now arrives by the same road.
+        env:
+          KMS_CLIENT_ID: ${{ secrets.KMS_CLIENT_ID }}
+          KMS_CLIENT_SECRET: ${{ secrets.KMS_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          KMS=${KMS_ENDPOINT:-https://api.hanzo.ai}
+          T=$(curl -sf "$KMS/v1/kms/auth/login" -H 'Content-Type: application/json' \
+            -d "{\"clientId\":\"$KMS_CLIENT_ID\",\"clientSecret\":\"$KMS_CLIENT_SECRET\"}" | jq -r '.accessToken // empty')
+          tok=""
+          for path in secrets/GITHUB_TOKEN secrets/deploy/GITHUB_TOKEN orgs/hanzo/secrets/GITHUB_TOKEN; do
+            tok=$(curl -sf "$KMS/v1/kms/$path?env=prod" -H "Authorization: Bearer $T" | jq -r '.value // .secret.value // empty'); [ -z "$tok" ] || break
+          done
+          [ -n "$tok" ] || { echo "::error::GITHUB_TOKEN not readable from KMS"; exit 1; }
+          echo "::add-mask::$tok"
+          echo "GH_PAT=$tok" >> "$GITHUB_ENV"
       - name: Upload into the draft
         env:
-          GH_PAT: ${{ secrets.GH_PAT }}
           REL: ${{ needs.version.outputs.release }}
         run: |
           set -euo pipefail
@@ -189,12 +234,35 @@ jobs:
     env:
       V: ${{ needs.version.outputs.version }}
       REL: ${{ needs.version.outputs.release }}
-      GH_PAT: ${{ secrets.GH_PAT }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: true
           fetch-depth: 0
+      - name: GitHub credential, from KMS
+        # The forge org carries KMS_CLIENT_ID/SECRET and nothing else, so
+        # `secrets.GH_PAT` expanded to empty and every call went out as
+        # `Authorization: Bearer `. GitHub answered 401, the draft was never
+        # opened, and all five platform jobs skipped behind it — a release train
+        # stopped by a header with nothing after the space.
+        #
+        # KMS is where this estate keeps secrets, and the publish job already
+        # reads NPM_TOKEN this way; the token now arrives by the same road.
+        env:
+          KMS_CLIENT_ID: ${{ secrets.KMS_CLIENT_ID }}
+          KMS_CLIENT_SECRET: ${{ secrets.KMS_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          KMS=${KMS_ENDPOINT:-https://api.hanzo.ai}
+          T=$(curl -sf "$KMS/v1/kms/auth/login" -H 'Content-Type: application/json' \
+            -d "{\"clientId\":\"$KMS_CLIENT_ID\",\"clientSecret\":\"$KMS_CLIENT_SECRET\"}" | jq -r '.accessToken // empty')
+          tok=""
+          for path in secrets/GITHUB_TOKEN secrets/deploy/GITHUB_TOKEN orgs/hanzo/secrets/GITHUB_TOKEN; do
+            tok=$(curl -sf "$KMS/v1/kms/$path?env=prod" -H "Authorization: Bearer $T" | jq -r '.value // .secret.value // empty'); [ -z "$tok" ] || break
+          done
+          [ -n "$tok" ] || { echo "::error::GITHUB_TOKEN not readable from KMS"; exit 1; }
+          echo "::add-mask::$tok"
+          echo "GH_PAT=$tok" >> "$GITHUB_ENV"
       - name: Tools
         run: |
           set -euo pipefail
