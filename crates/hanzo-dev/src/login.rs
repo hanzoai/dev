@@ -178,27 +178,32 @@ pub(crate) async fn run(login: Login, mut overrides: CliConfigOverrides) -> Resu
 }
 
 pub(crate) async fn logout(overrides: CliConfigOverrides) -> Result<()> {
-    // Clear the Hanzo side FIRST. `run_logout` never returns — it exits the
-    // process — so anything sequenced after it is unreachable, and that is how a
-    // logout came to print success while leaving the credential readable. On the
-    // default provider it was not reached at all, so auth.json survived too.
+    // Sign out of the provider that is signed in, and only that one. Signing out
+    // of ChatGPT must not delete a Hanzo key the user pasted weeks ago: the two
+    // credentials are separate accounts, and destroying the one nobody asked
+    // about is a surprise nothing undoes.
     //
-    // Both are cleared on every path now, and a failure on one does not stop the
-    // other: a logout that half-succeeds must not leave a live credential behind.
+    // The Hanzo side goes FIRST. `run_logout` never returns — it exits the
+    // process — so anything sequenced after it is unreachable, and that is how a
+    // logout came to print success while leaving the credential readable.
     let home = hanzo_config::home();
-    if home.join("hanzo-api-key").exists() {
-        hanzo_config::clear_hanzo_api_key(&home)?;
-        println!("Removed the saved Hanzo API key.");
-    } else {
-        match tokio::process::Command::new("hanzo")
-            .args(["auth", "logout"])
-            .status()
-            .await
-        {
-            Ok(status) if status.success() => {}
-            // Warned, not fatal: the account credential below still has to go.
-            Ok(status) => eprintln!("`hanzo auth logout` did not complete ({status})."),
-            Err(error) => eprintln!("Could not run `hanzo auth logout`: {error}"),
+    let config =
+        codex_cli::cloud_config::load_config(&overrides, LoaderOverrides::default()).await?;
+    if config.model_provider_id == "hanzo" {
+        if home.join("hanzo-api-key").exists() {
+            hanzo_config::clear_hanzo_api_key(&home)?;
+            println!("Removed the saved Hanzo API key.");
+        } else {
+            match tokio::process::Command::new("hanzo")
+                .args(["auth", "logout"])
+                .status()
+                .await
+            {
+                Ok(status) if status.success() => {}
+                // Warned, not fatal: the account credential below still has to go.
+                Ok(status) => eprintln!("`hanzo auth logout` did not complete ({status})."),
+                Err(error) => eprintln!("Could not run `hanzo auth logout`: {error}"),
+            }
         }
     }
     if std::env::var_os("HANZO_USER_KEY").is_some() {
