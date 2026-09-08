@@ -12,6 +12,8 @@ use codex_arg0::arg0_dispatch_or_else;
 use codex_config::LoaderOverrides;
 use codex_utils_cli::CliConfigOverrides;
 
+mod login;
+
 #[derive(Parser)]
 #[command(
     name = "dev",
@@ -45,7 +47,7 @@ enum Command {
     Exec(codex_exec::Cli),
 
     /// Sign in to Hanzo, or to ChatGPT.
-    Login(Login),
+    Login(login::Login),
 
     /// Discard stored credentials.
     Logout,
@@ -146,28 +148,6 @@ struct Pick {
     all: bool,
 }
 
-#[derive(Parser)]
-struct Login {
-    /// Sign in to Hanzo instead of ChatGPT. Hanzo is the default provider, and
-    /// `hanzo login` owns the credential this reads.
-    #[arg(long)]
-    hanzo: bool,
-
-    /// Read an API key from stdin rather than opening a browser.
-    #[arg(long = "with-api-key")]
-    api_key: bool,
-
-    /// Show who is signed in.
-    #[command(subcommand)]
-    command: Option<LoginCommand>,
-}
-
-#[derive(Subcommand)]
-enum LoginCommand {
-    /// Show who is signed in.
-    Status,
-}
-
 fn main() -> Result<()> {
     codex_build_info::initialize!();
     // Resolve the Hanzo home and provider before any thread or runtime starts.
@@ -192,8 +172,8 @@ async fn run(paths: Arg0DispatchPaths) -> Result<()> {
             cli.config_overrides = overrides;
             codex_exec::run_main(cli, paths).await?;
         }
-        Some(Command::Login(login)) => run_login(login, overrides).await,
-        Some(Command::Logout) => codex_cli::run_logout(overrides).await,
+        Some(Command::Login(login)) => login::run(login, overrides).await?,
+        Some(Command::Logout) => login::logout(overrides).await?,
         Some(Command::Serve) => {
             codex_app_server::run_main(paths, overrides, LoaderOverrides::default(), false, false)
                 .await?;
@@ -296,9 +276,17 @@ async fn run_features(command: FeatureCommand, overrides: CliConfigOverrides) ->
             let config =
                 codex_cli::cloud_config::load_config(&overrides, LoaderOverrides::default())
                     .await?;
-            let width = FEATURES.iter().map(|spec| spec.key.len()).max().unwrap_or_default();
+            let width = FEATURES
+                .iter()
+                .map(|spec| spec.key.len())
+                .max()
+                .unwrap_or_default();
             for spec in FEATURES {
-                let state = if config.features.enabled(spec.id) { "on" } else { "off" };
+                let state = if config.features.enabled(spec.id) {
+                    "on"
+                } else {
+                    "off"
+                };
                 println!("{:width$}  {:<17}  {state}", spec.key, stage(spec.stage));
             }
         }
@@ -341,9 +329,17 @@ fn session_options(
     }
 }
 
-async fn run_plugin(cli: codex_cli::plugin_cmd::PluginCli, overrides: CliConfigOverrides) -> Result<()> {
+async fn run_plugin(
+    cli: codex_cli::plugin_cmd::PluginCli,
+    overrides: CliConfigOverrides,
+) -> Result<()> {
     use codex_cli::plugin_cmd::PluginSubcommand;
-    let parsed = || overrides.clone().parse_overrides().map_err(anyhow::Error::msg);
+    let parsed = || {
+        overrides
+            .clone()
+            .parse_overrides()
+            .map_err(anyhow::Error::msg)
+    };
     match cli.subcommand {
         PluginSubcommand::Add(args) => codex_cli::plugin_cmd::run_plugin_add(parsed()?, args).await,
         PluginSubcommand::List(args) => {
@@ -357,36 +353,6 @@ async fn run_plugin(cli: codex_cli::plugin_cmd::PluginCli, overrides: CliConfigO
             marketplace.run().await
         }
     }
-}
-
-/// Choosing a provider is the whole of signing in: the credential and the model
-/// catalog travel together, so one cannot be selected without the other.
-async fn run_login(login: Login, overrides: CliConfigOverrides) -> ! {
-    let home = hanzo_config::home();
-    if let Some(LoginCommand::Status) = login.command {
-        codex_cli::run_login_status(overrides).await
-    }
-    if login.hanzo {
-        if let Err(error) = hanzo_config::activate_provider(&home, hanzo_config::Provider::Hanzo) {
-            eprintln!("Could not select Hanzo: {error}");
-            std::process::exit(1);
-        }
-        match hanzo_config::hanzo_credential() {
-            Some(_) => println!("Signed in to Hanzo."),
-            None => println!("Run `hanzo login` to sign in, then start `dev`."),
-        }
-        std::process::exit(0);
-    }
-    // ChatGPT owns both the credential and the model catalog once selected.
-    if let Err(error) = hanzo_config::activate_provider(&home, hanzo_config::Provider::OpenAi) {
-        eprintln!("Could not select ChatGPT: {error}");
-        std::process::exit(1);
-    }
-    if login.api_key {
-        let key = codex_cli::read_api_key_from_stdin();
-        codex_cli::run_login_with_api_key(overrides, key).await
-    }
-    codex_cli::run_login_with_chatgpt(overrides).await
 }
 
 // Each host backend takes a different option set, so the command's arguments

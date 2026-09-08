@@ -5,10 +5,12 @@ use std::path::Path;
 use std::path::PathBuf;
 
 mod provider;
-pub use provider::Provider;
 pub use provider::activate_provider;
+pub use provider::clear_hanzo_api_key;
 pub use provider::hanzo_credential;
+pub use provider::save_hanzo_api_key;
 pub use provider::set_feature;
+pub use provider::Provider;
 
 /// The active product home. Meaningful once [`initialize`] has run.
 pub fn home() -> PathBuf {
@@ -40,7 +42,12 @@ fn product_home(explicit: Option<OsString>, user: Option<OsString>) -> std::io::
     }
     user.filter(|home| !home.is_empty())
         .map(|home| PathBuf::from(home).join(".hanzo/dev"))
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "set DEV_HOME or HOME to a Hanzo profile directory"))
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "set DEV_HOME or HOME to a Hanzo profile directory",
+            )
+        })
 }
 
 /// One account across the Hanzo tools, so signing in to any of them signs in to
@@ -103,7 +110,7 @@ name = "Hanzo"
 base_url = "https://api.hanzo.ai/v1"
 wire_api = "responses"
 env_key = "HANZO_USER_KEY"
-env_key_instructions = "Sign in with `hanzo auth login`, then launch with `hanzo code --backend dev`, or set HANZO_USER_KEY."
+env_key_instructions = "Run `dev login` to sign in to Hanzo or paste a Hanzo API key, or set HANZO_USER_KEY."
 requires_openai_auth = false
 
 [mcp_servers.hanzo]

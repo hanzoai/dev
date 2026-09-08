@@ -1,0 +1,9 @@
+---
+source: crates/hanzo-dev/tests/login.rs
+expression: parser.screen().contents()
+---
+Sign in to Hanzo Dev:
+> Hanzo account (recommended)
+  ChatGPT account
+  Paste a Hanzo API key
+  Paste an OpenAI API key

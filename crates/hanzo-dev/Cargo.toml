@@ -69,6 +69,7 @@ codex-tui = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
 codex-utils-path = { workspace = true }
 crossterm = { workspace = true }
+dialoguer = { version = "0.11", default-features = false, features = ["password"] }
 http = { workspace = true }
 libc = { workspace = true }
 os_info = { workspace = true }
@@ -109,6 +110,9 @@ windows-sys = { version = "0.52", features = [
 ] }
 
 [dev-dependencies]
+codex-utils-pty = { workspace = true }
+insta = { workspace = true }
+vt100 = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 
