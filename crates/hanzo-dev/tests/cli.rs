@@ -51,19 +51,52 @@ fn completion_scripts_name_the_product() {
     assert!(text(&dev(home.path(), &["completion", "zsh"])).contains("compdef dev"));
 }
 
+/// Every surface a user reads, not just the front page. The banner `dev exec`
+/// prints was upstream's for a while precisely because only `--help` was
+/// checked, and `--help` never shows it.
 #[test]
-fn the_interface_carries_no_upstream_product_name() {
+fn no_surface_carries_an_upstream_product_name() {
     let home = home();
-    let help = text(&dev(home.path(), &["--help"]));
-    for name in ["OpenAI", "Codex", "ChatGPT Codex"] {
-        // `CODEX_HOME` still reaches the profile flag from a crate the island
-        // cannot reach. Everything else is ours to answer for.
-        let leaked: Vec<_> = help
-            .lines()
-            .filter(|line| line.contains(name) && !line.contains("CODEX_HOME"))
-            .collect();
-        assert!(leaked.is_empty(), "{name} reaches the interface: {leaked:?}");
+    let mut surfaces = vec![("--help".to_string(), text(&dev(home.path(), &["--help"])))];
+    for command in COMMANDS {
+        surfaces.push((
+            format!("{command} --help"),
+            text(&dev(home.path(), &[command, "--help"])),
+        ));
     }
+    for (surface, body) in surfaces {
+        for name in ["OpenAI", "Codex", "codex"] {
+            // Login names the provider whose credential the user is supplying.
+            if surface == "login --help" && name == "OpenAI" {
+                continue;
+            }
+            // Two things legitimately carry the word and must not be renamed:
+            // `CODEX_HOME`, an environment variable upstream owns, and
+            // `codex/…`, which names a method on the app-server wire protocol.
+            // Renaming either would break something real; branding is about the
+            // product name a reader sees, not identifiers on a wire.
+            let leaked: Vec<_> = body
+                .lines()
+                .filter(|line| {
+                    line.contains(name)
+                        && !line.contains("CODEX_HOME")
+                        && !line.contains("`codex/")
+                })
+                .collect();
+            assert!(leaked.is_empty(), "`dev {surface}` says {name}: {leaked:?}");
+        }
+    }
+}
+
+/// The product answers for one version, everywhere it states one.
+#[test]
+fn the_product_states_one_version() {
+    let home = home();
+    let version = text(&dev(home.path(), &["--version"]));
+    let number = version.split_whitespace().nth(1).expect("`dev <version>`").to_string();
+    assert!(version.starts_with("dev "), "{version}");
+    let doctor = text(&dev(home.path(), &["doctor", "--summary", "--no-color"]));
+    assert!(doctor.contains(&number), "doctor reports a different version: {doctor:.120}");
 }
 
 #[test]

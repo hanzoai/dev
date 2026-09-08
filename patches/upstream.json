@@ -112,5 +112,41 @@
     "old": "\"Codex's Linux sandbox uses bubblewrap",
     "new": "\"The Linux sandbox uses bubblewrap",
     "count": 2
+  },
+  {
+    "file": "utils/cli/src/config_override.rs",
+    "old": "`~/.codex/config.toml`",
+    "new": "`$DEV_HOME/config.toml`",
+    "count": 1
+  },
+  {
+    "file": "exec/src/cli.rs",
+    "old": "not recognized by this version of Codex.",
+    "new": "this version of Dev does not recognize.",
+    "count": 1
+  },
+  {
+    "file": "exec/src/cli.rs",
+    "old": "Allow running Codex outside a Git repository.",
+    "new": "Allow running Dev outside a Git repository.",
+    "count": 1
+  },
+  {
+    "file": "exec/src/cli.rs",
+    "old": "override_usage = \"codex exec [OPTIONS] [PROMPT]\\n       codex exec [OPTIONS] <COMMAND> [ARGS]\"",
+    "new": "override_usage = \"dev exec [OPTIONS] [PROMPT]\\n       dev exec [OPTIONS] <COMMAND> [ARGS]\"",
+    "count": 1
+  },
+  {
+    "file": "cloud-tasks/src/cli.rs",
+    "old": "Codex Cloud task",
+    "new": "Hanzo task",
+    "count": 8
+  },
+  {
+    "file": "cloud-tasks/src/cli.rs",
+    "old": "Codex Cloud",
+    "new": "Hanzo Tasks",
+    "count": 2
   }
 ]

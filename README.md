@@ -32,6 +32,13 @@ account. Then, from any repository:
 hanzo dev
 ```
 
+The standalone agent also supports `dev login`. Its arrow-key picker defaults
+to Hanzo and offers ChatGPT sign-in or hidden entry of a Hanzo or OpenAI API key.
+Run `dev login --hanzo` or `dev login --chatgpt` to select an account directly.
+`dev login --with-api-key` accepts a Hanzo key; add `--chatgpt` for an OpenAI key.
+Keys are hidden when typed or pasted, and can also be read from piped stdin.
+Launch `dev` to use the account selected there.
+
 Give it the task on the command line to run headless instead:
 
 ```bash

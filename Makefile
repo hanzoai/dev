@@ -23,8 +23,12 @@ install: release
 	@$(CARGO) install --locked --path crates/hanzo-dev --bin dev
 
 ## test: run the Hanzo test suite
+# hanzo-upstream is a detached workspace, so the root run cannot see it — and it
+# is the code that edits upstream in place, which is the last thing to leave
+# untested.
 test: prepare
 	@$(CARGO) nextest run --locked --no-fail-fast $(ARGS)
+	@$(CARGO) nextest run --no-fail-fast --manifest-path crates/hanzo-upstream/Cargo.toml $(ARGS)
 
 ## test-upstream: run the upstream suite against the pinned submodule
 # voice-host wants GStreamer >= 1.28, which no current distribution ships, and
