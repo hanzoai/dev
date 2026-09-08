@@ -1,7 +1,7 @@
 //! Manages the pinned upstream submodules.
 //!
 //! The only Hanzo edits to upstream are the anchored substitutions in
-//! `patches/codex.json`, applied to the submodule checkout in place.
+//! `patches/upstream.json`, applied to the submodule checkout in place.
 
 mod bump;
 mod prepare;

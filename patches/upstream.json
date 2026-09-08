@@ -94,5 +94,23 @@
     "old": "version = \"0.0.0\"",
     "new": "version = \"0.7.0-dev.1\"",
     "count": 1
+  },
+  {
+    "file": "exec/src/event_processor_with_human_output.rs",
+    "old": "eprintln!(\"OpenAI Codex v{VERSION}\\n--------\");",
+    "new": "eprintln!(\"Hanzo Dev v{VERSION}\\n--------\");",
+    "count": 1
+  },
+  {
+    "file": "tui/src/status/card.rs",
+    "old": "Span::from(\"OpenAI Codex\").bold()",
+    "new": "Span::from(hanzo_tui::PRODUCT_NAME).bold()",
+    "count": 1
+  },
+  {
+    "file": "sandboxing/src/bwrap.rs",
+    "old": "\"Codex's Linux sandbox uses bubblewrap",
+    "new": "\"The Linux sandbox uses bubblewrap",
+    "count": 2
   }
 ]

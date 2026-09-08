@@ -5,16 +5,14 @@
 # Hanzo Dev
 
 Hanzo Dev is our coding agent. It runs in your terminal, reads and edits the
-repository you point it at, runs commands in a sandbox, and drives a browser
-when a task needs one. It reaches every model [Hanzo AI](https://hanzo.ai)
-serves — over 500 of them, `enso` and the `zen5` family included — through one
-metered gateway at `api.hanzo.ai`.
+repository you point it at, and runs commands in a sandbox. It reaches every
+model [Hanzo AI](https://hanzo.ai) serves — hundreds of them, `enso` and the
+`zen5` family included — through one metered gateway at `api.hanzo.ai`.
 
 It ships inside the Hanzo CLI. `hanzo dev` is the command.
 
 | <img src="docs/images/simple.png" alt="A session in progress" width="100%"><br>A session in progress | <img src="docs/images/diff.png" alt="Reviewing a diff" width="100%"><br>Reviewing a diff |
 |:--:|:--:|
-| <img src="docs/images/browser.png" alt="Driving a browser" width="100%"><br>Driving a browser | <img src="docs/images/agents.png" alt="Several agents on one task" width="100%"><br>Several agents on one task |
 
 ## Install
 
@@ -22,6 +20,10 @@ It ships inside the Hanzo CLI. `hanzo dev` is the command.
 curl -fsSL https://hanzo.sh | sh
 hanzo auth login
 ```
+
+That fetches one prebuilt native binary per tool and verifies its checksum.
+`npm i -g @hanzo/dev` installs the agent on its own if you would rather have it
+from npm; both give you the same build.
 
 `hanzo auth login` signs you in through Hanzo IAM and links the machine to your
 account. Then, from any repository:

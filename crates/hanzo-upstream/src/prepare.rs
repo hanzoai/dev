@@ -34,7 +34,7 @@ pub fn run(arguments: &[String]) -> Result<()> {
     }
 
     let mut applied = 0;
-    for edit in serde_json::from_slice::<Vec<Edit>>(&std::fs::read(root.join("patches/codex.json"))?)?
+    for edit in serde_json::from_slice::<Vec<Edit>>(&std::fs::read(root.join("patches/upstream.json"))?)?
     {
         let path = source.join(&edit.file);
         let text =

@@ -20,7 +20,7 @@ Hanzo owns the front door; upstream owns the engines.
 no lockfile of hashes sits beside it. Crates are consumed straight from the
 checkout by ordinary path dependency.
 
-`patches/codex.json` carries the whole Hanzo delta: anchored substitutions that
+`patches/upstream.json` carries the whole Hanzo delta: anchored substitutions that
 `make prepare` applies to the checkout in place. `git -C upstream/codex status`
 shows them, and that is the honest picture — the checkout is a build input we
 own, not a pristine mirror. `make reset` returns it.
@@ -36,7 +36,7 @@ belong upstream as a pull request; landing them there shrinks this file.
 
 ## Never edit upstream by hand
 
-Changes go in a `hanzo-*` crate, or in `patches/codex.json` when upstream
+Changes go in a `hanzo-*` crate, or in `patches/upstream.json` when upstream
 hard-codes something that must be ours. A hand edit inside `upstream/` is lost
 at the next `make bump`.
 
