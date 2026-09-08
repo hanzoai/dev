@@ -1,19 +1,18 @@
 <p align="center">
-  <img src="docs/logo.png" alt="Hanzo Dev" width="400">
+  <img src="docs/images/logo.png" alt="Hanzo Dev" width="400">
 </p>
 
 # Hanzo Dev
 
 Hanzo Dev is our coding agent. It runs in your terminal, reads and edits the
-repository you point it at, runs commands in a sandbox, and drives a browser
-when a task needs one. Models are served by [Hanzo AI](https://hanzo.ai) —
-`enso` and the `zen5` family — over the metered gateway at `api.hanzo.ai`.
+repository you point it at, and runs commands in a sandbox. It reaches every
+model [Hanzo AI](https://hanzo.ai) serves — hundreds of them, `enso` and the
+`zen5` family included — through one metered gateway at `api.hanzo.ai`.
 
 It ships inside the Hanzo CLI. `hanzo dev` is the command.
 
-| <img src="docs/screenshots/simple.png" alt="A session in progress" width="100%"><br>A session in progress | <img src="docs/screenshots/diff.png" alt="Reviewing a diff" width="100%"><br>Reviewing a diff |
+| <img src="docs/images/simple.png" alt="A session in progress" width="100%"><br>A session in progress | <img src="docs/images/diff.png" alt="Reviewing a diff" width="100%"><br>Reviewing a diff |
 |:--:|:--:|
-| <img src="docs/screenshots/browser.png" alt="Driving a browser" width="100%"><br>Driving a browser | <img src="docs/screenshots/agents.png" alt="Several agents on one task" width="100%"><br>Several agents on one task |
 
 ## Install
 
@@ -22,12 +21,23 @@ curl -fsSL https://hanzo.sh | sh
 hanzo auth login
 ```
 
+That fetches one prebuilt native binary per tool and verifies its checksum.
+`npm i -g @hanzo/dev` installs the agent on its own if you would rather have it
+from npm; both give you the same build.
+
 `hanzo auth login` signs you in through Hanzo IAM and links the machine to your
 account. Then, from any repository:
 
 ```bash
 hanzo dev
 ```
+
+The standalone agent also supports `dev login`. Its arrow-key picker defaults
+to Hanzo and offers ChatGPT sign-in or hidden entry of a Hanzo or OpenAI API key.
+Run `dev login --hanzo` or `dev login --chatgpt` to select an account directly.
+`dev login --with-api-key` accepts a Hanzo key; add `--chatgpt` for an OpenAI key.
+Keys are hidden when typed or pasted, and can also be read from piped stdin.
+Launch `dev` to use the account selected there.
 
 Give it the task on the command line to run headless instead:
 

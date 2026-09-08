@@ -1,5 +1,5 @@
-# hanzoai/dev — the `dev` CLI (Rust workspace under code-rs/: core, tui, exec,
-# app-server, mcp client/server, and ~30 more crates).
+# hanzoai/dev — the `dev` CLI. Hanzo owns the command surface in crates/;
+# the engines are pinned upstream submodules under upstream/.
 #
 # Gate only: no image, nothing to deploy. The release — five per-platform
 # binaries, npm, Homebrew — is .hanzo/workflows/release.yml, one job on the
@@ -18,11 +18,14 @@
 # --locked so Cargo.lock is a fact rather than a suggestion: an out-of-date lock
 # fails here instead of silently resolving to versions no release will ever use.
 #
-# The toolchain is installed by this gate. hanzoai/ci provisions Rust only when
-# a Cargo.toml sits at the repo ROOT, and this workspace lives one directory
-# down — so without these three lines the gate dies at `cargo: command not
-# found` (exit 127) and never reads a single crate. --default-toolchain none
-# leaves the choice to code-rs/rust-toolchain.toml, which pins 1.90.0.
+# The workspace is at the repo root now, so hanzoai/ci provisions Rust on its
+# own; the install below stays as a fallback and costs nothing when cargo is
+# already there. --default-toolchain none leaves the choice to
+# rust-toolchain.toml.
+#
+# The engines are submodules, and `make prepare` applies our edits to that
+# checkout — so the gate must fetch them before it can build anything. A
+# shallow init is enough: nothing here reads upstream history.
 test:
   # Cheap, and first, so a 300 KB blob fails in seconds rather than after the
   # workspace compiles. This is .github/workflows/blob-size-policy.yml, which
@@ -48,7 +51,7 @@ test:
         --max-bytes 512000 \
         --allowlist .github/blob-size-allowlist.txt
 
-  - name: cargo-check
+  - name: build
     run: |
       set -euo pipefail
       if ! command -v cargo >/dev/null 2>&1; then
@@ -56,5 +59,20 @@ test:
           | sh -s -- -y --profile minimal --default-toolchain none
       fi
       export PATH="$HOME/.cargo/bin:$PATH"
-      cd code-rs
-      cargo check --workspace --locked
+      git submodule update --init --depth 1
+      make build
+
+  # The binary answering is the shallowest check that the whole graph linked.
+  - name: smoke
+    run: |
+      set -euo pipefail
+      export PATH="$HOME/.cargo/bin:$PATH"
+      ./target/debug/dev --version
+      ./target/debug/dev --help >/dev/null
+
+  - name: test
+    run: |
+      set -euo pipefail
+      export PATH="$HOME/.cargo/bin:$PATH"
+      command -v cargo-nextest >/dev/null || cargo install cargo-nextest --locked
+      make test

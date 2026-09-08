@@ -1,60 +1,64 @@
-# Hanzo Dev.
-#
-# Builds code-rs/, the workspace that ships. vendor/codex/ is a vendored mirror of
-# openai/codex and is deliberately not built here — only its models.json is
-# compiled in, via code-rs/code-version.
-#
-# Every target delegates to build-fast.sh so there is one build and one cache.
+TOOL := cargo run --quiet --manifest-path crates/hanzo-upstream/Cargo.toml --
+CARGO := RUST_MIN_STACK=8388608 cargo
 
-PREFIX  ?= $(HOME)/.local
-PROFILE ?= dev-fast
-
-bin   := code-rs/bin/dev
-cargo := $(HOME)/.cargo/bin/cargo
-
-export PATH            := $(HOME)/.cargo/bin:$(PATH)
-export BUILD_FAST_BINS := dev
-export RUST_MIN_STACK  := 8388608
-
-.PHONY: all build install uninstall run check test clippy clean help
+.PHONY: all prepare build release install test test-upstream bump v8 fmt clean reset help
+.DEFAULT_GOAL := help
 
 all: build
 
-## build: compile dev — the required check, warnings included
-build:
-	@PROFILE=$(PROFILE) ./build-fast.sh
+## prepare: apply the owned edits to the pinned upstream checkout
+prepare:
+	@$(TOOL) prepare
 
-## install: put dev on PATH, with code as an alias to the same program
-install: build
-	@install -Dm755 $(bin) $(PREFIX)/bin/dev
-	@ln -sf dev $(PREFIX)/bin/code
-	@$(PREFIX)/bin/dev --version
+## build: build the dev binary
+build: prepare
+	@$(CARGO) build --locked -p hanzo-dev --bin dev
 
-## uninstall: take dev and the code alias off PATH
-uninstall:
-	@rm -f $(PREFIX)/bin/dev $(PREFIX)/bin/code
+## release: build the optimized dev binary
+release: prepare
+	@$(CARGO) build --locked --release -p hanzo-dev --bin dev
 
-## run: build, then start the TUI
-run: build
-	@./$(bin)
+## install: put the release binary on PATH
+install: release
+	@$(CARGO) install --locked --path crates/hanzo-dev --bin dev
 
-## check: what CI gates on — build, then compile every test target
-##        `build` alone links binaries, so a test file that does not parse
-##        sails past it and fails in the release preflight instead.
-check: build
-	@cd code-rs && $(cargo) test --workspace --no-run --locked
+## test: run the Hanzo test suite
+# hanzo-upstream is a detached workspace, so the root run cannot see it — and it
+# is the code that edits upstream in place, which is the last thing to leave
+# untested.
+test: prepare
+	@$(CARGO) nextest run --locked --no-fail-fast $(ARGS)
+	@$(CARGO) nextest run --no-fail-fast --manifest-path crates/hanzo-upstream/Cargo.toml $(ARGS)
 
-## test: run the workspace suite
-test:
-	@cd code-rs && $(cargo) nextest run --no-fail-fast
+## test-upstream: run the upstream suite against the pinned submodule
+# voice-host wants GStreamer >= 1.28, which no current distribution ships, and
+# nothing else in the workspace depends on it.
+test-upstream: v8
+	@. target/v8-env.sh && $(CARGO) nextest run --no-fail-fast \
+		--manifest-path upstream/codex/codex-rs/Cargo.toml \
+		--workspace --exclude codex-voice-host $(ARGS)
 
-## clippy: lint the workspace
-clippy:
-	@cd code-rs && $(cargo) clippy --tests
+## bump: move the upstream submodules to newer revisions
+bump:
+	@$(TOOL) bump $(ARGS)
+	@$(TOOL) prepare
 
-## clean: drop build artifacts
+## v8: download and verify the V8 build the JavaScript runtime links
+v8:
+	@$(TOOL) v8
+
+## fmt: format the crates Hanzo owns
+fmt:
+	@$(CARGO) fmt -p hanzo-dev -p hanzo-config -p hanzo-tui
+	@$(CARGO) fmt --manifest-path crates/hanzo-upstream/Cargo.toml
+
+## clean: discard build output
 clean:
-	@cd code-rs && $(cargo) clean
+	@$(CARGO) clean
+
+## reset: return the upstream checkout to its pinned revision
+reset:
+	@git submodule foreach --quiet 'git reset --quiet --hard'
 
 help:
-	@sed -n 's/^## //p' $(MAKEFILE_LIST)
+	@grep -hE '^## ' $(MAKEFILE_LIST) | sed 's/## /  make /' | sort

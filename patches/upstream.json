@@ -1,0 +1,230 @@
+[
+  {
+    "file": "tui/Cargo.toml",
+    "old": "[dependencies]",
+    "new": "[dependencies]\nhanzo-tui = { path = \"../../../../crates/hanzo-tui\" }",
+    "count": 1
+  },
+  {
+    "file": "tui/src/history_cell/session.rs",
+    "old": "Span::from(\"OpenAI Codex\")",
+    "new": "Span::from(hanzo_tui::PRODUCT_NAME)",
+    "count": 1
+  },
+  {
+    "file": "tui/src/history_cell/session.rs",
+    "old": "format!(\"OpenAI Codex (v{})\", self.version)",
+    "new": "format!(\"{} (v{})\", hanzo_tui::PRODUCT_NAME, self.version)",
+    "count": 1
+  },
+  {
+    "file": "tui/src/chatwidget.rs",
+    "old": "const PLACEHOLDER: &str = \"Ask Codex to do anything\";",
+    "new": "const PLACEHOLDER: &str = hanzo_tui::INPUT_PLACEHOLDER;",
+    "count": 1
+  },
+  {
+    "file": "tui/src/version.rs",
+    "old": "env!(\"CARGO_PKG_VERSION\")",
+    "new": "hanzo_tui::VERSION",
+    "count": 1
+  },
+  {
+    "file": "tui/src/style.rs",
+    "old": "    let (top, alpha) = if is_light(terminal_bg) {\n        ((0, 0, 0), 0.04)\n    } else {\n        ((255, 255, 255), 0.12)\n    };\n    blend(top, terminal_bg, alpha)",
+    "new": "    hanzo_tui::input_background(terminal_bg, is_light(terminal_bg))",
+    "count": 1
+  },
+  {
+    "file": "tui/src/startup_draft.rs",
+    "old": "\"Ask Codex to do anything\".to_string()",
+    "new": "hanzo_tui::INPUT_PLACEHOLDER.to_string()",
+    "count": 1
+  },
+  {
+    "file": "tui/src/keymap_setup.rs",
+    "old": "\"Ask Codex to do anything\".to_string()",
+    "new": "hanzo_tui::INPUT_PLACEHOLDER.to_string()",
+    "count": 1
+  },
+  {
+    "file": "tui/src/onboarding/welcome.rs",
+    "old": "\"Codex\".bold()",
+    "new": "hanzo_tui::PRODUCT_NAME.bold()",
+    "count": 1
+  },
+  {
+    "file": "tui/src/onboarding/welcome.rs",
+    "old": "\", OpenAI's command-line coding agent\".into()",
+    "new": "\", your Hanzo coding agent\".into()",
+    "count": 1
+  },
+  {
+    "file": "tui/src/tooltips.rs",
+    "old": "pub(crate) fn get_tooltip(plan: Option<PlanType>, fast_mode_enabled: bool) -> Option<String> {",
+    "new": "pub(crate) fn get_tooltip(plan: Option<PlanType>, fast_mode_enabled: bool) -> Option<String> {\n    if plan.is_none() {\n        return Some(hanzo_tui::STARTUP_TIP.to_string());\n    }",
+    "count": 1
+  },
+  {
+    "file": "tui/src/cli.rs",
+    "old": "fields that are not recognized by this version of Codex.",
+    "new": "fields this version of Dev does not recognize.",
+    "count": 1
+  },
+  {
+    "file": "cli/src/lib.rs",
+    "old": "pub(crate) mod debug_sandbox;\nmod exit_status;\npub(crate) mod login;",
+    "new": "#![allow(dead_code)]\npub(crate) mod debug_sandbox;\nmod exit_status;\npub(crate) mod login;\n// Upstream declares these in its binary, which puts them out of reach of\n// any other front end. They are self-contained; publishing them from the\n// library is the whole of the change.\n#[cfg(any(target_os = \"macos\", target_os = \"windows\"))]\npub mod app_cmd;\npub mod cloud_config;\n#[cfg(any(target_os = \"macos\", target_os = \"windows\"))]\npub mod desktop_app;\npub mod doctor;\npub mod marketplace_cmd;\npub mod mcp_cmd;\npub mod migrate_rollouts;\npub mod plugin_cmd;\npub mod remote_control_cmd;",
+    "count": 1
+  },
+  {
+    "file": "cli/src/doctor/output.rs",
+    "old": "bold(\"Codex Doctor\", options)",
+    "new": "bold(\"Hanzo Dev Doctor\", options)",
+    "count": 1
+  },
+  {
+    "file": "cli/src/cloud_config.rs",
+    "old": "pub(crate) async fn load_config(",
+    "new": "pub async fn load_config(",
+    "count": 1
+  },
+  {
+    "file": "Cargo.toml",
+    "old": "version = \"0.0.0\"",
+    "new": "version = \"0.7.0-dev.1\"",
+    "count": 1
+  },
+  {
+    "file": "exec/src/event_processor_with_human_output.rs",
+    "old": "eprintln!(\"OpenAI Codex v{VERSION}\\n--------\");",
+    "new": "eprintln!(\"Hanzo Dev v{VERSION}\\n--------\");",
+    "count": 1
+  },
+  {
+    "file": "tui/src/status/card.rs",
+    "old": "Span::from(\"OpenAI Codex\").bold()",
+    "new": "Span::from(hanzo_tui::PRODUCT_NAME).bold()",
+    "count": 1
+  },
+  {
+    "file": "sandboxing/src/bwrap.rs",
+    "old": "\"Codex's Linux sandbox uses bubblewrap",
+    "new": "\"The Linux sandbox uses bubblewrap",
+    "count": 2
+  },
+  {
+    "file": "utils/cli/src/config_override.rs",
+    "old": "`~/.codex/config.toml`",
+    "new": "`$DEV_HOME/config.toml`",
+    "count": 1
+  },
+  {
+    "file": "exec/src/cli.rs",
+    "old": "fields that are not recognized by this version of Codex.",
+    "new": "fields this version of Dev does not recognize.",
+    "count": 1
+  },
+  {
+    "file": "exec/src/cli.rs",
+    "old": "Allow running Codex outside a Git repository.",
+    "new": "Allow running Dev outside a Git repository.",
+    "count": 1
+  },
+  {
+    "file": "exec/src/cli.rs",
+    "old": "override_usage = \"codex exec [OPTIONS] [PROMPT]\\n       codex exec [OPTIONS] <COMMAND> [ARGS]\"",
+    "new": "override_usage = \"dev exec [OPTIONS] [PROMPT]\\n       dev exec [OPTIONS] <COMMAND> [ARGS]\"",
+    "count": 1
+  },
+  {
+    "file": "cloud-tasks/src/cli.rs",
+    "old": "Codex Cloud task",
+    "new": "Hanzo task",
+    "count": 8
+  },
+  {
+    "file": "cloud-tasks/src/cli.rs",
+    "old": "Codex Cloud",
+    "new": "Hanzo Tasks",
+    "count": 2
+  },
+  {
+    "file": "cli/src/lib.rs",
+    "old": "Layer $CODEX_HOME/<name>.config.toml on top of the base user config",
+    "new": "Layer $DEV_HOME/<name>.config.toml on top of the base user config",
+    "count": 3
+  },
+  {
+    "file": "cli/src/main.rs",
+    "old": "Layer $CODEX_HOME/<name>.config.toml on top of the base user config",
+    "new": "Layer $DEV_HOME/<name>.config.toml on top of the base user config",
+    "count": 1
+  },
+  {
+    "file": "utils/cli/src/shared_options.rs",
+    "old": "Layer $CODEX_HOME/<name>.config.toml on top of the base user config",
+    "new": "Layer $DEV_HOME/<name>.config.toml on top of the base user config",
+    "count": 1
+  },
+  {
+    "file": "exec/src/cli.rs",
+    "old": "Do not load `$CODEX_HOME/config.toml`; auth still uses `CODEX_HOME`",
+    "new": "Do not load `$DEV_HOME/config.toml`; auth still uses `DEV_HOME`",
+    "count": 1
+  },
+  {
+    "file": "cli/src/doctor.rs",
+    "old": "Fix the reported config error, then rerun codex doctor.",
+    "new": "Fix the reported config error, then rerun dev doctor.",
+    "count": 1
+  },
+  {
+    "file": "cli/src/doctor/output.rs",
+    "old": "Run codex doctor without --summary for detailed diagnostics.",
+    "new": "Run dev doctor without --summary for detailed diagnostics.",
+    "count": 3
+  },
+  {
+    "file": "cli/src/doctor.rs",
+    "old": "CODEX_HOME was resolved without config",
+    "new": "DEV_HOME was resolved without config",
+    "count": 1
+  },
+  {
+    "file": "cli/src/doctor.rs",
+    "old": "CODEX_HOME could not be resolved",
+    "new": "DEV_HOME could not be resolved",
+    "count": 1
+  },
+  {
+    "file": "cli/src/doctor.rs",
+    "old": "CODEX_HOME: {}",
+    "new": "DEV_HOME: {}",
+    "count": 2
+  },
+  {
+    "file": "cli/src/doctor.rs",
+    "old": "path_readiness(&mut details, \"CODEX_HOME\"",
+    "new": "path_readiness(&mut details, \"DEV_HOME\"",
+    "count": 1
+  },
+  {
+    "file": "cli/src/doctor.rs",
+    "old": "    codex_version: String,\n    checks: Vec<DoctorCheck>,",
+    "new": "    #[serde(rename = \"devVersion\")]\n    codex_version: String,\n    checks: Vec<DoctorCheck>,",
+    "count": 1
+  },
+  {
+    "file": "cli/src/doctor.rs",
+    "old": "    codex_version: String,\n    checks: BTreeMap<String, JsonDoctorCheck>,",
+    "new": "    #[serde(rename = \"devVersion\")]\n    codex_version: String,\n    checks: BTreeMap<String, JsonDoctorCheck>,",
+    "count": 1
+  },
+  {
+    "file": "cli/src/lib.rs",
+    "old": "JSON value from `codex/sandbox-state-meta` to apply directly",
+    "new": "JSON value from the MCP sandbox state capability to apply directly",
+    "count": 1
+  }
+]

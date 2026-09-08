@@ -1,0 +1,14 @@
+[package]
+name = "hanzo-config"
+version.workspace = true
+edition = "2021"
+license = "Apache-2.0"
+description = "Hanzo Dev config integration"
+repository = "https://github.com/hanzoai/dev"
+
+[dependencies]
+tempfile = { workspace = true }
+toml_edit = { workspace = true }
+
+[dev-dependencies]
+toml = { workspace = true }

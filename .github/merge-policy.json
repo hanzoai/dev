@@ -11,7 +11,7 @@
     "code-rs/mcp-server/src/message_processor.rs",
     "code-rs/tui/**",
     "vendor/codex/tui/**",
-    "codex-cli/**",
+    "npm/**",
     "vendor/codex/core/src/openai_tools.rs",
     "vendor/codex/core/src/codex.rs",
     "vendor/codex/core/src/agent_tool.rs",

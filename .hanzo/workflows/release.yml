@@ -34,13 +34,14 @@ env:
 jobs:
   version:
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
-    runs-on: hanzo-build-linux-amd64
+    runs-on: [hanzo-build-linux-amd64]
     outputs:
       version: ${{ steps.v.outputs.version }}
       release: ${{ steps.v.outputs.release }}
     steps:
       - uses: actions/checkout@v4
         with:
+          submodules: true
           fetch-depth: 0
       - name: Next version, and the draft that will hold it
         id: v
@@ -62,7 +63,7 @@ jobs:
           # cross-built five targets.
           held=$(curl -fsS "${auth[@]}" "https://api.github.com/repos/hanzoai/dev/releases?per_page=100" \
             | jq -r '.[].tag_name' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed 's/^v//' | sort -V | tail -n1 || true)
-          base=$(top "${tag:-0.0.0}" "$npmv" "${held:-0.0.0}" "$(jq -r .version codex-cli/package.json)")
+          base=$(top "${tag:-0.0.0}" "$npmv" "${held:-0.0.0}" "$(jq -r .version npm/package.json)")
           IFS=. read -r a b c <<<"$base"
           v="$a.$b.$((c+1))"
           rel=$(curl -s -X POST "${auth[@]}" https://api.github.com/repos/hanzoai/dev/releases \
@@ -76,7 +77,7 @@ jobs:
   build:
     name: ${{ matrix.target.id }}
     needs: version
-    runs-on: hanzo-build-linux-amd64
+    runs-on: [hanzo-build-linux-amd64]
     timeout-minutes: 150
     strategy:
       fail-fast: false
@@ -94,6 +95,8 @@ jobs:
       RUSTFLAGS: -Awarnings -C debuginfo=0 -C strip=symbols
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
       - name: Toolchain deps
         run: |
           set -euo pipefail
@@ -104,7 +107,7 @@ jobs:
           set -euo pipefail
           command -v rustup >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none; }
           export PATH="$HOME/.cargo/bin:$PATH"; echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          CH=$(sed -n 's/^channel = "\(.*\)"/\1/p' code-rs/rust-toolchain.toml)
+          CH=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
           rustup toolchain install "$CH" --profile minimal
           rustup target add --toolchain "$CH" ${{ matrix.target.rust }}
       - name: Zig (the cross-linker)
@@ -137,8 +140,9 @@ jobs:
             sudo ln -sf "$src" "/usr/local/bin/$t"
           done
           cargo install cargo-xwin --version "${XWIN_CRATE_VERSION}" --locked
+      - name: Apply the owned edits to the pinned upstream
+        run: make prepare
       - name: Build
-        working-directory: code-rs
         run: |
           set -euo pipefail
           ulimit -n 65536 2>/dev/null || ulimit -n 10240 2>/dev/null || true
@@ -150,7 +154,7 @@ jobs:
         run: |
           set -euo pipefail
           t=${{ matrix.target.rust }}; short=${{ matrix.target.id }}
-          bin="code-rs/target/$t/release/dev"; mkdir -p dist; d=$(mktemp -d)
+          bin="target/$t/release/dev"; mkdir -p dist; d=$(mktemp -d)
           if [ "$short" = windows-amd64 ]; then
             cp "$bin.exe" "$d/dev-$t.exe"; (cd "$d" && zip -q "$OLDPWD/dist/dev-$t.exe.zip" "dev-$t.exe")
             cp "$bin.exe" "$d/dev.exe"; tar -C "$d" -czf "dist/dev-$short.tar.gz" dev.exe
@@ -180,7 +184,7 @@ jobs:
 
   publish:
     needs: [version, build]
-    runs-on: hanzo-build-linux-amd64
+    runs-on: [hanzo-build-linux-amd64]
     timeout-minutes: 60
     env:
       V: ${{ needs.version.outputs.version }}
@@ -189,6 +193,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          submodules: true
           fetch-depth: 0
       - name: Tools
         run: |
@@ -266,7 +271,7 @@ jobs:
           plat x86_64-unknown-linux-musl linux x64 @hanzo/dev-linux-x64-musl linux-amd64
           plat aarch64-unknown-linux-musl linux arm64 @hanzo/dev-linux-arm64-musl linux-arm64
           plat x86_64-pc-windows-msvc win32 x64 @hanzo/dev-win32-x64 windows-amd64
-          cp README.md codex-cli/README.md
+          cp README.md npm/README.md
           cd codex-cli
           npm version "$V" --no-git-tag-version --allow-same-version
           t=$(mktemp); jq --arg v "$V" '.optionalDependencies |= with_entries(.value=$v)' package.json > "$t" && mv "$t" package.json
@@ -287,7 +292,7 @@ jobs:
           GIT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          git add codex-cli/package.json codex-cli/package-lock.json Formula/hanzo-dev.rb 2>/dev/null || true
+          git add npm/package.json npm/package-lock.json Formula/hanzo-dev.rb 2>/dev/null || true
           git -c user.name=hanzo-dev -c user.email=dev@hanzo.ai commit -qm "chore(release): $V [skip ci]"
           push() { git push "$1" HEAD:main && return
             git fetch "$1" main && git -c user.name=hanzo-dev -c user.email=dev@hanzo.ai rebase FETCH_HEAD && git push "$1" HEAD:main; }

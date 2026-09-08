@@ -1,310 +1,68 @@
-# Rust/codex-rs
-
-In the codex-rs folder where the rust code lives:
-
-- Crate names are prefixed with `codex-`. For example, the `core` folder's crate is named `codex-core`
-- When using format! and you can inline variables into {}, always do that.
-- Treat `codex-rs` as a read-only mirror of `openai/codex:main`; edit Rust sources under `code-rs` instead.
-
-Completion/build step
-
-- Always validate using `./build-fast.sh` from the repo root. This is the single required check and must pass cleanly.
-- `./build-fast.sh` can take 20+min to run from a cold cache!!! Please use long timeout when running `./build-fast.sh` or waiting for it to complete.
-- Policy: All errors AND all warnings must be fixed before you’re done. Treat any compiler warning as a failure and address it (rename unused vars with `_`, remove `mut`, delete dead code, etc.).
-- Do not run additional format/lint/test commands on completion (e.g., `just fmt`, `just fix`, `cargo test`) unless explicitly requested for a specific task.
-- ***NEVER run rustfmt***
-- Before pushing to `main`, run `./pre-release.sh` to mirror the release preflight (dev-fast build, CLI smokes, workspace nextest).
-
-Optional regression checks (recommended when touching the Rust workspace):
-
-- `cargo nextest run --no-fail-fast` — runs all workspace tests with the TUI helpers automatically enabled. The suite is green after the resume fixtures/git-init fallback updates; older Git builds may print a warning when falling back from `--initial-branch`, but tests still pass.
-- Focused sweeps stay quick and green: `cargo test -p code-tui --features test-helpers`, `cargo test -p code-cloud-tasks --tests`, and `cargo test -p mcp-types --tests`.
-
-When debugging regressions or bugs, write a failing test (or targeted reproduction script) first and confirm it captures the issue before touching code—if it can’t fail, you can’t be confident the fix works.
-
-
-## Product identity — do not let a merge take it back
-
-`dev` is the Hanzo coding agent. `hanzo code` launches a bare `dev` off PATH, so
-these are contract, not preference:
-
-| Property | Value | Where |
-|---|---|---|
-| Default provider | `hanzo` — api.hanzo.ai/v1, Responses wire, bearer `HANZO_USER_KEY` | `code-rs/core/src/model_provider_info.rs` |
-| Default model | `zen5-coder` (Zen family) | `code-rs/core/src/config.rs` |
-| Login command | `hanzo auth login` | `code-rs/core/src/auth.rs` `LOGIN_COMMAND` |
-| Canonical binary | `dev` (declared first; `code` is an alias to the same program) | `code-rs/cli/Cargo.toml` |
-| npm | `@hanzo/dev` + `@hanzo/dev-<target>` | `codex-cli/package.json`, `.hanzo/workflows/release.yml` |
-| Homebrew | `hanzoai/homebrew-tap`, `Formula/hanzo-dev.rb`, assets `dev-<triple>` | `scripts/generate-homebrew-formula.sh` |
-| Release repo | `hanzoai/dev` | `code-rs/tui/src/updates.rs`, `codex-cli/postinstall.js` |
-
-**`code-rs/` is the workspace that SHIPS.** `vendor/codex/` is the vendored upstream
-copy. A change that only edits `vendor/codex/` changes nothing a user runs — this is
-the single easiest mistake to make here, and `.github/merge-policy.json` made it
-for a long time (every glob pointed at `vendor/codex/**`).
-
-That sentence only became true with the v0.6.169 merge. Before it, building
-`dev` compiled ten crates out of `vendor/codex/` — they were real path
-dependencies, so the "read-only mirror" was load-bearing. Upstream finished
-the migration and the two workspaces are now separate. One thread remains:
-`vendor/codex/models-manager/models.json` is `include_str!`'d by
-`code-version/src/lib.rs`, `core/src/model_family.rs` and
-`core/src/agent_defaults.rs`. Deleting `vendor/codex/` would not build.
-
-**Why there is a test for all of this.** A one-time edit to a default is a
-suggestion that lasts until the next merge. `code-rs/core/tests/hanzo_identity.rs`
-asserts every row above and fails the build if any regresses. Upstream has no
-file at that path, so a merge can neither conflict with it nor carry it away
-along with the thing it guards. If it goes red after a merge: re-apply the
-identity, do not delete the test. (It is not decorative — it caught the
-un-retargeted release pipeline and only went green once the pipeline was
-genuinely fixed.)
-
-**Model ids are not guessable.** `GET https://api.hanzo.ai/v1/models` needs a
-bearer and is the only authority. The previous default, `gpt-5-codex`, is not in
-the catalog and returns `400 model is not available` from our own gateway —
-which is why `hanzo`'s CLI passes `-c model=` on every launch. Verify a model id
-against `/v1/responses` (the wire `dev` speaks) before making it a default; some
-ids answer on chat/completions but return system-prompt text on responses.
-
-**Packaging is a supply chain.** `codex-cli/postinstall.js` runs on every
-`npm install` and downloads and executes a binary. It, and the TUI auto-updater
-(`code-rs/tui/src/updates.rs`), must point at `hanzoai/dev`. `codex-cli/.pack/`
-is `npm pack` output that CI regenerates — it is gitignored on purpose; when it
-was committed it was a second, stale home for that download URL.
-
-### Moving releases to git.hanzo.ai — the precondition
-
-Releases are served by GitHub today. Nothing in this repo points at
-`git.hanzo.ai`, and retargeting it blind breaks every installed copy, because
-the updater and the installer both fetch a URL the user already has baked in.
-There are exactly four places, and they must move together:
-
-| What | Where | Currently |
-|---|---|---|
-| Update check | `code-rs/tui/src/updates.rs` `LATEST_RELEASE_URL` | `api.github.com/repos/hanzoai/dev/releases/latest` |
-| Release page | `code-rs/tui/src/updates.rs` `CODE_RELEASE_URL` | `github.com/hanzoai/dev/releases/latest` |
-| Binary download | `codex-cli/postinstall.js` `downloadUrl` | `github.com/hanzoai/dev/releases/download/v${version}/…` |
-| Asset upload | `.hanzo/workflows/release.yml` | GitHub release assets, and the same files on the forge release |
-
-The forge serves its API at `/v1/`, **not** `/api/v1/` — so the update check
-becomes `git.hanzo.ai/v1/repos/hanzoai/dev/releases/latest`, and the JSON it
-returns must keep the `tag_name` and `assets[].name` fields `updates.rs` reads.
-
-**The flip is safe only once the forge is serving release assets for a tag that
-already exists on GitHub**, so an old client fetching the GitHub URL and a new
-client fetching the forge URL get the same bytes. Publish to both for one full
-release cycle, then move the updater, then stop publishing to GitHub. Moving the
-updater first strands everyone who has not yet updated — they poll a host that
-has no releases, and the CLI silently stops offering upgrades.
-
-## Upstream lineage — where the code actually comes from
-
-Read this before attempting a sync. The directory names lie about the topology.
-
-- **Proximate upstream is `just-every/code`**, not `openai/codex`. Our history
-  is just-every's history with every author email rewritten to `dev@hanzo.ai`,
-  which is why `git merge-base` against just-every returns nothing: identical
-  trees, different SHAs, disjoint graph.
-- **`vendor/codex/` is not ours to track.** just-every carries it as a read-only
-  mirror of `openai/codex:main` and refreshes it with "Refresh codex-rs mirror
-  to upstream/main" commits. It reaches us through them. We never merge
-  openai/codex directly. (The `upstream` git remote pointing at openai/codex is
-  a leftover — it is not the sync path.)
-- **`code-rs/` is the product.** It is what builds and what ships.
-
-### Syncing
-
-The graphs are disjoint, so there is no merge base to discover — the just-every
-commit our tree currently matches is recorded here, and nowhere else:
-
-    upstream        just-every/code
-    synced-to       7d59424890  ("fix(deps): update js-yaml to 4.3.1")
-    method          3-way apply of the delta (see below)
-
-Generate the delta with `git diff --binary`. Two schema fixtures under
-`vendor/codex/app-server-protocol/schema/precomputed/` are `.zst` blobs, and
-`git apply` is atomic: without full index lines it rejects those two hunks and
-silently rolls back all 371 files, reporting "Applied patch … cleanly" for
-every other file on the way. A clean worktree after an apply that printed
-success means it failed.
-
-To sync: fetch just-every, then apply the delta `<synced-to>..<their-new-head>`
-onto our tree and update the SHA above. Conflicts concentrate in the TUI
-chatwidget, `core/src/config.rs`, and every file carrying our name.
-
-The graft-and-merge recipe this section used to give (`git replace --graft`,
-`git merge`, `git replace -d`) is not what the last sync actually did, and the
-base it named — `e4fe007150` / `e92d81b496` — is now stale. Applying the delta
-directly is simpler and has the same effect, because a graft merge against a
-disjoint history degenerates to exactly that. The v0.6.170 sync (`2ebbda854e`)
-recorded the numbers: the upstream delta touched 249 files, our fork diverges
-in 140, and the intersection was 2 files — both pure additions.
-
-**Do not merge `openai/codex` directly**, whatever the `upstream` remote
-suggests. Measured 2026-08-06: `origin/main` and `openai/codex` share no merge
-base at all (different root commits), our `vendor/codex/` mirror differs from
-upstream by 341 shadowed files and ~175k lines, and 72 upstream crates have no
-counterpart here. The subsystems people ask for by name — `tool_search`,
-`thread_manager`, `multi_agents_v2`, MCP `connection_manager`, `resize_reflow` —
-do not exist in `code-rs` at all; upstream refactored `core` into ~15 crates
-while this fork kept the 2025-era monolith. Take upstream through just-every,
-who already carry the mirror, or port one subsystem deliberately. A direct merge
-is a re-fork, not a sync.
-
-## Documentation hygiene
-
-- Keep docs clean, clear, and current; prune stale instructions instead of piling on caveats.
-- Avoid excessive verbosity; prioritize concise guidance over long narratives.
-- Do not document minor or non-core features; focus on system-critical flows and expectations.
-- Never commit temporary "working" docs, plans, or scratch notes.
-
-## Strict Ordering In The TUI History
-
-The TUI enforces strict, per‑turn ordering for all streamed content. Every
-stream insert (Answer or Reasoning) must be associated with a stable
-`(request_ordinal, output_index, sequence_number)` key provided by the model.
-
-- A stream insert MUST carry a non‑empty stream id. The UI seeds an order key
-  for `(kind, id)` from the event's `OrderMeta` before any insert.
-- The TUI WILL NOT insert streaming content without a stream id. Any attempt to
-  insert without an id is dropped with an error log to make the issue visible
-  during development.
-
-## Commit Messages
-
-- Review staged changes before every commit: `git --no-pager diff --staged --stat` (and skim `git --no-pager diff --staged` if needed).
-- Write a descriptive subject that explains what changed and why. Avoid placeholders like "chore: commit local work".
-- Prefer Conventional Commits with an optional scope: `feat(tui/history): …`, `fix(core/exec): …`, `docs(agents): …`.
-- Keep the subject ≤ 72 chars; add a short body if rationale or context helps future readers.
-- Use imperative, present tense: "add", "fix", "update" (not "added", "fixes").
-- For merge commits, skip custom prefixes like `merge(main<-origin/main):`. Use a clear subject such as `Merge origin/main: <what changed and how conflicts were resolved>`.
-
-Examples:
-
-- `feat(tui/history): show exit code and duration for Exec cells`
-- `fix(core/codex): handle SIGINT in on_exec_command_begin to avoid orphaned child`
-- `docs(agents): clarify commit-message expectations`
-
-## How to Git Push
-
-### Merge-and-Push Policy (Do Not Rebase)
-
-When the user asks you to "push" local work:
-
-- Never rebase in this flow. Do not use `git pull --rebase` or attempt to replay local commits.
-- Prefer a simple merge of `origin/main` into the current branch, keeping our local history intact.
-- If the remote only has trivial release metadata changes (e.g., `codex-cli/package.json` version bumps), adopt the remote version for those files and keep ours for everything else unless the user specifies otherwise.
-- If in doubt or if conflicts touch non-trivial areas, pause and ask before resolving.
-
-Quick procedure (merge-only):
-
-- Commit your local work first:
-  - Review: `git --no-pager diff --stat` and `git --no-pager diff`
-  - Stage + commit: `git add -A && git commit -m "<descriptive message of local changes>"`
-- Fetch remote: `git fetch origin`
-- Merge without auto-commit: `git merge --no-ff --no-commit origin/main` (stops before committing so you can choose sides)
-- Resolve policy:
-  - Default to ours: `git checkout --ours .`
-  - Take remote for trivial package/version files as needed, e.g.: `git checkout --theirs codex-cli/package.json`
-- Stage and commit the merge with a descriptive message, e.g.:
-  - `git add -A && git commit -m "Merge origin/main: adopt remote version bumps; keep ours elsewhere (<areas>)"`
-- Run `./build-fast.sh` and then `git push`
-
-## The one thing `dev` sends to cloud besides inference
-
-`code-rs/core/src/shot/` publishes a screenshot of the UI a patch just changed:
-after each `TurnDiff`, a rendered file in the diff earns a headless capture of
-the route it renders at, uploaded to the `sessions` bucket and named by one
-`tool-call` event on `POST /v1/agents/sessions/{id}/events`, so a console
-watching the live stream shows the picture beside the diff.
-
-Four things about it are load-bearing and easy to undo by accident:
-
-- **It is off unless `HANZO_SESSION` names a session.** Without one there is
-  nowhere to publish, so nothing dials and nothing launches. That variable, not a
-  config key, is the switch — and it is validated before it reaches a URL path.
-- **It never starts a dev server.** It reads `package.json` for a port and dials
-  it. Starting one would run repo-supplied scripts outside the approval and
-  sandbox path every other command here goes through.
-- **Base URL and bearer come from `create_hanzo_provider()`.** Same door, same
-  credential as inference. Do not grow a second notion of where cloud is.
-- **The event names bucket and key, never a URL.** The only URL for a private
-  object is a signed, expiring one; writing that into a transcript leaks a
-  credential that outlives the session.
-
-It fails soft everywhere — evidence is not the work — so a broken capture is a
-`debug!` line, never a failed turn. Most of it arrived in `bc20e6af40`, whose
-subject is about the Hanzo provider's machine credential and does not mention it.
-
-## Command Execution Architecture
-
-The command execution flow in Codex follows an event-driven pattern:
-
-1. **Core Layer** (`codex-core/src/codex.rs`):
-   - `on_exec_command_begin()` initiates command execution
-   - Creates `EventMsg::ExecCommandBegin` events with command details
-
-2. **TUI Layer** (`codex-tui/src/chatwidget.rs`):
-   - `handle_codex_event()` processes execution events
-   - Manages `RunningCommand` state for active commands
-   - Creates `HistoryCell::Exec` for UI rendering
-
-3. **History Cell** (`codex-tui/src/history_cell.rs`):
-   - `new_active_exec_command()` - Creates cell for running command
-   - `new_completed_exec_command()` - Updates with final output
-   - Handles syntax highlighting via `ParsedCommand`
-
-This architecture separates concerns between execution logic (core), UI state management (chatwidget), and rendering (history_cell).
-
-### Auto Drive Escape Handling
-
-- All Auto Drive escape routing lives in `code-rs/tui/src/chatwidget.rs`. The
-  `ChatWidget::auto_should_handle_global_esc` helper decides whether the global
-  Esc handler in `app.rs` should defer to Auto Drive, and
-  `ChatWidget::handle_key_event` owns the actual stop / pause behaviour. When
-  you need to tweak Esc semantics, update those two locations together.
-- The approval pane must *never* swallow Esc. `code-rs/tui/src/bottom_pane/auto_coordinator_view.rs`
-  intentionally lets Esc (and the other approval shortcuts) bubble back to the
-  chat widget; keep this contract intact when editing the view layer.
-- Avoid adding additional Esc handlers elsewhere for Auto Drive flows. Doing
-  so breaks the modal-first ordering in `app.rs` and prevents users from
-  reliably stopping a run.
-
-## Writing New UI Regression Tests
-
-- Start with `make_chatwidget_manual()` (or `make_chatwidget_manual_with_sender()`) to build a `ChatWidget` in isolation with in-memory channels.
-- Simulate user input by defining a small enum (`ScriptStep`) and feeding key events via `chat.handle_key_event()`; see `run_script()` in `tests.rs` for a ready-to-use helper that also pumps `AppEvent`s.
-- After the scripted interaction, render with a `ratatui::Terminal`/`TestBackend`, then use `buffer_to_string()` (wraps `strip_ansi_escapes`) to normalize ANSI output before asserting.
-- Prefer snapshot assertions (`assert_snapshot!`) or rich string comparisons so UI regressions are obvious. Keep snapshots deterministic by trimming trailing space and driving commit ticks just like the existing tests do.
-- When adding fixtures or updating snapshots, gate rewrites behind an opt-in env var (e.g., `UPDATE_IDEAL=1`) so baseline refreshes remain explicit.
-
-## VT100 Snapshot Harness
-
-- The VT100 harness lives under `code-rs/tui/tests/vt100_chatwidget_snapshot.rs`. It renders the live `ChatWidget` UI into a `Terminal<VT100Backend>` so snapshots capture the exact PTY output the user sees (including frame chrome, composer rows, and streaming inserts).
-- Use `ChatWidgetHarness` helpers from `code_tui::test_helpers` to seed history events and drain `AppEvent`s. Call `render_chat_widget_to_vt100(width, height)` for a single frame, or `render_chat_widget_frames_to_vt100(&[(w,h), ...])` to simulate successive draws while streaming.
-- The harness now exports `layout_metrics()` so tests can assert scroll offsets and viewport heights without spelunking through private fields.
-- Snapshots are deterministic: the greeting is fixed text, the free-pool notice is left out of test renders, and the composer's running spinner holds its first frame in test mode.
-- To add a new scenario, push history/events onto the harness, call `render_*_to_vt100`, and either `insta::assert_snapshot!` the frame(s) or manually assert string contents. For multi-frame streaming, push deltas/events first, then capture frames in the order the UI would display them.
-- Run all VT100 snapshots via:
-  - `cargo test -p code-tui --test vt100_chatwidget_snapshot --features test-helpers -- --nocapture`
-- When you intentionally change rendering, review the `.snap.new` files that appear in `code-rs/tui/tests/snapshots/` and accept them with `cargo insta review` / `cargo insta accept` (limit to this test where possible).
-
-### The release lane
-
-CI runs on the forge (`git.hanzo.ai/hanzoai/dev`), from `.hanzo/workflows/`;
-`.github/workflows/` no longer exists. `cicd.yml` is the compile gate on the
-linux pool. `release.yml` is the release: one job on the macOS host runner
-(`runs-on: [self-hosted, macos, arm64]` — dbc-metal), every push to `main`,
-building all five targets on that one host — darwin natively, linux-musl via
-`cargo zigbuild`, windows-msvc via `cargo xwin` — then GitHub Release, forge
-release, npm (`@hanzo/dev` + five platform packages), Homebrew tap, and last the
-`chore(release): X.Y.Z [skip ci]` bump + `vX.Y.Z` tag pushed to both remotes.
-The version is the next patch above the newest tag and the newest npm package,
-so a run that dies half-published never reuses a number.
-
-Push `main` to both remotes (`origin` = GitHub, the forge = what runs CI); the
-release job pushes its bump commit to both as well.
-
-Every push to `main` on GitHub is not a release — only the forge runs the lane.
-Follow a run in the forge UI, or read `action_run` on the git database.
+# Hanzo Dev
+
+The `dev` command: a coding agent for the terminal.
+
+## Shape
+
+Hanzo owns the front door; upstream owns the engines.
+
+- `crates/hanzo-dev` is the binary. Its `main.rs` is the entire command
+  surface, and every subcommand hands off to a library. Nothing is generated
+  and no upstream source is compiled through an `include!`.
+- `crates/hanzo-config` picks the provider and the product home.
+  `crates/hanzo-tui` holds the strings and colors that make the interface ours.
+- `crates/hanzo-upstream` is a detached workspace, because the root workspace
+  cannot resolve until it has run. `make` drives it; it is never imported.
+
+## Upstream
+
+`upstream/codex` and `upstream/code` are submodules. The gitlink is the pin —
+no lockfile of hashes sits beside it. Crates are consumed straight from the
+checkout by ordinary path dependency.
+
+`patches/upstream.json` carries the whole Hanzo delta: anchored substitutions that
+`make prepare` applies to the checkout in place. `git -C upstream/codex status`
+shows them, and that is the honest picture — the checkout is a build input we
+own, not a pristine mirror. `make reset` returns it.
+
+Every edit carries an exact match count. When upstream moves the ground under
+one, preparation fails and names the file rather than branding the wrong line.
+That is the signal to re-anchor, and it is why the delta is anchored strings
+rather than a diff.
+
+Two of the edits are not branding: they publish `mcp_cmd`, `plugin_cmd` and
+`doctor` from upstream's library instead of leaving them in its binary. Those
+belong upstream as a pull request; landing them there shrinks this file.
+
+## Never edit upstream by hand
+
+Changes go in a `hanzo-*` crate, or in `patches/upstream.json` when upstream
+hard-codes something that must be ours. A hand edit inside `upstream/` is lost
+at the next `make bump`.
+
+## The Code fork
+
+`upstream/code` is reference, not a build input. Its crates depend on its own
+fork of `codex-core`, so importing them would link two cores into one binary.
+Its additions worth having — Auto Drive, the browser bridge — get rebuilt as
+`hanzo-*` crates against `codex-core`. `migration/code-v1.patch` records what
+v1 carried, including the defects it was already carrying; see
+`migration/STATUS.md` before porting anything from it.
+
+## Working here
+
+    make build          the dev binary
+    make test           the Hanzo suite
+    make test-upstream  the upstream suite against the pinned checkout
+    make bump           move the submodules forward
+    make help           everything
+
+`make build` is the check that must pass. Fix warnings as well as errors.
+
+## House rules
+
+- Hanzo service APIs use `https://api.hanzo.ai/v1/` exclusively.
+- Keep the upstream interaction model and animation; the branding is ours.
+- Keep Linux, macOS, and Windows working.
+- Upstream project names appear only in `NOTICE` — never in the README, the
+  repository description, the CLI, or the interface.
