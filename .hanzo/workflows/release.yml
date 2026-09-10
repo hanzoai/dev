@@ -396,15 +396,15 @@ jobs:
           git clone --depth 1 "https://x-access-token:$GH_PAT@github.com/hanzoai/homebrew-tap.git" "$tap"
           mkdir -p "$tap/Formula" && cp Formula/hanzo-dev.rb "$tap/Formula/hanzo-dev.rb"
           cd "$tap"
-          git -c user.name=hanzo-dev -c user.email=dev@hanzo.ai commit -qam "hanzo-dev $V" && git push -q || echo "formula unchanged"
+          git -c user.name="Zach Kelling" -c user.email=z@zeekay.io commit --trailer "Co-authored-by: Hanzo Dev <dev@hanzo.ai>" -qam "hanzo-dev $V" && git push -q || echo "formula unchanged"
       - name: Bump
         env:
           GIT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git add npm/package.json npm/package-lock.json Formula/hanzo-dev.rb 2>/dev/null || true
-          git -c user.name=hanzo-dev -c user.email=dev@hanzo.ai commit -qm "chore(release): $V [skip ci]"
+          git -c user.name="Zach Kelling" -c user.email=z@zeekay.io commit --trailer "Co-authored-by: Hanzo Dev <dev@hanzo.ai>" -qm "chore(release): $V [skip ci]"
           push() { git push "$1" HEAD:main && return
-            git fetch "$1" main && git -c user.name=hanzo-dev -c user.email=dev@hanzo.ai rebase FETCH_HEAD && git push "$1" HEAD:main; }
+            git fetch "$1" main && git -c user.name="Zach Kelling" -c user.email=z@zeekay.io rebase FETCH_HEAD && git push "$1" HEAD:main; }
           push "https://x-access-token:$GH_PAT@github.com/hanzoai/dev.git"
           [ -z "${GIT_TOKEN:-}" ] || push "https://x:$GIT_TOKEN@git.hanzo.ai/hanzoai/dev.git" || true
