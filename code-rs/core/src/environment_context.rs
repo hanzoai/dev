@@ -61,6 +61,12 @@ pub struct ToolCandidate {
 pub const TOOL_CANDIDATES: &[ToolCandidate] = &[
     ToolCandidate { label: "git", detection_names: &["git"] },
     ToolCandidate { label: "gh", detection_names: &["gh"] },
+    // Ahead of rg so a model reaching for search sees it first. It wins where
+    // its trigram index can prune — 23ms against rg's 78ms for an absent symbol,
+    // which is most of what a search asks — and loses where many files match.
+    // The index is per-tree (`tgrep index .`); without one it scans everything
+    // and is slower than plain grep, so rg stays listed as the fallback.
+    ToolCandidate { label: "tgrep", detection_names: &["tgrep"] },
     ToolCandidate { label: "rg", detection_names: &["rg"] },
     ToolCandidate { label: "fd", detection_names: &["fd", "fdfind"] },
     ToolCandidate { label: "fzf", detection_names: &["fzf"] },
