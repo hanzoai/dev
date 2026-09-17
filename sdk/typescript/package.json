@@ -35,6 +35,7 @@
     "clean": "rm -rf dist",
     "build": "tsup",
     "build:watch": "tsup --watch",
+    "typecheck": "../../node_modules/tsgo/bin/tsc --noEmit --incremental false",
     "lint": "pnpm eslint \"src/**/*.ts\" \"tests/**/*.ts\"",
     "lint:fix": "pnpm eslint --fix \"src/**/*.ts\" \"tests/**/*.ts\"",
     "test": "jest",

@@ -9,10 +9,12 @@
     "build:dev": "make build",
     "build:quick": "make release",
     "test:local": "make build && ./target/debug/dev --version",
+    "typecheck": "pnpm -r run typecheck",
     "fix": "cargo fmt && cargo fix --allow-dirty && cargo clippy --fix --allow-dirty"
   },
   "devDependencies": {
     "prettier": "catalog:",
+    "tsgo": "npm:typescript@7.0.2",
     "typescript": "catalog:"
   },
   "resolutions": {
