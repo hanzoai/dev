@@ -1,5 +1,12 @@
 [workspace]
-members = ["crates/hanzo-dev", "crates/hanzo-config", "crates/hanzo-tui"]
+members = [
+    "crates/hanzo-dev",
+    "crates/hanzo-config",
+    "crates/hanzo-tui",
+    "crates/protocol",
+    "crates/core",
+    "crates/ffi",
+]
 exclude = ["upstream", "crates/hanzo-upstream"]
 resolver = "2"
 

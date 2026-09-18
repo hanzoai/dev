@@ -5239,6 +5239,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "abd57806937c9cc163efc8ea3910e00a62e2aeb0b8119f1793a978088f8f6b04"
 
 [[package]]
+name = "dev-core"
+version = "0.7.0-dev.1"
+dependencies = [
+ "dev-protocol",
+ "serde",
+]
+
+[[package]]
+name = "dev-ffi"
+version = "0.7.0-dev.1"
+dependencies = [
+ "dev-core",
+ "dev-protocol",
+]
+
+[[package]]
+name = "dev-protocol"
+version = "0.7.0-dev.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "dialoguer"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

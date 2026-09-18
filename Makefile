@@ -1,7 +1,7 @@
 TOOL := cargo run --quiet --manifest-path crates/hanzo-upstream/Cargo.toml --
 CARGO := RUST_MIN_STACK=8388608 cargo
 
-.PHONY: all prepare build release install test test-upstream bump v8 fmt clean reset help
+.PHONY: all prepare build release install test test-upstream wasm bump v8 fmt clean reset help
 .DEFAULT_GOAL := help
 
 all: build
@@ -30,6 +30,12 @@ test: prepare
 	@$(CARGO) nextest run --locked --no-fail-fast $(ARGS)
 	@$(CARGO) nextest run --no-fail-fast --manifest-path crates/hanzo-upstream/Cargo.toml $(ARGS)
 
+## wasm: build the reasoning half for wasm32-wasip1
+# protocol and core carry no effects, so they run wherever a wasm host runs.
+# ffi is native by definition and stays out of this.
+wasm:
+	@$(CARGO) build --locked --target wasm32-wasip1 -p dev-protocol -p dev-core
+
 ## test-upstream: run the upstream suite against the pinned submodule
 # voice-host wants GStreamer >= 1.28, which no current distribution ships, and
 # nothing else in the workspace depends on it.
@@ -49,7 +55,7 @@ v8:
 
 ## fmt: format the crates Hanzo owns
 fmt:
-	@$(CARGO) fmt -p hanzo-dev -p hanzo-config -p hanzo-tui
+	@$(CARGO) fmt -p hanzo-dev -p hanzo-config -p hanzo-tui -p dev-protocol -p dev-core -p dev-ffi
 	@$(CARGO) fmt --manifest-path crates/hanzo-upstream/Cargo.toml
 
 ## clean: discard build output
