@@ -10,10 +10,17 @@
 //!
 //! [`encode`] and [`decode`] are the only two places that know the byte
 //! format, so the format can change without moving a type or a C symbol.
-//! Today it is `serde_json`. It becomes ZAP (HIP-0114) when the ZAP schema
-//! compiler is a dependency this repo can build with: the Rust runtime crate
-//! `zap` exists but its generated code needs the schema compiler binary, which
-//! is not a build input here yet. Nothing below simulates ZAP framing in the
+//! Today it is `serde_json`.
+//!
+//! It becomes ZAP (HIP-0114) when the ZAP schema compiler is a build input
+//! this repo has. The Rust side is published — `zap-proto` on crates.io
+//! re-exports `zap-schema`, the same runtime that sits in `zap/rust/zap` —
+//! but it is a runtime for generated code, and generating that code takes the
+//! `zap` schema compiler, which is not installed here and is not a build
+//! input of this repo or its CI. Pointing the generator at `capnp` instead
+//! would be a shim across a fork boundary, and hand-writing the wire format
+//! would be worse than either. So the two functions below stay serde until
+//! the compiler is a dependency, and nothing here imitates ZAP framing in the
 //! meantime.
 
 use serde::Deserialize;
