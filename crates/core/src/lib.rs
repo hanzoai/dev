@@ -153,6 +153,12 @@ impl Session {
     }
 
     /// Rebuild a session from its snapshot.
+    ///
+    /// A checksum that matches proves the bytes are intact, not that the
+    /// sequence agrees with the host's journal: a snapshot older than the
+    /// journal mints again ids the host has already dispatched under. Reconcile
+    /// [`Session::next_id`] with the journal before dispatching — see
+    /// [`dev_protocol::pack`].
     pub fn restore(state: &[u8]) -> Result<Self, Malformed> {
         dev_protocol::unpack(state)
     }

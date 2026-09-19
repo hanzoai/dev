@@ -64,7 +64,11 @@ int32_t dev_step(uint64_t session, const uint8_t *event, size_t len, dev_buf *ou
 /* Write the session's snapshot to out. */
 int32_t dev_snapshot(uint64_t session, dev_buf *out);
 
-/* Rebuild a session from a snapshot; writes its new handle to out. */
+/* Rebuild a session from a snapshot; writes its new handle to out. DEV_OK
+ * proves the bytes are intact, not that the sequence agrees with the host's
+ * journal: a snapshot older than the journal mints again ids the host has
+ * already dispatched under. Reconcile the ids this session answers with
+ * against the journal before dispatching one (see `pack` in dev-protocol). */
 int32_t dev_restore(const uint8_t *state, size_t len, uint64_t *out);
 
 /* End a session and retire its handle. */

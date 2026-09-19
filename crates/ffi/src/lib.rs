@@ -190,6 +190,12 @@ pub unsafe extern "C" fn dev_snapshot(session: u64, out: *mut Buf) -> i32 {
 
 /// Rebuild a session from a snapshot and write its new handle to `out`.
 ///
+/// [`DEV_OK`] proves the bytes are intact, not that the sequence agrees with
+/// the host's journal: a snapshot older than the journal mints again ids the
+/// host has already dispatched under. Reconcile the ids this session answers
+/// with against the journal before dispatching one — see
+/// [`dev_protocol::pack`].
+///
 /// # Safety
 /// `state` must be valid for `len` bytes unless `len` is zero, and `out` must
 /// be writable.
