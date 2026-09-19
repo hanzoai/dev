@@ -117,6 +117,13 @@ int main(void) {
   CHECK(dev_step(0, (const uint8_t *)TURN, strlen(TURN), &refused) == DEV_HANDLE);
   CHECK(dev_step(session, (const uint8_t *)TURN, strlen(TURN), NULL) == DEV_NULL);
 
+  /* What dev_alloc lends comes back through dev_release, and an allocation no
+   * allocator can make is a null rather than the end of the process. */
+  uint8_t *lent = dev_alloc(16);
+  CHECK(lent != NULL);
+  dev_release(lent, 16);
+  CHECK(dev_alloc(PTRDIFF_MAX) == NULL);
+
   if (failures != 0) {
     fprintf(stderr, "%d check(s) failed\n", failures);
     return 1;

@@ -21,9 +21,15 @@
 //!   status to answer with runs inside `catch_unwind`; an escaped panic answers
 //!   [`DEV_PANIC`] and poisons that session, whose every later call answers
 //!   [`DEV_POISON`] until it is dropped. The process stays up and the other
-//!   sessions are untouched. [`dev_abi`] is the exception and has no status
-//!   channel to answer on: it reads a constant, so there is nothing in it to
-//!   panic.
+//!   sessions are untouched. [`dev_abi`] and [`dev_alloc`] are the exceptions
+//!   and have no status channel to answer on: one reads a constant and the
+//!   other asks the allocator, whose refusal is a null, so there is nothing in
+//!   either to panic.
+//! - **A refused allocation is not a panic.** Rust aborts when memory it needs
+//!   for itself is refused — the copy of an input, a transcript that grew — and
+//!   `catch_unwind` never sees an abort: natively it ends the process, in wasm
+//!   it traps the instance. [`dev_alloc`] is the one place a refusal comes
+//!   back, as a null, because there the host asked and can check.
 
 mod slab;
 
@@ -248,10 +254,15 @@ pub extern "C" fn dev_alloc(len: usize) -> *mut u8 {
     if len == 0 {
         return std::ptr::null_mut();
     }
-    match catch_unwind(|| Box::into_raw(vec![0_u8; len].into_boxed_slice()).cast::<u8>()) {
-        Ok(ptr) => ptr,
-        Err(_) => std::ptr::null_mut(),
-    }
+    // The allocator is asked directly. A `vec!` answers a refusal by aborting
+    // the process, which is not a panic, so no `catch_unwind` ever sees it; a
+    // length with no layout at all is refused here instead.
+    let Ok(layout) = std::alloc::Layout::from_size_align(len, 1) else {
+        return std::ptr::null_mut();
+    };
+    // SAFETY: `len` is not zero, so neither is the layout. [`dev_release`]
+    // frees this as a boxed `[u8]` of the same length, whose layout this is.
+    unsafe { std::alloc::alloc_zeroed(layout) }
 }
 
 /// Take back a buffer [`dev_alloc`] lent.
@@ -674,6 +685,18 @@ mod tests {
         let lent = unsafe { std::slice::from_raw_parts(ptr, 64) };
         assert!(lent.iter().all(|b| *b == 0));
         unsafe { dev_release(ptr, 64) };
+    }
+
+    /// No allocator has `isize::MAX` bytes, and the layout for them is still a
+    /// valid one: the refusal comes from the allocator, which is the refusal
+    /// that aborts a process rather than unwinding. The two lengths past it
+    /// have no layout at all. Every one of them is a null the host can check.
+    #[test]
+    fn a_refused_allocation_is_null_rather_than_an_abort() {
+        let most = isize::MAX.unsigned_abs();
+        for len in [most, most + 1, usize::MAX] {
+            assert!(dev_alloc(len).is_null(), "{len} bytes were lent");
+        }
     }
 
     /// Asking for nothing lends nothing, and giving nothing back is not a fault.

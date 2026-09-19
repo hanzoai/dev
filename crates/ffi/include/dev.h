@@ -15,6 +15,9 @@
  *     left for its answer to belong to.
  *   - A call that panics answers DEV_PANIC and poisons that session; its later
  *     calls answer DEV_POISON until dev_drop. Other sessions are untouched.
+ *   - A refused allocation is not a panic. Memory the library needs for itself
+ *     and is refused ends the process, or in wasm traps the instance; dev_alloc
+ *     is the one place a refusal comes back, as a null.
  *   - A dev_buf is written only on DEV_OK. On any other status the out
  *     parameter is left as the caller passed it.
  *
