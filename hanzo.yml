@@ -70,6 +70,21 @@ test:
       ./target/debug/dev --version
       ./target/debug/dev --help >/dev/null
 
+  # go/ is the Go host, and it embeds go/dev.wasm: crates/protocol, core and
+  # ffi built for wasm and committed. Its tests run on that module, which is
+  # what a Go build importing the package gets, and again on one built here
+  # from the crates beside it, which is the core the next `make wasm` commits.
+  # The two are not compared byte for byte: cargo hashes the build host into
+  # the module, so one built on this linux-amd64 runner is never the bytes of
+  # one built on a Mac.
+  - name: go
+    run: |
+      set -euo pipefail
+      export PATH="$HOME/.cargo/bin:$PATH"
+      (cd go && GOWORK=off go test -race ./...)
+      make wasm
+      cd go && GOWORK=off go test -race ./...
+
   - name: test
     run: |
       set -euo pipefail

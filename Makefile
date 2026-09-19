@@ -42,16 +42,27 @@ test: prepare
 # socket, clock or random source. A change that grows that list has given the
 # loop an effect of its own.
 #
-# The copy is committed, so it is built to be the same bytes wherever it is
-# built: no DWARF, which spells out the build directory, and the cargo home
-# written as /cargo in the panic locations the dependencies carry. The name
-# section stays, so a trap still says which function it stopped in.
+# The copy is committed, so no path of the machine that built it goes in: no
+# DWARF, which spells out the build directory, and the cargo home written as
+# /cargo in the panic locations the dependencies carry. Two builds on one kind
+# of host are then the same bytes, whatever their directories. Two kinds of
+# host are not: cargo hashes the host into every crate that has a build script
+# or uses a proc macro, and into every crate built on one, and the module
+# differs with those hashes, code and all. macOS arm64, Linux arm64 and Linux
+# x86_64 each build a different one.
+# The name section stays, so a trap still says which function it stopped in.
+#
+# The remap goes in CARGO_ENCODED_RUSTFLAGS because cargo takes that over every
+# other source of rustflags; any other source is dropped whole the moment a
+# RUSTFLAGS is set, remap and all. The target directory is named too:
+# CARGO_TARGET_DIR would send the build elsewhere, and the copy would be
+# whatever an older build left here.
 CARGO_HOME ?= $(HOME)/.cargo
-wasm:
-	@$(CARGO) build --locked --release --target wasm32-wasip1 -p dev-ffi \
+wasm: prepare
+	@CARGO_ENCODED_RUSTFLAGS='--remap-path-prefix=$(CARGO_HOME)=/cargo' \
+		$(CARGO) build --locked --release --target wasm32-wasip1 --target-dir target -p dev-ffi \
 		--config 'profile.release.debug=false' \
-		--config 'profile.release.strip="debuginfo"' \
-		--config 'target.wasm32-wasip1.rustflags=["--remap-path-prefix=$(CARGO_HOME)=/cargo"]'
+		--config 'profile.release.strip="debuginfo"'
 	@install -m 644 target/wasm32-wasip1/release/dev.wasm go/dev.wasm
 
 ## test-upstream: run the upstream suite against the pinned submodule
