@@ -32,7 +32,8 @@
 //! statement of what that means. The host joins a path onto the tree it
 //! mounted for the session, so `/etc/passwd` names no workspace and
 //! `../../etc/passwd` climbs out of the one it was given. The core refuses
-//! such a call rather than emitting it, so no host re-derives confinement.
+//! such a call rather than emitting it, so no host re-derives that rule —
+//! resolving it against a real tree, symlinks and all, is still the host's.
 //!
 //! Which effects may happen at all — which argv, which URL — is policy, and
 //! policy belongs to `/v1/dev` outside the sandbox (HIP-1330 §Security). This
@@ -133,6 +134,12 @@ fn sum(bytes: &[u8]) -> u64 {
 /// would pass the root refuses the path. An interior NUL is out, because the
 /// path crosses a C ABI and would be cut there. What is left is a relative
 /// path the host can join onto the workspace it mounted.
+///
+/// This is lexical, and it is the whole of what a crate with no filesystem can
+/// say. A symlink inside the workspace that points out of it resolves outside
+/// it, and only the host holds the tree to see that: confinement at resolution
+/// is the host's half, and this is the half that keeps `/etc/passwd` from ever
+/// being asked for.
 pub fn inside(path: &str) -> bool {
     if path.is_empty() || path.contains('\0') {
         return false;

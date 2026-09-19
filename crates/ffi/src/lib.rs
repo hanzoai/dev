@@ -135,6 +135,12 @@ pub unsafe extern "C" fn dev_step(
                 Err(_) => return (DEV_MALFORMED, Vec::new()),
             };
             let actions = session.step(event);
+            // An action is integers, strings, options and enums, so there is
+            // nothing in one a serializer refuses and this arm is dead for
+            // today's types. Should one ever arrive, [`DEV_MALFORMED`] is about
+            // the answer rather than the event, and the session has moved past
+            // what the host can see: restore it from the last snapshot instead
+            // of stepping it again.
             match dev_protocol::encode(&actions) {
                 Ok(bytes) => (DEV_OK, bytes),
                 Err(_) => (DEV_MALFORMED, Vec::new()),
@@ -158,6 +164,8 @@ pub unsafe extern "C" fn dev_snapshot(session: u64, out: *mut Buf) -> i32 {
         if out.is_null() {
             return DEV_NULL;
         }
+        // Same as `dev_step`: a session holds nothing a serializer refuses, so
+        // the refusal arm is about the snapshot rather than any input.
         let (status, state) = enter(session, |session| match session.snapshot() {
             Ok(bytes) => (DEV_OK, bytes),
             Err(_) => (DEV_MALFORMED, Vec::new()),
