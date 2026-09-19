@@ -1,7 +1,7 @@
 TOOL := cargo run --quiet --manifest-path crates/hanzo-upstream/Cargo.toml --
 CARGO := RUST_MIN_STACK=8388608 cargo
 
-.PHONY: all prepare build release install test test-upstream wasm bump v8 fmt clean reset help
+.PHONY: all prepare build release install test test-upstream wasm wasm-check bump v8 fmt clean reset help
 .DEFAULT_GOAL := help
 
 all: build
@@ -57,13 +57,29 @@ test: prepare
 # RUSTFLAGS is set, remap and all. The target directory is named too:
 # CARGO_TARGET_DIR would send the build elsewhere, and the copy would be
 # whatever an older build left here.
+#
+# CI builds on another kind of host, so it cannot rebuild the committed bytes;
+# it checks what they were built from instead. Beside the copy goes
+# go/dev.wasm.sum, the sha256 of every tracked file the build reads and of the
+# copy itself. wasm-check hashes the tree again and fails on any difference, so
+# neither a change to the crates that never ran make wasm, nor a copy committed
+# without its sum, passes as current.
 CARGO_HOME ?= $(HOME)/.cargo
+WASM_SUM = git ls-files -z -- Makefile Cargo.toml Cargo.lock rust-toolchain.toml \
+    crates/protocol crates/core crates/ffi go/dev.wasm | xargs -0 sha256sum
 wasm: prepare
 	@CARGO_ENCODED_RUSTFLAGS='--remap-path-prefix=$(CARGO_HOME)=/cargo' \
 		$(CARGO) build --locked --release --target wasm32-wasip1 --target-dir target -p dev-ffi \
 		--config 'profile.release.debug=false' \
 		--config 'profile.release.strip="debuginfo"'
 	@install -m 644 target/wasm32-wasip1/release/dev.wasm go/dev.wasm
+	@$(WASM_SUM) > go/dev.wasm.sum
+
+## wasm-check: fail unless go/dev.wasm is make wasm of the tree beside it
+wasm-check:
+	@$(WASM_SUM) | diff go/dev.wasm.sum - || { \
+		echo 'go/dev.wasm was not built from this tree: run make wasm, and commit go/dev.wasm and go/dev.wasm.sum' >&2; \
+		exit 1; }
 
 ## test-upstream: run the upstream suite against the pinned submodule
 # voice-host wants GStreamer >= 1.28, which no current distribution ships, and

@@ -76,11 +76,14 @@ test:
   # from the crates beside it, which is the core the next `make wasm` commits.
   # The two are not compared byte for byte: cargo hashes the build host into
   # the module, so one built on this linux-amd64 runner is never the bytes of
-  # one built on a Mac.
+  # one built on a Mac. What is compared is what the committed one was built
+  # from: `make wasm-check` fails unless go/dev.wasm.sum, which the `make wasm`
+  # that built it wrote, still matches the tree and the module.
   - name: go
     run: |
       set -euo pipefail
       export PATH="$HOME/.cargo/bin:$PATH"
+      make wasm-check
       (cd go && GOWORK=off go test -race ./...)
       make wasm
       cd go && GOWORK=off go test -race ./...

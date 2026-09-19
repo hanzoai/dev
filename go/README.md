@@ -128,5 +128,8 @@ dispatching again.
 `dev.wasm` is `make wasm` at the repository root, copied here. Its imports are
 `environ_get`, `environ_sizes_get`, `fd_write` and `proc_exit`, and nothing
 else. The core cannot reach a file, a socket, a clock or a source of
-randomness, and a test checks that list. Each session gets at most 64 MiB of
-memory.
+randomness, and a test checks that list. `dev.wasm.sum` is the sha256 of every
+file `make wasm` built it from, and of the module itself. CI runs
+`make wasm-check`, which fails when the tree no longer matches it.
+
+Each session gets at most 64 MiB of memory.
