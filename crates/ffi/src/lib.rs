@@ -251,7 +251,8 @@ pub unsafe extern "C" fn dev_free(buf: Buf) {
 /// not share an address space: every input pointer and every out-parameter has
 /// to name memory that is IN the module, which the host cannot produce for
 /// itself. This is how it gets some. The bytes are zeroed, exactly `len` long,
-/// and the host's until [`dev_release`].
+/// aligned for an out-parameter as well as for bytes, and the host's until
+/// [`dev_release`].
 ///
 /// Null for a zero `len` or when the allocator refuses — a host that asks for
 /// nothing is given nothing to release.
@@ -263,19 +264,18 @@ pub extern "C" fn dev_alloc(len: usize) -> *mut u8 {
     // The allocator is asked directly. A `vec!` answers a refusal by aborting
     // the process, which is not a panic, so no `catch_unwind` ever sees it; a
     // length with no layout at all is refused here instead.
-    let Ok(layout) = std::alloc::Layout::from_size_align(len, 1) else {
+    let Some(layout) = lent(len) else {
         return std::ptr::null_mut();
     };
-    // SAFETY: `len` is not zero, so neither is the layout. [`dev_release`]
-    // frees this as a boxed `[u8]` of the same length, whose layout this is.
+    // SAFETY: `len` is not zero, so neither is the layout.
     unsafe { std::alloc::alloc_zeroed(layout) }
 }
 
 /// Take back a buffer [`dev_alloc`] lent.
 ///
-/// A boxed slice rather than a `Vec`, so the pair is exact: the allocation is
-/// `len` bytes and is released as `len` bytes, with no capacity for the host to
-/// remember or get wrong.
+/// Both ends work the layout out from `len` alone, so the pair is exact: the
+/// allocation is `len` bytes and is released as `len` bytes, with no capacity
+/// for the host to remember or get wrong.
 ///
 /// # Safety
 /// `ptr` and `len` must be one [`dev_alloc`] call's answer and its argument,
@@ -283,11 +283,24 @@ pub extern "C" fn dev_alloc(len: usize) -> *mut u8 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dev_release(ptr: *mut u8, len: usize) {
     guard(|| {
-        if !ptr.is_null() && len != 0 {
-            drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len)) });
+        if !ptr.is_null()
+            && len != 0
+            && let Some(layout) = lent(len)
+        {
+            unsafe { std::alloc::dealloc(ptr, layout) };
         }
         DEV_OK
     });
+}
+
+/// The layout of `len` lent bytes, if a length that long has one.
+///
+/// A host that borrows its memory borrows its out-parameters too, and the
+/// library writes a `u64` handle or a [`Buf`] into them in place. So a loan is
+/// aligned for both, whatever its length: a byte's alignment would leave where
+/// they land to the allocator's habits.
+fn lent(len: usize) -> Option<std::alloc::Layout> {
+    std::alloc::Layout::from_size_align(len, align_of::<(u64, Buf)>()).ok()
 }
 
 /// Run a call with the session lifted out of the slab, so no lock is held
@@ -693,14 +706,32 @@ mod tests {
         unsafe { dev_release(ptr, 64) };
     }
 
-    /// No allocator has `isize::MAX` bytes, and the layout for them is still a
-    /// valid one: the refusal comes from the allocator, which is the refusal
-    /// that aborts a process rather than unwinding. The two lengths past it
-    /// have no layout at all. Every one of them is a null the host can check.
+    /// A host with no memory of its own borrows its out-parameters too, so what
+    /// is lent is aligned for them at every length: a handle is a `u64` and an
+    /// answer is a `Buf`, and the library writes both in place.
+    #[test]
+    fn a_lent_buffer_is_aligned_for_an_out_parameter() {
+        for len in 1..=64 {
+            let ptr = dev_alloc(len);
+            assert!(!ptr.is_null());
+            assert!(
+                ptr.cast::<u64>().is_aligned() && ptr.cast::<Buf>().is_aligned(),
+                "{len} bytes were lent at {ptr:p}"
+            );
+            unsafe { dev_release(ptr, len) };
+        }
+    }
+
+    /// No allocator has the longest loan that still has a layout, so that
+    /// refusal is the allocator's own: the one that aborts a process rather
+    /// than unwinding. The lengths past it have no layout at all. Every one of
+    /// them is a null the host can check.
     #[test]
     fn a_refused_allocation_is_null_rather_than_an_abort() {
         let most = isize::MAX.unsigned_abs();
-        for len in [most, most + 1, usize::MAX] {
+        let longest = most - (align_of::<(u64, Buf)>() - 1);
+        assert!(lent(longest).is_some() && lent(longest + 1).is_none());
+        for len in [longest, longest + 1, most + 1, usize::MAX] {
             assert!(dev_alloc(len).is_null(), "{len} bytes were lent");
         }
     }
