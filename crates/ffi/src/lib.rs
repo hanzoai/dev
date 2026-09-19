@@ -726,7 +726,11 @@ mod tests {
     /// refusal is the allocator's own: the one that aborts a process rather
     /// than unwinding. The lengths past it have no layout at all. Every one of
     /// them is a null the host can check.
+    ///
+    /// Native only: Miri models a request this size as its own resource
+    /// exhaustion and stops the whole run rather than answering it.
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn a_refused_allocation_is_null_rather_than_an_abort() {
         let most = isize::MAX.unsigned_abs();
         let longest = most - (align_of::<(u64, Buf)>() - 1);
