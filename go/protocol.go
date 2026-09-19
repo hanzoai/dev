@@ -17,6 +17,11 @@ import (
 // Encoded, a union is what serde writes for an enum: {"Turn":{...}} for a
 // variant with a value, "Timer" for one without. An Option is a pointer, and a
 // nil one is null.
+//
+// Read, a union is refused where serde would refuse it: a name it does not
+// have, two names, null for a variant's value, or no union at all where a
+// struct holds one. Any other member that is missing reads as its zero value,
+// which serde refuses unless the member is an Option.
 
 // Config is what a session is born with.
 type Config struct {
@@ -223,8 +228,43 @@ func (c *Call) UnmarshalJSONFrom(dec *jsontext.Decoder) error { return decode(de
 func (m Message) MarshalJSONTo(enc *jsontext.Encoder) error      { return encode(enc, m) }
 func (m *Message) UnmarshalJSONFrom(dec *jsontext.Decoder) error { return decode(dec, m) }
 
-// encode writes the one variant a union sets.
-func encode(enc *jsontext.Encoder, union any) error {
+// Action, Done and Dispatch each hold a union. A member that is missing reads
+// as its zero value, and a union's is no variant at all, so each checks its
+// union once it has read the rest.
+
+func (a *Action) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	type fields Action
+	*a = Action{}
+	if err := json.UnmarshalDecode(dec, (*fields)(a)); err != nil {
+		return err
+	}
+	_, err := variant(a.Op)
+	return err
+}
+
+func (d *Done) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	type fields Done
+	*d = Done{}
+	if err := json.UnmarshalDecode(dec, (*fields)(d)); err != nil {
+		return err
+	}
+	_, err := variant(d.Outcome)
+	return err
+}
+
+func (d *Dispatch) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	type fields Dispatch
+	*d = Dispatch{}
+	if err := json.UnmarshalDecode(dec, (*fields)(d)); err != nil {
+		return err
+	}
+	_, err := variant(d.Call)
+	return err
+}
+
+// variant is the index of the one variant a union sets, and an error when it
+// sets none or two.
+func variant(union any) (int, error) {
 	v := reflect.ValueOf(union)
 	t := v.Type()
 	set := -1
@@ -233,14 +273,24 @@ func encode(enc *jsontext.Encoder, union any) error {
 			continue
 		}
 		if set >= 0 {
-			return fmt.Errorf("%s sets both %s and %s", t.Name(), t.Field(set).Name, t.Field(i).Name)
+			return 0, fmt.Errorf("%s sets both %s and %s", t.Name(), t.Field(set).Name, t.Field(i).Name)
 		}
 		set = i
 	}
 	if set < 0 {
-		return fmt.Errorf("%s sets no variant", t.Name())
+		return 0, fmt.Errorf("%s sets no variant", t.Name())
 	}
-	name, value := t.Field(set).Name, v.Field(set)
+	return set, nil
+}
+
+// encode writes the one variant a union sets.
+func encode(enc *jsontext.Encoder, union any) error {
+	set, err := variant(union)
+	if err != nil {
+		return err
+	}
+	v := reflect.ValueOf(union)
+	name, value := v.Type().Field(set).Name, v.Field(set)
 	if value.Kind() == reflect.Bool {
 		return enc.WriteToken(jsontext.String(name))
 	}
@@ -257,7 +307,8 @@ func encode(enc *jsontext.Encoder, union any) error {
 }
 
 // decode reads one variant into a union, and only one: a name the union does
-// not have, or an object naming two, is refused rather than guessed at.
+// not have, an object naming two, or a variant whose value is null, is refused
+// rather than guessed at.
 func decode(dec *jsontext.Decoder, union any) error {
 	v := reflect.ValueOf(union).Elem()
 	t := v.Type()
@@ -281,6 +332,9 @@ func decode(dec *jsontext.Decoder, union any) error {
 		f, ok := t.FieldByName(tok.String())
 		if !ok || f.Type.Kind() != reflect.Pointer {
 			return fmt.Errorf("%s has no variant %q with a value", t.Name(), tok.String())
+		}
+		if dec.PeekKind() == 'n' {
+			return fmt.Errorf("%s variant %s carries null, not a value", t.Name(), f.Name)
 		}
 		value := reflect.New(f.Type.Elem())
 		if err := json.UnmarshalDecode(dec, value.Interface()); err != nil {

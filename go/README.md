@@ -25,6 +25,12 @@ import dev "github.com/hanzoai/dev/go"
 A `Core` is safe for concurrent use. A `Session` is not: it runs one call at a
 time, and a call made while another is running answers `ErrBusy`.
 
+A call runs under its `ctx`, and each call into the instance under the 5s
+hanzoai/wasm allows one. A call either one ends stops where it stands and ends
+its session: it answers `ErrHandle`, which matches `context.Canceled` or
+`context.DeadlineExceeded` too, and every call after it answers `ErrHandle`.
+Restore the last snapshot to carry on.
+
 The statuses of `crates/ffi/include/dev.h` are errors to match with
 `errors.Is`: `ErrHandle`, `ErrMalformed`, `ErrPoison`, `ErrPanic`, `ErrNull`,
 `ErrBusy` and `ErrFull`. A trap in the core, such as a panic or a refused
@@ -41,6 +47,11 @@ refused as `ErrMalformed` before the core sees it.
     dev.Event{Turn: &dev.Turn{ID: 1, Prompt: "fix the build"}}
     dev.Event{Exec: &dev.Output{ID: a.ID, Text: out, Failed: code != 0}}
     dev.Event{Timer: true}
+
+Reading one refuses what serde refuses of a union: a name it does not have, two
+names, `null` for a variant's value, or no union at all where a struct holds
+one. Any other member that is missing reads as its zero value, which serde
+refuses unless the member is an `Option`.
 
 Text crosses as UTF-8. A host that has read bytes that are not UTF-8 must turn
 them into text before it steps with them.
@@ -105,9 +116,11 @@ instead of an effect run twice. The core refuses a turn id it has already
 accepted and a result for an id it is not waiting on, so replaying an event
 is safe.
 
-A restored snapshot continues the id sequence where it stopped. Intact bytes do
-not prove the snapshot agrees with the journal. One older than the journal
-mints ids the host has already dispatched, so reconcile the two before
+A restored snapshot continues the id sequence where it stopped. Its checksum
+catches damage in storage, and it is not a signature: a host that keeps
+snapshots where others can write must authenticate them itself. Intact bytes do
+not prove the snapshot agrees with the journal either. One older than the
+journal mints ids the host has already dispatched, so reconcile the two before
 dispatching again.
 
 ## The module

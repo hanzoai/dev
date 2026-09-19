@@ -20,6 +20,7 @@ import (
 	json "encoding/json/v2"
 	"errors"
 	"fmt"
+	"math"
 	"sync/atomic"
 
 	"github.com/hanzoai/wasm"
@@ -121,10 +122,12 @@ func (c *Core) New(ctx context.Context, cfg Config) (*Session, error) {
 
 // Restore rebuilds a session from its Snapshot, in an instance of its own.
 //
-// A snapshot that was truncated, edited, or written under another ABI answers
-// ErrMalformed. Intact bytes are not proof that the sequence agrees with the
-// host's journal: a snapshot older than the journal mints again ids the host
-// has already dispatched under, so reconcile the two before dispatching.
+// A snapshot damaged in storage — truncated, corrupted, or written under
+// another ABI — answers ErrMalformed. The checksum is not a signature: a host
+// that stores snapshots where others can write must authenticate them itself.
+// Intact bytes are not proof that the sequence agrees with the host's journal
+// either: a snapshot older than the journal mints again ids the host has
+// already dispatched under, so reconcile the two before dispatching.
 func (c *Core) Restore(ctx context.Context, state []byte) (*Session, error) {
 	return c.start(ctx, "dev_restore", state)
 }
@@ -149,11 +152,17 @@ func (c *Core) start(ctx context.Context, name string, in []byte) (*Session, err
 // A Session is not safe for concurrent use. It runs one call at a time and
 // does not queue: a call that arrives while another is running answers
 // ErrBusy, as DEV_BUSY does in C, and never reaches the instance.
+//
+// A call runs under its ctx, and each call into the instance under the 5s
+// hanzoai/wasm allows one. A call either one ends is stopped where it stands,
+// and the session with it: it answers ErrHandle, which matches
+// context.Canceled or context.DeadlineExceeded too, and every call after
+// answers ErrHandle. Restore the last Snapshot to carry on.
 type Session struct {
 	inst   *wasm.Instance
 	handle uint64
-	// out is the session's one out-parameter, lent at birth and released at
-	// Close: the handle is written there, then every dev_buf after it.
+	// out is the session's one out-parameter, lent at birth and gone with the
+	// instance: the handle is written there, then every dev_buf after it.
 	out  uint32
 	busy atomic.Bool
 	// gone is what every call answers once the instance can answer no more:
@@ -212,9 +221,9 @@ func (s *Session) Snapshot(ctx context.Context) ([]byte, error) {
 	return state, err
 }
 
-// Close drops the session and closes its instance, which takes every byte the
-// session held with it. A call after Close answers ErrHandle, and a second
-// Close answers nil.
+// Close closes the session's instance, and the session and every byte it held
+// go with it. A call after Close answers ErrHandle, and a second Close answers
+// nil.
 func (s *Session) Close(ctx context.Context) error {
 	if !s.busy.CompareAndSwap(false, true) {
 		return ErrBusy
@@ -222,14 +231,6 @@ func (s *Session) Close(ctx context.Context) error {
 	defer s.leave()
 	if s.inst == nil {
 		return nil
-	}
-	// A handle is never zero, and an instance that has trapped or closed is
-	// not called again: either way, what these would free goes with it.
-	if s.handle != 0 {
-		_, _ = s.call(ctx, "dev_drop", s.handle)
-	}
-	if s.out != 0 {
-		_, _ = s.call(ctx, "dev_release", uint64(s.out), buf)
 	}
 	err := s.inst.Close(ctx)
 	s.inst, s.gone = nil, ErrHandle
@@ -253,13 +254,15 @@ func (s *Session) open(ctx context.Context, name string, in []byte) error {
 	return nil
 }
 
+// enter holds the session for one call. What a gone session answers is read
+// before it lets go: after, a Close on another goroutine may be writing it.
 func (s *Session) enter() error {
 	if !s.busy.CompareAndSwap(false, true) {
 		return ErrBusy
 	}
-	if s.gone != nil {
+	if gone := s.gone; gone != nil {
 		s.leave()
-		return s.gone
+		return gone
 	}
 	return nil
 }
@@ -284,14 +287,15 @@ func (s *Session) call(ctx context.Context, name string, args ...uint64) (uint64
 }
 
 // lose answers for a call the instance could not finish, and marks what every
-// later call answers. An instance that has closed holds no session: ErrHandle.
-// Anything else is a trap — a panic, or memory the core needed and was refused
-// — after which the instance's memory is not trusted again: ErrPanic now,
-// ErrPoison after.
+// later call answers. An instance that has closed holds no session: ErrHandle,
+// wrapping why it closed, so a call its context ended matches that context's
+// error too. Anything else is a trap — a panic, or memory the core needed and
+// was refused — after which the instance's memory is not trusted again:
+// ErrPanic now, ErrPoison after.
 func (s *Session) lose(err error) error {
 	if _, ok := errors.AsType[*sys.ExitError](err); ok {
 		s.gone = ErrHandle
-		return fmt.Errorf("%w: %v", ErrHandle, err)
+		return fmt.Errorf("%w: %w", ErrHandle, err)
 	}
 	s.gone = ErrPoison
 	return fmt.Errorf("%w: %v", ErrPanic, err)
@@ -309,8 +313,13 @@ func status(code uint64, err error) error {
 	return statuses[n]
 }
 
-// alloc borrows n bytes inside the instance.
+// alloc borrows n bytes inside the instance. dev_alloc's length is an i32,
+// and the core lends no more than math.MaxInt32 bytes, so a longer n is
+// refused here rather than cut to its low 32 bits.
 func (s *Session) alloc(ctx context.Context, n int) (uint32, error) {
+	if n > math.MaxInt32 {
+		return 0, fmt.Errorf("%w: %d bytes cannot be lent", ErrNull, n)
+	}
 	ptr, err := s.call(ctx, "dev_alloc", uint64(n))
 	if err != nil {
 		return 0, err

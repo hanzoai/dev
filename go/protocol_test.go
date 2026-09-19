@@ -185,21 +185,33 @@ func TestTheCoreRefusesWhatItCannotRead(t *testing.T) {
 }
 
 // Go reads a union as strictly as it writes one: a single variant, named as
-// the protocol names it, carrying a value exactly when the variant does.
+// the protocol names it, carrying a value exactly when the variant does, and
+// never null for one. A union that is missing is no variant at all, and is
+// refused where it is missing.
 func TestAUnionIsReadAsOneVariant(t *testing.T) {
 	for _, payload := range []string{
 		`null`, `[]`, `{}`, `7`,
 		`"Bogus"`, `{"Bogus":{}}`,
 		`"save"`, `{"emit":"x"}`,
 		`"Emit"`, `{"Save":null}`, `{"Save":true}`,
+		`{"Emit":null}`, `{"Model":null}`, `{"Done":null}`,
 		`{"Emit":"x","Save":null}`,
 		`{"Emit":"x","Done":{"turn":1,"outcome":"Complete"}}`,
 		`{"Done":{"turn":1,"outcome":"Finished"}}`,
 		`{"Done":{"turn":1,"outcome":"Complete","by":"me"}}`,
+		`{"Done":{"turn":1}}`,
+		`{"Done":{"turn":1,"outcome":null}}`,
+		`{"Model":{"model":null,"prelude":null,"messages":[{"Agent":{"text":null,"calls":[{"id":2}]}}]}}`,
 	} {
 		var op Op
 		if err := json.Unmarshal([]byte(payload), &op, json.RejectUnknownMembers(true)); err == nil {
 			t.Errorf("%s was read as %s", payload, show(op))
+		}
+	}
+	for _, payload := range []string{`[{"id":1}]`, `[{"id":1,"op":null}]`} {
+		var actions []Action
+		if err := json.Unmarshal([]byte(payload), &actions, json.RejectUnknownMembers(true)); err == nil {
+			t.Errorf("%s was read as %#v", payload, actions)
 		}
 	}
 	for payload, want := range map[string]Op{

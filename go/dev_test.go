@@ -6,9 +6,11 @@ import (
 	json "encoding/json/v2"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // shared is one Core for every test that does not close its own. Open is the
@@ -355,6 +357,88 @@ func TestAClosedCoreEndsItsSessions(t *testing.T) {
 	}
 }
 
+// A call its context ends is stopped where it stands, and the session with
+// it: ErrHandle, matching the context's own error too, and ErrHandle for every
+// call after. The snapshot taken before carries the session on.
+func TestAStepItsContextEndsEndsTheSession(t *testing.T) {
+	ctx := t.Context()
+	c := core(t)
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	past, stop := context.WithDeadline(ctx, time.Now().Add(-time.Hour))
+	defer stop()
+	for _, ended := range []struct {
+		ctx context.Context
+		err error
+	}{{cancelled, context.Canceled}, {past, context.DeadlineExceeded}} {
+		s := session(t, c, Config{})
+		step(t, s, turn(1, "fix the build"))
+		state, err := s.Snapshot(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		answer := Event{Model: &Answer{ID: 1, Reply: Reply{Text: new("done")}}}
+		if actions, err := s.Step(ended.ctx, answer); !errors.Is(err, ErrHandle) || !errors.Is(err, ended.err) {
+			t.Errorf("a step under %v answered %s, %v", ended.err, show(actions), err)
+		}
+		if _, err := s.Step(ctx, answer); !errors.Is(err, ErrHandle) {
+			t.Errorf("the step after %v answered %v", ended.err, err)
+		}
+		if _, err := s.Snapshot(ctx); !errors.Is(err, ErrHandle) {
+			t.Errorf("a snapshot after %v answered %v", ended.err, err)
+		}
+		if fresh, err := c.New(ended.ctx, Config{}); !errors.Is(err, ErrHandle) || !errors.Is(err, ended.err) {
+			t.Errorf("New under %v answered %v", ended.err, err)
+			if fresh != nil {
+				_ = fresh.Close(ctx)
+			}
+		}
+
+		restored, err := c.Restore(ctx, state)
+		if err != nil {
+			t.Fatal(err)
+		}
+		same(t, "the restored session", step(t, restored, answer), []Action{
+			{ID: 2, Op: Op{Emit: new("done")}},
+			{ID: 3, Op: Op{Save: true}},
+			{ID: 4, Op: Op{Done: &Done{Turn: 1, Outcome: Outcome{Complete: true}}}},
+		})
+		_ = restored.Close(ctx)
+	}
+}
+
+// Open is bounded the same way: a module whose dev_abi never returns is
+// stopped when the context ends, rather than holding its goroutine, and every
+// garbage collection after, forever.
+func TestOpenStopsAModuleThatNeverAnswers(t *testing.T) {
+	// (module (func (export "dev_abi") (result i32) (loop (br 0)) (i32.const 1)))
+	spin := []byte{
+		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+		0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f,
+		0x03, 0x02, 0x01, 0x00,
+		0x07, 0x0b, 0x01, 0x07, 'd', 'e', 'v', '_', 'a', 'b', 'i', 0x00, 0x00,
+		0x0a, 0x0b, 0x01, 0x09, 0x00, 0x03, 0x40, 0x0c, 0x00, 0x0b, 0x41, 0x01, 0x0b,
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		c, err := open(ctx, spin)
+		if err == nil {
+			_ = c.Close(context.Background())
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("open answered %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("open is still running 10s after its deadline")
+	}
+}
+
 // A Session runs one call at a time and refuses, rather than queues, the
 // next: the instance never sees two.
 func TestASessionAnswersOneCallAtATime(t *testing.T) {
@@ -374,6 +458,60 @@ func TestASessionAnswersOneCallAtATime(t *testing.T) {
 	same(t, "the step after", step(t, s, turn(1, "fix the build")), []Action{
 		{ID: 1, Op: Op{Model: &Ask{Messages: []Message{{User: new("fix the build")}}}}},
 	})
+}
+
+// One goroutine steps a session whose instance has gone while another closes
+// it, and the session's busy flag is all that orders them. Under -race this
+// holds a call to reading what it answers while it still holds the flag: read
+// after it lets go, the answer races the Close that writes it.
+func TestAGoneSessionSteppedAndClosedAtOnce(t *testing.T) {
+	ctx := t.Context()
+	c, err := Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sessions []*Session
+	for range 16 {
+		s, err := c.New(ctx, Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessions = append(sessions, s)
+	}
+	if err := c.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range sessions {
+		// The first call finds the instance closed with the Core, and marks the
+		// session gone.
+		if _, err := s.Step(ctx, turn(1, "fix the build")); !errors.Is(err, ErrHandle) {
+			t.Fatalf("a step after the Core closed answered %v", err)
+		}
+		stepped := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			for i := range 200 {
+				_, err := s.Step(ctx, turn(1, "fix the build"))
+				if !errors.Is(err, ErrHandle) && !errors.Is(err, ErrBusy) {
+					t.Errorf("a step on a gone session answered %v", err)
+				}
+				if i == 0 {
+					close(stepped)
+				}
+			}
+		})
+		<-stepped
+		for {
+			err := s.Close(ctx)
+			if !errors.Is(err, ErrBusy) {
+				if err != nil {
+					t.Errorf("Close answered %v", err)
+				}
+				break
+			}
+		}
+		wg.Wait()
+	}
 }
 
 // Every session has an instance of its own, so thirty-two of them stepped at
@@ -475,6 +613,49 @@ func TestTenThousandStepsDoNotGrowMemory(t *testing.T) {
 	}
 }
 
+// A refused call gives back what it borrowed too. The core refusing an event
+// it cannot read, and the host refusing an answer it was handed, each release
+// the event's loan and free the answer, so a thousand of each leave the
+// instance's memory as large as it was.
+func TestRefusedCallsDoNotGrowMemory(t *testing.T) {
+	ctx := t.Context()
+	s := session(t, core(t), Config{})
+	prompt := strings.Repeat("fix the build ", 1024)
+	step(t, s, turn(1, prompt))
+
+	unreadable := []byte(`{"Turn":{"id":2,"prompt":"` + prompt + `"}`)
+	again, err := json.Marshal(turn(1, prompt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := errors.New("the host refuses the answer")
+	refuse := func() {
+		t.Helper()
+		err := s.step(ctx, unreadable, func(out []byte) error {
+			t.Errorf("an event the core cannot read was answered with %s", out)
+			return nil
+		})
+		if !errors.Is(err, ErrMalformed) {
+			t.Fatalf("an event the core cannot read answered %v", err)
+		}
+		// The core answers a redelivered turn with no actions, and the host
+		// refuses even that.
+		if err := s.step(ctx, again, func([]byte) error { return refused }); !errors.Is(err, refused) {
+			t.Fatalf("an answer the host refused answered %v", err)
+		}
+	}
+	for range 10 {
+		refuse()
+	}
+	before := s.inst.Memory().Size()
+	for range 1000 {
+		refuse()
+	}
+	if after := s.inst.Memory().Size(); after != before {
+		t.Errorf("2,000 refusals grew memory from %d to %d bytes", before, after)
+	}
+}
+
 // A core that is refused memory it needs traps. The trap is its session's
 // alone: that session answers ErrPanic, then ErrPoison until it is closed,
 // and a session beside it carries on.
@@ -505,6 +686,24 @@ func TestATrapPoisonsOnlyItsSession(t *testing.T) {
 		{ID: 2, Op: Op{Emit: new("fixed")}},
 		{ID: 3, Op: Op{Save: true}},
 		{ID: 4, Op: Op{Done: &Done{Turn: 1, Outcome: Outcome{Complete: true}}}},
+	})
+}
+
+// A length the core's i32 cannot carry is refused before the core is asked,
+// rather than cut to its low 32 bits: 4 GiB and 16 bytes would be lent as 16,
+// and writing the event into that would poison the session.
+func TestALengthTheCoreCannotTakeIsNull(t *testing.T) {
+	if math.MaxInt == math.MaxInt32 {
+		t.Skip("no slice here is longer than the core can lend")
+	}
+	s := session(t, core(t), Config{})
+	for _, n := range []uint64{math.MaxInt32 + 1, 1<<32 + 16} {
+		if ptr, err := s.alloc(t.Context(), int(n)); !errors.Is(err, ErrNull) {
+			t.Errorf("%d bytes were lent at %#x, %v", n, ptr, err)
+		}
+	}
+	same(t, "the step after", step(t, s, turn(1, "fix the build")), []Action{
+		{ID: 1, Op: Op{Model: &Ask{Messages: []Message{{User: new("fix the build")}}}}},
 	})
 }
 

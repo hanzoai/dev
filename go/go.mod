@@ -3,7 +3,7 @@ module github.com/hanzoai/dev/go
 go 1.27.1
 
 require (
-	github.com/hanzoai/wasm v0.0.0-20260919010011-c98759db1386
+	github.com/hanzoai/wasm v0.0.0-20260919121249-5b3376fa4533
 	github.com/tetratelabs/wazero v1.11.0
 )
 
