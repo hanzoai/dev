@@ -31,10 +31,17 @@ test: prepare
 	@$(CARGO) nextest run --no-fail-fast --manifest-path crates/hanzo-upstream/Cargo.toml $(ARGS)
 
 ## wasm: build the reasoning half for wasm32-wasip1
-# protocol and core carry no effects, so they run wherever a wasm host runs.
-# ffi is native by definition and stays out of this.
+# The loop as a wasm module: target/wasm32-wasip1/release/dev.wasm.
+#
+# protocol and core carry no effects, so they run wherever a wasm host runs — and
+# so does ffi, which is what a host actually calls. Its C ABI is the module's
+# export list unchanged; only the memory differs, and dev_alloc lends the host a
+# buffer inside it. What the module may IMPORT is the proof that the core touches
+# nothing: environ_get, environ_sizes_get, fd_write and proc_exit, and no file,
+# socket, clock or random source. A change that grows that list has given the
+# loop an effect of its own.
 wasm:
-	@$(CARGO) build --locked --target wasm32-wasip1 -p dev-protocol -p dev-core
+	@$(CARGO) build --locked --release --target wasm32-wasip1 -p dev-ffi
 
 ## test-upstream: run the upstream suite against the pinned submodule
 # voice-host wants GStreamer >= 1.28, which no current distribution ships, and

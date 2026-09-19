@@ -69,6 +69,14 @@ void dev_drop(uint64_t session);
 
 /* Release a dev_buf this library handed out. */
 void dev_free(dev_buf buf);
+/* Lend the host len zeroed bytes inside this library's memory; null for a zero
+ * len or a refused allocation. Compiled to wasm the library's memory is its own,
+ * so a host there has no other way to produce an input pointer or an
+ * out-parameter. A native host shares an address space and never needs it. */
+uint8_t *dev_alloc(size_t len);
+/* Take back what dev_alloc lent. ptr and len are that call's answer and its
+ * argument. */
+void dev_release(uint8_t *ptr, size_t len);
 
 #ifdef __cplusplus
 }

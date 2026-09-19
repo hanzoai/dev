@@ -1,12 +1,17 @@
 //! The C ABI the Go host drives the loop through.
 //!
-//! Seven symbols, an opaque `u64` per session, and a `Buf` for every byte
+//! Nine symbols, an opaque `u64` per session, and a `Buf` for every byte
 //! string that crosses back. The rules:
 //!
 //! - **Rust copies every input** before the call returns, so the host may free
 //!   or reuse its buffer immediately.
 //! - **Rust owns every output** until the host calls [`dev_free`]. A `Buf` is
 //!   a Rust allocation; `free(3)` on it is wrong.
+//! - **A host that shares no memory borrows some.** Compiled to wasm the
+//!   library's memory is its own, so a pointer the host holds means nothing
+//!   here: [`dev_alloc`] lends it a buffer inside, to write an input or receive
+//!   an out-parameter, and [`dev_release`] takes it back. A native host never
+//!   calls either — it already has memory both sides can see.
 //! - **A handle is generational.** Dropping a session retires its handle, and
 //!   a stale handle is refused with [`DEV_HANDLE`] rather than resolving to
 //!   whatever took the slot next. A session dropped while one of its calls is
@@ -223,6 +228,46 @@ pub unsafe extern "C" fn dev_free(buf: Buf) {
     guard(|| {
         if !buf.ptr.is_null() {
             drop(unsafe { Vec::from_raw_parts(buf.ptr, buf.len, buf.cap) });
+        }
+        DEV_OK
+    });
+}
+
+/// Lend the host `len` bytes inside this library's memory.
+///
+/// The loop compiles to wasm unchanged, and there the host and the library do
+/// not share an address space: every input pointer and every out-parameter has
+/// to name memory that is IN the module, which the host cannot produce for
+/// itself. This is how it gets some. The bytes are zeroed, exactly `len` long,
+/// and the host's until [`dev_release`].
+///
+/// Null for a zero `len` or when the allocator refuses — a host that asks for
+/// nothing is given nothing to release.
+#[unsafe(no_mangle)]
+pub extern "C" fn dev_alloc(len: usize) -> *mut u8 {
+    if len == 0 {
+        return std::ptr::null_mut();
+    }
+    match catch_unwind(|| Box::into_raw(vec![0_u8; len].into_boxed_slice()).cast::<u8>()) {
+        Ok(ptr) => ptr,
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Take back a buffer [`dev_alloc`] lent.
+///
+/// A boxed slice rather than a `Vec`, so the pair is exact: the allocation is
+/// `len` bytes and is released as `len` bytes, with no capacity for the host to
+/// remember or get wrong.
+///
+/// # Safety
+/// `ptr` and `len` must be one [`dev_alloc`] call's answer and its argument,
+/// not yet released.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dev_release(ptr: *mut u8, len: usize) {
+    guard(|| {
+        if !ptr.is_null() && len != 0 {
+            drop(unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len)) });
         }
         DEV_OK
     });
@@ -579,5 +624,63 @@ mod tests {
             }
             dev_drop(handle);
         }
+    }
+
+    /// A host with no memory of its own drives a whole step through borrowed
+    /// buffers: the input, and both out-parameters, live inside the library.
+    #[test]
+    fn a_host_that_shares_no_memory_steps_through_borrowed_buffers() {
+        let bytes = dev_protocol::encode(&Event::Turn(Turn {
+            id: 1,
+            prompt: "fix the build".into(),
+        }))
+        .expect("encode");
+
+        let handle_slot = dev_alloc(std::mem::size_of::<u64>());
+        let input = dev_alloc(bytes.len());
+        let out_slot = dev_alloc(std::mem::size_of::<Buf>());
+        assert!(!handle_slot.is_null() && !input.is_null() && !out_slot.is_null());
+
+        unsafe {
+            assert_eq!(dev_new(std::ptr::null(), 0, handle_slot.cast::<u64>()), DEV_OK);
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), input, bytes.len());
+            let handle = handle_slot.cast::<u64>().read_unaligned();
+            assert_eq!(
+                dev_step(handle, input, bytes.len(), out_slot.cast::<Buf>()),
+                DEV_OK
+            );
+            let out = out_slot.cast::<Buf>().read_unaligned();
+            let actions: Vec<Action> =
+                dev_protocol::decode(std::slice::from_raw_parts(out.ptr.cast_const(), out.len))
+                    .expect("decode actions");
+            assert!(
+                actions.iter().any(|a| matches!(a.op, Op::Model(_))),
+                "a first turn asks the model: {actions:?}"
+            );
+            dev_free(out);
+            dev_drop(handle);
+            dev_release(out_slot, std::mem::size_of::<Buf>());
+            dev_release(input, bytes.len());
+            dev_release(handle_slot, std::mem::size_of::<u64>());
+        }
+    }
+
+    /// What is lent is zeroed and exactly as long as asked, so a host that
+    /// writes fewer bytes than it borrowed leaks nothing of a previous tenant.
+    #[test]
+    fn a_lent_buffer_is_zeroed_and_exact() {
+        let ptr = dev_alloc(64);
+        assert!(!ptr.is_null());
+        let lent = unsafe { std::slice::from_raw_parts(ptr, 64) };
+        assert!(lent.iter().all(|b| *b == 0));
+        unsafe { dev_release(ptr, 64) };
+    }
+
+    /// Asking for nothing lends nothing, and giving nothing back is not a fault.
+    #[test]
+    fn nothing_is_lent_for_nothing() {
+        assert!(dev_alloc(0).is_null());
+        unsafe { dev_release(std::ptr::null_mut(), 0) };
+        unsafe { dev_release(std::ptr::null_mut(), 16) };
     }
 }
