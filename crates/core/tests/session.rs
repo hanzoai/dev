@@ -3,18 +3,24 @@
 use dev_core::Session;
 use dev_protocol::Action;
 use dev_protocol::Answer;
+use dev_protocol::Ask;
 use dev_protocol::Call;
 use dev_protocol::Config;
+use dev_protocol::Dispatch;
+use dev_protocol::Done;
 use dev_protocol::Event;
 use dev_protocol::Exec;
+use dev_protocol::Message;
 use dev_protocol::Op;
 use dev_protocol::Outcome;
 use dev_protocol::Output;
+use dev_protocol::Read;
 use dev_protocol::Reply;
 use dev_protocol::Turn;
 
-fn turn(prompt: &str) -> Event {
+fn turn(id: u64, prompt: &str) -> Event {
     Event::Turn(Turn {
+        id,
         prompt: prompt.to_string(),
     })
 }
@@ -43,50 +49,73 @@ fn test() -> Call {
     })
 }
 
+fn read(path: &str) -> Call {
+    Call::Read(Read {
+        path: path.to_string(),
+    })
+}
+
+fn result(id: u64, text: &str) -> Output {
+    Output {
+        id,
+        text: text.to_string(),
+        failed: false,
+    }
+}
+
+fn done(turn: u64, outcome: Outcome) -> Op {
+    Op::Done(Done { turn, outcome })
+}
+
 fn ops(actions: &[Action]) -> Vec<&Op> {
     actions.iter().map(|a| &a.op).collect()
+}
+
+/// The request an [`Op::Model`] action carries, or a failure naming what it
+/// carried instead.
+fn asked(action: &Action) -> &Ask {
+    match &action.op {
+        Op::Model(ask) => ask,
+        op => panic!("asked for {op:?}"),
+    }
 }
 
 #[test]
 fn a_turn_asks_a_model_then_runs_the_tool_then_asks_again() {
     let mut session = Session::new(Config::default());
 
-    let asked = session.step(turn("fix the build"));
-    assert_eq!(asked.len(), 1);
-    assert_eq!(asked[0].id, 1);
-    assert!(matches!(asked[0].op, Op::Model(_)));
+    let opened = session.step(turn(1, "fix the build"));
+    assert_eq!(opened.len(), 1);
+    assert_eq!(opened[0].id, 1);
+    assert!(matches!(opened[0].op, Op::Model(_)));
 
     let dispatched = session.step(tools(vec![test()], 1));
     assert_eq!(dispatched.len(), 1);
     assert_eq!(dispatched[0].id, 2);
     assert!(matches!(dispatched[0].op, Op::Exec(_)));
 
-    let again = session.step(Event::Exec(Output {
-        id: 2,
-        text: "ok".to_string(),
-        failed: false,
-    }));
+    let again = session.step(Event::Exec(result(2, "ok")));
     assert_eq!(again.len(), 1);
     assert_eq!(again[0].id, 3);
     assert!(matches!(again[0].op, Op::Model(_)));
 
-    let done = session.step(says("built", 3));
+    let ended = session.step(says("built", 3));
     assert_eq!(
-        ops(&done),
+        ops(&ended),
         vec![
             &Op::Emit("built".to_string()),
             &Op::Save,
-            &Op::Done(Outcome::Complete),
+            &done(1, Outcome::Complete),
         ]
     );
-    assert_eq!(done[0].id, 4);
-    assert_eq!(done[2].id, 6);
+    assert_eq!(ended[0].id, 4);
+    assert_eq!(ended[2].id, 6);
 }
 
 #[test]
 fn every_call_of_one_reply_gets_its_own_id() {
     let mut session = Session::new(Config::default());
-    session.step(turn("run the suite twice"));
+    session.step(turn(1, "run the suite twice"));
 
     let dispatched = session.step(tools(vec![test(), test()], 1));
     let ids: Vec<u64> = dispatched.iter().map(|a| a.id).collect();
@@ -94,52 +123,34 @@ fn every_call_of_one_reply_gets_its_own_id() {
 
     // One answer is not enough: the model is asked again only when the last
     // outstanding effect has been observed.
-    let quiet = session.step(Event::Exec(Output {
-        id: 2,
-        text: "ok".to_string(),
-        failed: false,
-    }));
-    assert!(quiet.is_empty());
-    let asked = session.step(Event::Exec(Output {
-        id: 3,
-        text: "ok".to_string(),
-        failed: false,
-    }));
-    assert_eq!(asked.len(), 1);
-    assert!(matches!(asked[0].op, Op::Model(_)));
+    assert!(session.step(Event::Exec(result(2, "ok"))).is_empty());
+    let again = session.step(Event::Exec(result(3, "ok")));
+    assert_eq!(again.len(), 1);
+    assert!(matches!(again[0].op, Op::Model(_)));
 }
 
 #[test]
-fn a_replayed_result_runs_nothing_twice() {
-    let mut session = Session::new(Config::default());
-    session.step(turn("fix the build"));
-    session.step(tools(vec![test()], 1));
-
-    let answered = Event::Exec(Output {
-        id: 2,
-        text: "ok".to_string(),
-        failed: false,
+fn the_prelude_rides_beside_the_conversation_rather_than_inside_it() {
+    let mut session = Session::new(Config {
+        model: Some("zen5.8".to_string()),
+        prelude: Some("you are a coding agent".to_string()),
     });
-    assert_eq!(session.step(answered.clone()).len(), 1);
-    assert!(session.step(answered).is_empty());
-    // The same id delivered by the wrong family is refused too.
-    assert!(
-        session
-            .step(Event::Git(Output {
-                id: 2,
-                text: "ok".to_string(),
-                failed: false,
-            }))
-            .is_empty()
+    let opened = session.step(turn(1, "fix the build"));
+    let ask = asked(&opened[0]);
+    assert_eq!(ask.model.as_deref(), Some("zen5.8"));
+    assert_eq!(ask.prelude.as_deref(), Some("you are a coding agent"));
+    assert_eq!(
+        ask.messages,
+        vec![Message::User("fix the build".to_string())]
     );
 }
 
 #[test]
 fn snapshot_and_restore_continue_at_the_same_id() {
     let mut session = Session::new(Config::default());
-    session.step(turn("fix the build"));
+    session.step(turn(1, "fix the build"));
 
-    let state = session.snapshot();
+    let state = session.snapshot().expect("snapshot");
     let mut restored = Session::restore(&state).expect("restore");
     assert_eq!(restored.next_id(), session.next_id());
     assert_eq!(restored.messages(), session.messages());
@@ -151,27 +162,11 @@ fn snapshot_and_restore_continue_at_the_same_id() {
 }
 
 #[test]
-fn a_prompt_mid_turn_waits_for_the_turn() {
-    let mut session = Session::new(Config::default());
-    session.step(turn("first"));
-    assert!(session.step(turn("second")).is_empty());
-
-    let actions = session.step(says("first done", 1));
-    assert_eq!(actions.len(), 3);
-    assert_eq!(actions[0].op, Op::Emit("first done".to_string()));
-    assert_eq!(actions[1].op, Op::Save);
-    assert!(matches!(actions[2].op, Op::Model(_)));
-
-    let closed = session.step(says("second done", actions[2].id));
-    assert!(matches!(closed.last().map(|a| &a.op), Some(Op::Done(_))));
-}
-
-#[test]
 fn a_timer_checkpoints_only_inside_a_turn() {
     let mut session = Session::new(Config::default());
     assert!(session.step(Event::Timer).is_empty());
 
-    session.step(turn("fix the build"));
+    session.step(turn(1, "fix the build"));
     let saved = session.step(Event::Timer);
     assert_eq!(ops(&saved), vec![&Op::Save]);
 }
@@ -179,30 +174,323 @@ fn a_timer_checkpoints_only_inside_a_turn() {
 #[test]
 fn cancel_ends_the_turn_and_drops_what_was_outstanding() {
     let mut session = Session::new(Config::default());
-    session.step(turn("fix the build"));
+    session.step(turn(1, "fix the build"));
     session.step(tools(vec![test()], 1));
 
     let stopped = session.step(Event::Cancel);
-    assert_eq!(
-        ops(&stopped),
-        vec![&Op::Save, &Op::Done(Outcome::Cancelled)]
-    );
+    assert_eq!(ops(&stopped), vec![&Op::Save, &done(1, Outcome::Cancelled)]);
     // A result for the cancelled effect is no longer outstanding.
-    assert!(
-        session
-            .step(Event::Exec(Output {
-                id: 2,
-                text: "ok".to_string(),
-                failed: false,
-            }))
-            .is_empty()
-    );
+    assert!(session.step(Event::Exec(result(2, "ok"))).is_empty());
     assert!(session.step(Event::Cancel).is_empty());
 }
 
 #[test]
 fn an_answer_to_an_id_that_was_never_asked_is_refused() {
     let mut session = Session::new(Config::default());
-    session.step(turn("fix the build"));
+    session.step(turn(1, "fix the build"));
     assert!(session.step(says("hello", 99)).is_empty());
+}
+
+#[test]
+fn a_failed_result_reaches_the_model_as_a_failure() {
+    let mut session = Session::new(Config::default());
+    session.step(turn(1, "fix the build"));
+    session.step(tools(vec![test()], 1));
+
+    let again = session.step(Event::Exec(Output {
+        id: 2,
+        text: "2 tests failed".to_string(),
+        failed: true,
+    }));
+    assert_eq!(
+        asked(&again[0]).messages.last(),
+        Some(&Message::Tool {
+            id: 2,
+            text: "2 tests failed".to_string(),
+            failed: true,
+        })
+    );
+}
+
+// Everything below is a delivery the core must refuse. A refusal answers with
+// no action, and — the part that took a wedged turn to learn — changes nothing.
+
+#[test]
+fn a_wrong_family_result_leaves_the_entry_for_the_right_one() {
+    let mut session = Session::new(Config::default());
+    session.step(turn(1, "fix the build"));
+    session.step(tools(vec![test()], 1));
+
+    // Id 2 was dispatched as an Exec. A Git result naming it is refused...
+    assert!(session.step(Event::Git(result(2, "ok"))).is_empty());
+    // ...and the Exec result it was standing in front of still lands.
+    let again = session.step(Event::Exec(result(2, "ok")));
+    assert_eq!(again.len(), 1);
+    assert!(matches!(again[0].op, Op::Model(_)));
+
+    let ended = session.step(says("built", again[0].id));
+    assert_eq!(
+        ended.last().map(|a| &a.op),
+        Some(&done(1, Outcome::Complete))
+    );
+}
+
+#[test]
+fn a_wrong_family_result_does_not_resume_the_turn_early() {
+    let mut session = Session::new(Config::default());
+    session.step(turn(1, "run the suite twice"));
+    session.step(tools(vec![test(), test()], 1));
+
+    assert!(session.step(Event::Git(result(2, "ok"))).is_empty());
+    // Two effects are still in flight, so the second result is not the last.
+    assert!(session.step(Event::Exec(result(3, "second"))).is_empty());
+    let again = session.step(Event::Exec(result(2, "first")));
+    assert_eq!(again.len(), 1);
+
+    // The model is asked once both results are in the transcript, never with
+    // one of them missing.
+    let results: Vec<&Message> = asked(&again[0])
+        .messages
+        .iter()
+        .filter(|message| matches!(message, Message::Tool { .. }))
+        .collect();
+    assert_eq!(
+        results,
+        vec![
+            &Message::Tool {
+                id: 3,
+                text: "second".to_string(),
+                failed: false,
+            },
+            &Message::Tool {
+                id: 2,
+                text: "first".to_string(),
+                failed: false,
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_model_event_naming_a_tool_id_leaves_the_entry_alone() {
+    let mut session = Session::new(Config::default());
+    session.step(turn(1, "fix the build"));
+    session.step(tools(vec![test()], 1));
+
+    // Id 2 is an Exec, not the model request.
+    assert!(session.step(says("here you go", 2)).is_empty());
+    assert_eq!(session.step(Event::Exec(result(2, "ok"))).len(), 1);
+}
+
+#[test]
+fn a_replayed_result_runs_nothing_twice() {
+    let mut session = Session::new(Config::default());
+    session.step(turn(1, "fix the build"));
+    session.step(tools(vec![test()], 1));
+
+    assert_eq!(session.step(Event::Exec(result(2, "ok"))).len(), 1);
+    assert!(session.step(Event::Exec(result(2, "ok"))).is_empty());
+}
+
+#[test]
+fn a_redelivered_turn_runs_the_prompt_once() {
+    let mut session = Session::new(Config::default());
+    let opened = session.step(turn(1, "ship it"));
+    assert_eq!(opened.len(), 1);
+    assert!(session.step(turn(1, "ship it")).is_empty());
+
+    // The model is asked once, with one prompt in front of it.
+    let ended = session.step(says("shipped", 1));
+    assert_eq!(
+        ended.last().map(|a| &a.op),
+        Some(&done(1, Outcome::Complete))
+    );
+    let again = session.step(turn(2, "and again"));
+    assert_eq!(
+        asked(&again[0]).messages,
+        vec![
+            Message::User("ship it".to_string()),
+            Message::Agent {
+                text: Some("shipped".to_string()),
+                calls: Vec::new(),
+            },
+            Message::User("and again".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn a_redelivered_timer_asks_for_nothing() {
+    let mut session = Session::new(Config::default());
+    session.step(turn(1, "fix the build"));
+
+    assert_eq!(ops(&session.step(Event::Timer)), vec![&Op::Save]);
+    assert!(session.step(Event::Timer).is_empty());
+    assert!(session.step(Event::Timer).is_empty());
+
+    // The next one checkpoints what the turn has moved on to since.
+    session.step(tools(vec![test()], 1));
+    assert_eq!(ops(&session.step(Event::Timer)), vec![&Op::Save]);
+}
+
+#[test]
+fn the_transcript_keeps_the_call_each_result_answers() {
+    let mut session = Session::new(Config::default());
+    session.step(turn(1, "fix the build"));
+    session.step(tools(vec![test()], 1));
+    let again = session.step(Event::Exec(result(2, "ok")));
+
+    assert_eq!(
+        asked(&again[0]).messages,
+        vec![
+            Message::User("fix the build".to_string()),
+            Message::Agent {
+                text: None,
+                calls: vec![Dispatch {
+                    id: 2,
+                    call: test(),
+                }],
+            },
+            Message::Tool {
+                id: 2,
+                text: "ok".to_string(),
+                failed: false,
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_prompt_that_arrives_mid_turn_is_acknowledged_and_ends_in_its_own_done() {
+    let mut session = Session::new(Config::default());
+    session.step(turn(1, "first"));
+    // Accepted, so the queue is state worth persisting — and the host can tell
+    // this apart from the empty answer a refusal gives.
+    assert_eq!(ops(&session.step(turn(2, "second"))), vec![&Op::Save]);
+
+    let chained = session.step(says("first done", 1));
+    assert_eq!(chained.len(), 4);
+    assert_eq!(chained[0].op, Op::Emit("first done".to_string()));
+    assert_eq!(chained[1].op, Op::Save);
+    assert_eq!(chained[2].op, done(1, Outcome::Complete));
+    assert!(matches!(chained[3].op, Op::Model(_)));
+
+    let closed = session.step(says("second done", chained[3].id));
+    assert_eq!(
+        closed.last().map(|a| &a.op),
+        Some(&done(2, Outcome::Complete))
+    );
+}
+
+#[test]
+fn a_cancel_says_what_became_of_every_prompt_it_discards() {
+    let mut session = Session::new(Config::default());
+    session.step(turn(1, "first"));
+    session.step(turn(2, "second"));
+    session.step(turn(3, "third"));
+
+    let stopped = session.step(Event::Cancel);
+    assert_eq!(
+        ops(&stopped),
+        vec![
+            &Op::Save,
+            &done(1, Outcome::Cancelled),
+            &done(2, Outcome::Cancelled),
+            &done(3, Outcome::Cancelled),
+        ]
+    );
+}
+
+#[test]
+fn a_path_that_leaves_the_workspace_is_refused_rather_than_dispatched() {
+    let mut session = Session::new(Config::default());
+    session.step(turn(1, "read my keys"));
+
+    let dispatched = session.step(tools(
+        vec![read("../../../../etc/passwd"), read("src/lib.rs")],
+        1,
+    ));
+    // Only the confined read goes out; the other never becomes an action.
+    assert_eq!(dispatched.len(), 1);
+    assert_eq!(
+        ops(&dispatched),
+        vec![&Op::Read(Read {
+            path: "src/lib.rs".to_string()
+        })]
+    );
+    assert_eq!(dispatched[0].id, 3);
+
+    // The model is told, under the id its own call was recorded with.
+    let again = session.step(Event::File(result(3, "the file")));
+    assert_eq!(
+        asked(&again[0]).messages[1..],
+        [
+            Message::Agent {
+                text: None,
+                calls: vec![
+                    Dispatch {
+                        id: 2,
+                        call: read("../../../../etc/passwd"),
+                    },
+                    Dispatch {
+                        id: 3,
+                        call: read("src/lib.rs"),
+                    },
+                ],
+            },
+            Message::Tool {
+                id: 2,
+                text: "refused: ../../../../etc/passwd is not inside the workspace".to_string(),
+                failed: true,
+            },
+            Message::Tool {
+                id: 3,
+                text: "the file".to_string(),
+                failed: false,
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_turn_whose_every_call_is_refused_asks_again_instead_of_waiting() {
+    let mut session = Session::new(Config::default());
+    session.step(turn(1, "read my keys"));
+
+    let answered = session.step(tools(vec![read("/Users/z/.ssh/authorized_keys")], 1));
+    assert_eq!(answered.len(), 1, "{:?}", ops(&answered));
+    let ask = asked(&answered[0]);
+    assert_eq!(
+        ask.messages.last(),
+        Some(&Message::Tool {
+            id: 2,
+            text: "refused: /Users/z/.ssh/authorized_keys is not inside the workspace".to_string(),
+            failed: true,
+        })
+    );
+
+    // And the turn is still live: it ends the ordinary way.
+    let ended = session.step(says("I cannot read that", answered[0].id));
+    assert_eq!(
+        ended.last().map(|a| &a.op),
+        Some(&done(1, Outcome::Complete))
+    );
+}
+
+#[test]
+fn a_snapshot_the_store_handed_back_changed_is_refused() {
+    let mut session = Session::new(Config::default());
+    session.step(turn(1, "fix the build"));
+    let state = session.snapshot().expect("snapshot");
+
+    // Re-mint an id the host has already dispatched under.
+    let stamp = 12;
+    let body = String::from_utf8(state[stamp..].to_vec()).expect("a json body");
+    let forged = body.replace("\"next\":2", "\"next\":1");
+    assert_ne!(forged, body, "the snapshot no longer spells the next id");
+    let mut bytes = state[..stamp].to_vec();
+    bytes.extend_from_slice(forged.as_bytes());
+
+    let err = Session::restore(&bytes).expect_err("a forged snapshot was restored");
+    assert!(err.to_string().contains("checksum"), "{err}");
 }

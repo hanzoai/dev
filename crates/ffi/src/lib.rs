@@ -9,11 +9,16 @@
 //!   a Rust allocation; `free(3)` on it is wrong.
 //! - **A handle is generational.** Dropping a session retires its handle, and
 //!   a stale handle is refused with [`DEV_HANDLE`] rather than resolving to
-//!   whatever took the slot next.
-//! - **A panic does not cross the boundary.** Every entry point runs inside
-//!   `catch_unwind`; an escaped panic answers [`DEV_PANIC`] and poisons that
-//!   session, whose every later call answers [`DEV_POISON`] until it is
-//!   dropped. The process stays up and the other sessions are untouched.
+//!   whatever took the slot next. A session dropped while one of its calls is
+//!   running makes that call answer [`DEV_HANDLE`] too, and lend nothing out:
+//!   there is no session left for the answer to belong to.
+//! - **A panic does not cross the boundary.** Every entry point that has a
+//!   status to answer with runs inside `catch_unwind`; an escaped panic answers
+//!   [`DEV_PANIC`] and poisons that session, whose every later call answers
+//!   [`DEV_POISON`] until it is dropped. The process stays up and the other
+//!   sessions are untouched. [`dev_abi`] is the exception and has no status
+//!   channel to answer on: it reads a constant, so there is nothing in it to
+//!   panic.
 
 mod slab;
 
@@ -124,15 +129,21 @@ pub unsafe extern "C" fn dev_step(
         let Some(bytes) = (unsafe { copy(event, len) }) else {
             return DEV_NULL;
         };
-        enter(session, |session| {
+        let (status, answer) = enter(session, |session| {
             let event: Event = match dev_protocol::decode(&bytes) {
                 Ok(event) => event,
-                Err(_) => return DEV_MALFORMED,
+                Err(_) => return (DEV_MALFORMED, Vec::new()),
             };
             let actions = session.step(event);
-            unsafe { out.write(lend(dev_protocol::encode(&actions))) };
-            DEV_OK
-        })
+            match dev_protocol::encode(&actions) {
+                Ok(bytes) => (DEV_OK, bytes),
+                Err(_) => (DEV_MALFORMED, Vec::new()),
+            }
+        });
+        if status == DEV_OK {
+            unsafe { out.write(lend(answer)) };
+        }
+        status
     })
 }
 
@@ -147,10 +158,14 @@ pub unsafe extern "C" fn dev_snapshot(session: u64, out: *mut Buf) -> i32 {
         if out.is_null() {
             return DEV_NULL;
         }
-        enter(session, |session| {
-            unsafe { out.write(lend(session.snapshot())) };
-            DEV_OK
-        })
+        let (status, state) = enter(session, |session| match session.snapshot() {
+            Ok(bytes) => (DEV_OK, bytes),
+            Err(_) => (DEV_MALFORMED, Vec::new()),
+        });
+        if status == DEV_OK {
+            unsafe { out.write(lend(state)) };
+        }
+        status
     })
 }
 
@@ -207,20 +222,28 @@ pub unsafe extern "C" fn dev_free(buf: Buf) {
 
 /// Run a call with the session lifted out of the slab, so no lock is held
 /// while it runs and a panic leaves the slot poisoned rather than occupied.
-fn enter(handle: u64, call: impl FnOnce(&mut Session) -> i32) -> i32 {
+///
+/// The bytes the call produced reach the caller only once the session is back
+/// in its slot. A [`dev_drop`] that lands in between retires the handle, the
+/// slab refuses the session, and the call answers [`DEV_HANDLE`] with nothing:
+/// a host that has dropped a session is never handed actions it would have to
+/// account for against one.
+fn enter(handle: u64, call: impl FnOnce(&mut Session) -> (i32, Vec<u8>)) -> (i32, Vec<u8>) {
     let mut session = match sessions().take(handle) {
         Ok(session) => session,
-        Err(fault) => return status(fault),
+        Err(fault) => return (status(fault), Vec::new()),
     };
     match catch_unwind(AssertUnwindSafe(|| call(&mut session))) {
-        Ok(status) => {
-            sessions().put(handle, session);
-            status
-        }
+        Ok(answer) => match sessions().put(handle, session) {
+            Ok(()) => answer,
+            // The slab handed the session back because the handle is retired.
+            // It dies here, with its answer, which is what dropping it meant.
+            Err(_) => (DEV_HANDLE, Vec::new()),
+        },
         Err(_) => {
             drop(session);
             sessions().poison(handle);
-            DEV_PANIC
+            (DEV_PANIC, Vec::new())
         }
     }
 }
@@ -286,6 +309,8 @@ mod tests {
     use dev_protocol::Config;
     use dev_protocol::Op;
     use dev_protocol::Turn;
+    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::Ordering;
 
     fn start() -> u64 {
         let mut handle = 0u64;
@@ -298,10 +323,11 @@ mod tests {
     }
 
     fn step(handle: u64, event: &Event) -> Result<Vec<Action>, i32> {
-        let bytes = dev_protocol::encode(event);
+        let bytes = dev_protocol::encode(event).expect("encode");
         let mut out = Buf::empty();
         let status = unsafe { dev_step(handle, bytes.as_ptr(), bytes.len(), &raw mut out) };
         if status != DEV_OK {
+            assert!(out.ptr.is_null(), "a refused call lent a buffer out");
             return Err(status);
         }
         let actions = dev_protocol::decode(unsafe {
@@ -313,7 +339,11 @@ mod tests {
     }
 
     fn turn(prompt: &str) -> Event {
+        // Each turn needs an id the session has not accepted before; a session
+        // refuses a redelivery, which is the point of the id.
+        static NEXT: AtomicU64 = AtomicU64::new(1);
         Event::Turn(Turn {
+            id: NEXT.fetch_add(1, Ordering::Relaxed),
             prompt: prompt.to_string(),
         })
     }
@@ -338,7 +368,8 @@ mod tests {
         let cfg = dev_protocol::encode(&Config {
             model: Some("zen5.8".to_string()),
             prelude: Some("you are a coding agent".to_string()),
-        });
+        })
+        .expect("encode");
         let mut handle = 0u64;
         assert_eq!(
             unsafe { dev_new(cfg.as_ptr(), cfg.len(), &raw mut handle) },
@@ -348,7 +379,8 @@ mod tests {
         match &actions[0].op {
             Op::Model(ask) => {
                 assert_eq!(ask.model.as_deref(), Some("zen5.8"));
-                assert_eq!(ask.messages.len(), 2);
+                assert_eq!(ask.prelude.as_deref(), Some("you are a coding agent"));
+                assert_eq!(ask.messages.len(), 1);
             }
             op => panic!("asked for {op:?}"),
         }
@@ -385,9 +417,10 @@ mod tests {
         let handle = start();
         let quiet = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
-        let status = enter(handle, |_| panic!("the loop gave up"));
+        let (status, answer) = enter(handle, |_| panic!("the loop gave up"));
         std::panic::set_hook(quiet);
         assert_eq!(status, DEV_PANIC);
+        assert!(answer.is_empty());
 
         assert_eq!(step(handle, &turn("fix the build")), Err(DEV_POISON));
         let mut out = Buf::empty();
@@ -417,7 +450,7 @@ mod tests {
     #[test]
     fn a_null_out_pointer_is_refused() {
         let handle = start();
-        let bytes = dev_protocol::encode(&turn("fix the build"));
+        let bytes = dev_protocol::encode(&turn("fix the build")).expect("encode");
         assert_eq!(
             unsafe { dev_step(handle, bytes.as_ptr(), bytes.len(), std::ptr::null_mut()) },
             DEV_NULL
@@ -459,5 +492,84 @@ mod tests {
 
         dev_drop(handle);
         dev_drop(restored);
+    }
+
+    #[test]
+    fn an_edited_snapshot_is_refused() {
+        let handle = start();
+        step(handle, &turn("fix the build")).expect("step");
+        let mut state = Buf::empty();
+        assert_eq!(unsafe { dev_snapshot(handle, &raw mut state) }, DEV_OK);
+        let mut bytes =
+            unsafe { std::slice::from_raw_parts(state.ptr.cast_const(), state.len) }.to_vec();
+        unsafe { dev_free(state) };
+        dev_drop(handle);
+
+        let body = String::from_utf8(bytes.split_off(12)).expect("a json body");
+        let forged = body.replace("\"next\":2", "\"next\":1");
+        assert_ne!(forged, body, "the snapshot no longer spells the next id");
+        bytes.extend_from_slice(forged.as_bytes());
+        let mut restored = 0u64;
+        assert_eq!(
+            unsafe { dev_restore(bytes.as_ptr(), bytes.len(), &raw mut restored) },
+            DEV_MALFORMED
+        );
+        assert_eq!(restored, 0);
+    }
+
+    /// The window `enter` opens on purpose: the lock is not held while the
+    /// session runs, so a `dev_drop` can land in the middle of a step.
+    #[test]
+    fn a_drop_during_a_step_answers_for_a_handle_that_is_gone() {
+        let handle = start();
+        let (status, answer) = enter(handle, |session| {
+            dev_drop(handle);
+            let actions = session.step(turn("fix the build"));
+            assert_eq!(actions.len(), 1, "the session did step");
+            (DEV_OK, dev_protocol::encode(&actions).expect("encode"))
+        });
+        assert_eq!(status, DEV_HANDLE, "a lost session answered OK");
+        assert!(answer.is_empty(), "actions for a session that is gone");
+        assert_eq!(step(handle, &turn("fix the build")), Err(DEV_HANDLE));
+    }
+
+    /// Two threads, one racing `dev_drop` against the other's `dev_step`, over
+    /// and over. This is the slab under contention: take, put, remove and the
+    /// free list all interleaving. It pins the answers — only [`DEV_OK`] or
+    /// [`DEV_HANDLE`], a buffer only on `DEV_OK`, a live session for anything
+    /// that claims one — and it is not what pins the lost-session fix, because
+    /// a handle is dead afterwards either way. That is
+    /// `a_drop_during_a_step_answers_for_a_handle_that_is_gone`, which times the
+    /// drop inside the window instead of racing for it.
+    #[test]
+    fn a_race_between_a_step_and_a_drop_never_reports_a_lost_session() {
+        for _ in 0..500 {
+            let handle = start();
+            let stepping = std::thread::spawn(move || step(handle, &turn("fix the build")));
+            let dropping = std::thread::spawn(move || dev_drop(handle));
+            let stepped = stepping.join().expect("stepping thread");
+            dropping.join().expect("dropping thread");
+
+            match stepped {
+                Ok(actions) => {
+                    assert_eq!(actions.len(), 1);
+                    assert!(matches!(actions[0].op, Op::Model(_)));
+                    // The step won the race, so its session must still be there
+                    // for the host to snapshot — or already dropped by the
+                    // other thread, never a slot handed to someone else.
+                    let mut out = Buf::empty();
+                    let status = unsafe { dev_snapshot(handle, &raw mut out) };
+                    assert!(
+                        status == DEV_OK || status == DEV_HANDLE,
+                        "snapshot answered {status}"
+                    );
+                    if status == DEV_OK {
+                        unsafe { dev_free(out) };
+                    }
+                }
+                Err(status) => assert_eq!(status, DEV_HANDLE, "the step answered {status}"),
+            }
+            dev_drop(handle);
+        }
     }
 }

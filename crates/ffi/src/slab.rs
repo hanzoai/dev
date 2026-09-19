@@ -1,6 +1,18 @@
 //! A generational slab: a handle names a slot and the generation it was born
 //! in, so a handle that outlives its session is refused instead of hitting
 //! whatever took the slot next.
+//!
+//! A call lifts its value out of the slot for as long as it runs ([`Slab::take`]
+//! then [`Slab::put`]), which is the window in which the handle can be retired
+//! under it. Two rules close that window:
+//!
+//! - [`Slab::remove`] keeps a slot whose value is out on loan out of the free
+//!   list, so no [`Slab::insert`] can hand the slot to a new session while the
+//!   older call is still running.
+//! - [`Slab::put`] refuses the value when the handle has been retired and hands
+//!   it back, so the caller answers for a session that no longer exists instead
+//!   of dropping its work on the floor. That is also where the slot rejoins the
+//!   free list.
 
 /// Why a handle did not resolve.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -19,6 +31,9 @@ struct Slot<T> {
     generation: u32,
     value: Option<T>,
     poisoned: bool,
+    /// Retired while its value was on loan to a running call. The slot stays
+    /// out of the free list until that call hands the value back.
+    orphan: bool,
 }
 
 pub struct Slab<T> {
@@ -54,6 +69,7 @@ impl<T> Slab<T> {
                     generation: 1,
                     value: Some(value),
                     poisoned: false,
+                    orphan: false,
                 });
                 Ok(handle(index, 1))
             }
@@ -70,19 +86,30 @@ impl<T> Slab<T> {
         slot.value.take().ok_or(Fault::Busy)
     }
 
-    /// Put the value back after the call returned.
-    pub fn put(&mut self, handle: u64, value: T) {
-        if let Ok(slot) = self.slot(handle) {
-            slot.value = Some(value);
+    /// Put the value back after the call returned, or hand it back when the
+    /// handle was retired while the call ran.
+    pub fn put(&mut self, handle: u64, value: T) -> Result<(), T> {
+        match self.slot(handle) {
+            Ok(slot) => {
+                slot.value = Some(value);
+                Ok(())
+            }
+            Err(_) => {
+                self.release(handle);
+                Err(value)
+            }
         }
     }
 
     /// Mark the slot as poisoned: the value is gone and the handle answers
     /// [`Fault::Poisoned`] until it is dropped.
     pub fn poison(&mut self, handle: u64) {
-        if let Ok(slot) = self.slot(handle) {
-            slot.value = None;
-            slot.poisoned = true;
+        match self.slot(handle) {
+            Ok(slot) => {
+                slot.value = None;
+                slot.poisoned = true;
+            }
+            Err(_) => self.release(handle),
         }
     }
 
@@ -90,16 +117,33 @@ impl<T> Slab<T> {
     pub fn remove(&mut self, handle: u64) -> Result<(), Fault> {
         let (index, _) = parts(handle);
         let slot = self.slot(handle)?;
+        let lent = slot.value.is_none() && !slot.poisoned;
         slot.value = None;
         slot.poisoned = false;
+        slot.orphan = lent;
         slot.generation = slot.generation.wrapping_add(1);
         if slot.generation == 0 {
             // Generation zero would make a handle collide with the reserved
             // zero handle; skip it.
             slot.generation = 1;
         }
-        self.free.push(index);
+        if !lent {
+            self.free.push(index);
+        }
         Ok(())
+    }
+
+    /// Return a slot that was retired mid-call to the free list, now that the
+    /// call has let go of it.
+    fn release(&mut self, handle: u64) {
+        let (index, _) = parts(handle);
+        let Some(slot) = self.slots.get_mut(index as usize) else {
+            return;
+        };
+        if slot.orphan {
+            slot.orphan = false;
+            self.free.push(index);
+        }
     }
 
     fn slot(&mut self, handle: u64) -> Result<&mut Slot<T>, Fault> {
@@ -155,5 +199,47 @@ mod tests {
         assert_eq!(slab.take(handle), Err(Fault::Poisoned));
         slab.remove(handle).expect("remove");
         assert_eq!(slab.take(handle), Err(Fault::Stale));
+    }
+
+    #[test]
+    fn a_slot_retired_mid_call_is_not_reused_until_the_call_lets_go() {
+        let mut slab: Slab<u32> = Slab::new();
+        let handle = slab.insert(7).expect("insert");
+        let lent = slab.take(handle).expect("take");
+        slab.remove(handle).expect("remove");
+
+        // The slot the running call still holds is not handed to a new session.
+        let other = slab.insert(9).expect("insert");
+        assert_ne!(parts(other).0, parts(handle).0);
+
+        // The value comes back to the caller, which is how it learns the
+        // session it stepped is gone.
+        assert_eq!(slab.put(handle, lent), Err(7));
+
+        // Only now is the slot free again, and its handles are all stale.
+        let next = slab.insert(11).expect("insert");
+        assert_eq!(parts(next).0, parts(handle).0);
+        assert_ne!(next, handle);
+        assert_eq!(slab.take(handle), Err(Fault::Stale));
+        assert_eq!(slab.take(next), Ok(11));
+        assert_eq!(slab.take(other), Ok(9));
+    }
+
+    #[test]
+    fn a_slot_retired_under_a_panicking_call_is_reused_once_and_only_once() {
+        let mut slab: Slab<u32> = Slab::new();
+        let handle = slab.insert(7).expect("insert");
+        // A panicking call drops the value where it stands and poisons after.
+        slab.take(handle).expect("take");
+        slab.remove(handle).expect("remove");
+        slab.poison(handle);
+        let next = slab.insert(11).expect("insert");
+        assert_eq!(parts(next).0, parts(handle).0);
+        // A second late arrival on the retired handle does not free the slot
+        // the new session is using.
+        slab.poison(handle);
+        assert_eq!(slab.put(handle, 13), Err(13));
+        assert_eq!(slab.insert(17).map(|h| parts(h).0), Ok(parts(next).0 + 1));
+        assert_eq!(slab.take(next), Ok(11));
     }
 }

@@ -22,7 +22,7 @@ static int failures = 0;
     }                                                                          \
   } while (0)
 
-static const char *TURN = "{\"Turn\":{\"prompt\":\"fix the build\"}}";
+static const char *TURN = "{\"Turn\":{\"id\":1,\"prompt\":\"fix the build\"}}";
 
 /* The buffer Rust lends is not terminated; copy it before reading it as text. */
 static char *text(dev_buf buf) {
@@ -56,6 +56,18 @@ int main(void) {
   }
   dev_free(actions);
 
+  /* The same turn again is a redelivery: no action, and the prompt is not
+   * asked a second time. */
+  dev_buf twice = {0};
+  CHECK(dev_step(session, (const uint8_t *)TURN, strlen(TURN), &twice) == DEV_OK);
+  shown = text(twice);
+  CHECK(shown != NULL);
+  if (shown != NULL) {
+    CHECK(strcmp(shown, "[]") == 0);
+    free(shown);
+  }
+  dev_free(twice);
+
   /* A snapshot restores into a second session that continues the sequence. */
   dev_buf state = {0};
   CHECK(dev_snapshot(session, &state) == DEV_OK);
@@ -73,16 +85,29 @@ int main(void) {
   shown = text(ended);
   CHECK(shown != NULL);
   if (shown != NULL) {
+    /* Emit, Save, then the Done that names the turn that asked. */
     CHECK(strstr(shown, "\"id\":2") != NULL);
-    CHECK(strstr(shown, "Done") != NULL);
+    CHECK(strstr(shown, "\"id\":4") != NULL);
+    CHECK(strstr(shown, "{\"Done\":{\"turn\":1,\"outcome\":\"Complete\"}}") != NULL);
     free(shown);
   }
   dev_free(ended);
   dev_drop(restored);
 
-  /* Garbage is refused, and the session survives it. */
+  /* Garbage is refused, the session survives it, and nothing is lent out. */
   dev_buf refused = {0};
   CHECK(dev_step(session, (const uint8_t *)"garbage", 7, &refused) == DEV_MALFORMED);
+  CHECK(refused.ptr == NULL);
+
+  /* A snapshot the store handed back changed is refused, not restored. */
+  dev_buf tampered = {0};
+  CHECK(dev_snapshot(session, &tampered) == DEV_OK);
+  CHECK(tampered.len > 13);
+  tampered.ptr[tampered.len - 1] ^= 0x20;
+  uint64_t forged = 0;
+  CHECK(dev_restore(tampered.ptr, tampered.len, &forged) == DEV_MALFORMED);
+  CHECK(forged == 0);
+  dev_free(tampered);
 
   /* A dropped handle names nothing. */
   dev_drop(session);

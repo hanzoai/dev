@@ -9,9 +9,14 @@
  *   - Every dev_buf handed back is a Rust allocation; release it with
  *     dev_free and never with free(3).
  *   - A session handle is opaque and generational: dev_drop retires it, and a
- *     retired handle answers DEV_HANDLE instead of naming a live session.
+ *     retired handle answers DEV_HANDLE instead of naming a live session. A
+ *     dev_drop that lands while a call on that session is running makes the
+ *     call answer DEV_HANDLE and hand back no dev_buf: there is no session
+ *     left for its answer to belong to.
  *   - A call that panics answers DEV_PANIC and poisons that session; its later
  *     calls answer DEV_POISON until dev_drop. Other sessions are untouched.
+ *   - A dev_buf is written only on DEV_OK. On any other status the out
+ *     parameter is left as the caller passed it.
  *
  * Payloads are dev-protocol messages (Config, Event, Action list, snapshot) in
  * the encoding dev_abi() names.

@@ -6,15 +6,36 @@
 //! `std::net` and no async runtime anywhere below this line, which is what lets
 //! the same core run in cloud, in a terminal, and inside wasm.
 //!
-//! Two rules make the loop replayable:
+//! # What is keyed, and what that buys
 //!
-//! - Every action gets the next id from a counter that is part of the
-//!   snapshot, so a restored session continues the sequence rather than
-//!   repeating it.
-//! - An observation is accepted only while its id is outstanding. A duplicate
-//!   delivery of the same result changes nothing and produces no action, so
-//!   at-least-once delivery of an event is not at-least-once execution of an
-//!   effect.
+//! Every action gets the next id from a counter that is part of the snapshot,
+//! so a restored session continues the sequence rather than repeating it. On
+//! top of that, each event class is keyed differently, and the difference is
+//! the whole replay story:
+//!
+//! - A **result** ([`Event::Exec`], [`Event::File`], [`Event::Git`],
+//!   [`Event::Browse`], [`Event::Model`]) is accepted only while its id is
+//!   outstanding *and* was dispatched to that family. A second delivery, or
+//!   one from the wrong family, changes nothing and produces no action — and
+//!   in particular does not consume the entry the genuine result still needs.
+//! - A **[`Event::Turn`]** carries the host's id. The core keeps the highest
+//!   it has accepted and refuses anything at or below it, so a redelivered
+//!   prompt is not run twice.
+//! - A **[`Event::Timer`]** carries no id and needs none: it asks only for
+//!   [`Op::Save`], and only when the sequence has moved since the last one, so
+//!   a redelivered timer asks for nothing.
+//! - A **[`Event::Cancel`]** is idempotent: there is one turn to stop.
+//!
+//! So at-least-once delivery of an event is at-most-once execution of an
+//! effect, for every event this protocol has.
+//!
+//! # Every accepted prompt ends in a [`Done`] that names it
+//!
+//! A prompt that arrives mid-turn is queued, and queueing answers with an
+//! [`Op::Save`] because the queue is state the host must not lose. A prompt
+//! the core refuses answers with nothing at all, so the two are distinct at
+//! the call. Whichever way the turn ends — its own answer, a chained queue, a
+//! cancel — exactly one [`Op::Done`] names the turn id that asked for it.
 //!
 //! # What upstream this does not reuse, and why
 //!
@@ -44,13 +65,15 @@ use dev_protocol::Answer;
 use dev_protocol::Ask;
 use dev_protocol::Call;
 use dev_protocol::Config;
+use dev_protocol::Dispatch;
+use dev_protocol::Done;
 use dev_protocol::Event;
 use dev_protocol::Malformed;
 use dev_protocol::Message;
 use dev_protocol::Op;
 use dev_protocol::Outcome;
 use dev_protocol::Output;
-use dev_protocol::Role;
+use dev_protocol::Turn;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -71,30 +94,29 @@ pub struct Session {
     messages: Vec<Message>,
     /// The id the next action will carry.
     next: u64,
+    /// The turn in flight, by the id the host gave it.
+    turn: Option<u64>,
+    /// The highest turn id accepted. One at or below it is a redelivery.
+    high: u64,
     /// Actions dispatched and not yet answered.
     outstanding: BTreeMap<u64, Wants>,
     /// Prompts that arrived while a turn was in flight.
-    queue: VecDeque<String>,
-    /// A turn is in flight.
-    busy: bool,
+    queue: VecDeque<Turn>,
+    /// `next` as it stood when the last [`Op::Save`] was asked for.
+    saved: u64,
 }
 
 impl Session {
     pub fn new(config: Config) -> Self {
-        let mut messages = Vec::new();
-        if let Some(prelude) = config.prelude.clone() {
-            messages.push(Message {
-                role: Role::Agent,
-                text: prelude,
-            });
-        }
         Self {
             config,
-            messages,
+            messages: Vec::new(),
             next: 1,
+            turn: None,
+            high: 0,
             outstanding: BTreeMap::new(),
             queue: VecDeque::new(),
-            busy: false,
+            saved: 1,
         }
     }
 
@@ -111,7 +133,7 @@ impl Session {
     /// Advance the machine.
     pub fn step(&mut self, event: Event) -> Vec<Action> {
         match event {
-            Event::Turn(turn) => self.turn(turn.prompt),
+            Event::Turn(turn) => self.turn(turn),
             Event::Model(answer) => self.answered(answer),
             Event::Exec(output) => self.observed(Wants::Exec, output),
             Event::File(output) => self.observed(Wants::File, output),
@@ -123,57 +145,87 @@ impl Session {
     }
 
     /// The core's own snapshot — one of the three facts a session is.
-    pub fn snapshot(&self) -> Vec<u8> {
-        dev_protocol::encode(self)
+    pub fn snapshot(&self) -> Result<Vec<u8>, Malformed> {
+        dev_protocol::pack(self)
     }
 
     /// Rebuild a session from its snapshot.
     pub fn restore(state: &[u8]) -> Result<Self, Malformed> {
-        dev_protocol::decode(state)
+        dev_protocol::unpack(state)
     }
 
-    fn turn(&mut self, prompt: String) -> Vec<Action> {
-        if self.busy {
-            self.queue.push_back(prompt);
+    fn turn(&mut self, turn: Turn) -> Vec<Action> {
+        if turn.id <= self.high {
             return Vec::new();
         }
-        self.messages.push(Message {
-            role: Role::User,
-            text: prompt,
-        });
-        self.busy = true;
+        self.high = turn.id;
+        if self.turn.is_some() {
+            self.queue.push_back(turn);
+            return vec![self.save()];
+        }
+        self.turn = Some(turn.id);
+        self.messages.push(Message::User(turn.prompt));
         vec![self.ask()]
     }
 
     fn answered(&mut self, answer: Answer) -> Vec<Action> {
-        if self.outstanding.remove(&answer.id) != Some(Wants::Model) {
+        let Some(turn) = self.turn else {
+            return Vec::new();
+        };
+        if self.outstanding.get(&answer.id) != Some(&Wants::Model) {
             return Vec::new();
         }
-        if let Some(text) = answer.reply.text.clone() {
-            self.messages.push(Message {
-                role: Role::Agent,
-                text,
-            });
-        }
+        self.outstanding.remove(&answer.id);
         if answer.reply.calls.is_empty() {
-            return self.finish(answer.reply.text);
+            if let Some(text) = answer.reply.text.clone() {
+                self.messages.push(Message::Agent {
+                    text: Some(text),
+                    calls: Vec::new(),
+                });
+            }
+            return self.finish(turn, answer.reply.text);
         }
-        answer
-            .reply
-            .calls
-            .into_iter()
-            .map(|call| self.dispatch(call))
-            .collect()
+
+        // Mint an id for every call, whether it goes out or not: the transcript
+        // records the call the model made and the answer it gets, and the two
+        // agree on the id even when the answer is a refusal.
+        let mut actions = Vec::new();
+        let mut calls = Vec::new();
+        let mut refused = Vec::new();
+        for call in answer.reply.calls {
+            let id = self.mint();
+            match call.escape() {
+                None => actions.push(self.dispatch(id, call.clone())),
+                Some(path) => refused.push(Message::Tool {
+                    id,
+                    text: format!("refused: {path} is not inside the workspace"),
+                    failed: true,
+                }),
+            }
+            calls.push(Dispatch { id, call });
+        }
+        self.messages.push(Message::Agent {
+            text: answer.reply.text,
+            calls,
+        });
+        self.messages.extend(refused);
+        if self.outstanding.is_empty() {
+            // Every call was refused, so nothing will arrive to resume the
+            // turn: tell the model now, with the refusals in the transcript.
+            actions.push(self.ask());
+        }
+        actions
     }
 
     fn observed(&mut self, wants: Wants, output: Output) -> Vec<Action> {
-        if self.outstanding.remove(&output.id) != Some(wants) {
+        if self.outstanding.get(&output.id) != Some(&wants) {
             return Vec::new();
         }
-        let mark = if output.failed { "failed" } else { "ok" };
-        self.messages.push(Message {
-            role: Role::Tool,
-            text: format!("{} {mark}: {}", output.id, output.text),
+        self.outstanding.remove(&output.id);
+        self.messages.push(Message::Tool {
+            id: output.id,
+            text: output.text,
+            failed: output.failed,
         });
         if self.outstanding.is_empty() {
             vec![self.ask()]
@@ -183,45 +235,41 @@ impl Session {
     }
 
     fn tick(&mut self) -> Vec<Action> {
-        if self.busy {
-            vec![self.action(Op::Save)]
+        if self.turn.is_some() && self.next != self.saved {
+            vec![self.save()]
         } else {
             Vec::new()
         }
     }
 
     fn cancel(&mut self) -> Vec<Action> {
-        if !self.busy {
+        let Some(turn) = self.turn.take() else {
             return Vec::new();
-        }
+        };
         self.outstanding.clear();
-        self.queue.clear();
-        self.busy = false;
-        vec![
-            self.action(Op::Save),
-            self.action(Op::Done(Outcome::Cancelled)),
-        ]
+        let dropped: Vec<u64> = self.queue.drain(..).map(|turn| turn.id).collect();
+        let mut actions = vec![self.save(), self.done(turn, Outcome::Cancelled)];
+        for queued in dropped {
+            actions.push(self.done(queued, Outcome::Cancelled));
+        }
+        actions
     }
 
-    /// End the turn, or start the next queued prompt instead.
-    fn finish(&mut self, text: Option<String>) -> Vec<Action> {
+    /// End the turn, then start the next queued prompt if there is one.
+    fn finish(&mut self, turn: u64, text: Option<String>) -> Vec<Action> {
         let mut actions = Vec::new();
         if let Some(text) = text {
             actions.push(self.action(Op::Emit(text)));
         }
-        actions.push(self.action(Op::Save));
+        actions.push(self.save());
+        actions.push(self.done(turn, Outcome::Complete));
         match self.queue.pop_front() {
-            Some(prompt) => {
-                self.messages.push(Message {
-                    role: Role::User,
-                    text: prompt,
-                });
+            Some(next) => {
+                self.turn = Some(next.id);
+                self.messages.push(Message::User(next.prompt));
                 actions.push(self.ask());
             }
-            None => {
-                self.busy = false;
-                actions.push(self.action(Op::Done(Outcome::Complete)));
-            }
+            None => self.turn = None,
         }
         actions
     }
@@ -229,6 +277,7 @@ impl Session {
     fn ask(&mut self) -> Action {
         let op = Op::Model(Ask {
             model: self.config.model.clone(),
+            prelude: self.config.prelude.clone(),
             messages: self.messages.clone(),
         });
         let action = self.action(op);
@@ -236,7 +285,7 @@ impl Session {
         action
     }
 
-    fn dispatch(&mut self, call: Call) -> Action {
+    fn dispatch(&mut self, id: u64, call: Call) -> Action {
         let (op, wants) = match call {
             Call::Read(read) => (Op::Read(read), Wants::File),
             Call::Write(write) => (Op::Write(write), Wants::File),
@@ -245,14 +294,30 @@ impl Session {
             Call::Git(git) => (Op::Git(git), Wants::Git),
             Call::Browse(browse) => (Op::Browse(browse), Wants::Browse),
         };
-        let action = self.action(op);
-        self.outstanding.insert(action.id, wants);
+        self.outstanding.insert(id, wants);
+        Action { id, op }
+    }
+
+    fn save(&mut self) -> Action {
+        let action = self.action(Op::Save);
+        self.saved = self.next;
         action
     }
 
+    fn done(&mut self, turn: u64, outcome: Outcome) -> Action {
+        self.action(Op::Done(Done { turn, outcome }))
+    }
+
     fn action(&mut self, op: Op) -> Action {
+        Action {
+            id: self.mint(),
+            op,
+        }
+    }
+
+    fn mint(&mut self) -> u64 {
         let id = self.next;
         self.next += 1;
-        Action { id, op }
+        id
     }
 }
