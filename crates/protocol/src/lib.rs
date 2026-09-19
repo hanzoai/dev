@@ -7,7 +7,8 @@
 //! under it and replay a result instead of repeating an effect. A [`Turn`]
 //! carries the host's own id for the same reason, in the other direction: the
 //! core refuses a turn it has already accepted, and names that id in the
-//! [`Done`] that ends it.
+//! [`Done`] that ends it. A [`Cancel`] names the turn it stops by that id, so
+//! one delivered twice cannot stop the turn that came after.
 //!
 //! # Encoding
 //!
@@ -182,8 +183,8 @@ pub enum Event {
     Browse(Output),
     /// Time passed; a long turn should checkpoint.
     Timer,
-    /// Stop this turn.
-    Cancel,
+    /// Stop the turn this names.
+    Cancel(Cancel),
 }
 
 /// What the core asks the host to do.
@@ -220,6 +221,16 @@ pub enum Op {
 pub struct Turn {
     pub id: u64,
     pub prompt: String,
+}
+
+/// The turn to stop, by the id its [`Turn`] carried.
+///
+/// The core acts on a cancel only while the turn it names is in flight or
+/// queued. An id is accepted once, so a redelivered cancel names a turn that is
+/// already over and stops nothing — least of all the turn that came after.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Cancel {
+    pub turn: u64,
 }
 
 /// The end of the turn `turn` asked for.
@@ -397,6 +408,13 @@ mod tests {
         let back: Action = decode(&encode(&action).expect("encode")).expect("decode");
         assert_eq!(back.id, 7821);
         assert_eq!(action, back);
+    }
+
+    #[test]
+    fn a_cancel_round_trips_with_the_turn_it_names() {
+        let cancel = Event::Cancel(Cancel { turn: 7 });
+        let back: Event = decode(&encode(&cancel).expect("encode")).expect("decode");
+        assert_eq!(cancel, back);
     }
 
     #[test]

@@ -24,7 +24,10 @@
 //! - A **[`Event::Timer`]** carries no id and needs none: it asks only for
 //!   [`Op::Save`], and only when the sequence has moved since the last one, so
 //!   a redelivered timer asks for nothing.
-//! - A **[`Event::Cancel`]** is idempotent: there is one turn to stop.
+//! - A **[`Event::Cancel`]** names the turn it stops, by the id that turn
+//!   arrived under. It is acted on only while that turn is in flight or queued,
+//!   and an id is accepted once, so a redelivered cancel finds nothing under
+//!   its id — it cannot reach the turn that came after.
 //!
 //! So at-least-once delivery of an event is at-most-once execution of an
 //! effect, for every event this protocol has.
@@ -140,7 +143,7 @@ impl Session {
             Event::Git(output) => self.observed(Wants::Git, output),
             Event::Browse(output) => self.observed(Wants::Browse, output),
             Event::Timer => self.tick(),
-            Event::Cancel => self.cancel(),
+            Event::Cancel(cancel) => self.cancel(cancel.turn),
         }
     }
 
@@ -242,15 +245,25 @@ impl Session {
         }
     }
 
-    fn cancel(&mut self) -> Vec<Action> {
-        let Some(turn) = self.turn.take() else {
+    /// Stop the turn `turn` names. The one in flight takes the queue behind it
+    /// along — a stop that started the next prompt would not be one — while a
+    /// queued one goes alone and the rest keep their place. Any other id is a
+    /// turn already over or never accepted, and changes nothing.
+    fn cancel(&mut self, turn: u64) -> Vec<Action> {
+        let ended: Vec<u64> = if self.turn == Some(turn) {
+            self.turn = None;
+            self.outstanding.clear();
+            let queued = self.queue.drain(..).map(|queued| queued.id);
+            std::iter::once(turn).chain(queued).collect()
+        } else if let Some(at) = self.queue.iter().position(|queued| queued.id == turn) {
+            self.queue.remove(at);
+            vec![turn]
+        } else {
             return Vec::new();
         };
-        self.outstanding.clear();
-        let dropped: Vec<u64> = self.queue.drain(..).map(|turn| turn.id).collect();
-        let mut actions = vec![self.save(), self.done(turn, Outcome::Cancelled)];
-        for queued in dropped {
-            actions.push(self.done(queued, Outcome::Cancelled));
+        let mut actions = vec![self.save()];
+        for turn in ended {
+            actions.push(self.done(turn, Outcome::Cancelled));
         }
         actions
     }

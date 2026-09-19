@@ -1,5 +1,5 @@
 /* The ABI, exercised the way the Go host will exercise it: a session, a turn,
- * a snapshot, a restore, and a handle that has been dropped.
+ * a snapshot, a restore, a cancel, and a handle that has been dropped.
  *
  * The event and the expected substrings below are in the protocol's current
  * encoding (dev-protocol `encode`). When that encoding changes, this fixture
@@ -108,6 +108,28 @@ int main(void) {
   CHECK(dev_restore(tampered.ptr, tampered.len, &forged) == DEV_MALFORMED);
   CHECK(forged == 0);
   dev_free(tampered);
+
+  /* A cancel names the turn it stops, so the same one delivered again stops
+   * nothing. */
+  const char *cancel = "{\"Cancel\":{\"turn\":1}}";
+  dev_buf stopped = {0};
+  CHECK(dev_step(session, (const uint8_t *)cancel, strlen(cancel), &stopped) == DEV_OK);
+  shown = text(stopped);
+  CHECK(shown != NULL);
+  if (shown != NULL) {
+    CHECK(strstr(shown, "{\"Done\":{\"turn\":1,\"outcome\":\"Cancelled\"}}") != NULL);
+    free(shown);
+  }
+  dev_free(stopped);
+  dev_buf again = {0};
+  CHECK(dev_step(session, (const uint8_t *)cancel, strlen(cancel), &again) == DEV_OK);
+  shown = text(again);
+  CHECK(shown != NULL);
+  if (shown != NULL) {
+    CHECK(strcmp(shown, "[]") == 0);
+    free(shown);
+  }
+  dev_free(again);
 
   /* A dropped handle names nothing. */
   dev_drop(session);

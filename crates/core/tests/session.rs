@@ -5,6 +5,7 @@ use dev_protocol::Action;
 use dev_protocol::Answer;
 use dev_protocol::Ask;
 use dev_protocol::Call;
+use dev_protocol::Cancel;
 use dev_protocol::Config;
 use dev_protocol::Dispatch;
 use dev_protocol::Done;
@@ -23,6 +24,10 @@ fn turn(id: u64, prompt: &str) -> Event {
         id,
         prompt: prompt.to_string(),
     })
+}
+
+fn cancel(turn: u64) -> Event {
+    Event::Cancel(Cancel { turn })
 }
 
 fn tools(calls: Vec<Call>, id: u64) -> Event {
@@ -177,11 +182,11 @@ fn cancel_ends_the_turn_and_drops_what_was_outstanding() {
     session.step(turn(1, "fix the build"));
     session.step(tools(vec![test()], 1));
 
-    let stopped = session.step(Event::Cancel);
+    let stopped = session.step(cancel(1));
     assert_eq!(ops(&stopped), vec![&Op::Save, &done(1, Outcome::Cancelled)]);
     // A result for the cancelled effect is no longer outstanding.
     assert!(session.step(Event::Exec(result(2, "ok"))).is_empty());
-    assert!(session.step(Event::Cancel).is_empty());
+    assert!(session.step(cancel(1)).is_empty());
 }
 
 #[test]
@@ -389,7 +394,7 @@ fn a_cancel_says_what_became_of_every_prompt_it_discards() {
     session.step(turn(2, "second"));
     session.step(turn(3, "third"));
 
-    let stopped = session.step(Event::Cancel);
+    let stopped = session.step(cancel(1));
     assert_eq!(
         ops(&stopped),
         vec![
@@ -399,6 +404,72 @@ fn a_cancel_says_what_became_of_every_prompt_it_discards() {
             &done(3, Outcome::Cancelled),
         ]
     );
+}
+
+#[test]
+fn a_redelivered_cancel_does_not_stop_the_turn_that_came_after() {
+    let mut session = Session::new(Config::default());
+    session.step(turn(1, "first"));
+    let stopped = session.step(cancel(1));
+    assert_eq!(ops(&stopped), vec![&Op::Save, &done(1, Outcome::Cancelled)]);
+
+    // A new turn nobody cancelled, and then the transport delivers the first
+    // cancel again. It names turn 1, which is over.
+    let opened = session.step(turn(2, "second"));
+    assert!(session.step(cancel(1)).is_empty());
+
+    // Turn 2 is still in flight: its answer lands and it ends the ordinary way.
+    let ended = session.step(says("second done", opened[0].id));
+    assert_eq!(
+        ended.last().map(|a| &a.op),
+        Some(&done(2, Outcome::Complete))
+    );
+}
+
+#[test]
+fn a_cancel_of_a_queued_prompt_takes_that_prompt_and_no_other() {
+    let mut session = Session::new(Config::default());
+    let opened = session.step(turn(1, "first"));
+    session.step(turn(2, "second"));
+    session.step(turn(3, "third"));
+
+    // The queue changed, so it is saved, and the prompt gets its own Done.
+    let removed = session.step(cancel(2));
+    assert_eq!(ops(&removed), vec![&Op::Save, &done(2, Outcome::Cancelled)]);
+    assert!(session.step(cancel(2)).is_empty());
+
+    // Turn 1 never noticed, and turn 3 is what it chains into.
+    let chained = session.step(says("first done", opened[0].id));
+    assert_eq!(chained[2].op, done(1, Outcome::Complete));
+    assert_eq!(
+        asked(&chained[3]).messages.last(),
+        Some(&Message::User("third".to_string()))
+    );
+}
+
+#[test]
+fn a_cancel_that_names_no_live_turn_changes_nothing() {
+    let mut session = Session::new(Config::default());
+    // Nothing is in flight, so there is nothing to name.
+    assert!(session.step(cancel(1)).is_empty());
+
+    let opened = session.step(turn(1, "fix the build"));
+    session.step(tools(vec![test()], opened[0].id));
+    // Neither a turn the core has not been given nor id zero reaches turn 1...
+    assert!(session.step(cancel(2)).is_empty());
+    assert!(session.step(cancel(0)).is_empty());
+    // ...whose effect is still outstanding and still resumes it.
+    let again = session.step(Event::Exec(result(2, "ok")));
+    assert_eq!(again.len(), 1);
+    assert!(matches!(again[0].op, Op::Model(_)));
+
+    // And a cancel that arrived ahead of its turn did not spend that id.
+    let ended = session.step(says("built", again[0].id));
+    assert_eq!(
+        ended.last().map(|a| &a.op),
+        Some(&done(1, Outcome::Complete))
+    );
+    assert_eq!(session.step(turn(2, "and again")).len(), 1);
 }
 
 #[test]
