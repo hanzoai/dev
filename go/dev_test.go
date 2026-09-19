@@ -297,6 +297,8 @@ func TestADamagedSnapshotIsMalformed(t *testing.T) {
 	})
 }
 
+// Close closes the session's instance, so the memory it held goes back, and
+// every call after answers ErrHandle.
 func TestAClosedSessionAnswersErrHandle(t *testing.T) {
 	ctx := t.Context()
 	s, err := core(t).New(ctx, Config{})
@@ -304,8 +306,12 @@ func TestAClosedSessionAnswersErrHandle(t *testing.T) {
 		t.Fatal(err)
 	}
 	step(t, s, turn(1, "fix the build"))
+	inst := s.inst
 	if err := s.Close(ctx); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := inst.Call(ctx, "dev_abi"); err == nil {
+		t.Error("the instance still answers after Close")
 	}
 	if _, err := s.Step(ctx, turn(2, "fix the build")); !errors.Is(err, ErrHandle) {
 		t.Errorf("a step after Close answered %v", err)
@@ -613,10 +619,9 @@ func TestTenThousandStepsDoNotGrowMemory(t *testing.T) {
 	}
 }
 
-// A refused call gives back what it borrowed too. The core refusing an event
-// it cannot read, and the host refusing an answer it was handed, each release
-// the event's loan and free the answer, so a thousand of each leave the
-// instance's memory as large as it was.
+// An event the core refuses gives back what it borrowed too: its loan is
+// released, so a thousand of them leave the instance's memory as large as it
+// was.
 func TestRefusedCallsDoNotGrowMemory(t *testing.T) {
 	ctx := t.Context()
 	s := session(t, core(t), Config{})
@@ -624,11 +629,6 @@ func TestRefusedCallsDoNotGrowMemory(t *testing.T) {
 	step(t, s, turn(1, prompt))
 
 	unreadable := []byte(`{"Turn":{"id":2,"prompt":"` + prompt + `"}`)
-	again, err := json.Marshal(turn(1, prompt))
-	if err != nil {
-		t.Fatal(err)
-	}
-	refused := errors.New("the host refuses the answer")
 	refuse := func() {
 		t.Helper()
 		err := s.step(ctx, unreadable, func(out []byte) error {
@@ -637,11 +637,6 @@ func TestRefusedCallsDoNotGrowMemory(t *testing.T) {
 		})
 		if !errors.Is(err, ErrMalformed) {
 			t.Fatalf("an event the core cannot read answered %v", err)
-		}
-		// The core answers a redelivered turn with no actions, and the host
-		// refuses even that.
-		if err := s.step(ctx, again, func([]byte) error { return refused }); !errors.Is(err, refused) {
-			t.Fatalf("an answer the host refused answered %v", err)
 		}
 	}
 	for range 10 {
@@ -652,8 +647,112 @@ func TestRefusedCallsDoNotGrowMemory(t *testing.T) {
 		refuse()
 	}
 	if after := s.inst.Memory().Size(); after != before {
-		t.Errorf("2,000 refusals grew memory from %d to %d bytes", before, after)
+		t.Errorf("1,000 refusals grew memory from %d to %d bytes", before, after)
 	}
+}
+
+// A core built from types this package does not have answers, once it has
+// taken the event, with what Step cannot read. What it asked for is lost to
+// the host, so the session ends there: no actions, ErrHandle rather than the
+// ErrMalformed that says nothing changed, and ErrHandle for every call after.
+func TestAnAnswerStepCannotReadEndsTheSession(t *testing.T) {
+	ctx := t.Context()
+	// A stand-in for such a core, whose every step answers with an action
+	// carrying a member Action does not have:
+	//
+	//	(module
+	//	  (memory (export "memory") 1)
+	//	  (data (i32.const 1024) "[{\"id\":1,\"op\":\"Save\",\"note\":null}]")
+	//	  (func (export "dev_abi") (result i32) i32.const 1)
+	//	  (func (export "dev_alloc") (param i32) (result i32) i32.const 2048)
+	//	  (func (export "dev_release") (param i32 i32))
+	//	  (func (export "dev_new") (param i32 i32 i32) (result i32) i32.const 0)
+	//	  (func (export "dev_step") (param i64 i32 i32 i32) (result i32)
+	//	    (i32.store (local.get 3) (i32.const 1024))
+	//	    (i32.store offset=4 (local.get 3) (i32.const 34))
+	//	    i32.const 0)
+	//	  (func (export "dev_free") (param i32)))
+	ahead := append([]byte{
+		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+		0x01, 0x22, 0x06,
+		0x60, 0x00, 0x01, 0x7f,
+		0x60, 0x01, 0x7f, 0x01, 0x7f,
+		0x60, 0x02, 0x7f, 0x7f, 0x00,
+		0x60, 0x03, 0x7f, 0x7f, 0x7f, 0x01, 0x7f,
+		0x60, 0x04, 0x7e, 0x7f, 0x7f, 0x7f, 0x01, 0x7f,
+		0x60, 0x01, 0x7f, 0x00,
+		0x03, 0x07, 0x06, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05,
+		0x05, 0x03, 0x01, 0x00, 0x01,
+		0x07, 0x4e, 0x07,
+		0x06, 'm', 'e', 'm', 'o', 'r', 'y', 0x02, 0x00,
+		0x07, 'd', 'e', 'v', '_', 'a', 'b', 'i', 0x00, 0x00,
+		0x09, 'd', 'e', 'v', '_', 'a', 'l', 'l', 'o', 'c', 0x00, 0x01,
+		0x0b, 'd', 'e', 'v', '_', 'r', 'e', 'l', 'e', 'a', 's', 'e', 0x00, 0x02,
+		0x07, 'd', 'e', 'v', '_', 'n', 'e', 'w', 0x00, 0x03,
+		0x08, 'd', 'e', 'v', '_', 's', 't', 'e', 'p', 0x00, 0x04,
+		0x08, 'd', 'e', 'v', '_', 'f', 'r', 'e', 'e', 0x00, 0x05,
+		0x0a, 0x2b, 0x06,
+		0x04, 0x00, 0x41, 0x01, 0x0b,
+		0x05, 0x00, 0x41, 0x80, 0x10, 0x0b,
+		0x02, 0x00, 0x0b,
+		0x04, 0x00, 0x41, 0x00, 0x0b,
+		0x13, 0x00, 0x20, 0x03, 0x41, 0x80, 0x08, 0x36, 0x02, 0x00, 0x20, 0x03, 0x41, 0x22, 0x36, 0x02, 0x04, 0x41, 0x00, 0x0b,
+		0x02, 0x00, 0x0b,
+		0x0b, 0x29, 0x01, 0x00, 0x41, 0x80, 0x08, 0x0b, 0x22,
+	}, `[{"id":1,"op":"Save","note":null}]`...)
+	c, err := open(ctx, ahead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close(ctx)
+	s, err := c.New(ctx, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close(ctx)
+
+	actions, err := s.Step(ctx, turn(1, "fix the build"))
+	if actions != nil || !errors.Is(err, ErrHandle) || errors.Is(err, ErrMalformed) {
+		t.Errorf("an answer Step cannot read answered %#v, %v", actions, err)
+	}
+	for range 2 {
+		if actions, err := s.Step(ctx, Event{Timer: true}); actions != nil || !errors.Is(err, ErrHandle) {
+			t.Errorf("a step after it answered %#v, %v", actions, err)
+		}
+	}
+}
+
+// Any answer the host does not take leaves the core ahead of it, and ends the
+// session. The snapshot from before the event carries it on: stepped again
+// there, the event asks for what the answer that was lost did.
+func TestAnAnswerTheHostDoesNotTakeEndsTheSession(t *testing.T) {
+	ctx := t.Context()
+	c := core(t)
+	s := session(t, c, Config{})
+	state, err := s.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := json.Marshal(turn(1, "fix the build"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := errors.New("the host refuses the answer")
+	if err := s.step(ctx, in, func([]byte) error { return refused }); !errors.Is(err, ErrHandle) || !errors.Is(err, refused) {
+		t.Fatalf("an answer the host refused answered %v", err)
+	}
+	if actions, err := s.Step(ctx, turn(1, "fix the build")); !errors.Is(err, ErrHandle) {
+		t.Errorf("the turn stepped again answered %s, %v", show(actions), err)
+	}
+
+	restored, err := c.Restore(ctx, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close(ctx)
+	same(t, "the turn in the restored session", step(t, restored, turn(1, "fix the build")), []Action{
+		{ID: 1, Op: Op{Model: &Ask{Messages: []Message{{User: new("fix the build")}}}}},
+	})
 }
 
 // A core that is refused memory it needs traps. The trap is its session's

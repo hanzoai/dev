@@ -106,7 +106,8 @@ func (c *Core) speaks(ctx context.Context) error {
 }
 
 // Close releases the runtime. A Session started from it has nothing left to
-// run in, and answers ErrHandle from then on.
+// run in, and answers ErrHandle from then on, or ErrPoison if it had already
+// trapped.
 func (c *Core) Close(ctx context.Context) error {
 	return c.engine.Close(ctx)
 }
@@ -149,6 +150,13 @@ func (c *Core) start(ctx context.Context, name string, in []byte) (*Session, err
 // isolation. What a session does to its memory, a panic included, reaches no
 // other.
 //
+// That memory is capped at 64 MiB, and every ask and every Snapshot copies
+// the whole conversation several times over while it runs. So a session holds
+// about 14 MiB of conversation, and about 8 MiB in any one event; a call past
+// that traps, and answers ErrPanic. A session restored from its snapshot holds
+// the same conversation and meets the same wall, so start a new session
+// before one reaches it.
+//
 // A Session is not safe for concurrent use. It runs one call at a time and
 // does not queue: a call that arrives while another is running answers
 // ErrBusy, as DEV_BUSY does in C, and never reaches the instance.
@@ -165,31 +173,38 @@ type Session struct {
 	// instance: the handle is written there, then every dev_buf after it.
 	out  uint32
 	busy atomic.Bool
-	// gone is what every call answers once the instance can answer no more:
-	// ErrHandle once it is closed, ErrPoison once it has trapped.
+	// gone is what every call answers once the session can go no further:
+	// ErrHandle once its instance is closed or an answer was lost, ErrPoison
+	// once it has trapped.
 	gone error
 }
 
 // Step feeds the core one event and returns the actions it answers with, in
 // the order it asks for them. An event it cannot read answers ErrMalformed
 // and changes nothing.
+//
+// An answer this package cannot read is another matter: the core has taken
+// the event by then, and what it asked for is lost to the host. That ends the
+// session, as an ended context does: ErrHandle, and ErrHandle for every call
+// after. Restore the last Snapshot and step the event again. A Step that
+// answers an error answers no actions.
 func (s *Session) Step(ctx context.Context, event Event) ([]Action, error) {
 	in, err := json.Marshal(event)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
 	}
 	var actions []Action
-	err = s.step(ctx, in, func(out []byte) error {
-		if err := json.Unmarshal(out, &actions, json.RejectUnknownMembers(true)); err != nil {
-			return fmt.Errorf("%w: the core's answer: %v", ErrMalformed, err)
-		}
-		return nil
-	})
-	return actions, err
+	if err := s.step(ctx, in, func(out []byte) error {
+		return json.Unmarshal(out, &actions, json.RejectUnknownMembers(true))
+	}); err != nil {
+		return nil, err
+	}
+	return actions, nil
 }
 
 // step is Step on encoded bytes: use reads the encoded answer before it goes
-// back to the core.
+// back to the core. The core has taken the event when use runs, so an answer
+// use refuses leaves the session ahead of its host, and ends it.
 func (s *Session) step(ctx context.Context, in []byte, use func([]byte) error) error {
 	if err := s.enter(); err != nil {
 		return err
@@ -199,7 +214,14 @@ func (s *Session) step(ctx context.Context, in []byte, use func([]byte) error) e
 		if err := status(s.call(ctx, "dev_step", s.handle, uint64(ptr), uint64(len(in)), uint64(s.out))); err != nil {
 			return err
 		}
-		return s.take(ctx, use)
+		return s.take(ctx, func(out []byte) error {
+			err := use(out)
+			if err != nil {
+				s.gone = ErrHandle
+				err = fmt.Errorf("%w: the core took the event, and its answer was not read; restore the last snapshot: %w", ErrHandle, err)
+			}
+			return err
+		})
 	})
 }
 
@@ -271,7 +293,9 @@ func (s *Session) leave() {
 	s.busy.Store(false)
 }
 
-// call runs one export and answers with its first result.
+// call runs one export and answers with its first result. A gone session
+// runs nothing and answers gone, so a loan or an answer it would have given
+// back goes with the instance instead.
 func (s *Session) call(ctx context.Context, name string, args ...uint64) (uint64, error) {
 	if s.gone != nil {
 		return 0, s.gone

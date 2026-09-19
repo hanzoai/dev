@@ -29,7 +29,9 @@ A call runs under its `ctx`, and each call into the instance under the 5s
 hanzoai/wasm allows one. A call either one ends stops where it stands and ends
 its session: it answers `ErrHandle`, which matches `context.Canceled` or
 `context.DeadlineExceeded` too, and every call after it answers `ErrHandle`.
-Restore the last snapshot to carry on.
+Restore the last snapshot to carry on. An answer from the core that the package
+cannot read ends the session the same way, since the core has already taken the
+event. A `Step` that answers an error answers no actions.
 
 The statuses of `crates/ffi/include/dev.h` are errors to match with
 `errors.Is`: `ErrHandle`, `ErrMalformed`, `ErrPoison`, `ErrPanic`, `ErrNull`,
@@ -50,8 +52,8 @@ refused as `ErrMalformed` before the core sees it.
 
 Reading one refuses what serde refuses of a union: a name it does not have, two
 names, `null` for a variant's value, or no union at all where a struct holds
-one. Any other member that is missing reads as its zero value, which serde
-refuses unless the member is an `Option`.
+one. Any other member that is missing, or `null`, reads as its zero value,
+which serde refuses unless the member is an `Option`.
 
 Text crosses as UTF-8. A host that has read bytes that are not UTF-8 must turn
 them into text before it steps with them.
@@ -132,4 +134,8 @@ randomness, and a test checks that list. `dev.wasm.sum` is the sha256 of every
 file `make wasm` built it from, and of the module itself. CI runs
 `make wasm-check`, which fails when the tree no longer matches it.
 
-Each session gets at most 64 MiB of memory.
+Each session gets at most 64 MiB of memory. Every ask and every snapshot copies
+the conversation several times over, so a session holds about 14 MiB of
+conversation, and about 8 MiB in any one event. A call past that traps with
+`ErrPanic`, and a session restored from its snapshot meets the same wall: start
+a new session before one reaches it.

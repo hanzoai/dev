@@ -20,8 +20,8 @@ import (
 //
 // Read, a union is refused where serde would refuse it: a name it does not
 // have, two names, null for a variant's value, or no union at all where a
-// struct holds one. Any other member that is missing reads as its zero value,
-// which serde refuses unless the member is an Option.
+// struct holds one. Any other member that is missing, or null, reads as its
+// zero value, which serde refuses unless the member is an Option.
 
 // Config is what a session is born with.
 type Config struct {
