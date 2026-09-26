@@ -226,5 +226,47 @@
     "old": "JSON value from `codex/sandbox-state-meta` to apply directly",
     "new": "JSON value from the MCP sandbox state capability to apply directly",
     "count": 1
+  },
+  {
+    "file": "core/Cargo.toml",
+    "old": "[dependencies]",
+    "new": "[dependencies]\nhanzo-loop = { path = \"../../../../crates/hanzo-loop\" }",
+    "count": 1
+  },
+  {
+    "file": "core/src/session/turn.rs",
+    "old": "    Ok(Arc::new(build_tool_router(\n",
+    "new": "    // Hanzo: the thread's controller shortlists this step's MCP tools.\n    if let Some(handle) = sess\n        .services\n        .thread_extension_data\n        .get::<hanzo_loop::Handle>()\n    {\n        let cards = all_mcp_tools\n            .iter()\n            .map(|tool| hanzo_loop::Card {\n                name: tool.canonical_tool_name().to_string(),\n                description: tool.tool.description.as_deref().unwrap_or_default().to_string(),\n            })\n            .collect();\n        if let Some(shortlist) = handle.tools(&turn_context.sub_id, cards).await {\n            step_store.insert(shortlist);\n        }\n    }\n    Ok(Arc::new(build_tool_router(\n",
+    "count": 1
+  },
+  {
+    "file": "core/src/tools/spec_plan.rs",
+    "old": "        apply_mcp_tool_exposure_policy(\n            turn_context,\n            model_info,\n            mcp,\n            &registered_mcp_tools,\n            &mut registry,\n        );\n",
+    "new": "        apply_mcp_tool_exposure_policy(\n            turn_context,\n            model_info,\n            mcp,\n            &registered_mcp_tools,\n            &mut registry,\n        );\n        // Hanzo: MCP tools off the controller's shortlist leave direct view; tool search\n        // still finds them when the model supports it.\n        if let Some(shortlist) = step_store.get::<hanzo_loop::Shortlist>() {\n            let search = search_tool_enabled(turn_context, model_info);\n            for tool in registry.entries_mut() {\n                let name = tool.runtime.tool_name();\n                if !registered_mcp_tools.contains(&name) || shortlist.keeps(&name.to_string()) {\n                    continue;\n                }\n                tool.exposure = match (tool.exposure, search) {\n                    (ToolExposure::Direct, true) => ToolExposure::Deferred,\n                    (ToolExposure::DirectModelOnly, true) => ToolExposure::DeferredModelOnly,\n                    (exposure, _) if exposure.is_direct() => ToolExposure::Hidden,\n                    (exposure, _) => exposure,\n                };\n            }\n        }\n",
+    "count": 1
+  },
+  {
+    "file": "core/src/tools/orchestrator.rs",
+    "old": "        let requirement = tool.exec_approval_requirement(req).unwrap_or_else(|| {\n            default_exec_approval_requirement(approval_policy, &file_system_sandbox_policy)\n        });\n",
+    "new": "        let requirement = tool.exec_approval_requirement(req).unwrap_or_else(|| {\n            default_exec_approval_requirement(approval_policy, &file_system_sandbox_policy)\n        });\n        // Hanzo: the thread's controller joins the policy on allow < ask < deny; it never\n        // loosens it.\n        let requirement = match tool_ctx\n            .session\n            .services\n            .thread_extension_data\n            .get::<hanzo_loop::Handle>()\n        {\n            None => requirement,\n            Some(handle) => {\n                let policy = match &requirement {\n                    ExecApprovalRequirement::Skip { .. } => hanzo_loop::Verdict::Allow,\n                    ExecApprovalRequirement::NeedsApproval { .. } => hanzo_loop::Verdict::Ask,\n                    ExecApprovalRequirement::Forbidden { .. } => hanzo_loop::Verdict::Deny,\n                };\n                let action = tool\n                    .approval_action(req, &tool_ctx.call_id)\n                    .ok()\n                    .and_then(|action| serde_json::to_value(action).ok())\n                    .unwrap_or_default();\n                let turn = &tool_ctx.step_context.turn.sub_id;\n                match handle.command(turn, &tool_ctx.call_id, policy, action).await {\n                    verdict if verdict == policy => requirement,\n                    hanzo_loop::Verdict::Deny => ExecApprovalRequirement::Forbidden {\n                        reason: \"Kai refused this command.\".to_string(),\n                    },\n                    _ => ExecApprovalRequirement::NeedsApproval {\n                        reason: Some(\"Kai asks before this command runs.\".to_string()),\n                        proposed_execpolicy_amendment: None,\n                    },\n                }\n            }\n        };\n",
+    "count": 1
+  },
+  {
+    "file": "core/src/session/turn.rs",
+    "old": "    let user_input = turn_user_input(&input);\n",
+    "new": "    let user_input = turn_user_input(&input);\n    // Hanzo: the thread's controller adds routing hints to the turn's request metadata.\n    if let Some(handle) = sess\n        .services\n        .thread_extension_data\n        .get::<hanzo_loop::Handle>()\n    {\n        let request = hanzo_loop::Request {\n            text: user_input\n                .iter()\n                .filter_map(|item| match item {\n                    UserInput::Text { text, .. } => Some(text.as_str()),\n                    _ => None,\n                })\n                .collect::<Vec<_>>()\n                .join(\"\\n\"),\n            images: user_input\n                .iter()\n                .any(|item| matches!(item, UserInput::Image { .. } | UserInput::LocalImage { .. })),\n        };\n        let hints = handle.route(&turn_context.sub_id, request).await;\n        if !hints.is_empty() {\n            let mut metadata = turn_context.config.responses_api_metadata.clone();\n            metadata.extend(hints);\n            turn_context\n                .turn_metadata_state\n                .set_responses_api_metadata(metadata);\n        }\n    }\n",
+    "count": 1
+  },
+  {
+    "file": "app-server/Cargo.toml",
+    "old": "[dependencies]",
+    "new": "[dependencies]\nhanzo-kai = { path = \"../../../../crates/hanzo-kai\" }",
+    "count": 1
+  },
+  {
+    "file": "app-server/src/extensions.rs",
+    "old": "    codex_guardian_v2::install(\n        &mut builder,",
+    "new": "    // Hanzo: Kai decides in the loop; it runs only for a profile with a kai.toml.\n    hanzo_kai::install(&mut builder, thread_manager.clone());\n    codex_guardian_v2::install(\n        &mut builder,",
+    "count": 1
   }
 ]

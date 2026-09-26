@@ -4,6 +4,7 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
+pub mod kai;
 mod provider;
 pub use provider::activate_provider;
 pub use provider::clear_hanzo_api_key;

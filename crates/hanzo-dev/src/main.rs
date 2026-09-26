@@ -113,6 +113,9 @@ enum Command {
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     App(codex_cli::app_cmd::AppCommand),
 
+    /// Run a flow: a Decision Program over this repository, its steps tools, Kai or Zen.
+    Flow(Flow),
+
     /// Run a command inside the agent sandbox.
     Sandbox(HostSandboxArgs),
 
@@ -131,6 +134,43 @@ enum FeatureCommand {
     Enable { feature: String },
     /// Turn a feature off.
     Disable { feature: String },
+}
+
+/// A flow and the task it runs for.
+#[derive(Parser)]
+struct Flow {
+    /// A flow file, or the name of a shipped flow (`fix`).
+    program: String,
+
+    /// The command whose failure is the task, run in this repository.
+    #[arg(long)]
+    test: String,
+
+    /// What the change is for, in words.
+    #[arg(long, default_value = "")]
+    goal: String,
+
+    /// Most attempts.
+    #[arg(long, default_value_t = 3)]
+    max: u32,
+
+    /// Who steers: Kai within what the tests and the budget permit, or the rule alone.
+    #[arg(long, value_enum, default_value_t = Steer::Kai)]
+    control: Steer,
+
+    /// The longest one test run may take, in seconds.
+    #[arg(long, default_value_t = 600)]
+    timeout: u64,
+
+    /// Write the last attempt's Decision Package to this file.
+    #[arg(long)]
+    out: Option<std::path::PathBuf>,
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum Steer {
+    Kai,
+    Rule,
 }
 
 /// Which earlier session to act on. With neither, a picker opens.
@@ -246,6 +286,7 @@ async fn run(paths: Arg0DispatchPaths) -> Result<()> {
         }
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         Some(Command::App(cli)) => codex_cli::app_cmd::run_app(cli).await?,
+        Some(Command::Flow(flow)) => run_flow(flow).await?,
         Some(Command::Sandbox(args)) => {
             run_sandbox(args, sandbox, overrides).await?;
         }
@@ -257,6 +298,38 @@ async fn run(paths: Arg0DispatchPaths) -> Result<()> {
                 &mut std::io::stdout(),
             );
         }
+    }
+    Ok(())
+}
+
+async fn run_flow(args: Flow) -> Result<()> {
+    use hanzo_kai::flow;
+    let program = flow::load(&args.program).map_err(anyhow::Error::msg)?;
+    let setup = flow::Setup::new(
+        &hanzo_config::home(),
+        hanzo_config::API_BASE,
+        hanzo_config::hanzo_credential(),
+    )
+    .map_err(anyhow::Error::msg)?;
+    let options = flow::Options {
+        task: serde_json::json!({"test": args.test, "goal": args.goal}),
+        max: args.max,
+        control: match args.control {
+            Steer::Kai => flow::Control::Kai,
+            Steer::Rule => flow::Control::Rule,
+        },
+        limit: std::time::Duration::from_secs(args.timeout),
+    };
+    let root = std::env::current_dir()?;
+    let report = flow::run_with(setup, program, root, options)
+        .await
+        .map_err(anyhow::Error::msg)?;
+    print!("{}", report.summary());
+    if let (Some(out), Some(package)) = (args.out, &report.package) {
+        std::fs::write(out, serde_json::to_vec_pretty(package)?)?;
+    }
+    if report.outcome == "escalate" {
+        std::process::exit(1);
     }
     Ok(())
 }

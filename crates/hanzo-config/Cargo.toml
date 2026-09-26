@@ -7,8 +7,7 @@ description = "Hanzo Dev config integration"
 repository = "https://github.com/hanzoai/dev"
 
 [dependencies]
+serde = { workspace = true, features = ["derive"] }
 tempfile = { workspace = true }
-toml_edit = { workspace = true }
-
-[dev-dependencies]
 toml = { workspace = true }
+toml_edit = { workspace = true }

@@ -3,6 +3,8 @@ members = [
     "crates/hanzo-dev",
     "crates/hanzo-config",
     "crates/hanzo-tui",
+    "crates/hanzo-kai",
+    "crates/hanzo-loop",
     "crates/protocol",
     "crates/core",
     "crates/ffi",

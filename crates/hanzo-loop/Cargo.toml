@@ -1,0 +1,17 @@
+[package]
+name = "hanzo-loop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "What a controller decides inside the agent loop, as data the loop applies."
+
+[lints]
+workspace = true
+
+# The agent loop depends on this crate, so it stays small and changes rarely: the loop is
+# rebuilt whenever it does.
+[dependencies]
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

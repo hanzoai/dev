@@ -40,6 +40,37 @@ Changes go in a `hanzo-*` crate, or in `patches/upstream.json` when upstream
 hard-codes something that must be ours. A hand edit inside `upstream/` is lost
 at the next `make bump`.
 
+## Kai
+
+Kai decides inside the loop; Zen only writes. Two crates:
+
+- `crates/hanzo-loop` is what the loop asks a controller and applies: a tool shortlist per
+  step, a command verdict joined with the policy on `allow < ask < deny` (`Handle::command`
+  joins again, so no controller can loosen it), and routing hints for the turn's request
+  metadata. It is small and stable on purpose: `codex-core` depends on it and rebuilds when
+  it changes.
+- `crates/hanzo-kai` links hanzoai/decision's `control` (Kai in process, batched) and
+  `program` (the Decision Program executor), pinned by rev. `agent` is the controller per
+  thread plus the extension contributors; `flow` runs `dev flow`; `trace` writes the decision
+  lines; `tools` are the deterministic steps; `zen` is the only model call a flow makes.
+
+The upstream delta is seven anchored edits in `patches/upstream.json`: `hanzo-loop` into
+core's manifest; the shortlist asked in `built_tools` and applied in `build_tool_router`; the
+verdict joined in the orchestrator right after the exec policy's requirement; the routing
+hints set on the turn metadata in `run_turn`; `hanzo-kai` into app-server's manifest and
+`hanzo_kai::install` before Guardian in `extensions.rs`.
+
+`kai.toml` in the product home turns Kai on; without it nothing runs. Operations take Enso's
+names (`tools`, `risk`, `model`, `reasoning`, `context`, `progress`, `complete`), each with a
+`program`, a `mode` (default `shadow`), `thresholds` and `k`. Only `enforced` acts, and an
+enforced decision is waited for at most 30 s. The trace (`kai/decisions.jsonl`) is Enso's
+line shape, one line per decision, written once its outcome is known.
+
+`dev flow fix --test "<cmd>"` runs `crates/hanzo-kai/flows/fix.json`: retrieval ranks the
+repository's files against the failure, Kai picks one, Zen writes a diff, the tests run, and
+Kai says done, retry or escalate within what the tests and the budget permit. A retried or
+escalated attempt is undone. `--control rule` takes Kai out of the steering.
+
 ## The Code fork
 
 `upstream/code` is reference, not a build input. Its crates depend on its own

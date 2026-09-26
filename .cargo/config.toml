@@ -1,0 +1,4 @@
+[net]
+# hanzoai/decision is a private git dependency: the git CLI carries the host's credentials and
+# URL rewrites, which cargo's built-in fetcher does not.
+git-fetch-with-cli = true

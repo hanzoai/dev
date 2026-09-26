@@ -12,7 +12,8 @@ use std::process::Output;
 /// clap only rejects a duplicate argument when it assembles that subcommand.
 const COMMANDS: &[&str] = &[
     "exec", "login", "logout", "serve", "resume", "fork", "review", "agents", "queue", "archive",
-    "unarchive", "delete", "cloud", "mcp", "plugin", "doctor", "features", "sandbox", "completion",
+    "unarchive", "delete", "cloud", "mcp", "plugin", "doctor", "features", "flow", "sandbox",
+    "completion",
 ];
 
 fn dev(home: &Path, arguments: &[&str]) -> Output {
