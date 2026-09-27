@@ -1,9 +1,10 @@
 use super::*;
-use crate::fake;
-use crate::fake::on;
+use crate::program::Kind;
+use crate::testing;
+use crate::testing::on;
 use pretty_assertions::assert_eq;
-use program::Kind;
 use std::process::Command;
+use wiremock::MockServer;
 
 const BUGGY: &str = "echo $(( $1 - $2 ))\n";
 const FIXED: &str = "echo $(( $1 + $2 ))\n";
@@ -54,10 +55,10 @@ fn diff(from: &str, to: &str) -> String {
 }
 
 /// Kai rating `src/add.sh` the file to change, and answering `next` by `next(test output)`.
-fn kai(next: impl Fn(&Value) -> (&'static str, f64) + Send + Sync + 'static) -> Judge {
-    let ask = fake::Kai::new(move |_, q, state| match q.kind {
+async fn kai(next: impl Fn(&Value) -> (&'static str, f64) + Send + Sync + 'static) -> MockServer {
+    testing::kai(move |_, q, state| match q.kind {
         Kind::Noul => {
-            let p = if state["option"]["label"] == "src/add.sh" {
+            let p = if state["file"]["path"] == "src/add.sh" {
                 0.9
             } else {
                 0.2
@@ -69,12 +70,12 @@ fn kai(next: impl Fn(&Value) -> (&'static str, f64) + Send + Sync + 'static) -> 
             on(q, label, p)
         }
         Kind::Score => on(q, "0", 0.9),
-    });
-    Judge(Arc::new(crate::Decider::with(Arc::new(ask))))
+    })
+    .await
 }
 
 /// Kai as an honest judge of the tests.
-fn honest() -> Judge {
+async fn honest() -> MockServer {
     kai(|test| {
         if test["passed"] == true {
             ("done", 0.9)
@@ -82,10 +83,19 @@ fn honest() -> Judge {
             ("retry", 0.8)
         }
     })
+    .await
 }
 
-fn zen(answer: impl Fn(&Value) -> String + Send + Sync + 'static) -> fake::Zen {
-    fake::Zen(Box::new(move |_, context| answer(context)))
+/// Kai and Zen at their servers, the trace in the repository's `.git`.
+fn setup(root: &Path, kai: &str, zen: &MockServer) -> Setup {
+    let home = root.join(".git/dev");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(
+        home.join("kai.toml"),
+        format!("url = \"{kai}/v1\"\ntrace = \"kai.jsonl\"\n"),
+    )
+    .unwrap();
+    Setup::new(&home, &format!("{}/v1", zen.uri()), None).unwrap()
 }
 
 fn options(max: u32, control: Control) -> Options {
@@ -97,51 +107,36 @@ fn options(max: u32, control: Control) -> Options {
     }
 }
 
-fn run_flow(
-    root: &Path,
-    judge: &Judge,
-    zen: &fake::Zen,
-    options: &Options,
-    trace: &Trace,
-) -> Report {
-    run(&load("fix").unwrap(), root, options, judge, zen, trace).unwrap()
+async fn run_flow(root: &Path, kai: &str, zen: &MockServer, options: Options) -> Report {
+    let setup = setup(root, kai, zen);
+    let root = root.to_path_buf();
+    run_with(setup, root, options).await.unwrap()
+}
+
+fn trace(root: &Path) -> PathBuf {
+    root.join(".git/dev/kai.jsonl")
 }
 
 fn read(root: &Path) -> String {
     std::fs::read_to_string(root.join("src/add.sh")).unwrap()
 }
 
-#[test]
-fn the_shipped_flow_is_a_valid_program() {
-    let flow = load("fix").unwrap();
-    assert_eq!(flow.id, "flow.fix");
-    assert!(flow.node("test").is_some() && flow.node("next").is_some());
+/// The inputs of every Zen request `zen` received, in order.
+async fn asked_zen(zen: &MockServer) -> Vec<Value> {
+    zen.received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .map(testing::inputs)
+        .collect()
 }
 
-#[test]
-fn kai_picks_the_file_zen_patches_it_and_the_flow_is_done() {
+#[tokio::test(flavor = "multi_thread")]
+async fn kai_picks_the_file_zen_patches_it_and_the_flow_is_done() {
     let repo = repo();
-    let trace = Trace::new(repo.path().join(".git/kai.jsonl"));
-    let zen = zen(|context| {
-        assert_eq!(
-            context["read"]["path"], "src/add.sh",
-            "Zen sees the file Kai picked"
-        );
-        assert!(
-            context["failure"]["output"]
-                .as_str()
-                .unwrap()
-                .contains("gave -1")
-        );
-        diff(BUGGY, FIXED)
-    });
-    let report = run_flow(
-        repo.path(),
-        &honest(),
-        &zen,
-        &options(3, Control::Kai),
-        &trace,
-    );
+    let kai = honest().await;
+    let zen = testing::zen(|_| diff(BUGGY, FIXED)).await;
+    let report = run_flow(repo.path(), &kai.uri(), &zen, options(3, Control::Kai)).await;
     assert_eq!(report.outcome, "done");
     assert_eq!(report.attempts.len(), 1);
     let a = &report.attempts[0];
@@ -151,18 +146,32 @@ fn kai_picks_the_file_zen_patches_it_and_the_flow_is_done() {
     assert_eq!(answer, "done");
     assert!((p - 0.9).abs() < 1e-6, "{p}");
     assert_eq!(read(repo.path()), FIXED);
+    assert!(report.missing.is_none());
     assert!(
         report.summary().contains("outcome: done"),
         "{}",
         report.summary()
     );
 
-    let lines = fake::lines(trace.path(), 1);
+    let sent = asked_zen(&zen).await;
+    assert_eq!(
+        sent[0]["read"]["path"], "src/add.sh",
+        "Zen sees the file Kai picked"
+    );
+    assert!(
+        sent[0]["failure"]["output"]
+            .as_str()
+            .unwrap()
+            .contains("gave -1")
+    );
+
+    let lines = testing::lines(&trace(repo.path()), 1);
     let line = &lines[0];
     assert_eq!(line["family"], "dev.flow");
     assert_eq!(line["sku"], "flow.fix@1");
     assert_eq!(line["outcome"]["finish"], "done");
     assert_eq!(line["outcome"]["result"]["passed"], true);
+    assert_eq!(line["ops"]["pick"]["program"], "fix.pick@1");
     assert_eq!(line["ops"]["pick"]["kai"], "src/add.sh");
     assert_eq!(line["ops"]["pick"]["applied"], true);
     assert_eq!(line["ops"]["next"]["kai"], "done");
@@ -173,50 +182,41 @@ fn kai_picks_the_file_zen_patches_it_and_the_flow_is_done() {
     );
 }
 
-#[test]
-fn a_wrong_patch_is_undone_and_the_retry_sees_it() {
+#[tokio::test(flavor = "multi_thread")]
+async fn a_wrong_patch_is_undone_and_the_retry_sees_it() {
     let repo = repo();
-    let trace = Trace::new(repo.path().join(".git/kai.jsonl"));
-    let zen = zen(|context| {
+    let kai = honest().await;
+    let zen = testing::zen(|context| {
         if context["last"].is_null() {
             diff(BUGGY, "echo $(( $1 * $2 ))")
         } else {
-            assert!(
-                context["last"]["test"]["output"]
-                    .as_str()
-                    .unwrap()
-                    .contains("gave 6")
-            );
             diff(BUGGY, FIXED)
         }
-    });
-    let report = run_flow(
-        repo.path(),
-        &honest(),
-        &zen,
-        &options(3, Control::Kai),
-        &trace,
-    );
+    })
+    .await;
+    let report = run_flow(repo.path(), &kai.uri(), &zen, options(3, Control::Kai)).await;
     assert_eq!(report.outcome, "done");
     let taken: Vec<&str> = report.attempts.iter().map(|a| a.taken.as_str()).collect();
     assert_eq!(taken, ["retry", "done"]);
     assert!(report.attempts[0].applied && !report.attempts[0].passed);
     assert_eq!(read(repo.path()), FIXED);
-    assert_eq!(fake::lines(trace.path(), 2).len(), 2);
+    let sent = asked_zen(&zen).await;
+    assert!(
+        sent[1]["last"]["test"]["output"]
+            .as_str()
+            .unwrap()
+            .contains("gave 6"),
+        "the retry sees the last attempt"
+    );
+    assert_eq!(testing::lines(&trace(repo.path()), 2).len(), 2);
 }
 
-#[test]
-fn out_of_attempts_the_flow_escalates_and_leaves_the_tree_as_it_was() {
+#[tokio::test(flavor = "multi_thread")]
+async fn out_of_attempts_the_flow_escalates_and_leaves_the_tree_as_it_was() {
     let repo = repo();
-    let trace = Trace::new(repo.path().join(".git/kai.jsonl"));
-    let zen = zen(|_| diff(BUGGY, "echo 0"));
-    let report = run_flow(
-        repo.path(),
-        &honest(),
-        &zen,
-        &options(2, Control::Kai),
-        &trace,
-    );
+    let kai = honest().await;
+    let zen = testing::zen(|_| diff(BUGGY, "echo 0")).await;
+    let report = run_flow(repo.path(), &kai.uri(), &zen, options(2, Control::Kai)).await;
     assert_eq!(report.outcome, "escalate");
     let taken: Vec<&str> = report.attempts.iter().map(|a| a.taken.as_str()).collect();
     assert_eq!(taken, ["retry", "escalate"]);
@@ -224,53 +224,99 @@ fn out_of_attempts_the_flow_escalates_and_leaves_the_tree_as_it_was() {
     assert!(report.summary().contains("+echo 0"), "{}", report.summary());
 }
 
-#[test]
-fn kai_cannot_call_a_failing_attempt_done() {
+#[tokio::test(flavor = "multi_thread")]
+async fn kai_cannot_call_a_failing_attempt_done() {
     let repo = repo();
-    let trace = Trace::new(repo.path().join(".git/kai.jsonl"));
-    let judge = kai(|_| ("done", 0.95));
-    let zen = zen(|_| diff(BUGGY, "echo 4"));
-    let report = run_flow(repo.path(), &judge, &zen, &options(2, Control::Kai), &trace);
+    let kai = kai(|_| ("done", 0.95)).await;
+    let zen = testing::zen(|_| diff(BUGGY, "echo 4")).await;
+    let report = run_flow(repo.path(), &kai.uri(), &zen, options(2, Control::Kai)).await;
     let taken: Vec<&str> = report.attempts.iter().map(|a| a.taken.as_str()).collect();
     assert_eq!(taken, ["retry", "escalate"]);
 }
 
-#[test]
-fn kai_may_escalate_early_and_rule_control_ignores_it() {
+#[tokio::test(flavor = "multi_thread")]
+async fn kai_may_escalate_early_and_rule_control_never_asks_it() {
     let repo = repo();
-    let trace = Trace::new(repo.path().join(".git/kai.jsonl"));
-    let judge = kai(|_| ("escalate", 0.9));
-    let zen = zen(|_| diff(BUGGY, "echo 0"));
-    let report = run_flow(repo.path(), &judge, &zen, &options(3, Control::Kai), &trace);
+    let kai = kai(|_| ("escalate", 0.9)).await;
+    let zen = testing::zen(|_| diff(BUGGY, "echo 0")).await;
+    let report = run_flow(repo.path(), &kai.uri(), &zen, options(3, Control::Kai)).await;
     assert_eq!(report.attempts.len(), 1);
     assert_eq!(report.outcome, "escalate");
+    let asked = testing::asked(&kai).await;
 
     let repo = self::repo();
-    let report = run_flow(
-        repo.path(),
-        &judge,
-        &zen,
-        &options(3, Control::Rule),
-        &trace,
-    );
+    let report = run_flow(repo.path(), &kai.uri(), &zen, options(3, Control::Rule)).await;
     let taken: Vec<&str> = report.attempts.iter().map(|a| a.taken.as_str()).collect();
     assert_eq!(taken, ["retry", "retry", "escalate"]);
     assert!(report.attempts.iter().all(|a| a.by == "rule"));
+    assert_eq!(
+        testing::asked(&kai).await,
+        asked,
+        "rule control asks Kai nothing"
+    );
 }
 
-#[test]
-fn passing_tests_need_no_attempt() {
+#[tokio::test(flavor = "multi_thread")]
+async fn without_kai_the_rule_decides_and_says_so_once() {
+    let repo = repo();
+    // Kai's address answers nothing: every request is a 404.
+    let kai = MockServer::start().await;
+    let zen = testing::zen(|context| {
+        if context["last"].is_null() {
+            diff(BUGGY, "echo 0")
+        } else {
+            diff(BUGGY, FIXED)
+        }
+    })
+    .await;
+    let report = run_flow(repo.path(), &kai.uri(), &zen, options(3, Control::Kai)).await;
+    assert_eq!(report.outcome, "done");
+    let taken: Vec<&str> = report.attempts.iter().map(|a| a.taken.as_str()).collect();
+    assert_eq!(taken, ["retry", "done"]);
+    assert!(
+        report
+            .attempts
+            .iter()
+            .all(|a| a.by == "rule" && a.kai.is_none())
+    );
+    assert_eq!(read(repo.path()), FIXED);
+    let summary = report.summary();
+    assert_eq!(
+        summary.matches("kai did not answer").count(),
+        1,
+        "{summary}"
+    );
+    // The first pick found Kai down, one request per candidate of the repository's four
+    // files; nothing asked it again.
+    let asked = testing::asked(&kai).await;
+    assert!((1..=4).contains(&asked), "{asked}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn passing_tests_need_no_attempt() {
     let repo = repo();
     std::fs::write(repo.path().join("src/add.sh"), FIXED).unwrap();
-    let trace = Trace::new(repo.path().join(".git/kai.jsonl"));
-    let zen = zen(|_| unreachable!("no attempt, no Zen"));
-    let report = run_flow(
-        repo.path(),
-        &honest(),
-        &zen,
-        &options(3, Control::Kai),
-        &trace,
-    );
+    let kai = honest().await;
+    let zen = testing::zen(|_| String::new()).await;
+    let report = run_flow(repo.path(), &kai.uri(), &zen, options(3, Control::Kai)).await;
     assert_eq!(report.outcome, "passing");
     assert!(report.attempts.is_empty());
+    assert!(asked_zen(&zen).await.is_empty(), "no attempt, no Zen");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_patch_the_tests_rewrote_ends_the_flow_instead_of_retrying_on_it() {
+    let repo = repo();
+    let kai = honest().await;
+    let zen = testing::zen(|_| diff(BUGGY, "echo 0")).await;
+    // Once patched, the test command rewrites the line the patch changed.
+    let mut options = options(3, Control::Kai);
+    options.task["test"] =
+        json!("grep -q 'echo 0' src/add.sh && printf 'echo 7\\n' > src/add.sh; sh test.sh");
+    let setup = setup(repo.path(), &kai.uri(), &zen);
+    let root = repo.path().to_path_buf();
+    let Err(error) = run_with(setup, root, options).await else {
+        panic!("the flow went on over a tree it could not restore");
+    };
+    assert!(error.contains("no longer reverses"), "{error}");
 }

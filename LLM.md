@@ -42,17 +42,22 @@ at the next `make bump`.
 
 ## Kai
 
-Kai decides inside the loop; Zen only writes. Two crates:
+Kai decides inside the loop; Zen only writes. Kai is reached over the Decisions API,
+`POST https://api.hanzo.ai/v1/decisions`, signed with the Hanzo credential Dev already sends
+(`hanzo_config::hanzo_credential`). Nothing of hanzoai/decision is linked: that repository is
+private, and a git or path dependency on it breaks the public build and every `cargo install`.
+Two crates:
 
 - `crates/hanzo-loop` is what the loop asks a controller and applies: a tool shortlist per
   step, a command verdict joined with the policy on `allow < ask < deny` (`Handle::command`
   joins again, so no controller can loosen it), and routing hints for the turn's request
   metadata. It is small and stable on purpose: `codex-core` depends on it and rebuilds when
   it changes.
-- `crates/hanzo-kai` links hanzoai/decision's `control` (Kai in process, batched) and
-  `program` (the Decision Program executor), pinned by rev. `agent` is the controller per
+- `crates/hanzo-kai`: `decide` is the HTTP client (one request per state, a decision's states
+  in parallel); `program` is a program's typed questions and the gate that turns answers into
+  signals and a verdict; `programs/` are the programs Dev asks; `agent` is the controller per
   thread plus the extension contributors; `flow` runs `dev flow`; `trace` writes the decision
-  lines; `tools` are the deterministic steps; `zen` is the only model call a flow makes.
+  lines; `tools` are the deterministic steps; `zen` is the only generating call a flow makes.
 
 The upstream delta is seven anchored edits in `patches/upstream.json`: `hanzo-loop` into
 core's manifest; the shortlist asked in `built_tools` and applied in `build_tool_router`; the
@@ -60,16 +65,30 @@ verdict joined in the orchestrator right after the exec policy's requirement; th
 hints set on the turn metadata in `run_turn`; `hanzo-kai` into app-server's manifest and
 `hanzo_kai::install` before Guardian in `extensions.rs`.
 
-`kai.toml` in the product home turns Kai on; without it nothing runs. Operations take Enso's
-names (`tools`, `risk`, `model`, `reasoning`, `context`, `progress`, `complete`), each with a
-`program`, a `mode` (default `shadow`), `thresholds` and `k`. Only `enforced` acts, and an
-enforced decision is waited for at most 30 s. The trace (`kai/decisions.jsonl`) is Enso's
-line shape, one line per decision, written once its outcome is known.
+`kai.toml` in the product home turns Kai on; without it nothing runs. `url` (default
+`https://api.hanzo.ai/v1`) and `model` (default `laya-agent`) say where and whom to ask.
+Operations take Enso's names (`tools`, `risk`, `model`, `reasoning`, `context`, `progress`,
+`complete`), each with a `program`, a `mode` (default `shadow`), `thresholds` and `k`. Only
+`enforced` acts, and an enforced decision is waited for at most 12 s (a request times out at
+10). A program pinned to a calibration runs in shadow when the answer says another. The trace
+(`kai/decisions.jsonl`) is Enso's line shape, one line per decision with every state's
+distributions, written once its outcome is known.
 
-`dev flow fix --test "<cmd>"` runs `crates/hanzo-kai/flows/fix.json`: retrieval ranks the
-repository's files against the failure, Kai picks one, Zen writes a diff, the tests run, and
-Kai says done, retry or escalate within what the tests and the budget permit. A retried or
-escalated attempt is undone. `--control rule` takes Kai out of the steering.
+When Kai does not answer — refused connection, timeout, a 401, 404 or 5xx, or no state of a
+decision answered — the decision fails at once, Kai is down for 60 s, and every decision in
+that window returns without a request: the loop runs exactly as without Kai, one warning goes
+to the log, and no trace line is written. A 400 fails only that state.
+
+The tier and effort hints ride the Responses request metadata as `kai.tier` and `kai.effort`.
+Nothing in the gateway reads them yet: a tier Kai decides changes the served model only once
+the gateway routes on it.
+
+`dev flow fix --test "<cmd>"`: retrieval ranks the repository's files against the failure, Kai
+picks one (`fix.pick@1`), Zen writes a diff, the tests run, and Kai says done, retry or
+escalate (`fix.next@1`) within what the tests and the budget permit. A retried or escalated
+attempt is undone; one that no longer reverses cleanly ends the flow with the tree as it
+stands. `--control rule`, or Kai not answering, leaves the tests and the budget to decide
+alone.
 
 ## The Code fork
 

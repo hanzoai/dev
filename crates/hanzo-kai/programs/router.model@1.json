@@ -1,0 +1,30 @@
+{
+  "id": "router.model@1",
+  "description": "Which model tier should serve a request: the smallest that answers it correctly. State: {request, system, turns, tools, prompt_tokens, images}.",
+  "calibration": "cal_6dbb072f8109a222",
+  "questions": {
+    "tier": {
+      "type": "choice",
+      "instructions": "What is the smallest model tier that would answer this request correctly?",
+      "criteria": {
+        "small": "a small fast model: lookup, formatting, extraction, short factual answers",
+        "medium": "a mid-size model: ordinary code edits, summaries, one or two reasoning steps",
+        "large": "a large model: multi-step reasoning, non-trivial code, long context",
+        "frontier": "the strongest model: hard proofs, research-grade problems, long plans under ambiguity"
+      }
+    },
+    "long_context": {
+      "type": "noul",
+      "instructions": "Does answering require reading a long document, many files or a long history?"
+    },
+    "private_model_required": {
+      "type": "noul",
+      "instructions": "Must the request stay on a private, self-hosted model because of the data it involves?"
+    }
+  },
+  "thresholds": {
+    "tier": 0.5,
+    "long_context": 0.5,
+    "private_model_required": 0.3
+  }
+}

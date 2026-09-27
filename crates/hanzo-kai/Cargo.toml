@@ -3,31 +3,29 @@ name = "hanzo-kai"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Kai in the Dev loop: decisions per turn, their trace, and flows over Decision Programs."
+description = "Kai in the Dev loop over the Decisions API: decisions per turn, their trace, and flows."
 
 [lints]
 workspace = true
 
 [dependencies]
-# Kai in process (`decide`, batched) and the Decision Program executor. The repository is
-# private: .cargo/config.toml fetches it with the git CLI, which carries the host's
-# credentials.
-control = { git = "https://github.com/hanzoai/decision", rev = "ec8207d55bf4de506775f9d734053c8d9fa8a344" }
-program = { git = "https://github.com/hanzoai/decision", rev = "ec8207d55bf4de506775f9d734053c8d9fa8a344" }
 hanzo-config = { path = "../hanzo-config", version = "0.7.0-dev.1" }
 hanzo-loop = { path = "../hanzo-loop", version = "0.7.0-dev.1" }
 chrono = { workspace = true }
 codex-core = { workspace = true }
 codex-extension-api = { workspace = true }
 codex-protocol = { workspace = true }
+futures = { workspace = true, features = ["std"] }
 indexmap = { workspace = true, features = ["serde"] }
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
+# Option order is a question's meaning: a choice's labels are its options in order.
+serde_json = { workspace = true, features = ["preserve_order"] }
+sha2 = { workspace = true }
 tokio = { workspace = true, features = ["macros", "process", "rt", "rt-multi-thread", "sync", "time"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
-anyhow = { workspace = true }
 pretty_assertions = { workspace = true }
 tempfile = { workspace = true }
+wiremock = { workspace = true }

@@ -1,37 +1,28 @@
-//! Flows: a Decision Program run over a repository, attempt after attempt.
+//! Flows: a pipeline over a repository, attempt after attempt.
 //!
-//! A flow is a Decision Program in the `program` crate's schema, run by its executor. Its
-//! solver nodes are Dev's deterministic tools (`search`, `read`, `patch`, `test`, `git`), its
-//! kai nodes are Kai, its zen nodes are Zen, and nothing else calls a model. Evidence is
-//! resolved by URI: `dev:task` is the task given on the command line, `dev:test` the failing
-//! test run the attempt starts from, `dev:last` the previous attempt (null on the first) and
-//! `git:status` HEAD with the working diff. A program that retrieves its options from
-//! `dev:files` is bound, each attempt, to the repository files that share the most words with
-//! its evidence: Kai chooses among those, never among every file.
+//! `fix` makes a failing test pass. Each attempt: retrieval ranks the repository's files by the
+//! words they share with the failure (and the previous attempt), Kai picks the file to change
+//! among those (`fix.pick@1`), Zen writes a diff against it, the diff is applied, the tests
+//! run, and Kai says done, retry or escalate (`fix.next@1`). Only Zen generates; retrieval,
+//! patching and testing are deterministic tools, and Kai is a classifier over their output.
 //!
-//! Two nodes steer the loop: `test`, whose output says whether the tests pass, and `next`, a
-//! Kai choice over `done`, `retry` and `escalate`. Under Kai control Kai's answer acts when
-//! its probability reaches [`CERTAIN`] and the tests and the budget permit it: `done` only once
-//! the tests pass, `retry` only while attempts remain, `escalate` always. Under rule control
-//! the tests and the budget decide alone. A `read` node reads the file Kai rated most likely
-//! under Kai control, and the best retrieval match under rule control.
-//!
-//! An attempt that is retried or escalated is undone, so the next starts from the original
-//! tree and a flow that ends anywhere but `done` leaves the tree as it found it. Attempts
-//! share the node cache: a node whose inputs did not change is not run again.
+//! Under Kai control Kai's `next` acts when its gate accepts it and the tests and the budget
+//! permit it: `done` only once the tests pass, `retry` only while attempts remain, `escalate`
+//! always. Under rule control, or when Kai does not answer, the tests and the budget decide
+//! alone and the best retrieval match is read. An attempt that is retried or escalated is
+//! undone, so the next starts from the original tree and a flow that ends anywhere but `done`
+//! leaves the tree as it found it.
 
+use crate::decide;
+use crate::decide::Call;
 use crate::decide::Decider;
+use crate::decide::Decision;
+use crate::program::Program;
 use crate::tools;
 use crate::trace::Line;
 use crate::trace::Step;
 use crate::trace::Trace;
-use indexmap::IndexMap;
-use program::Package;
-use program::Program;
-use program::Question;
-use program::Revision;
-use program::Snapshot;
-use program::program::Alternative;
+use hanzo_config::kai::Mode;
 use serde_json::Value;
 use serde_json::json;
 use std::path::Path;
@@ -39,20 +30,17 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// The probability at which Kai's answer to `next` acts.
-pub const CERTAIN: f64 = 0.5;
+/// The flow's name in the trace.
+const SKU: &str = "flow.fix@1";
+/// Candidate files retrieval offers Kai.
+const CANDIDATES: usize = 8;
+/// How much of a candidate file Kai reads.
+const HEAD: usize = 2000;
 
-/// The flows Dev ships, by name.
-pub const SHIPPED: &[(&str, &str)] = &[("fix", include_str!("../flows/fix.json"))];
-
-/// A shipped flow by name, or a flow file.
-pub fn load(name: &str) -> Result<Program, String> {
-    let text = match SHIPPED.iter().find(|(n, _)| *n == name) {
-        Some((_, text)) => (*text).to_string(),
-        None => std::fs::read_to_string(name).map_err(|e| format!("{name}: {e}"))?,
-    };
-    Program::parse(&text).map_err(|e| format!("{name}: {e}"))
-}
+const PROMPT: &str = "The test command in `task` fails with the output in `failure`. The file \
+most likely at fault is `read.path`; its content is `read.content`. When `last` is not null, it \
+is the previous attempt: its patch and the test output after it. Write the smallest change that \
+makes the test pass without weakening the test, as one unified diff against the repository root.";
 
 /// Who steers the loop and picks the file: Kai, or the tests, the budget and the ranking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,7 +50,7 @@ pub enum Control {
 }
 
 pub struct Options {
-    /// `dev:task`: `{test, goal}`.
+    /// `{test, goal}`.
     pub task: Value,
     /// Most attempts.
     pub max: u32,
@@ -84,19 +72,16 @@ pub struct Attempt {
     pub kai: Option<(String, f64)>,
     pub rule: String,
     pub taken: String,
-    /// Nodes run, of all; the rest came from the cache.
-    pub ran: usize,
-    pub nodes: usize,
 }
 
 pub struct Report {
     pub attempts: Vec<Attempt>,
     /// `done`, `escalate`, or `passing` when the tests passed before any attempt.
     pub outcome: String,
-    /// The last attempt's Decision Package.
-    pub package: Option<Package>,
     /// The last attempt's patch, as Zen wrote it.
     pub patch: String,
+    /// Why Kai did not answer, the first time it did not.
+    pub missing: Option<String>,
 }
 
 impl Report {
@@ -113,7 +98,7 @@ impl Report {
                 .map(|(answer, p)| format!("{answer} ({p:.2})"))
                 .unwrap_or_else(|| "none".into());
             out.push_str(&format!(
-                "attempt {}: file {} (by {}), patch {}, tests {}; next: kai {kai}, rule {} -> {}; {} of {} nodes ran\n",
+                "attempt {}: file {} (by {}), patch {}, tests {}; next: kai {kai}, rule {} -> {}\n",
                 a.n,
                 a.file.as_deref().unwrap_or("-"),
                 a.by,
@@ -121,8 +106,11 @@ impl Report {
                 if a.passed { "pass" } else { "fail" },
                 a.rule,
                 a.taken,
-                a.ran,
-                a.nodes,
+            ));
+        }
+        if let Some(why) = &self.missing {
+            out.push_str(&format!(
+                "kai did not answer ({why}); the tests and the budget decided\n"
             ));
         }
         out.push_str(&format!("outcome: {}\n", self.outcome));
@@ -134,83 +122,58 @@ impl Report {
     }
 }
 
-/// Kai answering a flow's kai nodes, one question at a time.
-pub struct Judge(pub Arc<Decider>);
+/// A flow's backends: Kai and its two programs, Zen, the trace.
+pub struct Setup {
+    pub decider: Arc<Decider>,
+    pub pick: Program,
+    pub next: Program,
+    pub zen: crate::zen::Zen,
+    pub trace: Trace,
+    runtime: tokio::runtime::Handle,
+}
 
-impl program::Judge for Judge {
-    fn judge(&self, model: &str, question: &Question, state: &Value) -> program::Result<Vec<f64>> {
-        let backend = |e: String| program::Error::Backend(e);
-        let ask = self.0.ask().map_err(backend)?;
-        let job = control::Job {
-            state: state.clone(),
-            questions: [("q".to_string(), question.clone())].into_iter().collect(),
+impl Setup {
+    /// Kai and the trace from the profile at `home` (`kai.toml`, or its defaults), Zen at
+    /// `base`, both signed with `key`. Call from within the async runtime.
+    pub fn new(home: &Path, base: &str, key: Option<String>) -> Result<Setup, String> {
+        let settings = hanzo_config::kai::Kai::load_or_default(home).map_err(|e| e.to_string())?;
+        Ok(Setup {
+            decider: Arc::new(Decider::new(&settings.url, &settings.model, key.clone())),
+            pick: Program::load("fix.pick@1")?,
+            next: Program::load("fix.next@1")?,
+            zen: crate::zen::Zen::new(base, key, &settings.zen),
+            trace: Trace::new(settings.trace),
+            runtime: tokio::runtime::Handle::current(),
+        })
+    }
+
+    /// Kai's ruling on `states` under `program`; `None` when Kai does not answer, and why
+    /// in `missing` the first time.
+    fn decide(
+        &self,
+        program: &Program,
+        states: Vec<Value>,
+        missing: &mut Option<String>,
+    ) -> Option<Decision> {
+        let call = Call {
+            mode: Mode::Enforced,
+            k: None,
+            base: None,
         };
-        let mut out = ask
-            .ask(model, &[job])
-            .map_err(|e| backend(format!("{e:#}")))?;
-        let answers = out
-            .pop()
-            .ok_or_else(|| backend("no answer".into()))?
-            .map_err(|e| backend(format!("{e:#}")))?;
-        answers
-            .into_values()
-            .next()
-            .ok_or_else(|| backend("no answer".into()))
-    }
-
-    fn revision(&self, model: &str) -> program::Result<Revision> {
-        let ask = self.0.ask().map_err(program::Error::Backend)?;
-        ask.revision(model)
-            .map_err(|e| program::Error::Backend(format!("{e:#}")))
-    }
-}
-
-/// Dev's deterministic tools as a flow's solvers.
-struct Tools<'a> {
-    root: &'a Path,
-    control: Control,
-    options: &'a Options,
-}
-
-impl Tools<'_> {
-    /// The file to read: Kai's likeliest under Kai control, the best match under rule control.
-    fn read(&self, context: &Value) -> Result<Value, String> {
-        let options = context["options"].as_array().cloned().unwrap_or_default();
-        if options.is_empty() {
-            return Err("read: no candidate files".into());
-        }
-        // A kai node's output keyed by option id, `{id: {"false": p, "true": q}}`.
-        let rated = context["inputs"]
-            .as_object()
-            .into_iter()
-            .flat_map(|m| m.values())
-            .find(|v| {
-                options
-                    .iter()
-                    .all(|o| v.get(o["id"].as_str().unwrap_or_default()).is_some())
-            });
-        let (option, by, p) = match (self.control, rated) {
-            (Control::Kai, Some(rated)) => {
-                let p = |o: &Value| {
-                    rated[o["id"].as_str().unwrap_or_default()]["true"]
-                        .as_f64()
-                        .unwrap_or(0.0)
-                };
-                let Some(best) = options.iter().max_by(|a, b| p(a).total_cmp(&p(b))) else {
-                    return Err("read: no candidate files".into());
-                };
-                (best, "kai", Some(p(best)))
+        match self
+            .runtime
+            .block_on(self.decider.decide(program, states, call))
+        {
+            Ok(d) => Some(d),
+            Err(why) => {
+                missing.get_or_insert(why);
+                None
             }
-            _ => (&options[0], "rule", None),
-        };
-        let path = option["label"].as_str().unwrap_or_default();
-        let content = tools::head(self.root, path, tools::HEAD)
-            .ok_or_else(|| format!("read: {path} is not a text file"))?;
-        Ok(json!({"path": path, "content": content, "by": by, "p": p}))
+        }
     }
 }
 
-/// The text of a node's inputs: strings as they are, anything else as JSON.
+/// The text of a value: strings as they are, anything else as JSON.
 fn text(value: &Value) -> String {
     match value {
         Value::String(s) => s.clone(),
@@ -221,93 +184,7 @@ fn text(value: &Value) -> String {
     }
 }
 
-impl program::Solver for Tools<'_> {
-    fn solve(&self, solver: &str, params: &Value, context: &Value) -> program::Result<Value> {
-        let inputs = &context["inputs"];
-        let out = match solver {
-            "read" => self.read(context),
-            "patch" => {
-                let answer = inputs
-                    .as_object()
-                    .into_iter()
-                    .flat_map(|m| m.values())
-                    .find_map(Value::as_str)
-                    .unwrap_or_default();
-                Ok(tools::patch(self.root, answer))
-            }
-            "test" => {
-                let command = params["command"]
-                    .as_str()
-                    .or_else(|| self.options.task["test"].as_str())
-                    .unwrap_or_default();
-                if command.is_empty() {
-                    Err("test: no test command".to_string())
-                } else {
-                    Ok(tools::test(self.root, command, self.options.limit))
-                }
-            }
-            "git" => {
-                let args: Vec<String> = params["args"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|a| a.as_str().map(str::to_string))
-                    .collect();
-                tools::git(self.root, &args)
-            }
-            "search" => {
-                let query = params["query"]
-                    .as_str()
-                    .map(str::to_string)
-                    .unwrap_or_else(|| text(inputs));
-                let top = params["top"].as_u64().unwrap_or(8) as usize;
-                let hits = tools::search(self.root, &query, top, tools::HEAD);
-                Ok(json!({"files": hits
-                    .iter()
-                    .map(|h| json!({"path": h.path, "score": h.score}))
-                    .collect::<Vec<_>>()}))
-            }
-            other => Err(format!(
-                "no tool {other:?}; a flow's tools are read, patch, test, git and search"
-            )),
-        };
-        out.map_err(program::Error::Backend)
-    }
-
-    fn revision(&self, solver: &str) -> program::Result<Revision> {
-        Ok(Revision {
-            model: format!("dev.{solver}@1"),
-            calibration: None,
-        })
-    }
-}
-
-/// The evidence a flow reads, by URI.
-fn evidence(
-    uri: &str,
-    task: &Value,
-    failure: &Value,
-    last: &Value,
-    root: &Path,
-) -> Result<Value, String> {
-    Ok(match uri {
-        "dev:task" => task.clone(),
-        "dev:test" => failure.clone(),
-        "dev:last" => last.clone(),
-        "git:status" => {
-            let head = tools::git(root, &["rev-parse".into(), "HEAD".into()])?;
-            let diff = tools::git(root, &["diff".into()])?;
-            json!({"head": head["output"].as_str().unwrap_or_default().trim(), "diff": diff["output"]})
-        }
-        other => {
-            return Err(format!(
-                "no evidence source {other:?}; a flow reads dev:task, dev:test, dev:last and git:status"
-            ));
-        }
-    })
-}
-
-/// A Kai node's distribution: its likeliest label and probability.
+/// A distribution's likeliest option and its probability.
 fn likeliest(dist: &Value) -> Option<(String, f64)> {
     dist.as_object()?
         .iter()
@@ -315,20 +192,8 @@ fn likeliest(dist: &Value) -> Option<(String, f64)> {
         .max_by(|a, b| a.1.total_cmp(&b.1))
 }
 
-/// Runs `flow` over the repository at `root`. Blocks: call it off the async runtime.
-pub fn run(
-    flow: &Program,
-    root: &Path,
-    options: &Options,
-    judge: &dyn program::Judge,
-    zen: &dyn program::Zen,
-    trace: &Trace,
-) -> Result<Report, String> {
-    for id in ["test", "next"] {
-        if flow.node(id).is_none() {
-            return Err(format!("{}: a flow needs a node {id:?}", flow.id));
-        }
-    }
+/// Runs the `fix` flow over the repository at `root`. Blocks: call it off the async runtime.
+pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, String> {
     let command = options.task["test"].as_str().unwrap_or_default();
     if command.is_empty() {
         return Err("the task names no test command".into());
@@ -338,97 +203,92 @@ pub fn run(
         return Ok(Report {
             attempts: Vec::new(),
             outcome: "passing".into(),
-            package: None,
             patch: String::new(),
+            missing: None,
         });
     }
-    let solvers = Tools {
-        root,
-        control: options.control,
-        options,
-    };
-    let absent = program::Absent::default();
-    let rt = program::Runtime {
-        judge,
-        zen,
-        solver: &solvers,
-        human: &absent,
-    };
+    let kai = options.control == Control::Kai;
     let run_id = crate::trace::now();
-    let mut cache = program::Cache::default();
     let mut last = Value::Null;
     let mut report = Report {
         attempts: Vec::new(),
         outcome: String::new(),
-        package: None,
         patch: String::new(),
+        missing: None,
     };
     for n in 1..=options.max.max(1) {
-        let time = chrono::Utc::now().timestamp();
-        let mut snapshots = IndexMap::new();
-        for e in &flow.evidence {
-            let content = evidence(&e.uri, &options.task, &failure, &last, root)?;
-            snapshots.insert(e.id.clone(), Snapshot { content, time });
+        let query = [&options.task, &failure, &last]
+            .into_iter()
+            .map(text)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let candidates: Vec<String> = tools::search(root, &query, CANDIDATES, tools::HEAD)
+            .into_iter()
+            .map(|hit| hit.path)
+            .collect();
+        if candidates.is_empty() {
+            return Err("no file in the repository shares a word with the failure".into());
         }
-        let bound = match &flow.retrieve {
-            Some(r) if r.graph == "dev:files" => {
-                let query = snapshots
-                    .values()
-                    .map(|s| text(&s.content))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                let options: Vec<Alternative> =
-                    tools::search(root, &query, r.top as usize, tools::HEAD)
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, hit)| Alternative {
-                            id: format!("f{i}"),
-                            label: hit.path,
-                            attributes: [("score".to_string(), hit.score)].into_iter().collect(),
-                        })
-                        .collect();
-                if options.is_empty() {
-                    return Err("no file in the repository shares a word with the failure".into());
-                }
-                flow.bind(options).map_err(|e| e.to_string())?
-            }
-            Some(r) => {
-                return Err(format!(
-                    "no graph {:?}; a flow retrieves from dev:files",
-                    r.graph
-                ));
-            }
-            None => flow.clone(),
+
+        // Kai picks the file among the candidates; the best match otherwise.
+        let pick = if kai {
+            let states = candidates
+                .iter()
+                .map(|path| {
+                    let head = tools::head(root, path, HEAD).unwrap_or_default();
+                    json!({
+                        "failure": {"code": failure["code"], "output": failure["output"]},
+                        "last": last,
+                        "file": {"path": path, "head": head},
+                    })
+                })
+                .collect();
+            setup.decide(&setup.pick, states, &mut report.missing)
+        } else {
+            None
         };
-        let package = program::execute(&bound, &snapshots, &[], &rt, &mut cache)
-            .map_err(|e| e.to_string())?;
-        let output = |id: &str| {
-            package
-                .results
-                .get(id)
-                .map(|o| o.output.clone())
-                .unwrap_or(Value::Null)
+        let rated = |d: &Decision, i: usize| match d.results.get(i) {
+            Some(decide::Row::Ruled(r)) => r.answers["pick"]["true"].as_f64(),
+            _ => None,
         };
-        let test = output("test");
+        let (index, by) = match &pick {
+            Some(d) => (0..candidates.len())
+                .filter_map(|i| Some((i, rated(d, i)?)))
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .map_or((0, "rule"), |(i, _)| (i, "kai")),
+            None => (0, "rule"),
+        };
+        let path = candidates[index].clone();
+        let content = tools::head(root, &path, tools::HEAD)
+            .ok_or_else(|| format!("{path} is not a text file"))?;
+
+        // Zen writes the change; the tools apply it and run the tests.
+        let context = json!({
+            "task": options.task,
+            "failure": failure,
+            "read": {"path": path, "content": content},
+            "last": last,
+        });
+        let answer = setup.zen.generate(PROMPT, &context)?;
+        let applied = tools::patch(root, &answer);
+        let test = tools::test(root, command, options.limit);
         let passed = test["passed"] == true;
-        let read = bound
-            .nodes
-            .iter()
-            .find(|n| matches!(&n.op, program::Op::Solver(s) if s.solver == "read"))
-            .map(|n| output(&n.id));
-        let applied = bound
-            .nodes
-            .iter()
-            .find(|n| matches!(&n.op, program::Op::Solver(s) if s.solver == "patch"))
-            .map(|n| output(&n.id));
-        let zen_answer = bound
-            .nodes
-            .iter()
-            .find(|n| matches!(n.op, program::Op::Zen(_)))
-            .map(|n| output(&n.id))
-            .and_then(|v| v.as_str().map(str::to_string))
-            .unwrap_or_default();
-        let kai = likeliest(&output("next"));
+        let was_applied = applied["applied"] == true;
+
+        // Kai says what next, within what the tests and the budget permit.
+        let next = if kai {
+            setup.decide(
+                &setup.next,
+                vec![json!({"test": test, "last": last})],
+                &mut report.missing,
+            )
+        } else {
+            None
+        };
+        let signal = next
+            .as_ref()
+            .and_then(decide::first)
+            .and_then(|r| r.signals.get("next"));
         let rule = match (passed, n < options.max) {
             (true, _) => "done",
             (false, true) => "retry",
@@ -439,61 +299,43 @@ pub fn run(
             "retry" => &["retry", "escalate"],
             _ => &["escalate"],
         };
-        let taken = match (&kai, options.control) {
-            (Some((answer, p)), Control::Kai)
-                if *p >= CERTAIN && permitted.contains(&answer.as_str()) =>
-            {
-                answer.clone()
-            }
-            _ => rule.to_string(),
-        };
-        let was_applied = applied.as_ref().is_some_and(|a| a["applied"] == true);
+        let taken = signal
+            .and_then(decide::accepted)
+            .filter(|answer| permitted.contains(answer))
+            .unwrap_or(rule)
+            .to_string();
         let attempt = Attempt {
             n,
-            file: read
-                .as_ref()
-                .and_then(|r| r["path"].as_str().map(str::to_string)),
-            by: read
-                .as_ref()
-                .and_then(|r| r["by"].as_str().map(str::to_string))
-                .unwrap_or_default(),
+            file: Some(path.clone()),
+            by: by.to_string(),
             applied: was_applied,
             passed,
-            kai: kai.clone(),
+            kai: signal.map(|s| (s.answer.clone(), s.certainty)),
             rule: rule.into(),
             taken: taken.clone(),
-            ran: package
-                .trace
-                .iter()
-                .filter(|s| s.source == program::Source::Run)
-                .count(),
-            nodes: package.trace.len(),
         };
-        trace.write(&line(
-            flow,
-            &bound,
-            &package,
+        setup.trace.write(&line(
+            &candidates,
+            pick.as_ref(),
+            next.as_ref(),
             &attempt,
             &run_id,
-            options.control,
         ));
         report.attempts.push(attempt);
-        report.patch = zen_answer.clone();
-        report.package = Some(package);
-        if taken != "done" && was_applied {
-            // Undo the attempt: the next starts from the tree as the flow found it.
-            tools::revert(root, &zen_answer);
+        report.patch.clone_from(&answer);
+        // Undo the attempt: the next starts from the tree as the flow found it. A tree the
+        // patch no longer reverses from (the test command rewrote a file) ends the flow.
+        if taken != "done" && was_applied && !tools::revert(root, &answer) {
+            return Err(format!(
+                "attempt {n}: the patch no longer reverses cleanly, so the working tree still \
+                 holds it; see `git diff`"
+            ));
         }
-        match taken.as_str() {
-            "retry" => {
-                last =
-                    json!({"patch": tools::diff_of(&zen_answer), "apply": applied, "test": test});
-            }
-            _ => {
-                report.outcome = taken;
-                return Ok(report);
-            }
+        if taken != "retry" {
+            report.outcome = taken;
+            return Ok(report);
         }
+        last = json!({"patch": tools::diff_of(&answer), "apply": applied, "test": test});
     }
     report.outcome = "escalate".into();
     Ok(report)
@@ -501,79 +343,52 @@ pub fn run(
 
 /// An attempt's trace line: Kai's pick and its `next`, with what was done and what followed.
 fn line(
-    flow: &Program,
-    bound: &Program,
-    package: &Package,
+    candidates: &[String],
+    pick: Option<&Decision>,
+    next: Option<&Decision>,
     attempt: &Attempt,
     run: &str,
-    control: Control,
 ) -> Line {
-    let mode = match control {
-        Control::Kai => "enforced",
-        Control::Rule => "shadow",
-    };
     let mut ops = std::collections::BTreeMap::new();
-    for node in &bound.nodes {
-        let program::Op::Kai(q) = &node.op else {
-            continue;
-        };
-        let Some(out) = package.results.get(&node.id) else {
-            continue;
-        };
-        let mut step = Step::new(&format!("{}@{}#{}", flow.id, flow.version, node.id), mode);
-        step.hash = bound.hash();
-        step.model = out
-            .revision
-            .as_ref()
-            .map(|r| r.model.clone())
+    if let Some(d) = pick {
+        let mut step = Step::new(&d.program, Mode::Enforced.name());
+        step.fill(d);
+        step.kai = d
+            .results
+            .iter()
+            .zip(candidates)
+            .filter_map(|(row, path)| match row {
+                decide::Row::Ruled(r) => Some((path, r.answers["pick"]["true"].as_f64()?)),
+                decide::Row::Failed { .. } => None,
+            })
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(path, _)| path.clone())
             .unwrap_or_default();
-        match q.scope {
-            program::program::Scope::Option => {
-                for o in &bound.options {
-                    step.states
-                        .push(program::canon::hash(&json!({"source": o.label})));
-                    step.gates.push(mode.into());
-                    let mut answers = IndexMap::new();
-                    answers.insert(node.id.clone(), out.output[&o.id].clone());
-                    step.answers.push(answers);
-                }
-                step.kai = bound
-                    .options
-                    .iter()
-                    .max_by(|a, b| {
-                        let p = |o: &Alternative| out.output[&o.id]["true"].as_f64().unwrap_or(0.0);
-                        p(a).total_cmp(&p(b))
-                    })
-                    .map(|o| o.label.clone())
-                    .unwrap_or_default();
-                step.taken = attempt.file.clone().unwrap_or_default();
-                step.applied = attempt.by == "kai";
-            }
-            program::program::Scope::Program => {
-                step.states.push(package.results[&node.id].inputs.clone());
-                step.gates.push(mode.into());
-                let mut answers = IndexMap::new();
-                answers.insert(node.id.clone(), out.output.clone());
-                step.answers.push(answers);
-                step.kai = likeliest(&out.output).map(|(a, _)| a).unwrap_or_default();
-                if node.id == "next" {
-                    step.taken = attempt.taken.clone();
-                    step.applied = attempt
-                        .kai
-                        .as_ref()
-                        .is_some_and(|(a, _)| *a == attempt.taken)
-                        && attempt.taken != attempt.rule;
-                }
-            }
-        }
-        ops.insert(node.id.clone(), step);
+        step.taken = attempt.file.clone().unwrap_or_default();
+        step.applied = attempt.by == "kai";
+        ops.insert("pick".to_string(), step);
+    }
+    if let Some(d) = next {
+        let mut step = Step::new(&d.program, Mode::Enforced.name());
+        step.fill(d);
+        step.kai = decide::first(d)
+            .and_then(|r| likeliest(&r.answers["next"]))
+            .map(|(a, _)| a)
+            .unwrap_or_default();
+        step.taken = attempt.taken.clone();
+        step.applied = attempt
+            .kai
+            .as_ref()
+            .is_some_and(|(a, _)| *a == attempt.taken)
+            && attempt.taken != attempt.rule;
+        ops.insert("next".to_string(), step);
     }
     Line {
         time: crate::trace::now(),
         request: format!("{run}#{}", attempt.n),
         family: "dev.flow".into(),
-        sku: format!("{}@{}", flow.id, flow.version),
-        ms: package.trace.iter().map(|s| s.ms).sum(),
+        sku: SKU.into(),
+        ms: ops.values().map(|s| s.ms).sum(),
         outcome: crate::trace::Outcome {
             status: i64::from(!attempt.passed),
             finish: attempt.taken.clone(),
@@ -586,41 +401,11 @@ fn line(
     }
 }
 
-/// A flow's backends and settings from the profile at `home`: Kai in process, Zen through
-/// the Hanzo API.
-pub struct Setup {
-    pub decider: Arc<Decider>,
-    pub zen: crate::zen::Zen,
-    pub trace: Trace,
-}
-
-impl Setup {
-    pub fn new(home: &Path, base: &str, key: Option<String>) -> Result<Setup, String> {
-        let settings = hanzo_config::kai::Kai::load_or_default(home).map_err(|e| e.to_string())?;
-        Ok(Setup {
-            decider: Arc::new(Decider::open(
-                settings.models.clone(),
-                settings.device.clone(),
-            )),
-            zen: crate::zen::Zen::new(base, key, &settings.zen),
-            trace: Trace::new(settings.trace),
-        })
-    }
-}
-
-/// Runs `flow` at `root` with Kai and Zen from `setup`, off the async runtime.
-pub async fn run_with(
-    setup: Setup,
-    flow: Program,
-    root: PathBuf,
-    options: Options,
-) -> Result<Report, String> {
-    tokio::task::spawn_blocking(move || {
-        let judge = Judge(Arc::clone(&setup.decider));
-        run(&flow, &root, &options, &judge, &setup.zen, &setup.trace)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+/// Runs the `fix` flow at `root` with `setup`, off the async runtime.
+pub async fn run_with(setup: Setup, root: PathBuf, options: Options) -> Result<Report, String> {
+    tokio::task::spawn_blocking(move || run(&root, &options, &setup))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]

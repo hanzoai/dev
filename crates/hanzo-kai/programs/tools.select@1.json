@@ -1,0 +1,14 @@
+{
+  "id": "tools.select@1",
+  "description": "Whether a tool or skill may be needed for a request; asked per candidate, the top K that hold are offered. State: {request, tool: {name, description}}.",
+  "calibration": "cal_6dbb072f8109a222",
+  "questions": {
+    "needed": {
+      "type": "noul",
+      "instructions": "Might the agent need this tool or skill to complete the request?"
+    }
+  },
+  "thresholds": {
+    "needed": 0.3
+  }
+}

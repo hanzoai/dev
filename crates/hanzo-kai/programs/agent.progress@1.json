@@ -1,0 +1,25 @@
+{
+  "id": "agent.progress@1",
+  "description": "Mid-task: is the agent getting closer to the goal, and should it stop to ask?",
+  "calibration": "cal_6dbb072f8109a222",
+  "questions": {
+    "status": {
+      "type": "choice",
+      "instructions": "How is the agent doing on the task so far?",
+      "criteria": {
+        "advancing": "each step moves closer to the goal",
+        "stalled": "recent steps changed nothing",
+        "looping": "repeating the same actions or errors",
+        "blocked": "cannot continue without something outside the agent's control"
+      }
+    },
+    "needs_user": {
+      "type": "noul",
+      "instructions": "Should the agent stop and ask the user now?"
+    }
+  },
+  "thresholds": {
+    "status": 0.5,
+    "needs_user": 0.5
+  }
+}

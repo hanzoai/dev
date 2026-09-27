@@ -1,5 +1,5 @@
-//! Deterministic tools over a repository: search, read, apply a patch, run the tests, git.
-//! A flow's solver nodes call them; the loop's context selection uses [`search`].
+//! Deterministic tools over a repository: search, read, apply a patch, run the tests. A flow's
+//! steps call them; the loop's context selection uses [`search`].
 
 use serde_json::Value;
 use serde_json::json;
@@ -293,26 +293,6 @@ pub fn revert(root: &Path, answer: &str) -> bool {
     child.wait().is_ok_and(|s| s.success())
 }
 
-/// Git commands a flow may run: those that only read.
-const GIT: &[&str] = &["diff", "status", "log", "show", "rev-parse", "ls-files"];
-
-/// Runs `git args` in `root` when the subcommand only reads: `{code, output}`.
-pub fn git(root: &Path, args: &[String]) -> Result<Value, String> {
-    let sub = args.first().map(String::as_str).unwrap_or_default();
-    if !GIT.contains(&sub) {
-        return Err(format!("git {sub}: a flow runs only {}", GIT.join(", ")));
-    }
-    let out = Command::new("git")
-        .args(args)
-        .current_dir(root)
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|e| e.to_string())?;
-    let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
-    text.push_str(&String::from_utf8_lossy(&out.stderr));
-    Ok(json!({"code": out.status.code().unwrap_or(-1), "output": tail(&text, TAIL)}))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,13 +320,6 @@ mod tests {
             hits.iter()
                 .all(|h| h.path != "src/text.rs" || h.score > 0.0)
         );
-    }
-
-    #[test]
-    fn git_runs_only_what_reads() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(git(dir.path(), &["push".to_string()]).is_err());
-        assert!(git(dir.path(), &["status".to_string()]).is_ok());
     }
 
     #[test]

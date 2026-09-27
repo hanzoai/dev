@@ -1,0 +1,20 @@
+{
+  "id": "reasoning.budget@1",
+  "description": "How much the serving model should think before it answers. State: {request, system, turns, tools, prompt_tokens, images}.",
+  "calibration": "cal_6dbb072f8109a222",
+  "questions": {
+    "budget": {
+      "type": "score",
+      "instructions": "How much reasoning does a correct answer to this request take?",
+      "criteria": [
+        "none: recall, formatting or a direct answer",
+        "short: one or two inference steps",
+        "medium: a chain of dependent steps",
+        "deep: search, proof or planning under uncertainty"
+      ]
+    }
+  },
+  "thresholds": {
+    "budget": 0.5
+  }
+}

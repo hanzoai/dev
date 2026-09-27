@@ -1,7 +1,6 @@
 //! Zen through the Hanzo API: the only model calls a flow makes, and only to write code or
 //! text.
 
-use program::Revision;
 use serde_json::Value;
 use serde_json::json;
 use std::time::Duration;
@@ -68,19 +67,9 @@ impl Zen {
             .map(str::to_string)
             .ok_or_else(|| "zen: an answer without text".to_string())
     }
-}
 
-impl program::Zen for Zen {
-    fn generate(&self, prompt: &str, context: &Value) -> program::Result<String> {
-        self.runtime
-            .block_on(self.complete(prompt, context))
-            .map_err(program::Error::Backend)
-    }
-
-    fn revision(&self) -> Revision {
-        Revision {
-            model: self.model.clone(),
-            calibration: None,
-        }
+    /// Zen's answer to `prompt` over `context`. Blocks: call it off the async runtime.
+    pub fn generate(&self, prompt: &str, context: &Value) -> Result<String, String> {
+        self.runtime.block_on(self.complete(prompt, context))
     }
 }

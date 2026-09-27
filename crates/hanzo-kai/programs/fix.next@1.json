@@ -1,0 +1,18 @@
+{
+  "id": "fix.next@1",
+  "description": "After an attempt to fix a failing test: done, retry or escalate. State: {test, last}.",
+  "questions": {
+    "next": {
+      "type": "choice",
+      "instructions": "An attempt to fix a failing test ran the tests again. What should happen next?",
+      "criteria": {
+        "done": "the tests pass: the fix is finished",
+        "retry": "the tests still fail, and another attempt could fix them",
+        "escalate": "the tests still fail, and more attempts will not help: a person must look"
+      }
+    }
+  },
+  "thresholds": {
+    "next": 0.5
+  }
+}

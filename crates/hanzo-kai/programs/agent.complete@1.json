@@ -1,0 +1,28 @@
+{
+  "id": "agent.complete@1",
+  "description": "Before an agent reports done: is the request finished, and is that shown rather than claimed?",
+  "calibration": "cal_6dbb072f8109a222",
+  "questions": {
+    "done": {
+      "type": "noul",
+      "instructions": "Has the agent finished everything the user asked for?"
+    },
+    "verified": {
+      "type": "noul",
+      "instructions": "Is the result backed by evidence in the transcript, such as passing tests or command output?"
+    },
+    "remaining": {
+      "type": "score",
+      "instructions": "How much of the request is left to do?",
+      "criteria": [
+        "nothing",
+        "minor: cleanup or a note",
+        "substantial: part of the request is not done"
+      ]
+    }
+  },
+  "thresholds": {
+    "done": 0.6,
+    "verified": 0.6
+  }
+}

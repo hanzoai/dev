@@ -1,0 +1,14 @@
+{
+  "id": "context.select@1",
+  "description": "Whether one retrieved chunk is needed to answer a request; asked per candidate, the top K that hold are kept. State: {request, chunk, source}.",
+  "calibration": "cal_6dbb072f8109a222",
+  "questions": {
+    "relevant": {
+      "type": "noul",
+      "instructions": "Does this chunk contain information needed to answer the request?"
+    }
+  },
+  "thresholds": {
+    "relevant": 0.5
+  }
+}

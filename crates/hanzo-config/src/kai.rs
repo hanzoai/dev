@@ -1,10 +1,12 @@
 //! Kai's settings: `kai.toml` in the product home.
 //!
-//! Each operation names the Decision Program it runs, the mode it runs in, the thresholds
-//! merged over the program's, and for a selection how many candidates it keeps. `shadow`
-//! records the decision, `advisory` also shows it, and only `enforced` lets it act, and then
-//! only toward the stricter outcome. A missing key is its default; every operation defaults
-//! to `shadow`. Without the file Kai does not run in the agent loop.
+//! Kai answers over the Decisions API, `POST {url}/decisions`, signed with the Hanzo
+//! credential Dev already uses. Each operation names the program it asks (its questions and
+//! gate), the mode it runs in, the thresholds merged over the program's, and for a selection
+//! how many candidates it keeps. `shadow` records the decision, `advisory` also shows it, and
+//! only `enforced` lets it act, and then only toward the stricter outcome. A missing key is
+//! its default; every operation defaults to `shadow`. Without the file Kai does not run in
+//! the agent loop.
 
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -116,7 +118,7 @@ struct Written {
 /// One operation's settings, defaults applied.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Op {
-    /// A shipped program id (`agent.command-risk@1`) or a path to a program file.
+    /// A program Dev ships (`agent.command-risk@1`) or a path to a program file.
     pub program: String,
     pub mode: Mode,
     /// Merged over the program's own, by question.
@@ -128,8 +130,8 @@ pub struct Op {
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct File {
-    models: Option<Vec<String>>,
-    device: Option<String>,
+    url: Option<String>,
+    model: Option<String>,
     trace: Option<PathBuf>,
     zen: Option<String>,
     ops: BTreeMap<String, Written>,
@@ -137,10 +139,10 @@ struct File {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Kai {
-    /// Decision runtime checkpoints Kai answers from, in process.
-    pub models: Vec<String>,
-    /// `cpu`, `metal` or `cuda`.
-    pub device: String,
+    /// The Decisions API base: `POST {url}/decisions`.
+    pub url: String,
+    /// The model every question is put to.
+    pub model: String,
     /// The decision trace, JSON lines, one per decision.
     pub trace: PathBuf,
     /// The Zen model a flow's generation nodes call.
@@ -196,10 +198,12 @@ impl Kai {
             })
             .collect();
         Ok(Kai {
-            models: file
-                .models
-                .unwrap_or_else(|| vec!["laya-agent".to_string()]),
-            device: file.device.unwrap_or_else(|| "cpu".to_string()),
+            url: file
+                .url
+                .unwrap_or_else(|| crate::API_BASE.to_string())
+                .trim_end_matches('/')
+                .to_string(),
+            model: file.model.unwrap_or_else(|| "laya-agent".to_string()),
             trace: home.join(
                 file.trace
                     .unwrap_or_else(|| PathBuf::from("kai/decisions.jsonl")),

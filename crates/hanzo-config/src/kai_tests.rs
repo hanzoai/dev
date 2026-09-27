@@ -17,7 +17,8 @@ fn every_operation_defaults_to_shadow_on_its_shipped_program() {
     assert_eq!(kai.op(Operation::Tools).k, Some(8));
     assert_eq!(kai.op(Operation::Context).k, Some(4));
     assert_eq!(kai.op(Operation::Risk).k, None);
-    assert_eq!(kai.models, ["laya-agent"]);
+    assert_eq!(kai.url, "https://api.hanzo.ai/v1");
+    assert_eq!(kai.model, "laya-agent");
     assert_eq!(kai.trace, home.path().join("kai/decisions.jsonl"));
 }
 
@@ -27,7 +28,8 @@ fn an_operation_takes_its_program_mode_thresholds_and_k() {
     std::fs::write(
         home.path().join(FILE),
         r#"
-models = ["kai@main"]
+url = "http://127.0.0.1:8080/v1/"
+model = "kai"
 trace = "/var/log/kai.jsonl"
 
 [ops.risk]
@@ -49,7 +51,8 @@ k = 3
     assert_eq!(kai.op(Operation::Tools).mode, Mode::Advisory);
     assert_eq!(kai.op(Operation::Tools).k, Some(3));
     assert_eq!(kai.op(Operation::Model).mode, Mode::Shadow);
-    assert_eq!(kai.models, ["kai@main"]);
+    assert_eq!(kai.url, "http://127.0.0.1:8080/v1");
+    assert_eq!(kai.model, "kai");
     assert_eq!(kai.trace, PathBuf::from("/var/log/kai.jsonl"));
 }
 

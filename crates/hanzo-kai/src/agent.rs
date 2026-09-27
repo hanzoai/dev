@@ -7,21 +7,23 @@
 //! operation's mode sets what its decision may do: `shadow` records it, `advisory` also
 //! shows it, `enforced` applies it, and then only toward the stricter outcome. A decision
 //! that is not enforced runs off the loop's path; an enforced one is waited for, at most
-//! [`WAIT`], and the loop goes on as without Kai when it is late or fails.
+//! [`WAIT`], and the loop goes on as without Kai when it is late or fails. While Kai is down
+//! no decision is asked at all.
 //!
 //! Every decision is a line in the trace, written once what followed it is known: the turn's
 //! end for tools, routing, context and progress, the command's end for risk, the decision
-//! itself for completion.
+//! itself for completion. A decision Kai did not answer writes no line.
 
 use crate::Kai;
 use crate::decide;
+use crate::decide::Call;
+use crate::decide::Decision;
 use crate::decide::cut;
 use crate::tools;
 use crate::trace::Line;
 use crate::trace::Outcome;
 use crate::trace::Record;
 use crate::trace::Step;
-use control::Decision;
 use hanzo_config::kai::Mode;
 use hanzo_config::kai::Op;
 use hanzo_config::kai::Operation;
@@ -40,10 +42,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
-/// The longest the loop waits for an enforced decision.
-pub const WAIT: Duration = Duration::from_secs(30);
-/// The longest a decision off the loop's path may take, the first loading Kai.
-const BACKGROUND: Duration = Duration::from_secs(600);
+/// The longest the loop waits for an enforced decision: past the client's own timeout, so a
+/// request that times out marks Kai down rather than being dropped.
+pub const WAIT: Duration = Duration::from_secs(12);
 /// Candidate files a context decision reads.
 const CANDIDATES: usize = 16;
 /// Continuations Kai may start for one request before it hands the request back.
@@ -68,8 +69,8 @@ struct State {
     turns: u64,
     /// The tools last offered.
     names: Vec<String>,
-    /// This turn's shortlist, once decided.
-    shortlist: Option<(String, Option<HashSet<String>>)>,
+    /// This turn's shortlist, once decided, and the tools it was decided over.
+    shortlist: Option<(String, Vec<String>, Option<HashSet<String>>)>,
     /// Tools called this turn.
     called: Vec<String>,
     /// This request's steps: `{tool, result}`.
@@ -121,6 +122,11 @@ impl Thread {
         self.state().request.text.clone()
     }
 
+    /// Whether Kai is down: its operations are skipped.
+    fn down(&self) -> bool {
+        self.kai.decider.down()
+    }
+
     /// A line for `op` in `turn`, not yet decided or closed.
     fn record(&self, turn: &str, name: &str, op: &Op) -> Arc<Record> {
         let line = Line {
@@ -145,43 +151,51 @@ impl Thread {
         record
     }
 
-    /// Runs `call` for `op`: waited for when enforced, else off the loop's path. `then` reads
-    /// the decision (or its failure) into the line and says what to act on; its answer is
-    /// returned only when enforced.
+    /// Asks Kai `kind`'s program over `states`: waited for when enforced, else off the
+    /// loop's path. `then` reads the decision into the line and says what to act on; its
+    /// answer is returned only when enforced. A decision Kai does not answer voids the line
+    /// and acts on nothing.
     async fn decide<T: Send + 'static>(
         self: &Arc<Self>,
-        op: &Op,
+        kind: Operation,
         record: Arc<Record>,
-        call: control::Call,
-        then: impl FnOnce(&Arc<Thread>, &Result<Decision, String>, &mut Step, &mut Outcome) -> Option<T>
+        states: Vec<Value>,
+        base: Option<Verdict>,
+        then: impl FnOnce(&Arc<Thread>, &Decision, &mut Step, &mut Outcome) -> Option<T>
         + Send
         + 'static,
     ) -> Option<T> {
+        let op = self.op(kind);
+        let program = self.kai.program(kind);
         let decider = Arc::clone(&self.kai.decider);
+        let call = Call {
+            mode: op.mode,
+            k: op.k,
+            base,
+        };
         if op.mode == Mode::Enforced {
-            let decision = decider.decide(call, WAIT).await;
+            let decision = tokio::time::timeout(WAIT, decider.decide(&program, states, call))
+                .await
+                .unwrap_or_else(|_| Err("late".into()));
+            let Ok(decision) = decision else {
+                record.void();
+                return None;
+            };
             let mut out = None;
             record.decided(|step, outcome| {
-                if let Ok(d) = &decision {
-                    step.fill(d);
-                }
-                if let Err(e) = &decision {
-                    step.error = e.clone();
-                }
+                step.fill(&decision);
                 out = then(self, &decision, step, outcome);
             });
             return out;
         }
         let me = Arc::clone(self);
         tokio::spawn(async move {
-            let decision = decider.decide(call, BACKGROUND).await;
+            let Ok(decision) = decider.decide(&program, states, call).await else {
+                record.void();
+                return;
+            };
             record.decided(|step, outcome| {
-                if let Ok(d) = &decision {
-                    step.fill(d);
-                }
-                if let Err(e) = &decision {
-                    step.error = e.clone();
-                }
+                step.fill(&decision);
                 let _ = then(&me, &decision, step, outcome);
                 step.applied = false;
             });
@@ -199,17 +213,20 @@ impl Thread {
     }
 
     /// The tools `turn` keeps in view, of `cards`.
+    /// Decided once a turn, and again when the tools on offer change: MCP servers that finish
+    /// starting mid-turn add theirs.
     async fn shortlist(self: &Arc<Self>, turn: &str, cards: Vec<Card>) -> Option<HashSet<String>> {
+        let names: Vec<String> = cards.iter().map(|c| c.name.clone()).collect();
         {
             let state = self.state();
-            if let Some((t, keep)) = &state.shortlist
+            if let Some((t, offered, keep)) = &state.shortlist
                 && t == turn
+                && *offered == names
             {
                 return keep.clone();
             }
         }
-        let names: Vec<String> = cards.iter().map(|c| c.name.clone()).collect();
-        let keep = if cards.is_empty() {
+        let keep = if cards.is_empty() || self.down() {
             None
         } else {
             let op = self.op(Operation::Tools);
@@ -224,43 +241,44 @@ impl Thread {
                 })
                 .collect();
             let record = self.open(turn, "tools", &op);
-            let call = decide::call(&op, states, None);
             let (turn_id, all) = (turn.to_string(), names.clone());
             let advisory = op.clone();
-            self.decide(&op, record, call, move |me, decision, step, _| {
-                let Ok(d) = decision else {
-                    step.taken = "all".into();
-                    return None;
-                };
-                let chosen: Vec<String> = d
-                    .selected
-                    .iter()
-                    .flatten()
-                    .filter_map(|&i| all.get(i).cloned())
-                    .collect();
-                step.kai = chosen.join(",");
-                let keep = (advisory.mode == Mode::Enforced && decide::all_enforced(d))
-                    .then(|| chosen.iter().cloned().collect::<HashSet<String>>());
-                step.taken = match &keep {
-                    Some(_) => step.kai.clone(),
-                    None => "all".into(),
-                };
-                step.applied = keep.is_some();
-                me.advise(&advisory, &turn_id, || {
-                    Some(format!(
-                        "would show {} of {} tools: {}",
-                        chosen.len(),
-                        all.len(),
-                        chosen.join(", ")
-                    ))
-                });
-                keep
-            })
+            self.decide(
+                Operation::Tools,
+                record,
+                states,
+                None,
+                move |me, d, step, _| {
+                    let chosen: Vec<String> = d
+                        .selected
+                        .iter()
+                        .flatten()
+                        .filter_map(|&i| all.get(i).cloned())
+                        .collect();
+                    step.kai = chosen.join(",");
+                    let keep = (advisory.mode == Mode::Enforced && decide::all_enforced(d))
+                        .then(|| chosen.iter().cloned().collect::<HashSet<String>>());
+                    step.taken = match &keep {
+                        Some(_) => step.kai.clone(),
+                        None => "all".into(),
+                    };
+                    step.applied = keep.is_some();
+                    me.advise(&advisory, &turn_id, || {
+                        Some(format!(
+                            "would show {} of {} tools: {}",
+                            chosen.len(),
+                            all.len(),
+                            chosen.join(", ")
+                        ))
+                    });
+                    keep
+                },
+            )
             .await
         };
         let mut state = self.state();
-        state.names = names;
-        state.shortlist = Some((turn.to_string(), keep.clone()));
+        state.names = names.clone();
+        state.shortlist = Some((turn.to_string(), names, keep.clone()));
         keep
     }
 
@@ -272,6 +290,9 @@ impl Thread {
         policy: Verdict,
         action: Value,
     ) -> Verdict {
+        if self.down() {
+            return policy;
+        }
         let op = self.op(Operation::Risk);
         let command = command_state(&action);
         let shown = command["command"]
@@ -282,39 +303,38 @@ impl Thread {
         self.state()
             .calls
             .insert(call_id.to_string(), Arc::clone(&record));
-        let call = decide::call(&op, vec![command], Some(decide::policy(policy)));
         let (turn_id, advisory) = (turn.to_string(), op.clone());
         let decided = self
-            .decide(&op, record, call, move |me, decision, step, _| {
-                let Ok(d) = decision else {
-                    step.taken = policy.name().into();
-                    return None;
-                };
-                let kai = decide::first(d)
-                    .and_then(|r| r.verdict)
-                    .map(decide::verdict);
-                step.kai = kai.map(Verdict::name).unwrap_or_default().into();
-                let taken = decide::enforced(d, 0)
-                    .and_then(|r| r.effective)
-                    .map(decide::verdict)
-                    .map_or(policy, |v| v.join(policy));
-                step.taken = taken.name().into();
-                step.applied = taken != policy;
-                me.advise(&advisory, &turn_id, || {
-                    let kai = kai?;
-                    (kai > policy).then(|| match kai {
-                        Verdict::Deny => format!("would refuse `{}`", cut(&shown, 120)),
-                        _ => format!("would ask before `{}`", cut(&shown, 120)),
-                    })
-                });
-                Some(taken)
-            })
+            .decide(
+                Operation::Risk,
+                record,
+                vec![command],
+                Some(policy),
+                move |me, d, step, _| {
+                    let kai = decide::first(d).and_then(|r| r.verdict);
+                    step.kai = kai.map(Verdict::name).unwrap_or_default().into();
+                    let taken = decide::enforced(d, 0)
+                        .and_then(|r| r.effective)
+                        .map_or(policy, |v| v.join(policy));
+                    step.taken = taken.name().into();
+                    step.applied = taken != policy;
+                    me.advise(&advisory, &turn_id, || {
+                        let kai = kai?;
+                        (kai > policy).then(|| match kai {
+                            Verdict::Deny => format!("would refuse `{}`", cut(&shown, 120)),
+                            _ => format!("would ask before `{}`", cut(&shown, 120)),
+                        })
+                    });
+                    Some(taken)
+                },
+            )
             .await;
         decided.unwrap_or(policy).join(policy)
     }
 
     /// Routing hints for the turn: Kai's model tier and reasoning budget, when enforced.
     async fn route(self: &Arc<Self>, turn: &str, request: Request) -> BTreeMap<String, String> {
+        let down = self.down();
         let state = {
             let mut s = self.state();
             s.turn = turn.to_string();
@@ -337,16 +357,18 @@ impl Thread {
                 "images": s.request.images,
             })
         };
+        if down {
+            return BTreeMap::new();
+        }
         let mut asks = Vec::new();
         for (kind, question) in [(Operation::Model, "tier"), (Operation::Reasoning, "budget")] {
             let op = self.op(kind);
             let record = self.open(turn, kind.name(), &op);
-            let call = decide::call(&op, vec![state.clone()], None);
+            let states = vec![state.clone()];
             let (turn_id, advisory) = (turn.to_string(), op.clone());
             let me = Arc::clone(self);
             asks.push(async move {
-                me.decide(&op, record, call, move |me, decision, step, _| {
-                    let d = decision.as_ref().ok()?;
+                me.decide(kind, record, states, None, move |me, d, step, _| {
                     let answer = decide::first(d)
                         .and_then(|r| r.signals.get(question))
                         .map(|s| s.answer.clone());
@@ -365,20 +387,38 @@ impl Thread {
                 .await
             });
         }
-        let mut hints = BTreeMap::new();
-        for ask in asks {
-            if let Some((k, v)) = ask.await {
-                hints.insert(k, v);
-            }
-        }
-        hints
+        // Tier and budget are asked together.
+        futures::future::join_all(asks)
+            .await
+            .into_iter()
+            .flatten()
+            .collect()
     }
 
     /// Files the turn should start from, for a request made in `cwd`.
     async fn context(self: &Arc<Self>, turn: &str, text: String, cwd: PathBuf) -> Option<String> {
-        if text.trim().is_empty() {
+        if text.trim().is_empty() || self.down() {
             return None;
         }
+        let op = self.op(Operation::Context);
+        let record = self.open(turn, "context", &op);
+        if op.mode == Mode::Enforced {
+            return self.select(turn.to_string(), record, text, cwd).await;
+        }
+        // Nothing can act on the answer: the search runs off the turn's path too.
+        let (me, turn) = (Arc::clone(self), turn.to_string());
+        tokio::spawn(async move { me.select(turn, record, text, cwd).await });
+        None
+    }
+
+    /// Retrieves candidate files for `text` and asks Kai which matter.
+    async fn select(
+        self: &Arc<Self>,
+        turn: String,
+        record: Arc<Record>,
+        text: String,
+        cwd: PathBuf,
+    ) -> Option<String> {
         let query = text.clone();
         let files = tokio::task::spawn_blocking(move || {
             tools::search(&cwd, &query, CANDIDATES, 2000)
@@ -390,8 +430,9 @@ impl Thread {
                 .collect::<Vec<_>>()
         })
         .await
-        .ok()?;
+        .unwrap_or_default();
         if files.is_empty() {
+            record.void();
             return None;
         }
         let op = self.op(Operation::Context);
@@ -401,35 +442,40 @@ impl Thread {
                 json!({"request": cut(&text, 2000), "chunk": cut(head, 2000), "source": path})
             })
             .collect();
-        let record = self.open(turn, "context", &op);
-        let call = decide::call(&op, states, None);
         let paths: Vec<String> = files.into_iter().map(|(p, _)| p).collect();
-        let (turn_id, advisory) = (turn.to_string(), op.clone());
-        self.decide(&op, record, call, move |me, decision, step, _| {
-            let d = decision.as_ref().ok()?;
-            let chosen: Vec<String> = d
-                .selected
-                .iter()
-                .flatten()
-                .filter_map(|&i| paths.get(i).cloned())
-                .collect();
-            step.kai = chosen.join(",");
-            me.advise(&advisory, &turn_id, || {
-                (!chosen.is_empty()).then(|| format!("would start from {}", chosen.join(", ")))
-            });
-            let apply =
-                advisory.mode == Mode::Enforced && decide::all_enforced(d) && !chosen.is_empty();
-            step.applied = apply;
-            if !apply {
-                return None;
-            }
-            step.taken = step.kai.clone();
-            let list: Vec<String> = chosen.iter().map(|p| format!("- {p}")).collect();
-            Some(format!(
-                "Kai: the files most likely to matter for this request; read them first.\n{}",
-                list.join("\n")
-            ))
-        })
+        let advisory = op.clone();
+        let turn_id = turn;
+        self.decide(
+            Operation::Context,
+            record,
+            states,
+            None,
+            move |me, d, step, _| {
+                let chosen: Vec<String> = d
+                    .selected
+                    .iter()
+                    .flatten()
+                    .filter_map(|&i| paths.get(i).cloned())
+                    .collect();
+                step.kai = chosen.join(",");
+                me.advise(&advisory, &turn_id, || {
+                    (!chosen.is_empty()).then(|| format!("would start from {}", chosen.join(", ")))
+                });
+                let apply = advisory.mode == Mode::Enforced
+                    && decide::all_enforced(d)
+                    && !chosen.is_empty();
+                step.applied = apply;
+                if !apply {
+                    return None;
+                }
+                step.taken = step.kai.clone();
+                let list: Vec<String> = chosen.iter().map(|p| format!("- {p}")).collect();
+                Some(format!(
+                    "Kai: the files most likely to matter for this request; read them first.\n{}",
+                    list.join("\n")
+                ))
+            },
+        )
         .await
     }
 
@@ -452,14 +498,15 @@ impl Thread {
         let Some(steps) = steps else {
             return;
         };
+        if self.down() {
+            return;
+        }
         let op = self.op(Operation::Progress);
         let state = json!({"request": cut(&self.request(), 2000), "steps": steps});
         let record = self.open(turn, "progress", &op);
-        let call = decide::call(&op, vec![state], None);
         let (turn_id, advisory) = (turn.to_string(), op.clone());
         let steer = self
-            .decide(&op, record, call, move |me, decision, step, _| {
-                let d = decision.as_ref().ok()?;
+            .decide(Operation::Progress, record, vec![state], None, move |me, d, step, _| {
                 let first = decide::first(d)?;
                 let status = first.signals.get("status").map(|s| s.answer.clone());
                 let asks = first.signals.get("needs_user").and_then(|s| s.holds) == Some(true);
@@ -507,7 +554,7 @@ impl Thread {
                 s.continued,
             )
         };
-        if request.trim().is_empty() {
+        if request.trim().is_empty() || self.down() {
             return;
         }
         let op = self.op(Operation::Complete);
@@ -518,37 +565,41 @@ impl Thread {
             line.outcome.finish = "idle".into();
             line.outcome.result = json!({"continued": continued});
         });
-        let call = decide::call(&op, vec![state], None);
         let (turn_id, advisory) = (turn.clone(), op.clone());
         let next = self
-            .decide(&op, record, call, move |me, decision, step, outcome| {
-                let d = decision.as_ref().ok()?;
-                let done = decide::first(d)
-                    .and_then(|r| r.signals.get("done"))
-                    .and_then(|s| s.holds);
-                step.kai = match done {
-                    Some(true) => "done".into(),
-                    Some(false) => "retry".into(),
-                    None => String::new(),
-                };
-                me.advise(&advisory, &turn_id, || {
-                    (done == Some(false)).then(|| "this does not look finished".to_string())
-                });
-                let not_done = decide::enforced(d, 0)
-                    .and_then(|r| r.signals.get("done"))
-                    .and_then(|s| s.holds)
-                    == Some(false);
-                let taken = match (not_done, continued < CONTINUATIONS) {
-                    (false, _) => "done",
-                    (true, true) => "retry",
-                    (true, false) => "escalate",
-                };
-                step.taken = taken.into();
-                step.applied = not_done;
-                outcome.finish = taken.into();
-                outcome.escalated = taken == "escalate";
-                not_done.then_some(taken)
-            })
+            .decide(
+                Operation::Complete,
+                record,
+                vec![state],
+                None,
+                move |me, d, step, outcome| {
+                    let done = decide::first(d)
+                        .and_then(|r| r.signals.get("done"))
+                        .and_then(|s| s.holds);
+                    step.kai = match done {
+                        Some(true) => "done".into(),
+                        Some(false) => "retry".into(),
+                        None => String::new(),
+                    };
+                    me.advise(&advisory, &turn_id, || {
+                        (done == Some(false)).then(|| "this does not look finished".to_string())
+                    });
+                    let not_done = decide::enforced(d, 0)
+                        .and_then(|r| r.signals.get("done"))
+                        .and_then(|s| s.holds)
+                        == Some(false);
+                    let taken = match (not_done, continued < CONTINUATIONS) {
+                        (false, _) => "done",
+                        (true, true) => "retry",
+                        (true, false) => "escalate",
+                    };
+                    step.taken = taken.into();
+                    step.applied = not_done;
+                    outcome.finish = taken.into();
+                    outcome.escalated = taken == "escalate";
+                    not_done.then_some(taken)
+                },
+            )
             .await;
         match next {
             Some("retry") => {
@@ -757,7 +808,7 @@ pub mod extension {
     struct Agent {
         events: Arc<dyn ExtensionEventSink>,
         manager: Weak<ThreadManager>,
-        /// Kai per profile home, opened once: every thread shares its checkpoint.
+        /// Kai per profile home, opened once: every thread shares its client and trace.
         homes: Mutex<HashMap<PathBuf, Option<Arc<Kai>>>>,
     }
 
@@ -769,11 +820,20 @@ pub mod extension {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             homes
                 .entry(home)
-                .or_insert_with_key(|home| match hanzo_config::kai::Kai::load(home) {
-                    Ok(settings) => settings.map(|s| Arc::new(Kai::open(s))),
-                    Err(e) => {
-                        tracing::warn!("{e}");
-                        None
+                .or_insert_with_key(|home| {
+                    let settings = match hanzo_config::kai::Kai::load(home) {
+                        Ok(settings) => settings?,
+                        Err(e) => {
+                            tracing::warn!("kai: {e}");
+                            return None;
+                        }
+                    };
+                    match Kai::open(settings, hanzo_config::hanzo_credential()) {
+                        Ok(kai) => Some(Arc::new(kai)),
+                        Err(e) => {
+                            tracing::warn!("kai: {e}");
+                            None
+                        }
                     }
                 })
                 .clone()

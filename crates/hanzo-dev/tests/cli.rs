@@ -46,6 +46,15 @@ fn every_subcommand_assembles_a_parser() {
 }
 
 #[test]
+fn flow_offers_fix_and_fix_needs_a_test_command() {
+    let home = home();
+    assert!(text(&dev(home.path(), &["flow", "--help"])).contains("fix"));
+    let help = text(&dev(home.path(), &["flow", "fix", "--help"]));
+    assert!(help.contains("--test") && help.contains("--control"), "{help}");
+    assert!(!dev(home.path(), &["flow", "fix"]).status.success());
+}
+
+#[test]
 fn completion_scripts_name_the_product() {
     let home = home();
     assert!(text(&dev(home.path(), &["completion", "bash"])).contains("_dev()"));

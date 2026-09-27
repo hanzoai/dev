@@ -1,0 +1,10 @@
+{
+  "id": "fix.pick@1",
+  "description": "Which retrieved file to change so a failing test passes; asked per candidate, the most probable is read. State: {failure, last, file: {path, head}}.",
+  "questions": {
+    "pick": {
+      "type": "noul",
+      "instructions": "A test fails with this output. Is this file the one to change to make it pass?"
+    }
+  }
+}

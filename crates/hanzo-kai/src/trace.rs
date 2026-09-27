@@ -7,10 +7,10 @@
 //! both. A line carries state hashes and distributions, never the text of a request, a
 //! command or an answer. Dev adds `outcome.result`, what followed the decision.
 
-use control::Decision;
-use control::Row;
+use crate::decide::Decision;
+use crate::decide::Row;
+use crate::program::Signal;
 use indexmap::IndexMap;
-use program::policy::Signal;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -105,13 +105,13 @@ impl Step {
     pub fn fill(&mut self, decision: &Decision) {
         self.program = decision.program.clone();
         self.hash = decision.hash.clone();
-        self.model = decision.revision.model.clone();
+        self.model = decision.model.clone();
         self.ms = decision.ms;
         for row in &decision.results {
             match row {
                 Row::Ruled(r) => {
                     self.states.push(r.state.clone());
-                    self.gates.push(mode_name(r.mode).to_string());
+                    self.gates.push(r.mode.name().to_string());
                     self.answers.push(r.answers.clone());
                     self.signals.push(r.signals.clone());
                 }
@@ -126,14 +126,6 @@ impl Step {
                 }
             }
         }
-    }
-}
-
-pub fn mode_name(mode: program::Mode) -> &'static str {
-    match mode {
-        program::Mode::Shadow => "shadow",
-        program::Mode::Advisory => "advisory",
-        program::Mode::Enforced => "enforced",
     }
 }
 
@@ -154,10 +146,6 @@ impl Trace {
             path,
             file: Mutex::new(None),
         }
-    }
-
-    pub fn path(&self) -> &std::path::Path {
-        &self.path
     }
 
     /// Appends `line`. A trace that cannot be written is logged and skipped: the loop never
@@ -206,6 +194,8 @@ struct Pending {
     op: String,
     decided: bool,
     closed: bool,
+    /// No decision was made: the line is never written.
+    void: bool,
 }
 
 impl Record {
@@ -219,6 +209,7 @@ impl Record {
                 op: op.to_string(),
                 decided: false,
                 closed: false,
+                void: false,
             }),
         })
     }
@@ -230,7 +221,7 @@ impl Record {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let was = p.decided && p.closed;
         f(&mut p);
-        if !was && p.decided && p.closed {
+        if !was && p.decided && p.closed && !p.void {
             self.trace.write(&p.line);
         }
     }
@@ -246,12 +237,11 @@ impl Record {
         });
     }
 
-    /// Updates the step before or after the decision is in, without deciding it.
-    pub fn step(&self, f: impl FnOnce(&mut Step)) {
+    /// Kai did not answer: nothing was decided, and the line is dropped.
+    pub fn void(&self) {
         self.with(|p| {
-            if let Some(step) = p.line.ops.get_mut(&p.op) {
-                f(step);
-            }
+            p.void = true;
+            p.decided = true;
         });
     }
 
@@ -263,12 +253,5 @@ impl Record {
                 p.closed = true;
             }
         });
-    }
-
-    pub fn is_closed(&self) -> bool {
-        self.inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .closed
     }
 }
