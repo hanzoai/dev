@@ -399,6 +399,8 @@ jobs:
           rm -rf "$RUNNER_TEMP/npm"; mkdir -p "$RUNNER_TEMP/npm"
           plat() { # plat <triple> <os> <cpu> <pkg> <short>
             local t=$1 os=$2 cpu=$3 pkg=$4 short=$5 d="$RUNNER_TEMP/npm/${4##*/}" x="$RUNNER_TEMP/x"
+            # npm never takes a version twice: a rerun goes past what it already holds.
+            if npm view "$pkg@$V" version >/dev/null 2>&1; then echo "$pkg@$V is published"; return 0; fi
             rm -rf "$x"; mkdir -p "$x" "$d/bin"
             tar -xzf "dist/dev-$short.tar.gz" -C "$x"
             if [ "$os" = win32 ]; then mv "$x/dev.exe" "$d/bin/dev-$t.exe"; else mv "$x/dev" "$d/bin/dev-$t"; chmod +x "$d/bin/dev-$t"; fi
@@ -411,11 +413,36 @@ jobs:
           plat x86_64-unknown-linux-musl linux x64 @hanzo/dev-linux-x64-musl linux-amd64
           plat aarch64-unknown-linux-musl linux arm64 @hanzo/dev-linux-arm64-musl linux-arm64
           plat x86_64-pc-windows-msvc win32 x64 @hanzo/dev-win32-x64 windows-amd64
+          # The launcher package lives in npm/ (it was codex-cli/ until the front
+          # door moved it), and it names its dependencies as pnpm catalog
+          # entries, which npm would publish verbatim and no installer resolves:
+          # each `catalog:` becomes the version pnpm-workspace.yaml gives it.
           cp README.md npm/README.md
-          cd codex-cli
+          cd npm
           npm version "$V" --no-git-tag-version --allow-same-version
+          python3 - <<'PY'
+          import json, re
+          catalog, inside = {}, False
+          for line in open("../pnpm-workspace.yaml"):
+              if re.match(r"^catalog:\s*$", line):
+                  inside = True
+                  continue
+              if inside and line.strip() and not line.startswith(" "):
+                  break
+              m = inside and re.match(r"""^\s+['"]?([^'":]+)['"]?\s*:\s*['"]?([^'"\s]+)""", line)
+              if m:
+                  catalog[m.group(1)] = m.group(2)
+          p = json.load(open("package.json"))
+          for field in ("dependencies", "devDependencies", "optionalDependencies"):
+              for name, spec in p.get(field, {}).items():
+                  if spec == "catalog:":
+                      if name not in catalog:
+                          raise SystemExit(f"{name}: catalog: names no catalog entry")
+                      p[field][name] = catalog[name]
+          open("package.json", "w").write(json.dumps(p, indent=2) + "\n")
+          PY
           t=$(mktemp); jq --arg v "$V" '.optionalDependencies |= with_entries(.value=$v)' package.json > "$t" && mv "$t" package.json
-          CI=true npm publish --access public
+          if npm view "@hanzo/dev@$V" version >/dev/null 2>&1; then echo "@hanzo/dev@$V is published"; else CI=true npm publish --access public; fi
           git checkout -- README.md 2>/dev/null || true
       - name: Publish Homebrew formula
         run: |
