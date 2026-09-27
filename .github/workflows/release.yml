@@ -202,6 +202,22 @@ jobs:
           echo "$HOME/llvm/bin" >> "$GITHUB_PATH"
           "$HOME/llvm/bin/clang-cl" --version | head -1
           cargo install cargo-xwin --version "${XWIN_CRATE_VERSION}" --locked
+      - name: Stamp the version
+        # The tree names the version it is heading for (0.7.0-dev.1); a release
+        # is the version it computed. The one string lives in the workspace
+        # manifest, the path dependencies that pin it, the upstream edit that
+        # gives upstream's crates the same version, and Cargo.lock, so it is
+        # replaced in all of them and --locked still holds. Without this the
+        # 0.6.107 build said 0.7.0-dev.1 and publish refused it.
+        run: |
+          set -euo pipefail
+          cur=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          [ -n "$cur" ] || { echo "::error::no workspace version in Cargo.toml"; exit 1; }
+          re=$(printf '%s' "$cur" | sed 's/[.]/\\./g')
+          files=$(git ls-files 'Cargo.toml' '*/Cargo.toml' Cargo.lock patches/upstream.json)
+          sed -i "s/$re/$CODE_VERSION/g" $files
+          ! grep -l "$re" $files || { echo "::error::$cur is still named above"; exit 1; }
+          echo "stamped $CODE_VERSION over $cur"
       - name: Apply the owned edits to the pinned upstream
         run: make prepare
       - name: Build
