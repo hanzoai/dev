@@ -15,7 +15,7 @@
 # No macOS or Windows runner is needed, and none is used: `cargo-zigbuild`
 # cross-links the darwin targets against a vendored, checksum-pinned MacOSX
 # SDK and the musl targets natively, and `cargo-xwin` builds windows-msvc with
-# LLVM's clang-cl — all from ordinary amd64 containers, one at a time.
+# LLVM's clang-cl — all from ordinary amd64 containers, five at once.
 #
 # Shape: `version` computes the next patch above everything already published
 # and opens a DRAFT GitHub release; five `build` jobs each compile one target
@@ -130,9 +130,10 @@ jobs:
     timeout-minutes: 150
     strategy:
       fail-fast: false
-      # One target at a time: five release builds of the whole workspace at once
-      # land on the runner hosts together, and those hosts serve other work.
-      max-parallel: 1
+      # No max-parallel. The platform starts one runner per job when the job is
+      # queued, and a job held back by max-parallel waits past that runner's
+      # life: on 2026-09-27 linux-amd64 built in 22 minutes and the four
+      # targets queued behind it never got a runner.
       matrix:
         target:
           - { id: linux-amd64,   rust: x86_64-unknown-linux-musl }
