@@ -1,18 +1,29 @@
 # Release — every push to main ships `dev`, from the Linux pool.
 #
+# THIS FILE LIVES IN .github/workflows BECAUSE GITHUB READS NOTHING ELSE. From
+# 2026-09-08 it sat in .hanzo/workflows, where GitHub never looks and the forge,
+# which mirrors this repository, runs nothing: nineteen days of pushes to main
+# released nothing, and the only trace was a draft v0.6.107 with no assets.
+#
+# The runner is a sandbox: uid 1001, no root (`sudo` answers "effective uid is
+# not 0"), 6 CPUs, 24 GB. Its image carries cc, make, curl, jq, tar, xz, zstd, zip,
+# git, python3 and node; it has no LLVM and no Rust. So nothing here installs a
+# package: a step checks what it needs and names what is missing, Rust comes
+# from rustup into $HOME, and the Windows build takes clang-cl from a pinned
+# LLVM release.
+#
 # No macOS or Windows runner is needed, and none is used: `cargo-zigbuild`
 # cross-links the darwin targets against a vendored, checksum-pinned MacOSX
 # SDK and the musl targets natively, and `cargo-xwin` builds windows-msvc with
-# LLVM's clang-cl — all from ordinary amd64 containers, five in parallel. This
-# is the same pattern hanzoai/cli has shipped its five platforms with; it
-# replaced a single-Mac lane whose host froze under every full build.
+# LLVM's clang-cl — all from ordinary amd64 containers, one at a time.
 #
 # Shape: `version` computes the next patch above everything already published
 # and opens a DRAFT GitHub release; five `build` jobs each compile one target
 # and upload its assets into the draft by id; `publish` verifies all 28
-# assets, publishes the release (which mints the tag), mirrors it to the
-# Hanzo Git, publishes npm (five platform packages, then @hanzo/dev), pushes the
-# Homebrew formula, and lands the version-bump commit on main.
+# assets, publishes the release (which mints the tag), publishes npm (five
+# platform packages, then @hanzo/dev), pushes the Homebrew formula, and lands
+# the version-bump commit on main. The forge mirrors this repository, tags
+# included, so nothing here pushes to it.
 name: Release
 on:
   push:
@@ -25,6 +36,8 @@ env:
   ZIG_VERSION: '0.16.0'
   ZIG_SHA256: '70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00'
   ZIGBUILD_VERSION: '0.23.0'
+  LLVM_VERSION: '21.1.2'
+  LLVM_SHA256: '38dc1e278b8d688d9f4f1077da1dcda623d9e0dd89ffcf03bc18d3492bbd9cb6'
   # Named away from XWIN_VERSION on purpose: cargo-xwin reads that env as its
   # --xwin-version flag (the Windows SDK manifest), and a crate version there
   # kills every msvc build with "invalid digit found in string".
@@ -117,6 +130,9 @@ jobs:
     timeout-minutes: 150
     strategy:
       fail-fast: false
+      # One target at a time: five release builds of the whole workspace at once
+      # land on the runner hosts together, and those hosts serve other work.
+      max-parallel: 1
       matrix:
         target:
           - { id: linux-amd64,   rust: x86_64-unknown-linux-musl }
@@ -136,8 +152,10 @@ jobs:
       - name: Toolchain deps
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential curl jq tar xz-utils zstd zip
+          missing=""
+          for t in cc make perl curl jq tar xz zstd zip sha256sum; do command -v "$t" >/dev/null || missing="$missing $t"; done
+          [ -z "$missing" ] || { echo "::error::the runner lacks:$missing"; exit 1; }
+          echo "the toolchain is here"
       - name: Rust (pinned by rust-toolchain.toml)
         run: |
           set -euo pipefail
@@ -165,16 +183,23 @@ jobs:
           tar -xf macsdk.tar.xz -C "$HOME"
           echo "SDKROOT=$HOME/MacOSX11.3.sdk" >> "$GITHUB_ENV"
       - name: LLVM for windows-msvc
+        # clang-cl compiles the C the crates carry, lld-link links, llvm-lib
+        # archives: three names for two binaries of one LLVM release. Only those
+        # and clang's own headers leave the tarball.
         if: ${{ matrix.target.msvc }}
         run: |
           set -euo pipefail
-          sudo apt-get install -y --no-install-recommends clang lld llvm clang-tools
-          for t in clang-cl lld-link llvm-lib; do
-            command -v "$t" >/dev/null && continue
-            src=$(ls /usr/bin/${t}-* /usr/lib/llvm-*/bin/$t 2>/dev/null | sort -V | tail -n1)
-            [ -n "$src" ] || { echo "::error::$t not provided by the llvm packages"; exit 1; }
-            sudo ln -sf "$src" "/usr/local/bin/$t"
-          done
+          curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/LLVM-${LLVM_VERSION}-Linux-X64.tar.xz" -o llvm.tar.xz
+          echo "${LLVM_SHA256}  llvm.tar.xz" | sha256sum -c -
+          mkdir -p "$HOME/llvm"
+          tar -xJf llvm.tar.xz -C "$HOME/llvm" --strip-components=1 --wildcards \
+            '*/bin/clang' '*/bin/clang-[0-9]*' '*/bin/lld' '*/bin/llvm-ar' '*/lib/clang/*'
+          rm llvm.tar.xz
+          ln -sf clang "$HOME/llvm/bin/clang-cl"
+          ln -sf lld "$HOME/llvm/bin/lld-link"
+          ln -sf llvm-ar "$HOME/llvm/bin/llvm-lib"
+          echo "$HOME/llvm/bin" >> "$GITHUB_PATH"
+          "$HOME/llvm/bin/clang-cl" --version | head -1
           cargo install cargo-xwin --version "${XWIN_CRATE_VERSION}" --locked
       - name: Apply the owned edits to the pinned upstream
         run: make prepare
@@ -308,9 +333,10 @@ jobs:
       - name: Tools
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends curl jq git zstd
-          command -v node >/dev/null || { curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -; sudo apt-get install -y nodejs; }
+          missing=""
+          for t in curl jq git zstd node npm sha256sum; do command -v "$t" >/dev/null || missing="$missing $t"; done
+          [ -z "$missing" ] || { echo "::error::the runner lacks:$missing"; exit 1; }
+          echo "the tools are here"
       - name: Every asset is present, then the release is real
         run: |
           set -euo pipefail
@@ -337,19 +363,6 @@ jobs:
           echo "smoked: $("$x/dev" --version)"
           curl -s -X PATCH "${auth[@]}" "https://api.github.com/repos/hanzoai/dev/releases/$REL" \
             -d '{"draft":false}' | jq -r '"published: " + .html_url'
-      - name: Mirror the release to Hanzo Git
-        env:
-          GIT_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          [ -n "${GIT_TOKEN:-}" ] || { echo "no GIT_TOKEN — skipping Hanzo Git mirror"; exit 0; }
-          git push "https://x:$GIT_TOKEN@git.hanzo.ai/hanzoai/dev.git" "$GITHUB_SHA:refs/tags/v$V" || true
-          a() { curl -fsS -H "Authorization: token $GIT_TOKEN" -H 'Accept: application/json' "$@"; }
-          rel=$(a "https://git.hanzo.ai/v1/repos/hanzoai/dev/releases/tags/v$V" 2>/dev/null | jq -r '.id // empty' || true)
-          [ -n "$rel" ] || rel=$(a -X POST "https://git.hanzo.ai/v1/repos/hanzoai/dev/releases" -H 'Content-Type: application/json' \
-            -d "$(jq -nc --arg t "v$V" --arg n "Release v$V" '{tag_name:$t,name:$n}')" | jq -r .id)
-          for f in dist/*; do a -X POST -F "attachment=@$f" "https://git.hanzo.ai/v1/repos/hanzoai/dev/releases/$rel/assets?name=$(basename "$f")" >/dev/null || true; done
-          echo "Hanzo Git release mirrored"
       - name: Publish npm
         env:
           KMS_CLIENT_ID: ${{ secrets.KMS_CLIENT_ID }}
@@ -398,8 +411,6 @@ jobs:
           cd "$tap"
           git -c user.name="Zach Kelling" -c user.email=z@zeekay.io commit --trailer "Co-authored-by: Hanzo Dev <dev@hanzo.ai>" -qam "hanzo-dev $V" && git push -q || echo "formula unchanged"
       - name: Bump
-        env:
-          GIT_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git add npm/package.json npm/package-lock.json Formula/hanzo-dev.rb 2>/dev/null || true
@@ -407,4 +418,3 @@ jobs:
           push() { git push "$1" HEAD:main && return
             git fetch "$1" main && git -c user.name="Zach Kelling" -c user.email=z@zeekay.io rebase FETCH_HEAD && git push "$1" HEAD:main; }
           push "https://x-access-token:$GH_PAT@github.com/hanzoai/dev.git"
-          [ -z "${GIT_TOKEN:-}" ] || push "https://x:$GIT_TOKEN@git.hanzo.ai/hanzoai/dev.git" || true
