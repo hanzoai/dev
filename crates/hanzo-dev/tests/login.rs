@@ -311,7 +311,7 @@ async fn picker_defaults_to_hanzo_and_hides_a_pasted_key() {
         &env,
         &None,
         codex_utils_pty::TerminalSize { rows: 14, cols: 88 },
-        &[],
+        codex_utils_pty::ChildFds::Attached(&[]),
     )
     .await
     .unwrap();

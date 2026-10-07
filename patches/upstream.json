@@ -7,8 +7,8 @@
   },
   {
     "file": "tui/src/history_cell/session.rs",
-    "old": "Span::from(\"OpenAI Codex\")",
-    "new": "Span::from(hanzo_tui::PRODUCT_NAME)",
+    "old": "\"OpenAI Codex\".bold()",
+    "new": "hanzo_tui::PRODUCT_NAME.bold()",
     "count": 1
   },
   {
@@ -61,8 +61,8 @@
   },
   {
     "file": "tui/src/tooltips.rs",
-    "old": "pub(crate) fn get_tooltip(plan: Option<PlanType>, fast_mode_enabled: bool) -> Option<String> {",
-    "new": "pub(crate) fn get_tooltip(plan: Option<PlanType>, fast_mode_enabled: bool) -> Option<String> {\n    if plan.is_none() {\n        return Some(hanzo_tui::STARTUP_TIP.to_string());\n    }",
+    "old": "pub(crate) fn get_tooltip(plan: Option<PlanType>, keymap: &TuiKeymap) -> Option<String> {",
+    "new": "pub(crate) fn get_tooltip(plan: Option<PlanType>, keymap: &TuiKeymap) -> Option<String> {\n    if plan.is_none() {\n        return Some(hanzo_tui::STARTUP_TIP.to_string());\n    }",
     "count": 1
   },
   {
@@ -74,7 +74,7 @@
   {
     "file": "cli/src/lib.rs",
     "old": "pub(crate) mod debug_sandbox;\nmod exit_status;\npub(crate) mod login;",
-    "new": "#![allow(dead_code)]\npub(crate) mod debug_sandbox;\nmod exit_status;\npub(crate) mod login;\n// Upstream declares these in its binary, which puts them out of reach of\n// any other front end. They are self-contained; publishing them from the\n// library is the whole of the change.\n#[cfg(any(target_os = \"macos\", target_os = \"windows\"))]\npub mod app_cmd;\npub mod cloud_config;\n#[cfg(any(target_os = \"macos\", target_os = \"windows\"))]\npub mod desktop_app;\npub mod doctor;\npub mod marketplace_cmd;\npub mod mcp_cmd;\npub mod migrate_rollouts;\npub mod plugin_cmd;\npub mod remote_control_cmd;",
+    "new": "#![allow(dead_code)]\npub(crate) mod debug_sandbox;\nmod exit_status;\npub(crate) mod login;\n// Upstream declares these in its binary, which puts them out of reach of\n// any other front end. They are self-contained; publishing them from the\n// library is the whole of the change.\n#[cfg(any(target_os = \"macos\", target_os = \"windows\"))]\npub mod app_cmd;\npub mod cloud_config;\n#[cfg(any(target_os = \"macos\", target_os = \"windows\"))]\npub mod desktop_app;\npub mod doctor;\npub mod marketplace_cmd;\npub mod mcp_cmd;\npub mod mcp_login;\npub mod migrate_rollouts;\npub mod plugin_cmd;\npub mod remote_control_cmd;",
     "count": 1
   },
   {
@@ -102,12 +102,6 @@
     "count": 1
   },
   {
-    "file": "tui/src/status/card.rs",
-    "old": "Span::from(\"OpenAI Codex\").bold()",
-    "new": "Span::from(hanzo_tui::PRODUCT_NAME).bold()",
-    "count": 1
-  },
-  {
     "file": "sandboxing/src/bwrap.rs",
     "old": "\"Codex's Linux sandbox uses bubblewrap",
     "new": "\"The Linux sandbox uses bubblewrap",
@@ -129,6 +123,12 @@
     "file": "exec/src/cli.rs",
     "old": "Allow running Codex outside a Git repository.",
     "new": "Allow running Dev outside a Git repository.",
+    "count": 1
+  },
+  {
+    "file": "exec/src/cli.rs",
+    "old": "(OpenAI provider only)",
+    "new": "(supported providers only)",
     "count": 1
   },
   {

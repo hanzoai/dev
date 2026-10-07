@@ -56,14 +56,18 @@ codex-code-mode-protocol = { path = "upstream/codex/codex-rs/code-mode-protocol"
 codex-code-mode-runtime = { path = "upstream/codex/codex-rs/code-mode-runtime" }
 codex-home = { path = "upstream/codex/codex-rs/codex-home" }
 codex-http-client = { path = "upstream/codex/codex-rs/http-client" }
+codex-websocket-auth = { path = "upstream/codex/codex-rs/websocket-auth" }
 codex-websocket-client = { path = "upstream/codex/codex-rs/websocket-client" }
 codex-config = { path = "upstream/codex/codex-rs/config" }
 codex-connectors = { path = "upstream/codex/codex-rs/connectors" }
 codex-agent-extension = { path = "upstream/codex/codex-rs/ext/agent" }
+codex-agent-message-board-client = { path = "upstream/codex/codex-rs/agent-message-board-client" }
+codex-agent-message-board-extension = { path = "upstream/codex/codex-rs/ext/agent-message-board" }
 codex-connectors-extension = { path = "upstream/codex/codex-rs/ext/connectors" }
 codex-context-fragments = { path = "upstream/codex/codex-rs/context-fragments" }
 codex-core = { path = "upstream/codex/codex-rs/core" }
 codex-core-api = { path = "upstream/codex/codex-rs/core-api" }
+codex-core-plugin-common = { path = "upstream/codex/codex-rs/core-plugin-common" }
 codex-core-plugins = { path = "upstream/codex/codex-rs/core-plugins" }
 codex-diagnostics = { path = "upstream/codex/codex-rs/diagnostics" }
 codex-exec = { path = "upstream/codex/codex-rs/exec" }
@@ -76,6 +80,7 @@ codex-extension-api = { path = "upstream/codex/codex-rs/ext/extension-api" }
 codex-extension-items = { path = "upstream/codex/codex-rs/ext/items" }
 codex-goal-extension = { path = "upstream/codex/codex-rs/ext/goal" }
 codex-git-attribution = { path = "upstream/codex/codex-rs/ext/git-attribution" }
+codex-guardian-reviewer = { path = "upstream/codex/codex-rs/ext/guardian-reviewer" }
 codex-guardian-v2 = { path = "upstream/codex/codex-rs/ext/guardian-v2" }
 codex-history-notes-extension = { path = "upstream/codex/codex-rs/ext/history-notes" }
 codex-image-generation-extension = { path = "upstream/codex/codex-rs/ext/image-generation" }
@@ -94,6 +99,7 @@ codex-keyring-store = { path = "upstream/codex/codex-rs/keyring-store" }
 codex-linux-sandbox = { path = "upstream/codex/codex-rs/linux-sandbox" }
 codex-lmstudio = { path = "upstream/codex/codex-rs/lmstudio" }
 codex-login = { path = "upstream/codex/codex-rs/login" }
+codex-mermaid = { path = "upstream/codex/codex-rs/mermaid" }
 codex-message-history = { path = "upstream/codex/codex-rs/message-history" }
 codex-memories-extension = { path = "upstream/codex/codex-rs/ext/memories" }
 codex-web-search-extension = { path = "upstream/codex/codex-rs/ext/web-search" }
@@ -131,6 +137,7 @@ codex-terminal-detection = { path = "upstream/codex/codex-rs/terminal-detection"
 codex-test-binary-support = { path = "upstream/codex/codex-rs/test-binary-support" }
 codex-thread-store = { path = "upstream/codex/codex-rs/thread-store" }
 codex-tools = { path = "upstream/codex/codex-rs/tools" }
+codex-tcp-tunnel = { path = "upstream/codex/codex-rs/tcp-tunnel" }
 codex-tui = { path = "upstream/codex/codex-rs/tui" }
 codex-uds = { path = "upstream/codex/codex-rs/uds" }
 codex-utils-absolute-path = { path = "upstream/codex/codex-rs/utils/absolute-path" }
@@ -150,6 +157,7 @@ codex-utils-output-truncation = { path = "upstream/codex/codex-rs/utils/output-t
 codex-utils-path = { path = "upstream/codex/codex-rs/utils/path-utils" }
 codex-utils-path-uri = { path = "upstream/codex/codex-rs/utils/path-uri" }
 codex-utils-plugins = { path = "upstream/codex/codex-rs/utils/plugins" }
+codex-utils-process = { path = "upstream/codex/codex-rs/utils/process" }
 codex-utils-pty = { path = "upstream/codex/codex-rs/utils/pty" }
 codex-utils-redacted-string = { path = "upstream/codex/codex-rs/utils/redacted-string" }
 codex-utils-rustls-provider = { path = "upstream/codex/codex-rs/utils/rustls-provider" }
@@ -163,12 +171,13 @@ codex-user-verification = { path = "upstream/codex/codex-rs/user-verification" }
 codex-v8-poc = { path = "upstream/codex/codex-rs/v8-poc" }
 codex-workload-identity = { path = "upstream/codex/codex-rs/workload-identity" }
 codex-windows-sandbox = { path = "upstream/codex/codex-rs/windows-sandbox-rs" }
+codex-windows-sandbox-test-support = { path = "upstream/codex/codex-rs/windows-sandbox-rs/tests/support" }
 core_test_support = { path = "upstream/codex/codex-rs/core/tests/common" }
 
 # External
 learning_mode_windows = { git = "https://github.com/microsoft/mxc", rev = "6cd3d58f05d3447e67109cfb75e042803b843ca4" }
 wxc_common = { git = "https://github.com/microsoft/mxc", rev = "6cd3d58f05d3447e67109cfb75e042803b843ca4" }
-age = "0.11.1"
+age = "0.12.1"
 ansi-to-tui = "8.0.1"
 anyhow = "1"
 appcontainer_common = { git = "https://github.com/microsoft/mxc", rev = "6cd3d58f05d3447e67109cfb75e042803b843ca4" }
@@ -182,6 +191,8 @@ async-stream = "0.3.6"
 aws-config = "1"
 aws-credential-types = "1"
 aws-sigv4 = "1"
+aws-smithy-runtime-api = { version = "1", features = ["client", "http-1x"] }
+aws-smithy-types = { version = "1", features = ["http-body-1-x"] }
 aws-types = "1"
 axum = { version = "0.8", default-features = false }
 base64 = "0.22.1"
@@ -189,6 +200,7 @@ bitflags = "2.13.1"
 blake3 = "1.8.2"
 bm25 = "2.3.2"
 bytes = "1.10.1"
+caseless = "0.2.2"
 chardetng = "0.1.17"
 chrono = "0.4.43"
 clap = "4"
@@ -218,6 +230,7 @@ dunce = "1.0.4"
 ed25519-dalek = { version = "2.2.0", features = ["pkcs8"] }
 encoding_rs = "0.8.35"
 eventsource-stream = "0.2.3"
+file-id = "0.2.3"
 flate2 = "1.1.8"
 futures = { version = "0.3", default-features = false }
 gethostname = "1.1.0"
@@ -272,6 +285,7 @@ pretty_assertions = "1.4.1"
 pulldown-cmark = { version = "0.10", default-features = false }
 quick-xml = "0.41.0"
 rand = "0.9"
+rand_regex = "0.18.1"
 ratatui = { version = "0.30.2", default-features = false, features = [
     "crossterm",
     "layout-cache",
@@ -283,12 +297,15 @@ rcgen = { version = "0.14.7", default-features = false, features = [
     "pem",
 ] }
 regex = "1.12.3"
+regex-automata = { version = "0.4.13", default-features = false, features = ["std", "syntax", "unicode", "nfa-pikevm"] }
 regex-lite = "0.1.8"
+regex-syntax = "0.8.8"
 reqwest = { version = "0.12", features = ["cookies"] }
-rmcp = { version = "=3.2.0", default-features = false }
+# rmcp-v3.3.0 includes enterprise authorization helpers (rust-sdk#1234).
+rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", rev = "3e636cab26c013eca5131103c03d20237f12c4df", version = "=3.3.0", default-features = false }
 runfiles = { git = "https://github.com/dzbarsky/rules_rust", rev = "b56cbaa8465e74127f1ea216f813cd377295ad81" }
 rustix = { version = "1.1.4", features = ["net"] }
-rustls = { version = "0.23", default-features = false, features = [
+rustls = { version = "0.23.45", default-features = false, features = [
     "aws_lc_rs",
     "std",
 ] }
@@ -309,6 +326,7 @@ sha1 = "0.10.6"
 scopeguard = "1.2.0"
 sha2 = "0.10"
 shlex = "1.3.0"
+signal-hook = "0.3.18"
 similar = "2.7.0"
 symphonia = { version = "0.6.0", default-features = false, features = [
     "isomp4",
@@ -318,11 +336,10 @@ symphonia = { version = "0.6.0", default-features = false, features = [
     "wav",
 ] }
 socket2 = "0.6.1"
-# When bumping sqlx, audit the SQLite constructor deny list in clippy.toml.
-sqlx = { version = "0.9.0", default-features = false, features = [
+# Keep SQLx versions in sync; when bumping, audit the SQLite constructor deny list in clippy.toml.
+sqlx = { version = "=0.9.0", default-features = false, features = [
     "chrono",
     "json",
-    "macros",
     "migrate",
     "runtime-tokio",
     "tls-rustls",
@@ -330,6 +347,10 @@ sqlx = { version = "0.9.0", default-features = false, features = [
     "time",
     "uuid",
 ] }
+# Derives and migration embedding do not need query macros or a host SQLite driver.
+sqlx-macros = { version = "=0.9.0", default-features = false, features = ["derive", "migrate"] }
+# Preserve the target driver's query-description support without building it on the host.
+sqlx-sqlite = { version = "=0.9.0", default-features = false, features = ["offline"] }
 starlark = { version = "0.14.2", default-features = false }
 strum = "0.27.2"
 strum_macros = "0.28.0"
@@ -382,6 +403,7 @@ which = "8"
 whoami = "1.6.1"
 wildmatch = "2.6.1"
 winapi-util = "0.1.11"
+windows-sys = "0.61.2"
 zip = "2.4.2"
 zstd = "0.13"
 
@@ -439,9 +461,9 @@ ignored = [
 ]
 
 [profile.dev]
-# Keep line tables/backtraces while avoiding expensive full variable debug info
-# across local dev builds.
-debug = "limited"
+# The test profile inherits dev. Keep source locations in ordinary builds;
+# use CARGO_PROFILE_DEV_DEBUG=full (or CARGO_PROFILE_TEST_DEBUG=full) for locals.
+debug = "line-tables-only"
 
 [profile.dev-small]
 inherits = "dev"
@@ -468,14 +490,13 @@ strip = false
 
 [profile.ci-test]
 # Reduce binary size to reduce disk pressure.
-debug = "limited"
 inherits = "test"
 opt-level = 0
 
 [patch.crates-io]
 # Uncomment to debug local changes.
 # ratatui = { path = "upstream/codex/codex-rs/../../ratatui" }
-crossterm = { git = "https://github.com/openai-oss-forks/crossterm", rev = "45fecb9508105988f42fe6ff0441783ed3717f92" }
+crossterm = { git = "https://github.com/openai-oss-forks/crossterm", rev = "ed1cdab335221515706178d68495bba2aed1924f" }
 tokio-tungstenite = { git = "https://github.com/openai-oss-forks/tokio-tungstenite", rev = "0e5b2d73aa18dd9f0a50ee9ff199d5aef7594186" }
 tungstenite = { git = "https://github.com/openai-oss-forks/tungstenite-rs", rev = "4fffad30fe373adbdcffab9545e9e9bf4f2fc19f" }
 

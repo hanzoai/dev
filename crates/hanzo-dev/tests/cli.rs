@@ -109,20 +109,36 @@ fn the_product_states_one_version() {
     assert!(doctor.contains(&number), "doctor reports a different version: {doctor:.120}");
 }
 
+/// The first feature upstream still offers as a switch. Names come and go with
+/// each upstream release, so the round trip asks for one instead of naming it.
+fn experimental_feature(listed: &str) -> String {
+    listed
+        .lines()
+        .find_map(|line| {
+            let columns: Vec<_> = line.split("  ").map(str::trim).filter(|c| !c.is_empty()).collect();
+            (columns.get(1) == Some(&"experimental")).then(|| columns[0].to_string())
+        })
+        .expect("an experimental feature is listed")
+}
+
 #[test]
 fn features_round_trip_through_the_product_config() {
     let home = home();
-    assert!(dev(home.path(), &["features", "enable", "transcript_v2"]).status.success());
+    let feature = experimental_feature(&text(&dev(home.path(), &["features", "list"])));
+    assert!(dev(home.path(), &["features", "enable", &feature]).status.success());
     let listed = text(&dev(home.path(), &["features", "list"]));
     let row = listed
         .lines()
-        .find(|line| line.starts_with("transcript_v2"))
+        .find(|line| line.split_whitespace().next() == Some(feature.as_str()))
         .expect("the feature is listed");
     assert!(row.ends_with("on"), "{row}");
 
-    assert!(dev(home.path(), &["features", "disable", "transcript_v2"]).status.success());
+    assert!(dev(home.path(), &["features", "disable", &feature]).status.success());
     let listed = text(&dev(home.path(), &["features", "list"]));
-    let row = listed.lines().find(|line| line.starts_with("transcript_v2")).unwrap();
+    let row = listed
+        .lines()
+        .find(|line| line.split_whitespace().next() == Some(feature.as_str()))
+        .unwrap();
     assert!(row.ends_with("off"), "{row}");
 }
 
