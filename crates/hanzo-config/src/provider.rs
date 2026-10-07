@@ -223,17 +223,6 @@ pub(super) fn upgrade_auth(home: &Path) {
     });
 }
 
-/// The model a profile gets when it uses Hanzo and names none: Enso, whatever
-/// the catalog lists first. A model the profile names, or another provider, is
-/// the profile's own.
-pub fn default_model_override(home: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(home.join("config.toml")).ok()?;
-    let config: toml::Table = text.parse().ok()?;
-    (config.get("model_provider").and_then(toml::Value::as_str) == Some("hanzo")
-        && !config.contains_key("model"))
-    .then(|| format!("model=\"{}\"", super::DEFAULT_MODEL))
-}
-
 #[cfg(test)]
 #[path = "provider_tests.rs"]
 mod tests;

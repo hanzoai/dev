@@ -203,13 +203,9 @@ fn main() -> Result<()> {
 async fn run(paths: Arg0DispatchPaths) -> Result<()> {
     let Dev {
         mut interactive,
-        mut overrides,
+        overrides,
         command,
     } = Dev::parse();
-    // A flag the user passes comes later, so it wins.
-    if let Some(model) = hanzo_config::default_model_override(&hanzo_config::home()) {
-        overrides.raw_overrides.insert(0, model);
-    }
     let sandbox = paths.codex_linux_sandbox_exe.clone();
 
     match command {

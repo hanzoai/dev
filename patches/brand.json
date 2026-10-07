@@ -1,0 +1,62 @@
+{
+  "roots": [
+    "tui/src",
+    "cli/src",
+    "exec/src",
+    "utils/cli/src",
+    "app-server-daemon/src",
+    "app-server/src",
+    "core/src",
+    "model-provider/src",
+    "login/src",
+    "config/src",
+    "state/src",
+    "sandboxing/src",
+    "codex-mcp/src",
+    "core-plugins/src"
+  ],
+  "skip_files": [
+    "cli/src/doctor/security.rs",
+    "cli/src/doctor/desktop",
+    "cli/src/desktop_app",
+    "cli/src/doctor/updates.rs",
+    "cli/src/bin/",
+    "tui/src/task_mentions.rs",
+    "tui/src/ide_context/prompt.rs",
+    "tui/src/async_question_reply.rs",
+    "tui/src/goal_files.rs",
+    "tui/src/thread_transcript.rs",
+    "tui/src/chatwidget/replay.rs",
+    "tui/src/analytics/",
+    "tui/src/config_update.rs",
+    "login/src/auth/",
+    "login/src/auth_env",
+    "login/src/gateway",
+    "core/src/tools/handlers/test_sync_spec.rs",
+    "core-plugins/src/command_migration",
+    "app-server/src/request_processors/initialize_processor.rs"
+  ],
+  "skip_literals": [
+    "Codex Apps",
+    "Codex Desktop",
+    "Codex Memo",
+    "Codex-managed Bedrock",
+    "Codex.app",
+    "Codex.dmg",
+    "Codex.exe",
+    "OpenAI.Codex",
+    "Codex Auth",
+    "Codex/Logs",
+    "dotCodex",
+    "persistent.oaistatic",
+    "CODEX_",
+    "## "
+  ],
+  "phrases": [
+    ["OpenAI Codex", "Hanzo Dev"],
+    ["`codex ", "`dev "],
+    ["`codex`", "`dev`"]
+  ],
+  "word": "Codex",
+  "to": "Dev"
+}

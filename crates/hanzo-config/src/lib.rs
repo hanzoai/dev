@@ -9,7 +9,6 @@ pub mod kai;
 mod provider;
 pub use provider::activate_provider;
 pub use provider::clear_hanzo_api_key;
-pub use provider::default_model_override;
 pub use provider::hanzo_credential;
 pub use provider::save_hanzo_api_key;
 pub use provider::set_feature;

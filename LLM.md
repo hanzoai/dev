@@ -30,6 +30,11 @@ checkout by ordinary path dependency.
 shows them, and that is the honest picture — the checkout is a build input we
 own, not a pristine mirror. `make reset` returns it.
 
+The product's name is a rule, not edits. `patches/brand.json` says where `make prepare`
+turns the word upstream calls itself by into ours, in the string literals of non-test code,
+and what it leaves alone: a file name, a package, a wire value. A rewording upstream
+cannot break it; an anchored edit can.
+
 Every edit carries an exact match count. When upstream moves the ground under
 one, preparation fails and names the file rather than branding the wrong line.
 That is the signal to re-anchor, and it is why the delta is anchored strings

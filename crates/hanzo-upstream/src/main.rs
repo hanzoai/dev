@@ -3,6 +3,7 @@
 //! The only Hanzo edits to upstream are the anchored substitutions in
 //! `patches/upstream.json`, applied to the submodule checkout in place.
 
+mod brand;
 mod bump;
 mod prepare;
 mod v8;
