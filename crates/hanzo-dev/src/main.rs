@@ -46,7 +46,7 @@ enum Command {
     #[command(visible_alias = "e")]
     Exec(codex_exec::Cli),
 
-    /// Sign in to Hanzo, or to ChatGPT.
+    /// Sign in to Hanzo.
     Login(login::Login),
 
     /// Discard stored credentials.

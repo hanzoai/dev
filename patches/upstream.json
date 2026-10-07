@@ -241,8 +241,8 @@
   },
   {
     "file": "core/src/tools/spec_plan.rs",
-    "old": "        apply_mcp_tool_exposure_policy(\n            turn_context,\n            model_info,\n            mcp,\n            &registered_mcp_tools,\n            &mut registry,\n        );\n",
-    "new": "        apply_mcp_tool_exposure_policy(\n            turn_context,\n            model_info,\n            mcp,\n            &registered_mcp_tools,\n            &mut registry,\n        );\n        // Hanzo: MCP tools off the controller's shortlist leave direct view; tool search\n        // still finds them when the model supports it.\n        if let Some(shortlist) = step_store.get::<hanzo_loop::Shortlist>() {\n            let search = search_tool_enabled(turn_context, model_info);\n            for tool in registry.entries_mut() {\n                let name = tool.runtime.tool_name();\n                if !registered_mcp_tools.contains(&name) || shortlist.keeps(&name.to_string()) {\n                    continue;\n                }\n                tool.exposure = match (tool.exposure, search) {\n                    (ToolExposure::Direct, true) => ToolExposure::Deferred,\n                    (ToolExposure::DirectModelOnly, true) => ToolExposure::DeferredModelOnly,\n                    (exposure, _) if exposure.is_direct() => ToolExposure::Hidden,\n                    (exposure, _) => exposure,\n                };\n            }\n        }\n",
+    "old": "    apply_mcp_tool_exposure_policy(\n        turn_context,\n        model_info,\n        mcp,\n        &registered_mcp_tools,\n        &mut registry,\n    );\n",
+    "new": "    apply_mcp_tool_exposure_policy(\n        turn_context,\n        model_info,\n        mcp,\n        &registered_mcp_tools,\n        &mut registry,\n    );\n    // Hanzo: MCP tools off the controller's shortlist leave direct view; tool search\n    // still finds them when the model supports it.\n    if let Some(shortlist) = step_store.get::<hanzo_loop::Shortlist>() {\n        let search = model_info.supports_search_tool;\n        for tool in registry.entries_mut() {\n            let name = tool.runtime.tool_name();\n            if !registered_mcp_tools.contains(&name) || shortlist.keeps(&name.to_string()) {\n                continue;\n            }\n            tool.exposure = match (tool.exposure, search) {\n                (ToolExposure::Direct, true) => ToolExposure::Deferred,\n                (ToolExposure::DirectModelOnly, true) => ToolExposure::DeferredModelOnly,\n                (exposure, _) if exposure.is_direct() => ToolExposure::Hidden,\n                (exposure, _) => exposure,\n            };\n        }\n    }\n",
     "count": 1
   },
   {
@@ -265,8 +265,8 @@
   },
   {
     "file": "app-server/src/extensions.rs",
-    "old": "    codex_guardian_v2::install(\n        &mut builder,",
-    "new": "    // Hanzo: Kai decides in the loop; it runs only for a profile with a kai.toml.\n    hanzo_kai::install(&mut builder, thread_manager.clone());\n    codex_guardian_v2::install(\n        &mut builder,",
+    "old": "    codex_guardian_v2::install(&mut builder, auth_manager.clone(), thread_manager);",
+    "new": "    // Hanzo: Kai decides in the loop; it runs only for a profile with a kai.toml.\n    hanzo_kai::install(&mut builder, thread_manager.clone());\n    codex_guardian_v2::install(&mut builder, auth_manager.clone(), thread_manager);",
     "count": 1
   },
   {

@@ -14,6 +14,41 @@ Hanzo owns the front door; upstream owns the engines.
 - `crates/hanzo-upstream` is a detached workspace, because the root workspace
   cannot resolve until it has run. `make` drives it; it is never imported.
 
+## The loop the cloud drives
+
+HIP-1330 splits the agent at the seam between reasoning and effect. Three
+crates hold Hanzo's side of that seam, and none of them knows about the
+terminal:
+
+- `crates/protocol` is the alphabet: eight events in, ten actions out, every
+  action carrying the id its dispatch and completion are recorded under, and a
+  `Turn` carrying the host's id so a `Done` can name the prompt it ends.
+  `encode` and `decode` are the only two functions that know the byte format,
+  so ZAP replaces `serde_json` without moving a type or a C symbol; `pack` and
+  `unpack` are those two with an ABI stamp and a checksum in front, for the one
+  payload that gets stored and handed back. A path is workspace-relative, and
+  `inside` is the one statement of what that means.
+- `crates/core` is a `Session`: `step(Event) -> Vec<Action>`, `snapshot`,
+  `restore`, and no effects — no filesystem, no process, no socket, no
+  runtime. A result is accepted only while its id is outstanding *to that
+  family*, a turn only above the highest turn id accepted, a timer only when
+  the sequence has moved — so a redelivery of any event runs nothing twice, and
+  a refusal changes nothing rather than consuming the entry the real answer
+  needs. A call naming a path outside the workspace is refused in the
+  transcript instead of dispatched. `make wasm` proves it builds for
+  `wasm32-wasip1`. `codex-core` is not separable as it stands (tokio, an HTTP
+  client, a rollout store, a pty), so the model-request and tool-result loop
+  is driven here; the module doc lists what stays coupled upstream and can
+  move one piece at a time.
+- `crates/ffi` is the C ABI the Go host calls: seven symbols, generational
+  `u64` handles so a stale handle is refused, `catch_unwind` on every entry
+  point that has a status to answer with (`dev_abi` reads a constant and has
+  none) so a panic poisons one session instead of aborting the process, and
+  `include/dev.h` written by hand beside the source. A session dropped while
+  one of its calls is running makes that call answer `DEV_HANDLE` and lend
+  nothing out. `tests/abi.c` links the archive and drives a whole turn through
+  it.
+
 ## Upstream
 
 `upstream/codex` and `upstream/code` are submodules. The gitlink is the pin —
@@ -39,56 +74,6 @@ belong upstream as a pull request; landing them there shrinks this file.
 Changes go in a `hanzo-*` crate, or in `patches/upstream.json` when upstream
 hard-codes something that must be ours. A hand edit inside `upstream/` is lost
 at the next `make bump`.
-
-## Kai
-
-Kai decides inside the loop; Zen only writes. Kai is reached over the Decisions API,
-`POST https://api.hanzo.ai/v1/decisions`, signed with the Hanzo credential Dev already sends
-(`hanzo_config::hanzo_credential`). Nothing of hanzoai/decision is linked: that repository is
-private, and a git or path dependency on it breaks the public build and every `cargo install`.
-Two crates:
-
-- `crates/hanzo-loop` is what the loop asks a controller and applies: a tool shortlist per
-  step, a command verdict joined with the policy on `allow < ask < deny` (`Handle::command`
-  joins again, so no controller can loosen it), and routing hints for the turn's request
-  metadata. It is small and stable on purpose: `codex-core` depends on it and rebuilds when
-  it changes.
-- `crates/hanzo-kai`: `decide` is the HTTP client (one request per state, a decision's states
-  in parallel); `program` is a program's typed questions and the gate that turns answers into
-  signals and a verdict; `programs/` are the programs Dev asks; `agent` is the controller per
-  thread plus the extension contributors; `flow` runs `dev flow`; `trace` writes the decision
-  lines; `tools` are the deterministic steps; `zen` is the only generating call a flow makes.
-
-The upstream delta is seven anchored edits in `patches/upstream.json`: `hanzo-loop` into
-core's manifest; the shortlist asked in `built_tools` and applied in `build_tool_router`; the
-verdict joined in the orchestrator right after the exec policy's requirement; the routing
-hints set on the turn metadata in `run_turn`; `hanzo-kai` into app-server's manifest and
-`hanzo_kai::install` before Guardian in `extensions.rs`.
-
-`kai.toml` in the product home turns Kai on; without it nothing runs. `url` (default
-`https://api.hanzo.ai/v1`) and `model` (default `laya-agent`) say where and whom to ask.
-Operations take Enso's names (`tools`, `risk`, `model`, `reasoning`, `context`, `progress`,
-`complete`), each with a `program`, a `mode` (default `shadow`), `thresholds` and `k`. Only
-`enforced` acts, and an enforced decision is waited for at most 12 s (a request times out at
-10). A program pinned to a calibration runs in shadow when the answer says another. The trace
-(`kai/decisions.jsonl`) is Enso's line shape, one line per decision with every state's
-distributions, written once its outcome is known.
-
-When Kai does not answer — refused connection, timeout, a 401, 404 or 5xx, or no state of a
-decision answered — the decision fails at once, Kai is down for 60 s, and every decision in
-that window returns without a request: the loop runs exactly as without Kai, one warning goes
-to the log, and no trace line is written. A 400 fails only that state.
-
-The tier and effort hints ride the Responses request metadata as `kai.tier` and `kai.effort`.
-Nothing in the gateway reads them yet: a tier Kai decides changes the served model only once
-the gateway routes on it.
-
-`dev flow fix --test "<cmd>"`: retrieval ranks the repository's files against the failure, Kai
-picks one (`fix.pick@1`), Zen writes a diff, the tests run, and Kai says done, retry or
-escalate (`fix.next@1`) within what the tests and the budget permit. A retried or escalated
-attempt is undone; one that no longer reverses cleanly ends the flow with the tree as it
-stands. `--control rule`, or Kai not answering, leaves the tests and the budget to decide
-alone.
 
 ## The Code fork
 
@@ -116,3 +101,12 @@ v1 carried, including the defects it was already carrying; see
 - Keep Linux, macOS, and Windows working.
 - Upstream project names appear only in `NOTICE` — never in the README, the
   repository description, the CLI, or the interface.
+
+## Runtime & Model Fixes (2026-10-07)
+
+- **Model Metadata (`enso-auto`)**: Native `ModelInfo` entry added to `upstream/codex/codex-rs/models-manager/src/model_info.rs` with 262k context window, reasoning effort presets, search tool support, and `used_fallback_model_metadata: false`, eliminating "Unknown model enso-auto... fallback metadata" warning.
+- **Sandbox Permissions Inference**: In `upstream/codex/codex-rs/core/src/tools/handlers/mod.rs`, `resolve_sandbox_permissions` now infers `SandboxPermissions::RequireEscalated` when `justification.is_some() && sandbox_permissions.is_none()`, preventing malformed shell call errors under `approval_policy = "never"` / `sandbox_mode = "danger-full-access"`.
+- **ChatGPT Legacy Plugins 401**: In `upstream/codex/codex-rs/core-plugins/src/remote_legacy.rs` and `manager.rs`, requests to `chatgpt.com/backend-api/plugins/featured` are skipped unless authenticated against ChatGPT backend (`auth.uses_codex_backend()`).
+- **Auth Symlink Guarantee**: `hanzo-config::ensure_parent_and_symlink` ensures `~/.hanzo/auth.json` is initialized with `{}` if absent before symlinking, preventing dangling `~/.hanzo/dev/auth.json`.
+- **Token Refresh Command**: `DEFAULT_CONFIG` includes dynamic token refresh configuration `[model_providers.hanzo.auth] command = "hanzo auth token", refresh_interval_ms = 600000` to prevent 60-minute JWT expiration mid-session.
+

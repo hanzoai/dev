@@ -956,7 +956,8 @@ pub mod extension {
         fn on_turn_start<'a>(&'a self, input: TurnStartInput<'a>) -> ExtensionFuture<'a, ()> {
             Box::pin(async move {
                 if let Some(thread) = thread(input.thread_store) {
-                    thread.turn_started(input.turn_id, totals(input.token_usage_at_turn_start));
+                    let start = input.token_usage_at_turn_start.map(totals).unwrap_or_default();
+                    thread.turn_started(input.turn_id, start);
                 }
             })
         }
