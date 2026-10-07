@@ -50,6 +50,7 @@ fn the_default_profile_shares_one_account() {
     let root = tempfile::tempdir().unwrap();
     let home = root.path().join(".hanzo/dev");
     std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(root.path().join(".hanzo/auth.json"), "{}").unwrap();
     share_credential(&home);
     let link = std::fs::read_link(home.join("auth.json")).unwrap();
     assert_eq!(link, root.path().join(".hanzo/auth.json"));
@@ -61,6 +62,7 @@ fn sharing_the_account_again_changes_nothing() {
     let root = tempfile::tempdir().unwrap();
     let home = root.path().join(".hanzo/dev");
     std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(root.path().join(".hanzo/auth.json"), "{}").unwrap();
     share_credential(&home);
     share_credential(&home);
     let link = std::fs::read_link(home.join("auth.json")).unwrap();
@@ -88,4 +90,34 @@ fn an_explicit_profile_keeps_its_own_account() {
     std::fs::create_dir_all(&home).unwrap();
     share_credential(&home);
     assert!(std::fs::symlink_metadata(home.join("auth.json")).is_err());
+}
+
+/// With no shared credential there is nothing to link to, so no link is made,
+/// and a link left pointing at nothing is removed.
+#[test]
+fn no_link_names_a_missing_credential() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join(".hanzo/dev");
+    std::fs::create_dir_all(&home).unwrap();
+    share_credential(&home);
+    assert!(std::fs::symlink_metadata(home.join("auth.json")).is_err());
+    link(&root.path().join(".hanzo/auth.json"), &home.join("auth.json")).unwrap();
+    share_credential(&home);
+    assert!(std::fs::symlink_metadata(home.join("auth.json")).is_err());
+}
+
+/// A sign-in about to save links first, so it writes the one shared credential.
+#[test]
+fn a_sign_in_writes_the_shared_credential() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join(".hanzo/dev");
+    std::fs::create_dir_all(&home).unwrap();
+    share_for_login(&home);
+    std::fs::write(home.join("auth.json"), "{\"token\":\"new\"}").unwrap();
+    assert_eq!(
+        std::fs::read_to_string(root.path().join(".hanzo/auth.json")).unwrap(),
+        "{\"token\":\"new\"}"
+    );
+    share_credential(&home);
+    assert!(std::fs::symlink_metadata(home.join("auth.json")).unwrap().is_symlink());
 }

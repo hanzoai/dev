@@ -52,6 +52,9 @@ enum Command {
     /// Discard stored credentials.
     Logout,
 
+    /// Print the Hanzo credential the agent sends, fresh from the sign-in.
+    Token,
+
     /// Speak the agent protocol on stdin and stdout.
     Serve,
 
@@ -216,6 +219,10 @@ async fn run(paths: Arg0DispatchPaths) -> Result<()> {
         }
         Some(Command::Login(login)) => login::run(login, overrides).await?,
         Some(Command::Logout) => login::logout(overrides).await?,
+        Some(Command::Token) => match hanzo_config::hanzo_credential() {
+            Some(token) => println!("{token}"),
+            None => anyhow::bail!("Not signed in to Hanzo. Run `dev login`."),
+        },
         Some(Command::Serve) => {
             codex_app_server::run_main(paths, overrides, LoaderOverrides::default(), false, false)
                 .await?;

@@ -4,6 +4,7 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
+pub mod catalog;
 pub mod kai;
 mod provider;
 pub use provider::activate_provider;
@@ -30,6 +31,7 @@ pub fn initialize() -> std::io::Result<()> {
         std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")),
     )?;
     initialize_home(&home)?;
+    provider::upgrade_auth(&home);
     share_credential(&home);
     provider::load_hanzo_credentials(&home);
     // This function is only invoked before upstream starts threads.
@@ -54,7 +56,22 @@ fn product_home(explicit: Option<OsString>, user: Option<OsString>) -> std::io::
 /// One account across the Hanzo tools, so signing in to any of them signs in to
 /// all of them. Dev keeps its own sessions and settings; only the credential is
 /// shared, and only when the profile is the default one under `~/.hanzo`.
+///
+/// At startup the profile links to the shared credential only when it exists; a
+/// link to nothing is removed, so the profile never holds a dangling link.
 fn share_credential(home: &Path) {
+    link_shared(home, false);
+}
+
+/// Point the profile's credential at the shared one before a sign-in saves it,
+/// so the sign-in writes the one credential every Hanzo tool reads. The link may
+/// name a file the sign-in is about to create; a sign-in that does not finish
+/// leaves it for the next start to remove.
+pub fn share_for_login(home: &Path) {
+    link_shared(home, true);
+}
+
+fn link_shared(home: &Path, for_login: bool) {
     let (Some(hanzo), Some(name)) = (home.parent(), home.file_name()) else {
         return;
     };
@@ -63,6 +80,13 @@ fn share_credential(home: &Path) {
     }
     let shared = hanzo.join("auth.json");
     let ours = home.join("auth.json");
+    if !for_login && !shared.exists() {
+        // Nothing to share yet: a link here would name a file that is not there.
+        if std::fs::symlink_metadata(&ours).is_ok_and(|metadata| metadata.is_symlink()) {
+            let _ = std::fs::remove_file(&ours);
+        }
+        return;
+    }
     match std::fs::symlink_metadata(&ours) {
         // A real file here predates the shared credential; leave the user's alone.
         Ok(metadata) if !metadata.is_symlink() => return,
@@ -110,9 +134,14 @@ model = "enso-auto"
 name = "Hanzo"
 base_url = "https://api.hanzo.ai/v1"
 wire_api = "responses"
-env_key = "HANZO_USER_KEY"
-env_key_instructions = "Run `dev login` to sign in to Hanzo or paste a Hanzo API key, or set HANZO_USER_KEY."
 requires_openai_auth = false
+
+# The Hanzo sign-in is a short-lived token, so the agent asks `dev token` for it
+# again before it ages out instead of reading it once at startup.
+[model_providers.hanzo.auth]
+command = "dev"
+args = ["token"]
+refresh_interval_ms = 600000
 
 [mcp_servers.hanzo]
 command = "hanzo-mcp"

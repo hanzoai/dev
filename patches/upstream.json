@@ -268,5 +268,47 @@
     "old": "    codex_guardian_v2::install(\n        &mut builder,",
     "new": "    // Hanzo: Kai decides in the loop; it runs only for a profile with a kai.toml.\n    hanzo_kai::install(&mut builder, thread_manager.clone());\n    codex_guardian_v2::install(\n        &mut builder,",
     "count": 1
+  },
+  {
+    "file": "core-plugins/src/remote_legacy.rs",
+    "old": "    let base_url = config.chatgpt_base_url.trim_end_matches('/');\n    let mut url = Url::parse(&format!(\"{base_url}/plugins/featured\"))",
+    "new": "    // Featured plugins are served to a ChatGPT sign-in only; any other caller is\n    // refused, so it is not asked.\n    let Some(auth) = auth.filter(|auth| auth.uses_codex_backend()) else {\n        return Ok(Vec::new());\n    };\n    let base_url = config.chatgpt_base_url.trim_end_matches('/');\n    let mut url = Url::parse(&format!(\"{base_url}/plugins/featured\"))",
+    "count": 1
+  },
+  {
+    "file": "core-plugins/src/remote_legacy.rs",
+    "old": "    if let Some(auth) = auth.filter(|auth| auth.uses_codex_backend()) {\n        request =\n            request.headers(codex_model_provider::auth_provider_from_auth(auth).to_auth_headers());\n    }\n",
+    "new": "    request = request.headers(codex_model_provider::auth_provider_from_auth(auth).to_auth_headers());\n",
+    "count": 1
+  },
+  {
+    "file": "core/src/tools/handlers/mod.rs",
+    "old": "    if justification.is_some() && sandbox_permissions.is_none() {\n        return Err(FunctionCallError::RespondToModel(\n            \"`justification` requires an explicit `sandbox_permissions`; use `sandbox_permissions: \\\"require_escalated\\\"` for unsandboxed execution, or omit `justification`.\".to_string(),\n        ));\n    }\n\n    Ok(sandbox_permissions.unwrap_or_default())",
+    "new": "    // A justification explains an escalation. With none asked for there is\n    // nothing for it to explain, so the call runs at the default permissions\n    // rather than failing.\n    let _ = justification;\n    Ok(sandbox_permissions.unwrap_or_default())",
+    "count": 1
+  },
+  {
+    "file": "models-manager/Cargo.toml",
+    "old": "[dependencies]",
+    "new": "[dependencies]\nhanzo-config = { path = \"../../../../crates/hanzo-config\" }",
+    "count": 1
+  },
+  {
+    "file": "models-manager/src/model_info.rs",
+    "old": "    warn!(\"Unknown model {slug} is used. This will use fallback model metadata.\");\n    ModelInfo {\n        slug: slug.to_string(),\n        display_name: slug.to_string(),",
+    "new": "    let known = hanzo_config::catalog::find(slug);\n    if known.is_none() {\n        warn!(\"Unknown model {slug} is used. This will use fallback model metadata.\");\n    }\n    let window = known.map_or(272_000, |model| model.window);\n    ModelInfo {\n        slug: slug.to_string(),\n        display_name: known.map_or_else(|| slug.to_string(), |model| model.name.to_string()),",
+    "count": 1
+  },
+  {
+    "file": "models-manager/src/model_info.rs",
+    "old": "        context_window: Some(272_000),\n        max_context_window: Some(272_000),",
+    "new": "        context_window: Some(window),\n        max_context_window: Some(window),",
+    "count": 1
+  },
+  {
+    "file": "models-manager/src/model_info.rs",
+    "old": "        input_modalities: default_input_modalities(),\n        used_fallback_model_metadata: true, // this is the fallback model metadata",
+    "new": "        input_modalities: match known {\n            Some(model) if !model.vision => vec![codex_protocol::openai_models::InputModality::Text],\n            _ => default_input_modalities(),\n        },\n        used_fallback_model_metadata: known.is_none(),",
+    "count": 1
   }
 ]

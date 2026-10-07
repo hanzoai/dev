@@ -119,6 +119,7 @@ pub(crate) async fn run(login: Login, mut overrides: CliConfigOverrides) -> Resu
             println!("Hanzo API key saved.");
         }
         Choice::ChatGpt | Choice::OpenAiKey => {
+            hanzo_config::share_for_login(&home);
             overrides
                 .raw_overrides
                 .push("model_provider=\"openai\"".into());
