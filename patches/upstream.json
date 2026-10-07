@@ -132,6 +132,12 @@
     "count": 1
   },
   {
+    "file": "exec/src/event_processor_with_human_output.rs",
+    "old": "\"codex\".style(self.italic)",
+    "new": "\"dev\".style(self.italic)",
+    "count": 2
+  },
+  {
     "file": "exec/src/cli.rs",
     "old": "override_usage = \"codex exec [OPTIONS] [PROMPT]\\n       codex exec [OPTIONS] <COMMAND> [ARGS]\"",
     "new": "override_usage = \"dev exec [OPTIONS] [PROMPT]\\n       dev exec [OPTIONS] <COMMAND> [ARGS]\"",
