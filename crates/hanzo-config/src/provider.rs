@@ -181,7 +181,8 @@ pub(super) fn load_hanzo_credentials(home: &Path) {
 
 /// Move a profile still on the startup-only credential to the refreshing one.
 ///
-/// Earlier releases wrote the Hanzo provider with `env_key = "HANZO_USER_KEY"`,
+/// Earlier releases wrote the Hanzo provider with `env_key = "HANZO_USER_KEY"`
+/// (or `HANZO_API_KEY`, which nothing here ever read),
 /// read once when the agent starts, so a session outlived its sign-in token and
 /// failed with 401 an hour in. A provider block still holding exactly that
 /// default is rewritten to ask `dev token` instead; a provider the user changed
@@ -201,7 +202,10 @@ pub(super) fn upgrade_auth(home: &Path) {
         return;
     };
     if provider.get("auth").is_some()
-        || provider.get("env_key").and_then(toml_edit::Item::as_str) != Some("HANZO_USER_KEY")
+        || !matches!(
+            provider.get("env_key").and_then(toml_edit::Item::as_str),
+            Some("HANZO_USER_KEY" | "HANZO_API_KEY")
+        )
         || provider.get("base_url").and_then(toml_edit::Item::as_str) != Some(super::API_BASE)
     {
         return;
@@ -217,6 +221,17 @@ pub(super) fn upgrade_auth(home: &Path) {
         provider.remove("env_key_instructions");
         provider.insert("auth", defaults["model_providers"]["hanzo"]["auth"].clone());
     });
+}
+
+/// The model a profile gets when it uses Hanzo and names none: Enso, whatever
+/// the catalog lists first. A model the profile names, or another provider, is
+/// the profile's own.
+pub fn default_model_override(home: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(home.join("config.toml")).ok()?;
+    let config: toml::Table = text.parse().ok()?;
+    (config.get("model_provider").and_then(toml::Value::as_str) == Some("hanzo")
+        && !config.contains_key("model"))
+    .then(|| format!("model=\"{}\"", super::DEFAULT_MODEL))
 }
 
 #[cfg(test)]

@@ -98,3 +98,36 @@ fn a_provider_the_user_changed_is_left_alone() {
     upgrade_auth(home.path());
     assert_eq!(std::fs::read_to_string(&path).unwrap(), theirs);
 }
+
+#[test]
+fn a_hanzo_profile_without_a_model_gets_enso() {
+    let home = tempfile::tempdir().expect("tempdir");
+    std::fs::write(home.path().join("config.toml"), "model_provider = \"hanzo\"\n").expect("write");
+    assert_eq!(
+        default_model_override(home.path()).as_deref(),
+        Some("model=\"enso-auto\"")
+    );
+}
+
+#[test]
+fn a_model_the_profile_names_or_another_provider_is_left_alone() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let path = home.path().join("config.toml");
+    std::fs::write(&path, "model_provider = \"hanzo\"\nmodel = \"mine\"\n").expect("write");
+    assert_eq!(default_model_override(home.path()), None);
+    std::fs::write(&path, "model_provider = \"pool\"\n").expect("write");
+    assert_eq!(default_model_override(home.path()), None);
+    std::fs::remove_file(&path).expect("remove");
+    assert_eq!(default_model_override(home.path()), None);
+}
+
+#[test]
+fn the_api_key_name_nothing_reads_is_upgraded_too() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let stale = OLD_PROVIDER.replace("HANZO_USER_KEY", "HANZO_API_KEY");
+    std::fs::write(home.path().join("config.toml"), stale).expect("write");
+    upgrade_auth(home.path());
+    let text = std::fs::read_to_string(home.path().join("config.toml")).expect("read");
+    assert!(text.contains("command = \"dev\""), "{text}");
+    assert!(!text.contains("HANZO_API_KEY"), "{text}");
+}

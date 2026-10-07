@@ -30,7 +30,15 @@ impl Edit {
     /// still there" cannot mean "not yet applied". Finding the *result* is what
     /// means done, and it is what stops a second run from stacking the edit.
     fn apply(&self, text: &str) -> Result<Option<String>> {
-        if text.contains(&self.new) {
+        // An edit that keeps its anchor is done once its result is there. One
+        // that replaces its anchor is done once the anchor is gone: a short
+        // result such as "Dev" is in most files before any edit has run.
+        let done = if self.new.contains(&self.old) {
+            text.contains(&self.new)
+        } else {
+            text.contains(&self.new) && !text.contains(&self.old)
+        };
+        if done {
             return Ok(None);
         }
         let found = text.matches(&self.old).count();
@@ -100,6 +108,15 @@ mod tests {
     fn an_edit_already_applied_is_not_applied_again() {
         let e = edit("Codex", "Hanzo Dev", 1);
         assert!(e.apply("Hanzo Dev").unwrap().is_none());
+    }
+
+    /// A replacement whose result is shorter than its anchor, or common, must
+    /// still run: "Dev" is in most files before the first edit.
+    #[test]
+    fn a_result_already_present_elsewhere_does_not_hide_the_anchor() {
+        let e = edit("Codex", "Dev", 1);
+        assert_eq!(e.apply("Dev tools, Codex").unwrap().unwrap(), "Dev tools, Dev");
+        assert!(e.apply("Dev tools, Dev").unwrap().is_none(), "applied once the anchor is gone");
     }
 
     /// The whole point of the count: upstream moving the ground under an anchor
