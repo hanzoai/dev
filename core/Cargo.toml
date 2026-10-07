@@ -1,0 +1,18 @@
+[package]
+name = "dev-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "dev_core"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+# A dependency here is a dependency of the reasoning half. It must not reach a
+# filesystem, a process, a socket or an async runtime: the host owns effects.
+[dependencies]
+dev-protocol = { path = "../protocol", version = "0.7.0-dev.1" }
+serde = { workspace = true, features = ["derive"] }
