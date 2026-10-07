@@ -16,38 +16,8 @@ Hanzo owns the front door; upstream owns the engines.
 
 ## The loop the cloud drives
 
-HIP-1330 splits the agent at the seam between reasoning and effect. Three
-crates hold Hanzo's side of that seam, and none of them knows about the
-terminal:
-
-- `crates/protocol` is the alphabet: eight events in, ten actions out, every
-  action carrying the id its dispatch and completion are recorded under, and a
-  `Turn` carrying the host's id so a `Done` can name the prompt it ends.
-  `encode` and `decode` are the only two functions that know the byte format,
-  so ZAP replaces `serde_json` without moving a type or a C symbol; `pack` and
-  `unpack` are those two with an ABI stamp and a checksum in front, for the one
-  payload that gets stored and handed back. A path is workspace-relative, and
-  `inside` is the one statement of what that means.
-- `crates/core` is a `Session`: `step(Event) -> Vec<Action>`, `snapshot`,
-  `restore`, and no effects — no filesystem, no process, no socket, no
-  runtime. A result is accepted only while its id is outstanding *to that
-  family*, a turn only above the highest turn id accepted, a timer only when
-  the sequence has moved — so a redelivery of any event runs nothing twice, and
-  a refusal changes nothing rather than consuming the entry the real answer
-  needs. A call naming a path outside the workspace is refused in the
-  transcript instead of dispatched. `make wasm` proves it builds for
-  `wasm32-wasip1`. `codex-core` is not separable as it stands (tokio, an HTTP
-  client, a rollout store, a pty), so the model-request and tool-result loop
-  is driven here; the module doc lists what stays coupled upstream and can
-  move one piece at a time.
-- `crates/ffi` is the C ABI the Go host calls: seven symbols, generational
-  `u64` handles so a stale handle is refused, `catch_unwind` on every entry
-  point that has a status to answer with (`dev_abi` reads a constant and has
-  none) so a panic poisons one session instead of aborting the process, and
-  `include/dev.h` written by hand beside the source. A session dropped while
-  one of its calls is running makes that call answer `DEV_HANDLE` and lend
-  nothing out. `tests/abi.c` links the archive and drives a whole turn through
-  it.
+The reasoning half of `dev` as a wasm module, with its Go host and the `wasm2go`
+build, lives in `hanzo-inc/dev`. Nothing here depends on it.
 
 ## Upstream
 

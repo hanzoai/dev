@@ -5,7 +5,7 @@ export NEXTEST_HIDE_PROGRESS_BAR := true
 TOOL := cargo run --quiet --manifest-path crates/hanzo-upstream/Cargo.toml --
 CARGO := RUST_MIN_STACK=8388608 cargo
 
-.PHONY: all prepare build release install test test-upstream wasm wasm-check bump v8 fmt clean reset help
+.PHONY: all prepare build release install test test-upstream bump v8 fmt clean reset help
 .DEFAULT_GOAL := build
 
 all: build
@@ -34,56 +34,6 @@ test: prepare
 	@$(CARGO) nextest run --locked --no-fail-fast $(ARGS)
 	@$(CARGO) nextest run --no-fail-fast --manifest-path crates/hanzo-upstream/Cargo.toml $(ARGS)
 
-## wasm: build the reasoning half for wasm32-wasip1
-# The loop as a wasm module: target/wasm32-wasip1/release/dev.wasm, copied to
-# go/dev.wasm, which the Go host embeds.
-#
-# protocol and core carry no effects, so they run wherever a wasm host runs — and
-# so does ffi, which is what a host actually calls. Its C ABI is the module's
-# export list unchanged; only the memory differs, and dev_alloc lends the host a
-# buffer inside it. What the module may IMPORT is the proof that the core touches
-# nothing: environ_get, environ_sizes_get, fd_write and proc_exit, and no file,
-# socket, clock or random source. A change that grows that list has given the
-# loop an effect of its own.
-#
-# The copy is committed, so no path of the machine that built it goes in: no
-# DWARF, which spells out the build directory, and the cargo home written as
-# /cargo in the panic locations the dependencies carry. Two builds on one kind
-# of host are then the same bytes, whatever their directories. Two kinds of
-# host are not: cargo hashes the host into every crate that has a build script
-# or uses a proc macro, and into every crate built on one, and the module
-# differs with those hashes, code and all. macOS arm64, Linux arm64 and Linux
-# x86_64 each build a different one.
-# The name section stays, so a trap still says which function it stopped in.
-#
-# The remap goes in CARGO_ENCODED_RUSTFLAGS because cargo takes that over every
-# other source of rustflags; any other source is dropped whole the moment a
-# RUSTFLAGS is set, remap and all. The target directory is named too:
-# CARGO_TARGET_DIR would send the build elsewhere, and the copy would be
-# whatever an older build left here.
-#
-# CI builds on another kind of host, so it cannot rebuild the committed bytes;
-# it checks what they were built from instead. Beside the copy goes
-# go/dev.wasm.sum, the sha256 of every tracked file the build reads and of the
-# copy itself. wasm-check hashes the tree again and fails on any difference, so
-# neither a change to the crates that never ran make wasm, nor a copy committed
-# without its sum, passes as current.
-WASM_SUM = git ls-files -z -- Makefile Cargo.toml Cargo.lock rust-toolchain.toml \
-    crates/protocol crates/core crates/ffi go/dev.wasm | xargs -0 sha256sum
-wasm: prepare
-	@CARGO_ENCODED_RUSTFLAGS='--remap-path-prefix=$(CARGO_HOME)=/cargo' \
-		$(CARGO) build --locked --release --target wasm32-wasip1 --target-dir target -p dev-ffi \
-		--config 'profile.release.debug=false' \
-		--config 'profile.release.strip="debuginfo"'
-	@install -m 644 target/wasm32-wasip1/release/dev.wasm go/dev.wasm
-	@$(WASM_SUM) > go/dev.wasm.sum
-
-## wasm-check: fail unless go/dev.wasm is make wasm of the tree beside it
-wasm-check:
-	@$(WASM_SUM) | diff go/dev.wasm.sum - || { \
-		echo 'go/dev.wasm was not built from this tree: run make wasm, and commit go/dev.wasm and go/dev.wasm.sum' >&2; \
-		exit 1; }
-
 ## test-upstream: run the upstream suite against the pinned submodule
 # voice-host wants GStreamer >= 1.28, which no current distribution ships, and
 # nothing else in the workspace depends on it.
@@ -103,7 +53,7 @@ v8:
 
 ## fmt: format the crates Hanzo owns
 fmt:
-	@$(CARGO) fmt -p hanzo-dev -p hanzo-config -p hanzo-tui -p hanzo-kai -p hanzo-loop -p dev-protocol -p dev-core -p dev-ffi
+	@$(CARGO) fmt -p hanzo-dev -p hanzo-config -p hanzo-tui -p hanzo-kai -p hanzo-loop
 	@$(CARGO) fmt --manifest-path crates/hanzo-upstream/Cargo.toml
 
 ## clean: discard build output
