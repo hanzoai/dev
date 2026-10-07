@@ -1,8 +1,12 @@
+CARGO_HOME ?= $(HOME)/.cargo
+export PATH := $(CARGO_HOME)/bin:$(PATH)
+export NEXTEST_HIDE_PROGRESS_BAR := true
+
 TOOL := cargo run --quiet --manifest-path crates/hanzo-upstream/Cargo.toml --
 CARGO := RUST_MIN_STACK=8388608 cargo
 
 .PHONY: all prepare build release install test test-upstream wasm wasm-check bump v8 fmt clean reset help
-.DEFAULT_GOAL := help
+.DEFAULT_GOAL := build
 
 all: build
 
@@ -64,7 +68,6 @@ test: prepare
 # copy itself. wasm-check hashes the tree again and fails on any difference, so
 # neither a change to the crates that never ran make wasm, nor a copy committed
 # without its sum, passes as current.
-CARGO_HOME ?= $(HOME)/.cargo
 WASM_SUM = git ls-files -z -- Makefile Cargo.toml Cargo.lock rust-toolchain.toml \
     crates/protocol crates/core crates/ffi go/dev.wasm | xargs -0 sha256sum
 wasm: prepare

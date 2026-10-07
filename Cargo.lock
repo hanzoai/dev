@@ -3446,6 +3446,7 @@ dependencies = [
  "codex-prompts",
  "codex-protocol",
  "codex-utils-output-truncation",
+ "hanzo-config",
  "serde",
  "serde_json",
  "tokio",
