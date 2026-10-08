@@ -7387,6 +7387,7 @@ dependencies = [
  "libc",
  "os_info",
  "owo-colors",
+ "portable-pty",
  "regex-lite",
  "serde",
  "serde_json",

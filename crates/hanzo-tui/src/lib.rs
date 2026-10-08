@@ -9,6 +9,9 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Dev checks no one else's releases. The check upstream makes compares this build
 /// with another product's latest release and offers that product's installer.
 pub const UPDATE_CHECK: bool = false;
+/// Dev runs its server inside the process. Upstream's shared background server
+/// starts from an installer's package directory, which Dev does not ship.
+pub const BACKGROUND_SERVER: bool = false;
 pub const STARTUP_TIP: &str = "Use **/mcp** to inspect connected tools. Hanzo MCP provides cloud controls and local development tools.";
 
 /// Keep light terminals readable and dark input bars much subtler than the upstream default.

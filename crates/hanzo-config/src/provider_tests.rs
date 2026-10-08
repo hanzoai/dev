@@ -32,6 +32,30 @@ fn switching_back_to_hanzo_preserves_unrelated_preferences() {
     assert_eq!(config, expected);
 }
 
+#[test]
+fn a_profile_naming_no_provider_runs_on_hanzo_and_keeps_its_own_providers() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    std::fs::write(&path, "[model_providers.pool]\nname = \"Pool\"\nbase_url = \"http://pool/v1\"\n").unwrap();
+    default_to_hanzo(home.path());
+    let config: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let defaults: toml::Value = toml::from_str(crate::DEFAULT_CONFIG).unwrap();
+    assert_eq!(config["model_provider"].as_str(), Some("hanzo"));
+    assert_eq!(config["model"].as_str(), Some(crate::DEFAULT_MODEL));
+    assert_eq!(config["model_providers"]["hanzo"], defaults["model_providers"]["hanzo"]);
+    assert_eq!(config["model_providers"]["pool"]["base_url"].as_str(), Some("http://pool/v1"));
+}
+
+#[test]
+fn a_profile_that_names_a_provider_is_left_as_it_is() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    let text = "model_provider = \"pool\"\nmodel = \"qwen\"\n\n[model_providers.pool]\nname = \"Pool\"\n";
+    std::fs::write(&path, text).unwrap();
+    default_to_hanzo(home.path());
+    assert_eq!(std::fs::read_to_string(path).unwrap(), text);
+}
+
 const JWT: &str = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ6In0.c2ln";
 
 #[test]

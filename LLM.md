@@ -30,6 +30,13 @@ checkout by ordinary path dependency.
 shows them, and that is the honest picture — the checkout is a build input we
 own, not a pristine mirror. `make reset` returns it.
 
+Dev reads only Hanzo's directories. Its home is `~/.hanzo/dev` (or `DEV_HOME`), a project's
+settings live in `<repo>/.hanzo/dev/`, and system ones in `/etc/hanzo/dev/`; a `.codex` beside
+them belongs to another product and is not read. Its server runs inside the process: upstream's
+shared background server is installed from a package directory Dev does not ship
+(`hanzo_tui::BACKGROUND_SERVER`). A profile that names no provider is set to Hanzo at startup.
+`crates/hanzo-dev/tests/launch.rs` launches a bare `dev` in a terminal and holds all three.
+
 The product's name is a rule, not edits. `patches/brand.json` says where `make prepare`
 turns the word upstream calls itself by into ours, in the string literals of non-test code,
 and what it leaves alone: a file name, a package, a wire value. A rewording upstream

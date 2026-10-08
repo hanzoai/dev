@@ -38,6 +38,20 @@ pub fn activate_provider(home: &Path, provider: Provider) -> io::Result<()> {
     })
 }
 
+/// A profile that names no provider runs on Hanzo. Upstream reads an unset provider as
+/// OpenAI, whose first screen is a sign-in Dev does not offer.
+pub(super) fn default_to_hanzo(home: &Path) {
+    let Ok(text) = std::fs::read_to_string(home.join("config.toml")) else {
+        return;
+    };
+    let Ok(config) = text.parse::<DocumentMut>() else {
+        return;
+    };
+    if config.get("model_provider").is_none() {
+        let _ = activate_provider(home, Provider::Hanzo);
+    }
+}
+
 /// Turn one feature on or off for this profile.
 pub fn set_feature(home: &Path, key: &str, on: bool) -> io::Result<()> {
     edit(home, |config| {

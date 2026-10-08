@@ -31,6 +31,7 @@ pub fn initialize() -> std::io::Result<()> {
         std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")),
     )?;
     initialize_home(&home)?;
+    provider::default_to_hanzo(&home);
     provider::upgrade_auth(&home);
     share_credential(&home);
     provider::load_hanzo_credentials(&home);

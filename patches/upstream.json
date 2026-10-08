@@ -484,5 +484,65 @@
     "old": "    if !config.check_for_update_on_startup || is_source_build_version(CODEX_CLI_VERSION) {",
     "new": "    if !hanzo_tui::UPDATE_CHECK\n        || !config.check_for_update_on_startup\n        || is_source_build_version(CODEX_CLI_VERSION)\n    {",
     "count": 2
+  },
+  {
+    "file": "tui/src/startup_orchestration.rs",
+    "old": "    if cli.no_daemon && explicit_remote_endpoint.is_some() {\n        return Err(std::io::Error::other(\n            \"--no-daemon cannot be used with --remote.\",\n        ));\n    }\n",
+    "new": "    if !hanzo_tui::BACKGROUND_SERVER && explicit_remote_endpoint.is_none() {\n        cli.no_daemon = true;\n    }\n    if cli.no_daemon && explicit_remote_endpoint.is_some() {\n        return Err(std::io::Error::other(\n            \"--no-daemon cannot be used with --remote.\",\n        ));\n    }\n",
+    "count": 1
+  },
+  {
+    "file": "protocol/src/permissions.rs",
+    "old": "const PROTECTED_METADATA_CODEX_PATH_NAME: &str = \".codex\";",
+    "new": "/// The directory a project keeps Hanzo's settings in; Dev's own are under `dev/` in it,\n/// the same layout as `~/.hanzo/dev`. Another product's directory is not Dev's to read.\npub const PROJECT_DIR: &str = \".hanzo\";\nconst PROTECTED_METADATA_CODEX_PATH_NAME: &str = PROJECT_DIR;",
+    "count": 1
+  },
+  {
+    "file": "protocol/src/permissions.rs",
+    "old": "append_default_read_only_project_root_subpath_if_no_explicit_rule(&mut entries, \".codex\");",
+    "new": "append_default_read_only_project_root_subpath_if_no_explicit_rule(&mut entries, PROJECT_DIR);",
+    "count": 1
+  },
+  {
+    "file": "config/src/loader/mod.rs",
+    "old": "let dot_codex_abs = dir.join(\".codex\");",
+    "new": "let dot_codex_abs = dir.join(codex_protocol::permissions::PROJECT_DIR).join(\"dev\");",
+    "count": 1
+  },
+  {
+    "file": "config/src/loader/mod.rs",
+    "old": "Some(repo_root.join(relative_dir).join(\".codex\"))",
+    "new": "Some(\n            repo_root\n                .join(relative_dir)\n                .join(codex_protocol::permissions::PROJECT_DIR)\n                .join(\"dev\"),\n        )",
+    "count": 1
+  },
+  {
+    "file": "config/src/loader/mod.rs",
+    "old": "const SYSTEM_CONFIG_TOML_FILE_UNIX: &str = \"/etc/codex/config.toml\";",
+    "new": "const SYSTEM_CONFIG_TOML_FILE_UNIX: &str = \"/etc/hanzo/dev/config.toml\";",
+    "count": 1
+  },
+  {
+    "file": "config/src/loader/mod.rs",
+    "old": "AbsolutePathBuf::from_absolute_path(Path::new(\"/etc/codex/requirements.toml\"))",
+    "new": "AbsolutePathBuf::from_absolute_path(Path::new(\"/etc/hanzo/dev/requirements.toml\"))",
+    "count": 1
+  },
+  {
+    "file": "config/src/loader/layer_io.rs",
+    "old": "const CODEX_MANAGED_CONFIG_SYSTEM_PATH: &str = \"/etc/codex/managed_config.toml\";",
+    "new": "const CODEX_MANAGED_CONFIG_SYSTEM_PATH: &str = \"/etc/hanzo/dev/managed_config.toml\";",
+    "count": 1
+  },
+  {
+    "file": "config/src/loader/mod.rs",
+    "old": "program_data.join(\"OpenAI\").join(\"Codex\")",
+    "new": "program_data.join(\"Hanzo\").join(\"Dev\")",
+    "count": 1
+  },
+  {
+    "file": "config/src/loader/macos.rs",
+    "old": "const MANAGED_PREFERENCES_APPLICATION_ID: &str = \"com.openai.codex\";",
+    "new": "const MANAGED_PREFERENCES_APPLICATION_ID: &str = \"ai.hanzo.dev\";",
+    "count": 1
   }
 ]
