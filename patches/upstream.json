@@ -478,5 +478,11 @@
     "old": "pub fn bundled_models_response()\n-> std::result::Result<codex_protocol::openai_models::ModelsResponse, serde_json::Error> {\n    serde_json::from_str(include_str!(\"../models.json\"))\n}",
     "new": "pub fn bundled_models_response()\n-> std::result::Result<codex_protocol::openai_models::ModelsResponse, serde_json::Error> {\n    use codex_protocol::openai_models::ModelVisibility;\n    let mut response: codex_protocol::openai_models::ModelsResponse =\n        serde_json::from_str(include_str!(\"../models.json\"))?;\n    // Hanzo: the Hanzo catalog leads the picker, with the default first. The bundled\n    // OpenAI models stay known, for lookups, but unlisted.\n    for model in &mut response.models {\n        model.visibility = ModelVisibility::Hide;\n    }\n    let default = hanzo_config::DEFAULT_MODEL;\n    let served = hanzo_config::catalog::MODELS\n        .iter()\n        .map(|model| model.slug)\n        .filter(|slug| !slug.contains('/') && *slug != default);\n    let mut models: Vec<_> = std::iter::once(default)\n        .chain(served)\n        .enumerate()\n        .map(|(index, slug)| {\n            let mut info = model_info::model_info_from_slug(slug);\n            info.visibility = ModelVisibility::List;\n            info.priority = index as i32;\n            info\n        })\n        .collect();\n    models.append(&mut response.models);\n    response.models = models;\n    Ok(response)\n}",
     "count": 1
+  },
+  {
+    "file": "tui/src/updates.rs",
+    "old": "    if !config.check_for_update_on_startup || is_source_build_version(CODEX_CLI_VERSION) {",
+    "new": "    if !hanzo_tui::UPDATE_CHECK\n        || !config.check_for_update_on_startup\n        || is_source_build_version(CODEX_CLI_VERSION)\n    {",
+    "count": 2
   }
 ]

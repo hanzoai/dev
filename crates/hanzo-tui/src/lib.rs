@@ -6,6 +6,9 @@ pub mod model;
 pub const PRODUCT_NAME: &str = "Hanzo Dev";
 pub const INPUT_PLACEHOLDER: &str = "Ask Hanzo Dev to do anything";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Dev checks no one else's releases. The check upstream makes compares this build
+/// with another product's latest release and offers that product's installer.
+pub const UPDATE_CHECK: bool = false;
 pub const STARTUP_TIP: &str = "Use **/mcp** to inspect connected tools. Hanzo MCP provides cloud controls and local development tools.";
 
 /// Keep light terminals readable and dark input bars much subtler than the upstream default.
