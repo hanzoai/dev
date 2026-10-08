@@ -127,7 +127,12 @@ jobs:
     name: ${{ matrix.target.id }}
     needs: version
     runs-on: [linux-amd64]
-    timeout-minutes: 150
+    # A build takes 70 minutes with the 6 CPUs it asks for. On 2026-10-07 the
+    # cluster had one 8-CPU node left for all five, each got under 2, and both
+    # Linux jobs were cancelled at 150 minutes one step short of finishing.
+    # The limit sits at GitHub's ceiling so a crowded cluster slows a release
+    # instead of failing it.
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       # No max-parallel. The platform starts one runner per job when the job is
