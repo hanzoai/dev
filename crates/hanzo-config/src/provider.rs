@@ -113,16 +113,24 @@ fn is_session_token(value: &str) -> bool {
     value.starts_with("eyJ") && value.split('.').count() == 3
 }
 
-/// The Hanzo credential, in order: an API key set in the environment, a pasted
-/// API key, a fresh token from the signed-in Hanzo CLI, and last a sign-in token
-/// set in the environment. A sign-in token in the environment is whatever the
-/// launching process held when it started, so a fresh one from the CLI is
-/// preferred to it.
+/// The Hanzo credential, in order: `HANZO_API_KEY` as given, an API key in
+/// `HANZO_USER_KEY`, a pasted API key, a fresh token from the signed-in Hanzo CLI,
+/// and last a sign-in token in `HANZO_USER_KEY`. That sign-in token is whatever the
+/// launching process held when it started, so a fresh one from the CLI is preferred
+/// to it. `HANZO_API_KEY` is the credential a host hands a run it starts (a cloud
+/// sandbox has no CLI to ask), so it is taken whatever its shape.
 fn credential(home: &Path) -> Option<String> {
-    let inherited = std::env::var("HANZO_USER_KEY")
-        .ok()
-        .filter(|key| !key.is_empty());
-    pick(inherited, saved_key(home), cli_token)
+    let set = |name| std::env::var(name).ok().filter(|key: &String| !key.is_empty());
+    choose(set("HANZO_API_KEY"), set("HANZO_USER_KEY"), saved_key(home), cli_token)
+}
+
+fn choose(
+    given: Option<String>,
+    inherited: Option<String>,
+    saved: Option<String>,
+    cli: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    given.or_else(|| pick(inherited, saved, cli))
 }
 
 fn pick(

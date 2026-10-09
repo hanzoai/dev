@@ -65,6 +65,17 @@ fn an_api_key_in_the_environment_wins() {
 }
 
 #[test]
+fn a_key_the_host_hands_the_run_is_used_as_given() {
+    // A cloud sandbox has no CLI to ask: the delegated token in HANZO_API_KEY is it.
+    let chosen = choose(Some(JWT.into()), Some("hk-live-key".into()), Some("saved".into()), || {
+        panic!("a run handed a key never asks the CLI")
+    });
+    assert_eq!(chosen.as_deref(), Some(JWT));
+    let fallback = choose(None, None, None, || Some("fresh".into()));
+    assert_eq!(fallback.as_deref(), Some("fresh"));
+}
+
+#[test]
 fn an_inherited_sign_in_token_yields_to_a_fresh_one() {
     let fresh = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJmcmVzaCJ9.c2ln";
     assert_eq!(pick(Some(JWT.into()), None, || Some(fresh.into())).as_deref(), Some(fresh));
