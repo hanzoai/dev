@@ -151,6 +151,11 @@ jobs:
       CARGO_INCREMENTAL: "0"
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       RUSTFLAGS: -Awarnings -C debuginfo=0 -C strip=symbols
+      # Thin LTO's final link of this binary took 14 GB on one runner, and on
+      # 2026-10-08 three of them on one 32 GB node ran it out of memory: a system
+      # OOM, the node went NotReady, and every build on it was evicted. Without LTO
+      # the link needs a fraction of that memory and time, for a larger binary.
+      CARGO_PROFILE_RELEASE_LTO: "false"
     steps:
       - uses: actions/checkout@v4
         with:
