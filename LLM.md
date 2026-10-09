@@ -42,6 +42,20 @@ turns the word upstream calls itself by into ours, in the string literals of non
 and what it leaves alone: a file name, a package, a wire value. A rewording upstream
 cannot break it; an anchored edit can.
 
+The version is a rule too. The tree names the version it is heading for (`0.7.0-dev.1`)
+and nothing rewrites it. A release hands its number to the Build step as `DEV_VERSION`;
+`crates/hanzo-dev`'s `main` passes it to `hanzo_version::set`, and everything else asks
+`hanzo_version::get()` at run time. `make prepare` makes upstream ask: every
+`env!("CARGO_PKG_VERSION")` and every bare `version` in clap's `#[command(...)]` becomes
+the call, and each package that names it gets the dependency
+(`crates/hanzo-upstream/src/version.rs`). A read that must stay a constant cannot be a
+call, so those few are anchored edits: `CODEX_CLI_VERSION` is `hanzo_version::VERSION`,
+which derefs to the run-time value; the MCP User-Agent is built once; models-manager's
+`client_version` and the doctor's User-Agent format it. Without `DEV_VERSION` the binary
+states the tree's version. A new release recompiles hanzo-dev and the link, nothing
+beneath; `crates/hanzo-dev/tests/cli.rs` and `launch.rs` hold `--version`, the doctor and
+the TUI header to the version the binary was built as.
+
 Every edit carries an exact match count. When upstream moves the ground under
 one, preparation fails and names the file rather than branding the wrong line.
 That is the signal to re-anchor, and it is why the delta is anchored strings
@@ -84,19 +98,23 @@ files and the git dependencies to the next run through the org's `ci-cache` buck
 in cloud's `/v1/s3`. The IAM token comes from the KMS client pair inside the restore
 and save steps and is never exported, so no build script sees it.
 
-- Name `<sha16 of rustc -vV + sccache --version>-<target>`, key `<sha32 of Cargo.lock,
-  rust-toolchain.toml, patches/*.json and the RUSTFLAGS/CARGO_*/ZIG*/LLVM_*/XWIN_*/
-  MACOS_SDK_* env>`, both computed before the version stamp. A key that misses restores
-  `latest` for that name.
+- Name `<sha16 of rustc -vV + sccache --version>-<target>`; key `<sha32 of git ls-tree of
+  Cargo.toml, Cargo.lock, rust-toolchain.toml, patches/, crates/ and the upstream/codex
+  pin, and the RUSTFLAGS/CARGO_*/ZIG*/LLVM_*/XWIN_*/MACOS_SDK_* env>`. The release's
+  version is in neither, so a release that changed no source restores its key exactly. A
+  key that misses restores `latest` for that name.
 - Only main and tags write, and only a key the store does not hold. Before a save the
   directory is cut to what that build touched: sccache bumps an object's mtime on a
   hit, and a crate file stays only if cargo unpacked it.
-- What compiles every release anyway: every first-party crate (upstream's and ours),
-  because the stamp changes their version, which is in both `-C metadata` and
-  `CARGO_PKG_VERSION`; proc-macro and build-script crates, which sccache cannot
-  cache; and the final link. On a quiet node the first-party chain from
-  codex-protocol to the link is ~46 of a ~58-minute cold build, so that chain, not
-  the dependencies, is what to shorten next.
+- What compiles every release anyway: proc-macro and build-script crates, which sccache
+  cannot cache, the crates the commit changed and those above them, hanzo-dev (it reads
+  `DEV_VERSION`) and the link. Before the version became a run-time value the stamp
+  changed every first-party crate's version, which is in both `-C metadata` and
+  `CARGO_PKG_VERSION`, so all ~150 recompiled on every release.
+- Measured on dgx (its own target, two jobs, a busy host): cold, 1,046 crates in 59.6
+  minutes; the same release from an empty target dir with a warm cache, 6.7 minutes and
+  not one Rust miss (1,109 hits), hanzo-dev's own compile and the link ~4 of them; a
+  new `DEV_VERSION` alone rebuilds hanzo-dev and nothing else.
 - `sccache --show-stats` prints at the end of every Build step, pass or fail.
 
 ## House rules

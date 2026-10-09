@@ -5,7 +5,6 @@ pub mod model;
 
 pub const PRODUCT_NAME: &str = "Hanzo Dev";
 pub const INPUT_PLACEHOLDER: &str = "Ask Hanzo Dev to do anything";
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Dev checks no one else's releases. The check upstream makes compares this build
 /// with another product's latest release and offers that product's installer.
 pub const UPDATE_CHECK: bool = false;

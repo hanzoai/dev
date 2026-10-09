@@ -18,6 +18,7 @@ workspace = true
 hanzo-config = { path = "../hanzo-config", version = "0.7.0-dev.1" }
 hanzo-kai = { path = "../hanzo-kai", version = "0.7.0-dev.1" }
 hanzo-tui = { path = "../hanzo-tui", version = "0.7.0-dev.1" }
+hanzo-version = { path = "../hanzo-version", version = "0.7.0-dev.1" }
 anyhow = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }

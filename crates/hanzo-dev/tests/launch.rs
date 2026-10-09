@@ -81,6 +81,10 @@ fn a_bare_launch_starts_in_process_and_reads_only_the_projects_hanzo_config() {
     assert!(!shown.contains(PACKAGE_ERROR), "a bare launch asked for a package:\n{shown}");
     assert!(shown.contains(COMPOSER), "a bare launch never reached the composer:\n{shown}");
     assert!(shown.contains("project-model"), "the project's own config was not read:\n{shown}");
+    // The header names the version this binary was built as: a release's
+    // DEV_VERSION, read at run time, or the tree's own.
+    let built = option_env!("DEV_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
+    assert!(shown.contains(&format!("Hanzo Dev (v{built})")), "the header does not say v{built}:\n{shown}");
     assert!(
         !shown.to_ascii_lowercase().contains("gpt-6"),
         "another product's project config set the model:\n{shown}"

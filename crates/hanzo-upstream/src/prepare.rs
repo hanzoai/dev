@@ -76,8 +76,9 @@ pub fn run(arguments: &[String]) -> Result<()> {
     }
 
     let names = crate::brand::run(root, &source)?;
+    let reads = crate::version::run(root, &source)?;
     let revision = crate::git(&source, &["rev-parse", "HEAD"])?;
-    println!("upstream {}: {applied} edits applied, {names} names", &revision[..12]);
+    println!("upstream {}: {applied} edits applied, {names} names, {reads} version reads", &revision[..12]);
     Ok(())
 }
 

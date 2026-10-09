@@ -1,12 +1,14 @@
 //! Manages the pinned upstream submodules.
 //!
-//! The only Hanzo edits to upstream are the anchored substitutions in
-//! `patches/upstream.json`, applied to the submodule checkout in place.
+//! The Hanzo edits to upstream are the anchored substitutions in
+//! `patches/upstream.json` and two rules, the product's name and its version,
+//! applied to the submodule checkout in place.
 
 mod brand;
 mod bump;
 mod prepare;
 mod v8;
+mod version;
 
 use anyhow::Context;
 use anyhow::Result;

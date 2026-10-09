@@ -1,0 +1,7 @@
+[package]
+name = "hanzo-version"
+version.workspace = true
+edition = "2021"
+license = "Apache-2.0"
+description = "The version a Hanzo Dev process runs as"
+repository = "https://github.com/hanzoai/dev"

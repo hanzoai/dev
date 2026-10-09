@@ -53,7 +53,7 @@ v8:
 
 ## fmt: format the crates Hanzo owns
 fmt:
-	@$(CARGO) fmt -p hanzo-dev -p hanzo-config -p hanzo-tui -p hanzo-kai -p hanzo-loop
+	@$(CARGO) fmt -p hanzo-dev -p hanzo-config -p hanzo-tui -p hanzo-kai -p hanzo-loop -p hanzo-version
 	@$(CARGO) fmt --manifest-path crates/hanzo-upstream/Cargo.toml
 
 ## clean: discard build output

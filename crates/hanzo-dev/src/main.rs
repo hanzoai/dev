@@ -18,7 +18,7 @@ mod login;
 #[command(
     name = "dev",
     bin_name = "dev",
-    version = hanzo_tui::VERSION,
+    version = hanzo_version::get(),
     subcommand_negates_reqs = true,
     override_usage = "dev [OPTIONS] [PROMPT]\n       dev [OPTIONS] <COMMAND> [ARGS]"
 )]
@@ -194,6 +194,11 @@ struct Pick {
 }
 
 fn main() -> Result<()> {
+    // The release version reaches this crate alone, so a new release recompiles
+    // this crate and the link, and the graph beneath reads it at run time.
+    if let Some(version) = option_env!("DEV_VERSION") {
+        hanzo_version::set(version);
+    }
     codex_build_info::initialize!();
     // Resolve the Hanzo home and provider before any thread or runtime starts.
     hanzo_config::initialize()?;

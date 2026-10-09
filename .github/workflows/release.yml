@@ -159,7 +159,6 @@ jobs:
           - { id: darwin-arm64,  rust: aarch64-apple-darwin, apple: true }
           - { id: windows-amd64, rust: x86_64-pc-windows-msvc, msvc: true }
     env:
-      CODE_VERSION: ${{ needs.version.outputs.version }}
       CARGO_INCREMENTAL: "0"
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       RUSTFLAGS: -Awarnings -C debuginfo=0 -C strip=symbols
@@ -235,18 +234,19 @@ jobs:
             echo "::notice::hanzoai/ci@$CI_SHA bin/cache did not download, so nothing is carried between runs"
           fi
       - name: Restore the Rust cache (this org's store)
-        # Before the version stamp, because the key hashes the tree as it was
-        # committed: the stamp rewrites Cargo.lock and patches/upstream.json on
-        # every run, and a key taken after it would never be seen twice. And
-        # before Zig, so `cargo install` starts warm too.
+        # Before Zig, so `cargo install` starts warm too, and before `make
+        # prepare`, so the key hashes the tree as it was committed.
         #
         # The name is what an archive is only valid for: the compiler, the host
         # it runs on, sccache's own version, and the target. The key is what
-        # decides its contents: the lock, the toolchain pin, the owned edits,
-        # and every flag and cross-toolchain pin in the environment, which
-        # sccache hashes too. A key that misses restores the newest one saved
-        # for that name, so a lock bump still reuses every crate that did not
-        # move.
+        # decides its contents: every tracked file that goes into the binary
+        # (git's own hashes of the manifests, the lock, the toolchain pin, the
+        # owned edits, crates/, and the upstream pin) and every flag and
+        # cross-toolchain pin in the environment, which sccache hashes too. The
+        # release's version is in none of them, so a release that changed no
+        # source restores its key exactly and recompiles only the binary crate.
+        # One that did misses, restores the newest key saved for that name, and
+        # recompiles what moved; main then saves the new key.
         #
         # The IAM token is minted here and handed to bin/cache alone, never to
         # GITHUB_ENV: the Build step runs every crate's build script and proc
@@ -262,7 +262,7 @@ jobs:
           set -uo pipefail
           [ -x "$RUNNER_TEMP/cache" ] || { echo "::notice::no bin/cache, so this build starts cold"; exit 0; }
           name="$({ rustc -vV; sccache --version; } | sha256sum | cut -c1-16)-$TARGET"
-          key=$({ cat Cargo.lock rust-toolchain.toml patches/*.json
+          key=$({ git ls-tree -r HEAD -- Cargo.toml Cargo.lock rust-toolchain.toml patches crates upstream/codex
                   env | grep -E '^(RUSTFLAGS|CARGO_[A-Z0-9_]+|ZIG[A-Z0-9_]*|LLVM_[A-Z0-9_]+|XWIN_[A-Z0-9_]+|MACOS_SDK_[A-Z0-9_]+)=' | sort
                 } | sha256sum | cut -c1-32)
           echo "name=$name" >> "$GITHUB_OUTPUT"; echo "key=$key" >> "$GITHUB_OUTPUT"
@@ -313,25 +313,18 @@ jobs:
           echo "$HOME/llvm/bin" >> "$GITHUB_PATH"
           "$HOME/llvm/bin/clang-cl" --version | head -1
           cargo install cargo-xwin --version "${XWIN_CRATE_VERSION}" --locked
-      - name: Stamp the version
-        # The tree names the version it is heading for (0.7.0-dev.1); a release
-        # is the version it computed. The one string lives in the workspace
-        # manifest, the path dependencies that pin it, the upstream edit that
-        # gives upstream's crates the same version, and Cargo.lock, so it is
-        # replaced in all of them and --locked still holds. Without this the
-        # 0.6.107 build said 0.7.0-dev.1 and publish refused it.
-        run: |
-          set -euo pipefail
-          cur=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
-          [ -n "$cur" ] || { echo "::error::no workspace version in Cargo.toml"; exit 1; }
-          re=$(printf '%s' "$cur" | sed 's/[.]/\\./g')
-          files=$(git ls-files 'Cargo.toml' '*/Cargo.toml' Cargo.lock patches/upstream.json)
-          sed -i "s/$re/$CODE_VERSION/g" $files
-          ! grep -l "$re" $files || { echo "::error::$cur is still named above"; exit 1; }
-          echo "stamped $CODE_VERSION over $cur"
       - name: Apply the owned edits to the pinned upstream
         run: make prepare
       - name: Build
+        # The tree names the version it is heading for (0.7.0-dev.1); a release
+        # is the version it computed, and it reaches the binary crate alone:
+        # hanzo-dev's main hands DEV_VERSION to hanzo-version, and every reader
+        # beneath asks that at run time. So the manifests, the lock and every
+        # crate under the binary are the same from one release to the next, and
+        # the cache serves them. Stamping the number into the manifests instead
+        # changed every first-party crate's version, and with it every object.
+        env:
+          DEV_VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
           ulimit -n 65536 2>/dev/null || ulimit -n 10240 2>/dev/null || true

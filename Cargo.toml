@@ -5,6 +5,7 @@ members = [
     "crates/hanzo-tui",
     "crates/hanzo-kai",
     "crates/hanzo-loop",
+    "crates/hanzo-version",
 ]
 exclude = ["upstream", "crates/hanzo-upstream"]
 resolver = "2"

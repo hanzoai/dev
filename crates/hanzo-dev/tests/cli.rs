@@ -105,6 +105,10 @@ fn the_product_states_one_version() {
     let version = text(&dev(home.path(), &["--version"]));
     let number = version.split_whitespace().nth(1).expect("`dev <version>`").to_string();
     assert!(version.starts_with("dev "), "{version}");
+    // A release names its version as DEV_VERSION when it builds; without one the
+    // binary states the tree's own.
+    let built = option_env!("DEV_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
+    assert_eq!(number, built, "{version}");
     let doctor = text(&dev(home.path(), &["doctor", "--summary", "--no-color"]));
     assert!(doctor.contains(&number), "doctor reports a different version: {doctor:.120}");
 }

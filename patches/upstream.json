@@ -25,8 +25,8 @@
   },
   {
     "file": "tui/src/version.rs",
-    "old": "env!(\"CARGO_PKG_VERSION\")",
-    "new": "hanzo_tui::VERSION",
+    "old": "/// The current Codex CLI version as embedded at compile time.\npub const CODEX_CLI_VERSION: &str = env!(\"CARGO_PKG_VERSION\");",
+    "new": "/// The version this process runs as, which the binary sets (hanzo-version).\npub const CODEX_CLI_VERSION: &hanzo_version::Version = hanzo_version::VERSION;",
     "count": 1
   },
   {
@@ -97,8 +97,8 @@
   },
   {
     "file": "exec/src/event_processor_with_human_output.rs",
-    "old": "eprintln!(\"OpenAI Codex v{VERSION}\\n--------\");",
-    "new": "eprintln!(\"Hanzo Dev v{VERSION}\\n--------\");",
+    "old": "const VERSION: &str = env!(\"CARGO_PKG_VERSION\");\n        eprintln!(\"OpenAI Codex v{VERSION}\\n--------\");",
+    "new": "eprintln!(\"Hanzo Dev v{}\\n--------\", hanzo_version::get());",
     "count": 1
   },
   {
@@ -543,6 +543,54 @@
     "file": "config/src/loader/macos.rs",
     "old": "const MANAGED_PREFERENCES_APPLICATION_ID: &str = \"com.openai.codex\";",
     "new": "const MANAGED_PREFERENCES_APPLICATION_ID: &str = \"ai.hanzo.dev\";",
+    "count": 1
+  },
+  {
+    "file": "models-manager/src/lib.rs",
+    "old": "    format!(\n        \"{}.{}.{}\",\n        env!(\"CARGO_PKG_VERSION_MAJOR\"),\n        env!(\"CARGO_PKG_VERSION_MINOR\"),\n        env!(\"CARGO_PKG_VERSION_PATCH\")\n    )",
+    "new": "    let version = hanzo_version::get();\n    version.split(['-', '+']).next().unwrap_or(version).to_string()",
+    "count": 1
+  },
+  {
+    "file": "rmcp-client/src/utils.rs",
+    "old": "pub(crate) const MCP_USER_AGENT: &str = concat!(\"codex-mcp-client/\", env!(\"CARGO_PKG_VERSION\"));",
+    "new": "pub(crate) static MCP_USER_AGENT: std::sync::LazyLock<String> =\n    std::sync::LazyLock::new(|| format!(\"codex-mcp-client/{}\", hanzo_version::get()));",
+    "count": 1
+  },
+  {
+    "file": "rmcp-client/src/utils.rs",
+    "old": "HeaderValue::from_static(MCP_USER_AGENT)",
+    "new": "HeaderValue::from_static(&MCP_USER_AGENT)",
+    "count": 1
+  },
+  {
+    "file": "rmcp-client/src/oauth_http_client.rs",
+    "old": "HeaderValue::from_static(MCP_USER_AGENT)",
+    "new": "HeaderValue::from_static(&MCP_USER_AGENT)",
+    "count": 2
+  },
+  {
+    "file": "rmcp-client/src/oauth_http_client_security_tests.rs",
+    "old": "                } else {\n                    MCP_USER_AGENT\n                },",
+    "new": "                } else {\n                    MCP_USER_AGENT.as_str()\n                },",
+    "count": 1
+  },
+  {
+    "file": "rmcp-client/src/oauth_http_client_security_tests.rs",
+    "old": ".and(header(\"user-agent\", MCP_USER_AGENT))",
+    "new": ".and(header(\"user-agent\", MCP_USER_AGENT.as_str()))",
+    "count": 1
+  },
+  {
+    "file": "rmcp-client/src/oauth_client_registration_tests.rs",
+    "old": ".and(header(\"user-agent\", MCP_USER_AGENT))",
+    "new": ".and(header(\"user-agent\", MCP_USER_AGENT.as_str()))",
+    "count": 1
+  },
+  {
+    "file": "cli/src/doctor/updates.rs",
+    "old": "concat!(\"codex-doctor/\", env!(\"CARGO_PKG_VERSION\"))",
+    "new": "format!(\"codex-doctor/{}\", hanzo_version::get())",
     "count": 1
   }
 ]
