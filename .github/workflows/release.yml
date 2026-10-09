@@ -156,6 +156,11 @@ jobs:
       # OOM, the node went NotReady, and every build on it was evicted. Without LTO
       # the link needs a fraction of that memory and time, for a larger binary.
       CARGO_PROFILE_RELEASE_LTO: "false"
+      # Without LTO, five builds on one such node still reached 79% of its memory
+      # mid-compile and took it down at 100 minutes: each ran a rustc per CPU it
+      # could see. Each gets under 2 CPUs on a full node, so two at a time costs
+      # little time and halves the memory a build holds at once.
+      CARGO_BUILD_JOBS: "2"
     steps:
       - uses: actions/checkout@v4
         with:
