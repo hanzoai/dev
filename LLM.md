@@ -76,6 +76,29 @@ v1 carried, including the defects it was already carrying; see
 
 `make build` is the check that must pass. Fix warnings as well as errors.
 
+## The release cache
+
+Each release build runs rustc through sccache, and hanzoai/ci's `bin/cache` (pinned
+by commit as `CI_SHA` in `release.yml`) carries the objects, the registry's crate
+files and the git dependencies to the next run through the org's `ci-cache` bucket
+in cloud's `/v1/s3`. The IAM token comes from the KMS client pair inside the restore
+and save steps and is never exported, so no build script sees it.
+
+- Name `<sha16 of rustc -vV + sccache --version>-<target>`, key `<sha32 of Cargo.lock,
+  rust-toolchain.toml, patches/*.json and the RUSTFLAGS/CARGO_*/ZIG*/LLVM_*/XWIN_*/
+  MACOS_SDK_* env>`, both computed before the version stamp. A key that misses restores
+  `latest` for that name.
+- Only main and tags write, and only a key the store does not hold. Before a save the
+  directory is cut to what that build touched: sccache bumps an object's mtime on a
+  hit, and a crate file stays only if cargo unpacked it.
+- What compiles every release anyway: every first-party crate (upstream's and ours),
+  because the stamp changes their version, which is in both `-C metadata` and
+  `CARGO_PKG_VERSION`; proc-macro and build-script crates, which sccache cannot
+  cache; and the final link. On a quiet node the first-party chain from
+  codex-protocol to the link is ~46 of a ~58-minute cold build, so that chain, not
+  the dependencies, is what to shorten next.
+- `sccache --show-stats` prints at the end of every Build step, pass or fail.
+
 ## House rules
 
 - Hanzo service APIs use `https://api.hanzo.ai/v1/` exclusively.
