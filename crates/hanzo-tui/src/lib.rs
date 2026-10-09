@@ -11,6 +11,11 @@ pub const UPDATE_CHECK: bool = false;
 /// Dev runs its server inside the process. Upstream's shared background server
 /// starts from an installer's package directory, which Dev does not ship.
 pub const BACKGROUND_SERVER: bool = false;
+/// Dev draws in the terminal's own foreground and background: no hue and no grey,
+/// with weight and reverse video for emphasis.
+pub const MONOCHROME: bool = true;
+/// One line under the input: the status line takes the row the shortcut hint would.
+pub const SEPARATE_STATUS_LINE: bool = false;
 pub const STARTUP_TIP: &str = "Use **/mcp** to inspect connected tools. Hanzo MCP provides cloud controls and local development tools.";
 
 /// Keep light terminals readable and dark input bars much subtler than the upstream default.

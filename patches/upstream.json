@@ -592,5 +592,29 @@
     "old": "concat!(\"codex-doctor/\", env!(\"CARGO_PKG_VERSION\"))",
     "new": "format!(\"codex-doctor/{}\", hanzo_version::get())",
     "count": 1
+  },
+  {
+    "file": "tui/src/tui.rs",
+    "old": "    set_modes()?;\n\n    set_panic_hook();",
+    "new": "    set_modes()?;\n    if hanzo_tui::MONOCHROME {\n        crossterm::style::force_color_output(false);\n    }\n\n    set_panic_hook();",
+    "count": 1
+  },
+  {
+    "file": "tui/src/insert_history.rs",
+    "old": "        if next_fg != fg || next_bg != bg {",
+    "new": "        // A disabled color writes an empty SGR, which would also drop the span's weight.\n        if (next_fg != fg || next_bg != bg) && !crossterm::style::Colored::ansi_color_disabled_memoized() {",
+    "count": 1
+  },
+  {
+    "file": "tui/src/chatwidget/rendering.rs",
+    "old": "            options.separate_status_line = options.command_popup_placement\n                != crate::bottom_pane::CommandPopupPlacement::AboveComposer;",
+    "new": "            options.separate_status_line = hanzo_tui::SEPARATE_STATUS_LINE\n                && options.command_popup_placement\n                    != crate::bottom_pane::CommandPopupPlacement::AboveComposer;",
+    "count": 1
+  },
+  {
+    "file": "tui/src/startup_draft_layout.rs",
+    "old": "                    separate_status_line: true,",
+    "new": "                    separate_status_line: hanzo_tui::SEPARATE_STATUS_LINE,",
+    "count": 1
   }
 ]
