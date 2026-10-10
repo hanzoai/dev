@@ -24,6 +24,11 @@ pub fn home() -> PathBuf {
 pub const API_BASE: &str = "https://api.hanzo.ai/v1";
 pub const DEFAULT_MODEL: &str = "enso-auto";
 
+/// Whether a provider's base URL is [`API_BASE`], the API that serves [`catalog::MODELS`].
+pub fn is_hanzo(base_url: Option<&str>) -> bool {
+    base_url.is_some_and(|url| url.trim_end_matches('/') == API_BASE)
+}
+
 /// Called once by the synchronous entry point, before the async runtime starts.
 pub fn initialize() -> std::io::Result<()> {
     let home = product_home(

@@ -117,6 +117,18 @@ and save steps and is never exported, so no build script sees it.
   new `DEV_VERSION` alone rebuilds hanzo-dev and nothing else.
 - `sccache --show-stats` prints at the end of every Build step, pass or fail.
 
+## Review and memory models
+
+Automatic approval review and memory extraction and consolidation name a model
+of their own. Upstream's ids are OpenAI's; api.hanzo.ai serves none of them. On
+the Hanzo provider (`hanzo_config::is_hanzo`, base URL `API_BASE`) all three are
+`DEFAULT_MODEL`. The reviewer takes its preferred id only when the catalog serves
+it, else the parent's model, and off OpenAI only a listed entry is served: the
+bundled OpenAI entries ride along unlisted in every catalog, for lookups. So a LAN
+engine with no catalog of its own is reviewed by the model it runs. Guardian v2's
+sync reviewer runs on that same choice; its `CodexResponsesHeaders` model only
+scopes an OpenAI-backend header. `crates/hanzo-dev/tests/review.rs` holds both.
+
 ## House rules
 
 - Hanzo service APIs use `https://api.hanzo.ai/v1/` exclusively.

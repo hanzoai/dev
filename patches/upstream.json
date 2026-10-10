@@ -616,5 +616,23 @@
     "old": "                    separate_status_line: true,",
     "new": "                    separate_status_line: hanzo_tui::SEPARATE_STATUS_LINE,",
     "count": 1
+  },
+  {
+    "file": "model-provider/Cargo.toml",
+    "old": "[dependencies]",
+    "new": "[dependencies]\nhanzo-config = { path = \"../../../../crates/hanzo-config\" }",
+    "count": 1
+  },
+  {
+    "file": "model-provider/src/provider.rs",
+    "old": "    fn approval_review_preferred_model(&self) -> &'static str {\n        if self\n            .auth_manager\n            .as_ref()\n            .and_then(|auth_manager| auth_manager.auth_cached())\n            .is_some_and(|auth| auth.is_api_key_auth())\n        {\n            API_KEY_APPROVAL_REVIEW_PREFERRED_MODEL\n        } else {\n            DEFAULT_APPROVAL_REVIEW_PREFERRED_MODEL\n        }\n    }\n",
+    "new": "    fn approval_review_preferred_model(&self) -> &'static str {\n        // Hanzo: api.hanzo.ai serves none of OpenAI's own ids; Enso routes the review.\n        if hanzo_config::is_hanzo(self.info.base_url.as_deref()) {\n            return hanzo_config::DEFAULT_MODEL;\n        }\n        if self\n            .auth_manager\n            .as_ref()\n            .and_then(|auth_manager| auth_manager.auth_cached())\n            .is_some_and(|auth| auth.is_api_key_auth())\n        {\n            API_KEY_APPROVAL_REVIEW_PREFERRED_MODEL\n        } else {\n            DEFAULT_APPROVAL_REVIEW_PREFERRED_MODEL\n        }\n    }\n\n    fn memory_extraction_preferred_model(&self) -> &'static str {\n        if hanzo_config::is_hanzo(self.info.base_url.as_deref()) {\n            return hanzo_config::DEFAULT_MODEL;\n        }\n        DEFAULT_MEMORY_EXTRACTION_PREFERRED_MODEL\n    }\n\n    fn memory_consolidation_preferred_model(&self) -> &'static str {\n        if hanzo_config::is_hanzo(self.info.base_url.as_deref()) {\n            return hanzo_config::DEFAULT_MODEL;\n        }\n        DEFAULT_MEMORY_CONSOLIDATION_PREFERRED_MODEL\n    }\n",
+    "count": 1
+  },
+  {
+    "file": "core/src/guardian/reviewer_config.rs",
+    "old": "    let available_models = session\n        .services\n        .models_manager\n        .list_models(\n            codex_models_manager::manager::RefreshStrategy::Offline,\n            turn.config.http_client_factory(),\n        )\n        .await;\n    let default_review_model_id = turn.provider.approval_review_preferred_model();\n",
+    "new": "    let mut available_models = session\n        .services\n        .models_manager\n        .list_models(\n            codex_models_manager::manager::RefreshStrategy::Offline,\n            turn.config.http_client_factory(),\n        )\n        .await;\n    // Hanzo: off OpenAI a provider serves the models its catalog lists. The bundled\n    // OpenAI entries ride along unlisted, for lookups, and no other provider serves them.\n    if !turn.provider.info().is_openai() {\n        available_models.retain(|preset| preset.show_in_picker);\n    }\n    let default_review_model_id = turn.provider.approval_review_preferred_model();\n",
+    "count": 1
   }
 ]

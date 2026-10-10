@@ -3408,6 +3408,7 @@ dependencies = [
  "codex-response-debug-context",
  "codex-secrets",
  "codex-utils-process",
+ "hanzo-config",
  "http 1.4.0",
  "serde",
  "serde_json",
@@ -7383,6 +7384,7 @@ dependencies = [
  "codex-mcp",
  "codex-memories-write",
  "codex-model-provider",
+ "codex-model-provider-info",
  "codex-models-manager",
  "codex-plugin",
  "codex-protocol",
@@ -7431,6 +7433,7 @@ dependencies = [
  "vt100",
  "which",
  "windows-sys 0.52.0",
+ "wiremock",
 ]
 
 [[package]]

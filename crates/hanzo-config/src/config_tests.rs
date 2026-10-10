@@ -121,3 +121,15 @@ fn a_sign_in_writes_the_shared_credential() {
     share_credential(&home);
     assert!(std::fs::symlink_metadata(home.join("auth.json")).unwrap().is_symlink());
 }
+
+/// The default profile's provider is the one that serves the Hanzo catalog; a LAN
+/// engine or any other host is not, however it is named.
+#[test]
+fn only_the_hanzo_api_is_hanzo() {
+    let config: toml::Value = toml::from_str(DEFAULT_CONFIG).unwrap();
+    assert!(is_hanzo(config["model_providers"]["hanzo"]["base_url"].as_str()));
+    assert!(is_hanzo(Some("https://api.hanzo.ai/v1/")));
+    assert!(!is_hanzo(Some("http://dgx.local:1235/v1")));
+    assert!(!is_hanzo(Some("https://api.hanzo.ai.example/v1")));
+    assert!(!is_hanzo(None));
+}
