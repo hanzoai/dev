@@ -74,6 +74,15 @@ pub trait Controller: Send + Sync {
     /// Routing hints for `turn`'s model requests.
     fn route<'a>(&'a self, turn: &'a str, request: Request)
     -> Answer<'a, BTreeMap<String, String>>;
+
+    /// Compact transcript history, pruning stale tool outputs while preserving error diagnostics verbatim.
+    fn compact<'a>(
+        &'a self,
+        _turn: &'a str,
+        _messages: Vec<serde_json::Value>,
+    ) -> Answer<'a, Option<Vec<serde_json::Value>>> {
+        Box::pin(async { None })
+    }
 }
 
 /// The controller installed on a thread.
@@ -101,6 +110,10 @@ impl Handle {
 
     pub async fn route(&self, turn: &str, request: Request) -> BTreeMap<String, String> {
         self.0.route(turn, request).await
+    }
+
+    pub async fn compact(&self, turn: &str, messages: Vec<serde_json::Value>) -> Option<Vec<serde_json::Value>> {
+        self.0.compact(turn, messages).await
     }
 }
 
@@ -154,5 +167,12 @@ mod tests {
                 .await;
             assert_eq!(verdict, policy);
         }
+    }
+
+    #[tokio::test]
+    async fn a_controller_default_compact_returns_none() {
+        let handle = Handle(Arc::new(Loose));
+        let res = handle.compact("t", vec![]).await;
+        assert_eq!(res, None);
     }
 }

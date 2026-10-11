@@ -622,6 +622,64 @@ impl Thread {
         }
     }
 
+    /// Compacts transcript history, pruning stale tool outputs while keeping error diagnostics verbatim.
+    pub async fn compact_messages(
+        self: &Arc<Self>,
+        _turn: &str,
+        mut messages: Vec<Value>,
+    ) -> Option<Vec<Value>> {
+        if messages.len() <= 4 {
+            return None;
+        }
+        let cutoff = messages.len().saturating_sub(4);
+        let mut changed = false;
+        for (i, msg) in messages.iter_mut().enumerate() {
+            if i > 0 && i < cutoff {
+                if let Some(role) = msg.get("role").and_then(|r| r.as_str()) {
+                    if role == "tool" {
+                        if let Some(content) = msg.get("content").and_then(|c| c.as_str()) {
+                            if content.len() > 1000 {
+                                let error_lines: Vec<&str> = content
+                                    .lines()
+                                    .filter(|l| {
+                                        let low = l.to_lowercase();
+                                        low.contains("error:")
+                                            || low.contains("failed")
+                                            || low.contains("panic")
+                                            || low.contains("exception")
+                                            || low.contains("cannot find")
+                                    })
+                                    .take(10)
+                                    .collect();
+                                let compacted = if !error_lines.is_empty() {
+                                    format!(
+                                        "[Diagnostics retained verbatim]:\n{}\n[... {} chars omitted ...]",
+                                        error_lines.join("\n"),
+                                        content.len()
+                                    )
+                                } else {
+                                    let head_len = content.char_indices().nth(300).map_or(content.len(), |(i, _)| i);
+                                    format!(
+                                        "{}\n[... {} chars omitted ...]",
+                                        &content[..head_len],
+                                        content.len()
+                                    )
+                                };
+                                msg["content"] = Value::String(compacted);
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if changed {
+            Some(messages)
+        } else {
+            None
+        }
+    }
+
     fn turn_started(&self, turn: &str, start: [i64; 4]) {
         let mut s = self.state();
         s.turn = turn.to_string();
@@ -743,6 +801,14 @@ impl Controller for Shared {
         request: Request,
     ) -> Answer<'a, BTreeMap<String, String>> {
         Box::pin(self.0.route(turn, request))
+    }
+
+    fn compact<'a>(
+        &'a self,
+        turn: &'a str,
+        messages: Vec<Value>,
+    ) -> Answer<'a, Option<Vec<Value>>> {
+        Box::pin(self.0.compact_messages(turn, messages))
     }
 }
 

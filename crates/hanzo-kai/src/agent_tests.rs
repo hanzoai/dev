@@ -559,3 +559,25 @@ async fn a_server_that_answers_without_distributions_is_kai_not_answering() {
     std::thread::sleep(std::time::Duration::from_millis(200));
     assert!(!home.path().join("kai/decisions.jsonl").exists());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn compact_messages_preserves_error_diagnostics_verbatim() {
+    let (_home, _server, kai) = kai("", risky).await;
+    let (thread, _) = thread(&kai);
+    let long_tool_output = format!("info: line 1\nerror: undefined symbol foo\ninfo: line 3\n{}", "a".repeat(1500));
+    let msgs = vec![
+        serde_json::json!({"role": "user", "content": "run task"}),
+        serde_json::json!({"role": "tool", "content": long_tool_output}),
+        serde_json::json!({"role": "assistant", "content": "checking"}),
+        serde_json::json!({"role": "tool", "content": "ok"}),
+        serde_json::json!({"role": "assistant", "content": "next action"}),
+        serde_json::json!({"role": "tool", "content": "status done"}),
+        serde_json::json!({"role": "user", "content": "finalize"}),
+    ];
+    let compacted = thread.compact_messages("t1", msgs).await.expect("compacted");
+    let tool_msg = &compacted[1];
+    let content = tool_msg["content"].as_str().unwrap();
+    assert!(content.contains("[Diagnostics retained verbatim]:"));
+    assert!(content.contains("error: undefined symbol foo"));
+    assert!(content.contains("chars omitted"));
+}
