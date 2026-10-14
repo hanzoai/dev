@@ -83,6 +83,16 @@ pub trait Controller: Send + Sync {
     ) -> Answer<'a, Option<Vec<serde_json::Value>>> {
         Box::pin(async { None })
     }
+
+    /// Decides or verifies a typed Action for `turn`, returning Some(action) to execute directly,
+    /// or None to fall back to unconstrained generative model planning.
+    fn action<'a>(
+        &'a self,
+        _turn: &'a str,
+        _state: serde_json::Value,
+    ) -> Answer<'a, Option<serde_json::Value>> {
+        Box::pin(async { None })
+    }
 }
 
 /// The controller installed on a thread.
@@ -90,6 +100,10 @@ pub trait Controller: Send + Sync {
 pub struct Handle(pub Arc<dyn Controller>);
 
 impl Handle {
+    /// Decides a typed Action: fast-path or Kai selected action.
+    pub async fn action(&self, turn: &str, state: serde_json::Value) -> Option<serde_json::Value> {
+        self.0.action(turn, state).await
+    }
     /// The command's verdict: the policy's joined with the controller's, never looser.
     pub async fn command(
         &self,

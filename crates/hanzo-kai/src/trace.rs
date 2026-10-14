@@ -85,10 +85,30 @@ pub struct Step {
     pub ms: f64,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub error: String,
+    /// Telemetry stage in the 8-stage funnel:
+    /// eligible -> attempted -> completed -> validated -> selected -> applied -> verified -> beneficial
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub funnel_stage: String,
+    /// Reason if dropped, abstained, rejected, timed out, or unverified.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub funnel_reason: String,
+    /// Whether this action was verified independently.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub verified: bool,
+    /// Measured net benefit: seconds saved vs baseline.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub benefit_seconds: f64,
+    /// Measured net benefit: model calls eliminated vs baseline.
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub benefit_model_calls: i64,
 }
 
 fn is_zero(ms: &f64) -> bool {
     *ms == 0.0
+}
+
+fn is_zero_i64(n: &i64) -> bool {
+    *n == 0
 }
 
 impl Step {
@@ -96,7 +116,15 @@ impl Step {
         Step {
             program: program.to_string(),
             mode: mode.to_string(),
+            funnel_stage: "eligible".to_string(),
             ..Step::default()
+        }
+    }
+
+    pub fn set_stage(&mut self, stage: &str, reason: Option<&str>) {
+        self.funnel_stage = stage.to_string();
+        if let Some(r) = reason {
+            self.funnel_reason = r.to_string();
         }
     }
 
@@ -224,6 +252,15 @@ impl Record {
         if !was && p.decided && p.closed && !p.void {
             self.trace.write(&p.line);
         }
+    }
+
+    /// Updates the step in place without marking the decision complete.
+    pub fn update_step(&self, f: impl FnOnce(&mut Step)) {
+        self.with(|p| {
+            if let Some(step) = p.line.ops.get_mut(&p.op) {
+                f(step);
+            }
+        });
     }
 
     /// The decision is in: `f` fills the step, and the outcome when the decision is its own.

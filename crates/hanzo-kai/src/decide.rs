@@ -22,15 +22,50 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::time::Duration;
-use std::time::Instant;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
-/// How long Kai stays down after it fails to answer.
-pub const COOLDOWN: Duration = Duration::from_secs(60);
+/// How long a specific capability stays in cooldown after a failure before a half-open probe.
+pub const CAPABILITY_COOLDOWN: Duration = Duration::from_secs(10);
+/// Legacy global cooldown fallback.
+pub const COOLDOWN: Duration = Duration::from_secs(10);
 /// The longest a connection may take to open.
 const CONNECT: Duration = Duration::from_secs(2);
 /// The longest one request may take.
 const REQUEST: Duration = Duration::from_secs(10);
+
+/// Bounded per-capability default timeouts
+pub const TIMEOUT_FAST: Duration = Duration::from_millis(150);
+pub const TIMEOUT_STEP: Duration = Duration::from_millis(500);
+pub const TIMEOUT_SEARCH: Duration = Duration::from_millis(1000);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BreakerState {
+    Closed,
+    HalfOpen,
+    Open,
+}
+
+#[derive(Debug, Clone)]
+pub struct CapabilityHealth {
+    pub state: BreakerState,
+    pub until: Option<Instant>,
+    pub fell: Option<Instant>,
+    pub consecutive_failures: u32,
+    pub logged: bool,
+}
+
+impl Default for CapabilityHealth {
+    fn default() -> Self {
+        Self {
+            state: BreakerState::Closed,
+            until: None,
+            fell: None,
+            consecutive_failures: 0,
+            logged: false,
+        }
+    }
+}
 
 /// How a request reaches Kai and its answer comes back: the HTTP status and the body. The status
 /// is the Decisions API's whatever the wire: 200, 400 or 422 for a request Kai refused, anything
@@ -84,6 +119,32 @@ pub struct Call {
     pub mode: Mode,
     pub k: Option<usize>,
     pub base: Option<Verdict>,
+    pub capability: Option<&'static str>,
+    pub timeout: Option<Duration>,
+}
+
+impl Call {
+    pub fn simple(mode: Mode, k: Option<usize>, base: Option<Verdict>) -> Self {
+        Self {
+            mode,
+            k,
+            base,
+            capability: None,
+            timeout: None,
+        }
+    }
+}
+
+impl Call {
+    pub fn simple(mode: Mode, k: Option<usize>, base: Option<Verdict>) -> Self {
+        Self {
+            mode,
+            k,
+            base,
+            capability: None,
+            timeout: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -154,6 +215,7 @@ pub struct Decider {
     transport: Arc<dyn Transport>,
     /// Per program: one capability's outage is not another's.
     health: Mutex<HashMap<String, Health>>,
+    capabilities: Mutex<HashMap<String, CapabilityHealth>>,
 }
 
 impl Decider {
@@ -169,6 +231,7 @@ impl Decider {
             model: model.to_string(),
             transport,
             health: Mutex::new(HashMap::new()),
+            capabilities: Mutex::new(HashMap::new()),
         }
     }
 
@@ -191,6 +254,72 @@ impl Decider {
             .get(program)
             .and_then(|h| h.until)
             .is_some_and(|until| Instant::now() < until)
+    }
+
+<<<<<<< HEAD
+    fn fell(&self, program: &str, why: &str) {
+        let mut all = self.health();
+        let h = all.entry(program.to_string()).or_default();
+=======
+    /// Whether a specific capability is down. Returns false if Closed or HalfOpen (permits probe).
+    pub fn is_capability_down(&self, capability: &str) -> bool {
+        let mut caps = self
+            .capabilities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let entry = caps.entry(capability.to_string()).or_default();
+        match entry.state {
+            BreakerState::Closed => false,
+            BreakerState::Open => {
+                if let Some(until) = entry.until {
+                    if Instant::now() >= until {
+                        entry.state = BreakerState::HalfOpen;
+                        return false;
+                    }
+                }
+                true
+            }
+            BreakerState::HalfOpen => false,
+        }
+    }
+
+    pub fn capability_fell(&self, capability: &str, why: &str) {
+        let mut caps = self
+            .capabilities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let entry = caps.entry(capability.to_string()).or_default();
+        let now = Instant::now();
+        entry.consecutive_failures += 1;
+        entry.state = BreakerState::Open;
+        entry.until = Some(now + CAPABILITY_COOLDOWN);
+        entry.fell = Some(now);
+        if !entry.logged {
+            entry.logged = true;
+            tracing::warn!(
+                "kai: capability '{capability}' at {} circuit open ({why}); cooling down for {}s",
+                self.url,
+                CAPABILITY_COOLDOWN.as_secs()
+            );
+        }
+    }
+
+    pub fn capability_answered(&self, capability: &str, started: Instant) {
+        let mut caps = self
+            .capabilities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let entry = caps.entry(capability.to_string()).or_default();
+        if entry.fell.is_some_and(|fell| started <= fell) {
+            return;
+        }
+        if entry.logged {
+            tracing::info!(
+                "kai: capability '{capability}' at {} recovered to closed circuit",
+                self.url
+            );
+        }
+        *entry = CapabilityHealth::default();
     }
 
     fn fell(&self, program: &str, why: &str) {
@@ -225,13 +354,21 @@ impl Decider {
     }
 
     /// One state's answers.
-    async fn ask(&self, program: &Program, state: &Value) -> Result<Asked, Fault> {
+    async fn ask(&self, program: &Program, state: &Value, timeout: Option<Duration>) -> Result<Asked, Fault> {
         let body = json!({
             "model": self.model,
             "state": state,
             "questions": program.questions,
         });
-        let (status, text) = self.transport.send(&body).await.map_err(Fault::Down)?;
+        let send_fut = self.transport.send(&body);
+        let send_res = match timeout {
+            Some(t) => match tokio::time::timeout(t, send_fut).await {
+                Ok(r) => r,
+                Err(_) => return Err(Fault::Down("timeout".to_string())),
+            },
+            None => send_fut.await,
+        };
+        let (status, text) = send_res.map_err(Fault::Down)?;
         if status == 400 || status == 422 {
             let why: Value = serde_json::from_str(&text).unwrap_or_default();
             let message = why["error"]["message"]
@@ -279,9 +416,15 @@ impl Decider {
         if self.down_for(&program.id) {
             return Err("kai is down".into());
         }
+        if let Some(cap) = call.capability {
+            if self.is_capability_down(cap) {
+                return Err(format!("kai: capability '{cap}' circuit open"));
+            }
+        }
         let started = Instant::now();
+        let timeout = call.timeout;
         let asked =
-            futures::future::join_all(states.iter().map(|state| self.ask(program, state))).await;
+            futures::future::join_all(states.iter().map(|state| self.ask(program, state, timeout))).await;
         let down = asked.iter().find_map(|a| match a {
             Err(Fault::Down(why)) => Some(why.clone()),
             _ => None,
@@ -295,7 +438,13 @@ impl Decider {
             });
         if let Some(why) = down.or(silent) {
             self.fell(&program.id, &why);
+            if let Some(cap) = call.capability {
+                self.capability_fell(cap, &why);
+            }
             return Err(format!("kai: {why}"));
+        }
+        if let Some(cap) = call.capability {
+            self.capability_answered(cap, started);
         }
         self.answered(&program.id, started);
         let mut model = String::new();

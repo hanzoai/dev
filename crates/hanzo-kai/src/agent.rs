@@ -42,9 +42,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
-/// The longest the loop waits for an enforced decision: past the client's own timeout, so a
-/// request that times out marks Kai down rather than being dropped.
-pub const WAIT: Duration = Duration::from_secs(12);
+/// The longest the loop waits for an enforced decision before falling back.
+pub const WAIT: Duration = Duration::from_millis(1500);
 /// Candidate files a context decision reads.
 const CANDIDATES: usize = 16;
 /// Continuations Kai may start for one request before it hands the request back.
@@ -123,8 +122,14 @@ impl Thread {
     }
 
     /// Whether Kai is down: its operations are skipped.
+    #[allow(dead_code)]
     fn down(&self) -> bool {
         self.kai.decider.down()
+    }
+
+    /// Whether Kai is down for a specific capability.
+    fn down_for(&self, op: Operation) -> bool {
+        self.kai.decider.down() || self.kai.decider.is_capability_down(op.name())
     }
 
     /// A line for `op` in `turn`, not yet decided or closed.
@@ -168,23 +173,43 @@ impl Thread {
         let op = self.op(kind);
         let program = self.kai.program(kind);
         let decider = Arc::clone(&self.kai.decider);
+        let timeout = match kind {
+            Operation::Risk => decide::TIMEOUT_FAST,
+            Operation::Model | Operation::Reasoning => decide::TIMEOUT_FAST,
+            Operation::Context => decide::TIMEOUT_SEARCH,
+            _ => decide::TIMEOUT_STEP,
+        };
         let call = Call {
             mode: op.mode,
             k: op.k,
             base,
+            capability: Some(kind.name()),
+            timeout: Some(timeout),
         };
         if op.mode == Mode::Enforced {
+            record.update_step(|step| {
+                step.set_stage("attempted", None);
+            });
             let decision = tokio::time::timeout(WAIT, decider.decide(&program, states, call))
                 .await
                 .unwrap_or_else(|_| Err("late".into()));
             let Ok(decision) = decision else {
+                record.update_step(|step| {
+                    step.set_stage("attempted", Some("timeout_or_error"));
+                });
                 record.void();
                 return None;
             };
             let mut out = None;
             record.decided(|step, outcome| {
                 step.fill(&decision);
+                step.set_stage("completed", None);
                 out = then(self, &decision, step, outcome);
+                if step.applied {
+                    step.set_stage("applied", None);
+                } else if out.is_none() {
+                    step.set_stage("abstained", Some("below_threshold"));
+                }
             });
             return out;
         }
@@ -196,8 +221,10 @@ impl Thread {
             };
             record.decided(|step, outcome| {
                 step.fill(&decision);
+                step.set_stage("completed", None);
                 let _ = then(&me, &decision, step, outcome);
                 step.applied = false;
+                step.set_stage("shadow", None);
             });
         });
         None
@@ -226,7 +253,7 @@ impl Thread {
                 return keep.clone();
             }
         }
-        let keep = if cards.is_empty() || self.down() {
+        let keep = if cards.is_empty() || self.down_for(Operation::Tools) {
             None
         } else {
             let op = self.op(Operation::Tools);
@@ -257,7 +284,15 @@ impl Thread {
                         .collect();
                     step.kai = chosen.join(",");
                     let keep = (advisory.mode == Mode::Enforced && decide::all_enforced(d))
-                        .then(|| chosen.iter().cloned().collect::<HashSet<String>>());
+                        .then(|| {
+                            let mut set: HashSet<String> = chosen.iter().cloned().collect();
+                            for tool in &all {
+                                if is_essential_tool(tool) {
+                                    set.insert(tool.clone());
+                                }
+                            }
+                            set
+                        });
                     step.taken = match &keep {
                         Some(_) => step.kai.clone(),
                         None => "all".into(),
@@ -290,7 +325,7 @@ impl Thread {
         policy: Verdict,
         action: Value,
     ) -> Verdict {
-        if self.down() {
+        if self.down_for(Operation::Risk) {
             return policy;
         }
         let op = self.op(Operation::Risk);
@@ -334,7 +369,7 @@ impl Thread {
 
     /// Routing hints for the turn: Kai's model tier and reasoning budget, when enforced.
     async fn route(self: &Arc<Self>, turn: &str, request: Request) -> BTreeMap<String, String> {
-        let down = self.down();
+        let down = self.down_for(Operation::Model);
         let state = {
             let mut s = self.state();
             s.turn = turn.to_string();
@@ -397,7 +432,7 @@ impl Thread {
 
     /// Files the turn should start from, for a request made in `cwd`.
     async fn context(self: &Arc<Self>, turn: &str, text: String, cwd: PathBuf) -> Option<String> {
-        if text.trim().is_empty() || self.down() {
+        if text.trim().is_empty() || self.down_for(Operation::Context) {
             return None;
         }
         let op = self.op(Operation::Context);
@@ -498,7 +533,7 @@ impl Thread {
         let Some(steps) = steps else {
             return;
         };
-        if self.down() {
+        if self.down_for(Operation::Progress) {
             return;
         }
         let op = self.op(Operation::Progress);
@@ -554,7 +589,7 @@ impl Thread {
                 s.continued,
             )
         };
-        if request.trim().is_empty() || self.down() {
+        if request.trim().is_empty() || self.down_for(Operation::Complete) {
             return;
         }
         let op = self.op(Operation::Complete);
@@ -680,6 +715,36 @@ impl Thread {
         }
     }
 
+    /// Evaluates whether a deterministic action or Kai decision can be applied for the current step.
+    /// Returns Some(action) to execute directly, or None to fall back to generative planning.
+    pub async fn step_action(self: &Arc<Self>, _turn: &str, state: Value) -> Option<Value> {
+        // 1. Zero-Inference Fast Path: exactly 1 valid candidate with satisfied preconditions
+        if let Some(candidates) = state.get("candidates").and_then(Value::as_array) {
+            let valid: Vec<&Value> = candidates
+                .iter()
+                .filter(|c| {
+                    c.get("preconditions_satisfied")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+                })
+                .collect();
+            if valid.len() == 1 {
+                tracing::info!(
+                    "kai: zero-inference fast path applied for {}",
+                    valid[0].get("action_id").unwrap_or(&serde_json::Value::Null)
+                );
+                return Some(valid[0].clone());
+            }
+        }
+
+        // 2. Ambiguity: check capability circuit breaker
+        if self.down_for(Operation::Tools) {
+            return None;
+        }
+
+        None
+    }
+
     fn turn_started(&self, turn: &str, start: [i64; 4]) {
         let mut s = self.state();
         s.turn = turn.to_string();
@@ -746,6 +811,26 @@ fn hint_value(question: &str, answer: &str) -> String {
     .to_string()
 }
 
+/// Core universal execution primitives that must never be pruned when offered.
+fn is_essential_tool(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    matches!(
+        lower.as_str(),
+        "bash"
+            | "bash_run"
+            | "exec_command"
+            | "file_edit"
+            | "edit_file"
+            | "write_to_file"
+            | "read_file"
+            | "view_file"
+            | "grep"
+            | "grep_search"
+            | "glob"
+            | "glob_search"
+    )
+}
+
 /// A command as Kai reads it: the tool, the command line, where it runs, why.
 pub fn command_state(action: &Value) -> Value {
     let mut state = serde_json::Map::new();
@@ -809,6 +894,14 @@ impl Controller for Shared {
         messages: Vec<Value>,
     ) -> Answer<'a, Option<Vec<Value>>> {
         Box::pin(self.0.compact_messages(turn, messages))
+    }
+
+    fn action<'a>(
+        &'a self,
+        turn: &'a str,
+        state: Value,
+    ) -> Answer<'a, Option<Value>> {
+        Box::pin(self.0.step_action(turn, state))
     }
 }
 

@@ -581,3 +581,71 @@ async fn compact_messages_preserves_error_diagnostics_verbatim() {
     assert!(content.contains("error: undefined symbol foo"));
     assert!(content.contains("chars omitted"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn zero_inference_fast_path_executes_immediately_when_preconditions_satisfied() {
+    let (_home, _server, kai) = kai("", risky).await;
+    let (thread, _) = thread(&kai);
+    
+    // Exactly 1 valid candidate action satisfies preconditions -> 0ms fast path
+    let state = serde_json::json!({
+        "candidates": [
+            {
+                "action_id": "act_targeted_test",
+                "preconditions_satisfied": true,
+                "params": {"test_target": "tests::test_packet_null_payload"}
+            },
+            {
+                "action_id": "act_inspect_source",
+                "preconditions_satisfied": false,
+                "params": {"file": "src/net/packet.rs"}
+            }
+        ]
+    });
+    let fast_path = thread.step_action("t1", state).await;
+    assert!(fast_path.is_some());
+    assert_eq!(fast_path.unwrap()["action_id"], "act_targeted_test");
+
+    // Multiple valid candidates -> None (proceed to Kai deliberation or model turn)
+    let ambiguous = serde_json::json!({
+        "candidates": [
+            {
+                "action_id": "act_targeted_test",
+                "preconditions_satisfied": true
+            },
+            {
+                "action_id": "act_inspect_source",
+                "preconditions_satisfied": true
+            }
+        ]
+    });
+    assert!(thread.step_action("t1", ambiguous).await.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recall_preserving_prefilter_always_retains_essential_tools() {
+    let (_home, _server, kai) = kai("[ops.tools]\nmode = \"enforced\"\nk = 1", |_, _, state| {
+        let p = match state["tool"]["name"].as_str().unwrap_or_default() {
+            "custom_analyzer" => 0.99,
+            _ => 0.01,
+        };
+        vec![1.0 - p, p]
+    })
+    .await;
+    let (thread, _) = thread(&kai);
+    let cards: Vec<Card> = ["custom_analyzer", "bash", "file_edit", "read_file", "other_tool"]
+        .iter()
+        .map(|n| Card {
+            name: n.to_string(),
+            description: format!("the {n} tool"),
+        })
+        .collect();
+    let keep = thread.shortlist("t1", cards).await.unwrap();
+    // Kai picked only custom_analyzer (k=1), but essential tools (bash, file_edit, read_file) MUST be preserved!
+    assert!(keep.contains("custom_analyzer"));
+    assert!(keep.contains("bash"));
+    assert!(keep.contains("file_edit"));
+    assert!(keep.contains("read_file"));
+    assert!(!keep.contains("other_tool"));
+}
+

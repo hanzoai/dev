@@ -391,11 +391,7 @@ impl Setup {
     /// Kai's ruling on `state` under `program`; `None` when Kai does not answer, and why in
     /// `missing` the first time.
     fn decide(&self, program: &Program, state: Value, missing: &mut Option<String>) -> Option<Decision> {
-        let call = Call {
-            mode: Mode::Enforced,
-            k: None,
-            base: None,
-        };
+        let call = Call::simple(Mode::Enforced, None, None);
         match self
             .runtime
             .block_on(self.decider.decide(program, vec![state], call))
