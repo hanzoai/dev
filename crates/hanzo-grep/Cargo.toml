@@ -1,0 +1,22 @@
+[package]
+name = "hanzo-grep"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The agent's grep tool: Dev's search engine as one native tool, kept current with Dev's writes."
+
+[lints]
+workspace = true
+
+[dependencies]
+hanzo-search = { path = "../hanzo-search", version = "0.7.0-dev.1" }
+codex-exec-server = { workspace = true }
+codex-extension-api = { workspace = true }
+codex-protocol = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt"] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }

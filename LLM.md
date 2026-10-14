@@ -129,6 +129,36 @@ engine with no catalog of its own is reviewed by the model it runs. Guardian v2'
 sync reviewer runs on that same choice; its `CodexResponsesHeaders` model only
 scopes an OpenAI-backend header. `crates/hanzo-dev/tests/review.rs` holds both.
 
+## Search
+
+One search path: `crates/hanzo-search` (`hanzo_search::Search::query`) answers text
+(regex), file names (glob) and symbols (word-boundary identifier, definitions first;
+textual, with a `Resolver` hook for the LSP or code graph to confirm). The agent reaches
+it as the native `grep` tool (`crates/hanzo-grep`), contributed through upstream's
+extension API and installed by one anchored edit in the app server's
+`thread_extensions`; the base instructions send the model to `grep`, and to `rg` in the
+shell only when `grep` errors. `hanzo-search` is also a CLI that prints what the tool
+returns (`-n` for `path:line:text`, `--files GLOB`, `--symbol`, `--json`, `--no-index`,
+`--index-only`, `--prepare PATH`, `--stats`; exit 0/1/2 as rg).
+
+- Engine: tgrep (MIT), the single search engine, linked as `tgrep-core`: a git dependency
+  pinned by exact commit in `crates/hanzo-search/Cargo.toml`, upstream v1.2.1
+  (`c7b2ab827274f8a56ff95eadc005f69e0732ee92`) until the hanzoai/tgrep fork's rev replaces
+  it. Its rusqlite git pin would link a second SQLite beside sqlx's, so the root
+  `Cargo.toml` patches it to rusqlite 0.39, which shares libsqlite3-sys 0.37.
+- Per query path: the nearest `.tgrep/` index above it; a running tgrep server for that
+  root (its `serve.json`, loopback JSON-RPC), else the on-disk index in process, else a
+  scan with tgrep's walker (rg's ignore, hidden and binary rules). Nothing is spawned.
+- Freshness: paths Dev names (`Search::touched`), files changed after a tool that may
+  write started (`Search::since`, called by `hanzo-grep` on every other tool and command
+  start), and, for an on-disk index, files whose size or mtime differs from its record
+  are read from disk instead of the index; a row whose file is gone is dropped. The walk
+  that finds them is the cost of an index that lags.
+- Ranking: file score (text: matching lines; symbol: definitions x 2^32 + references;
+  name: shallower first), then path, then line.
+- Licence boundary: tgrep-core is MIT and linked; its notice is in `NOTICE`. ripgrep-all
+  (`rga`, AGPL-3.0) is never used: not linked, copied, called, shipped, or compared.
+
 ## House rules
 
 - Hanzo service APIs use `https://api.hanzo.ai/v1/` exclusively.

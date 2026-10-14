@@ -1,0 +1,29 @@
+[package]
+name = "hanzo-search"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Dev's one search engine: text, file names and symbols over tgrep's trigram index."
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "hanzo-search"
+path = "src/main.rs"
+
+[dependencies]
+# tgrep (MIT), pinned by exact commit: upstream v1.2.1. The root workspace patches its
+# rusqlite to the release that shares Dev's SQLite.
+tgrep-core = { git = "https://github.com/microsoft/tgrep", rev = "c7b2ab827274f8a56ff95eadc005f69e0732ee92" }
+clap = { workspace = true, features = ["derive"] }
+globset = { workspace = true }
+memchr = { workspace = true }
+rayon = "1"
+regex = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }

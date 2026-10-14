@@ -634,5 +634,35 @@
     "old": "    let available_models = session\n        .services\n        .models_manager\n        .list_models(\n            codex_models_manager::manager::RefreshStrategy::Offline,\n            turn.config.http_client_factory(),\n        )\n        .await;\n    let default_review_model_id = turn.provider.approval_review_preferred_model();\n",
     "new": "    let mut available_models = session\n        .services\n        .models_manager\n        .list_models(\n            codex_models_manager::manager::RefreshStrategy::Offline,\n            turn.config.http_client_factory(),\n        )\n        .await;\n    // Hanzo: off OpenAI a provider serves the models its catalog lists. The bundled\n    // OpenAI entries ride along unlisted, for lookups, and no other provider serves them.\n    if !turn.provider.info().is_openai() {\n        available_models.retain(|preset| preset.show_in_picker);\n    }\n    let default_review_model_id = turn.provider.approval_review_preferred_model();\n",
     "count": 1
+  },
+  {
+    "file": "app-server/Cargo.toml",
+    "old": "codex-memories-extension = { workspace = true }",
+    "new": "codex-memories-extension = { workspace = true }\nhanzo-grep = { path = \"../../../../crates/hanzo-grep\" }",
+    "count": 1
+  },
+  {
+    "file": "app-server/src/extensions.rs",
+    "old": "    codex_memories_extension::install(&mut builder, codex_otel::global());",
+    "new": "    // Hanzo: the grep tool, Dev's one search path (crates/hanzo-search).\n    hanzo_grep::install(&mut builder);\n    codex_memories_extension::install(&mut builder, codex_otel::global());",
+    "count": 1
+  },
+  {
+    "file": "protocol/src/prompts/base_instructions/default.md",
+    "old": "- When searching for text or files, prefer using `rg` or `rg --files` respectively because `rg` is much faster than alternatives like `grep`. (If the `rg` command is not found, then use alternatives.)",
+    "new": "- When searching for text or files, use the `grep` tool: it searches file contents (`kind: \"text\"`), file names (`kind: \"name\"`) and an identifier's definitions and references (`kind: \"symbol\"`) through an index that reflects your edits. Run `rg` in the shell only if `grep` returns an error.",
+    "count": 1
+  },
+  {
+    "file": "models-manager/prompt.md",
+    "old": "- When searching for text or files, prefer using `rg` or `rg --files` respectively because `rg` is much faster than alternatives like `grep`. (If the `rg` command is not found, then use alternatives.)",
+    "new": "- When searching for text or files, use the `grep` tool: it searches file contents (`kind: \"text\"`), file names (`kind: \"name\"`) and an identifier's definitions and references (`kind: \"symbol\"`) through an index that reflects your edits. Run `rg` in the shell only if `grep` returns an error.",
+    "count": 1
+  },
+  {
+    "file": "core/templates/agents/orchestrator.md",
+    "old": "- Unless you are otherwise instructed, prefer using `rg` or `rg --files` respectively when searching because `rg` is much faster than alternatives like `grep`. If the `rg` command is not found, then use alternatives.",
+    "new": "- Unless you are otherwise instructed, use the `grep` tool when searching for text or files: it is indexed and reflects your edits. Run `rg` in the shell only if `grep` returns an error.",
+    "count": 1
   }
 ]
