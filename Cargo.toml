@@ -501,3 +501,8 @@ tungstenite = { git = "https://github.com/openai-oss-forks/tungstenite-rs", rev 
 
 [patch."ssh://git@github.com/openai-oss-forks/tungstenite-rs.git"]
 tungstenite = { git = "https://github.com/openai-oss-forks/tungstenite-rs", rev = "4fffad30fe373adbdcffab9545e9e9bf4f2fc19f" }
+
+# hanzo-trigram's tgrep-core pins rusqlite by git commit, whose libsqlite3-sys 0.38 would link a
+# second SQLite beside the 0.37 sqlx bundles. rusqlite 0.39 is the release built on 0.37.
+[patch."https://github.com/rusqlite/rusqlite.git"]
+rusqlite = "=0.39.0"

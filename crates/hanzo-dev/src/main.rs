@@ -159,6 +159,20 @@ struct Fix {
     #[arg(long, default_value = "")]
     goal: String,
 
+    /// A file holding the failing run's output, already in hand (a CI log): the tests are not run
+    /// to see them fail.
+    #[arg(long)]
+    failure: Option<std::path::PathBuf>,
+
+    /// Do not try candidate edits against the test before asking the model.
+    #[arg(long)]
+    no_search: bool,
+
+    /// Do not put tgrep's evidence (where the failure's messages and names are spelled) into the
+    /// ranking.
+    #[arg(long)]
+    no_tgrep: bool,
+
     /// Most attempts.
     #[arg(long, default_value_t = 3)]
     max: u32,
@@ -320,14 +334,13 @@ async fn run(paths: Arg0DispatchPaths) -> Result<()> {
 
 async fn run_fix(args: Fix) -> Result<()> {
     use hanzo_kai::flow;
-    let setup = flow::Setup::new(
-        &hanzo_config::home(),
-        hanzo_config::API_BASE,
-        hanzo_config::hanzo_credential(),
-    )
-    .map_err(anyhow::Error::msg)?;
+    let setup = flow::Setup::new(&hanzo_config::home(), hanzo_config::hanzo_credential)
+        .map_err(anyhow::Error::msg)?;
     let options = flow::Options {
         task: serde_json::json!({"test": args.test, "goal": args.goal}),
+        failure: args.failure.as_deref().map(std::fs::read_to_string).transpose()?,
+        search: !args.no_search,
+        discover: !args.no_tgrep,
         max: args.max,
         control: match args.control {
             Steer::Kai => flow::Control::Kai,

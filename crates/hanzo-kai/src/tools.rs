@@ -143,12 +143,20 @@ pub fn tail(text: &str, n: usize) -> String {
 /// Runs `sh -c script` in `root`, killing it after `limit`: `{code, output, ms}`, output
 /// being the tail of stdout and stderr together.
 pub fn shell(root: &Path, script: &str, limit: Duration) -> Value {
+    shell_until(root, script, limit, &|| false)
+}
+
+/// [`shell`], also killed as soon as `stop` says so (code -3).
+pub fn shell_until(root: &Path, script: &str, limit: Duration, stop: &dyn Fn() -> bool) -> Value {
     let started = Instant::now();
     let mut command = Command::new("sh");
     command
         .arg("-c")
         .arg(format!("exec 2>&1\n{script}"))
         .current_dir(root)
+        // An edit is read at once: Python validates a cached module by the source's second and
+        // size, so a same-size edit within the second of the last run would run stale code.
+        .env("PYTHONDONTWRITEBYTECODE", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -172,16 +180,17 @@ pub fn shell(root: &Path, script: &str, limit: Duration) -> Value {
     let code = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status.code().unwrap_or(-1),
-            Ok(None) if started.elapsed() > limit => {
+            Ok(None) if started.elapsed() > limit || stop() => {
+                let timed = started.elapsed() > limit;
                 #[cfg(unix)]
                 let _ = Command::new("kill")
                     .args(["-9", &format!("-{}", child.id())])
                     .status();
                 let _ = child.kill();
                 let _ = child.wait();
-                break -2;
+                break if timed { -2 } else { -3 };
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            Ok(None) => std::thread::sleep(Duration::from_millis(5)),
             Err(_) => break -1,
         }
     };

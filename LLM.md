@@ -129,6 +129,44 @@ engine with no catalog of its own is reviewed by the model it runs. Guardian v2'
 sync reviewer runs on that same choice; its `CodexResponsesHeaders` model only
 scopes an OpenAI-backend header. `crates/hanzo-dev/tests/review.rs` holds both.
 
+## Controller
+
+Kai is Dev's native controller, not an advisory service: it returns a validated operation or an
+explicit abstention, never advice. `crates/hanzo-kai` is the loop (`flow`), the ledger (`ledger`)
+and the tools they run.
+
+- **Task state.** One per run: objective, workspace revision, pending actions, verification
+  status. The loop owns it and each action's lifecycle. An expected outcome is never accepted
+  because something predicted it: only the verifier's record (exit status, the tests, the diff)
+  settles it.
+- **Action.** `Action { id, task, revision, evidence, operation, preconditions, authorization,
+  expected, verification, source }` plus status, milliseconds and result. `operation` is typed
+  (`search`, `decide`, `generate`, `edit`, `test`, `revert`); `source` is `rule`, `kai`, `model` or
+  `recover`. A saved typed operation is an action; a plan of actions is a workflow; a reusable
+  validated result is the cache. Kai selects and binds an action's inputs and never writes shell.
+- **Order of cheapness, per step.** An action that applies (one candidate, preconditions hold)
+  runs with no Kai inference. Else Kai's structured decision: next action, search, effort; all of a
+  state's questions in one request. Else low-effort generation, then full-effort generation, then
+  `recover`. Every transition is a ledger line with its reason; every fall from a deterministic
+  step to a model is logged with why. No step waits on Kai when an action already applies.
+- **Revision-bound.** Preconditions are checked immediately before execution; an edit invalidates
+  every pending decision made against the old revision. A cached result is keyed on what it depends
+  on (files, symbols, tool versions, environment; uncommitted changes count), never on a commit.
+- **Recover proves progress.** A failed verification records the failure's fingerprint (paths, line
+  numbers and ids normalized), the prior action, the resulting diff and the outcome. The same
+  fingerprint with no meaningful change of state makes `recover` pick a different action or
+  escalate; it never replays the loop.
+- **Search** is one engine (tgrep): files, symbols, documents, freshness. Until it lands the
+  engine is `locate`, the learned ranker over the tree's functions (kai-gateway's preflight policy,
+  weights from bench/code/onegen/policies.py, `locate::tests` hold its features to the gateway's).
+- **Jobs** (not built): long work runs in the background and reports events into the same ledger.
+  Start, progress, completion and verified outcome are four states; a finished process is not a
+  finished task.
+- **Ledger.** `kai/ledger.jsonl`, replayable: stable ids for every decision, fallback, execution
+  and verification so time and cost are attributable; credentials and sensitive output redacted.
+- **Generation** is Zen or enso-flash over an OpenAI-compatible endpoint, called when needed.
+  Independent checks (the verifier) decide success and trigger `recover`.
+
 ## House rules
 
 - Hanzo service APIs use `https://api.hanzo.ai/v1/` exclusively.

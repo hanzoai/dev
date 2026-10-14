@@ -1,11 +1,13 @@
-//! Kai answering over the Decisions API: `POST {url}/decisions`, one request per state, the
-//! states of a decision in parallel.
+//! Kai answering over the Decisions API: one request per state, the states of a decision in
+//! parallel, over a [`Transport`] (`POST {url}/decisions` over HTTP, or the local engine's ZAP
+//! socket when it serves Kai).
 //!
 //! Kai is optional. When it cannot be reached — no connection, a timeout, a refusal, a server
-//! error, or no state of a decision answered — the decision fails at once, Kai is marked down
-//! for [`COOLDOWN`], and every decision in that window fails without a request, so the loop runs
-//! as it would without Kai. The first failure is logged; nothing else is until a decision asked
-//! after it is answered.
+//! error, or no state of a decision answered — the decision fails at once, that program is marked
+//! down for [`COOLDOWN`], and every decision of it in that window fails without a request, so the
+//! loop runs as it would without Kai. A program's outage is its own: one capability's timeout never
+//! disables another (`site` timing out leaves `turn` asked). The first failure is logged; nothing
+//! else is until a decision asked after it is answered.
 
 use crate::program::Program;
 use crate::program::Signal;
@@ -15,6 +17,10 @@ use hanzo_loop::Verdict;
 use indexmap::IndexMap;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
@@ -25,6 +31,51 @@ pub const COOLDOWN: Duration = Duration::from_secs(60);
 const CONNECT: Duration = Duration::from_secs(2);
 /// The longest one request may take.
 const REQUEST: Duration = Duration::from_secs(10);
+
+/// How a request reaches Kai and its answer comes back: the HTTP status and the body. The status
+/// is the Decisions API's whatever the wire: 200, 400 or 422 for a request Kai refused, anything
+/// else for a server that cannot answer. An error is a connection that did not hold.
+pub trait Transport: Send + Sync {
+    fn send<'a>(&'a self, body: &'a Value) -> Pin<Box<dyn Future<Output = Result<(u16, String), String>> + Send + 'a>>;
+}
+
+/// `POST {url}/decisions` over HTTP, signed with `key`.
+pub struct Http {
+    url: String,
+    key: Option<String>,
+    client: reqwest::Client,
+}
+
+impl Http {
+    pub fn new(url: &str, key: Option<String>) -> Http {
+        Http {
+            url: format!("{}/decisions", url.trim_end_matches('/')),
+            key,
+            client: reqwest::Client::builder()
+                .connect_timeout(CONNECT)
+                .timeout(REQUEST)
+                .pool_idle_timeout(Duration::from_secs(300))
+                .tcp_nodelay(true)
+                .build()
+                .unwrap_or_default(),
+        }
+    }
+}
+
+impl Transport for Http {
+    fn send<'a>(&'a self, body: &'a Value) -> Pin<Box<dyn Future<Output = Result<(u16, String), String>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut request = self.client.post(&self.url).json(body);
+            if let Some(key) = &self.key {
+                request = request.bearer_auth(key);
+            }
+            let response = request.send().await.map_err(|e| e.without_url().to_string())?;
+            let status = response.status().as_u16();
+            let text = response.text().await.map_err(|e| e.without_url().to_string())?;
+            Ok((status, text))
+        })
+    }
+}
 
 /// What a decision is asked with: the operation's mode, how many states a selection keeps,
 /// and the deterministic verdict a verdict rule joins.
@@ -96,67 +147,79 @@ struct Health {
     logged: bool,
 }
 
-/// Kai over HTTP, answering from any task.
+/// Kai, answering from any task.
 pub struct Decider {
     url: String,
     model: String,
-    key: Option<String>,
-    client: reqwest::Client,
-    health: Mutex<Health>,
+    transport: Arc<dyn Transport>,
+    /// Per program: one capability's outage is not another's.
+    health: Mutex<HashMap<String, Health>>,
 }
 
 impl Decider {
-    /// Kai at `url` (`https://api.hanzo.ai/v1`) as `model`, signed with `key`.
+    /// Kai at `url` (`https://api.hanzo.ai/v1`) as `model`, signed with `key`, over HTTP.
     pub fn new(url: &str, model: &str, key: Option<String>) -> Decider {
+        Decider::over(url, model, Arc::new(Http::new(url, key)))
+    }
+
+    /// Kai as `model` over `transport`; `url` names it in the log.
+    pub fn over(url: &str, model: &str, transport: Arc<dyn Transport>) -> Decider {
         Decider {
-            url: format!("{}/decisions", url.trim_end_matches('/')),
+            url: url.to_string(),
             model: model.to_string(),
-            key,
-            client: reqwest::Client::builder()
-                .connect_timeout(CONNECT)
-                .timeout(REQUEST)
-                .build()
-                .unwrap_or_default(),
-            health: Mutex::new(Health::default()),
+            transport,
+            health: Mutex::new(HashMap::new()),
         }
     }
 
-    fn health(&self) -> std::sync::MutexGuard<'_, Health> {
+    fn health(&self) -> std::sync::MutexGuard<'_, HashMap<String, Health>> {
         self.health
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Whether Kai is down: a decision now fails without a request.
+    /// Whether some program of Kai's is down: the agent loop, whose programs fail together, skips
+    /// Kai while it is.
     pub fn down(&self) -> bool {
+        let now = Instant::now();
+        self.health().values().any(|h| h.until.is_some_and(|until| now < until))
+    }
+
+    /// Whether `program` is down: a decision of it now fails without a request.
+    pub fn down_for(&self, program: &str) -> bool {
         self.health()
-            .until
+            .get(program)
+            .and_then(|h| h.until)
             .is_some_and(|until| Instant::now() < until)
     }
 
-    fn fell(&self, why: &str) {
-        let mut h = self.health();
+    fn fell(&self, program: &str, why: &str) {
+        let mut all = self.health();
+        let h = all.entry(program.to_string()).or_default();
         let now = Instant::now();
         h.until = Some(now + COOLDOWN);
         h.fell = Some(now);
         if !h.logged {
             h.logged = true;
             tracing::warn!(
-                "kai: {} does not answer ({why}); deciding without Kai",
+                "kai: {} does not answer {program} ({why}); deciding without Kai",
                 self.url
             );
         }
     }
 
-    /// A decision asked at `started` was answered. One asked before the last failure says
-    /// nothing about Kai now.
-    fn answered(&self, started: Instant) {
-        let mut h = self.health();
+    /// A decision of `program` asked at `started` was answered. One asked before the last failure
+    /// says nothing about Kai now.
+    fn answered(&self, program: &str, started: Instant) {
+        let mut all = self.health();
+        let Some(h) = all.get_mut(program) else {
+            return;
+        };
         if h.fell.is_some_and(|fell| started <= fell) {
             return;
         }
         if h.logged {
-            tracing::info!("kai: {} answers again", self.url);
+            tracing::info!("kai: {} answers {program} again", self.url);
         }
         *h = Health::default();
     }
@@ -168,22 +231,8 @@ impl Decider {
             "state": state,
             "questions": program.questions,
         });
-        let mut request = self.client.post(&self.url).json(&body);
-        if let Some(key) = &self.key {
-            request = request.bearer_auth(key);
-        }
-        let response = request
-            .send()
-            .await
-            .map_err(|e| Fault::Down(e.without_url().to_string()))?;
-        let status = response.status();
-        let text = response
-            .text()
-            .await
-            .map_err(|e| Fault::Down(e.without_url().to_string()))?;
-        if status == reqwest::StatusCode::BAD_REQUEST
-            || status == reqwest::StatusCode::UNPROCESSABLE_ENTITY
-        {
+        let (status, text) = self.transport.send(&body).await.map_err(Fault::Down)?;
+        if status == 400 || status == 422 {
             let why: Value = serde_json::from_str(&text).unwrap_or_default();
             let message = why["error"]["message"]
                 .as_str()
@@ -192,7 +241,7 @@ impl Decider {
                 .to_string();
             return Err(Fault::Row(format!("{status}: {message}")));
         }
-        if !status.is_success() {
+        if !(200..300).contains(&status) {
             return Err(Fault::Down(status.to_string()));
         }
         let answer: Value = serde_json::from_str(&text)
@@ -227,7 +276,7 @@ impl Decider {
         states: Vec<Value>,
         call: Call,
     ) -> Result<Decision, String> {
-        if self.down() {
+        if self.down_for(&program.id) {
             return Err("kai is down".into());
         }
         let started = Instant::now();
@@ -245,10 +294,10 @@ impl Decider {
                 _ => "no answer".to_string(),
             });
         if let Some(why) = down.or(silent) {
-            self.fell(&why);
+            self.fell(&program.id, &why);
             return Err(format!("kai: {why}"));
         }
-        self.answered(started);
+        self.answered(&program.id, started);
         let mut model = String::new();
         let results: Vec<Row> = asked
             .into_iter()

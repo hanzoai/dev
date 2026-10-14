@@ -115,30 +115,32 @@ pub fn on(q: &Question, label: &str, p: f64) -> Vec<f64> {
         .collect()
 }
 
-/// Zen answering chat completions by `rule(inputs)`, the inputs being the JSON a flow sends.
-pub async fn zen(rule: impl Fn(&Value) -> String + Send + Sync + 'static) -> MockServer {
+/// Zen answering streamed chat completions by `rule(prompt)`, the prompt being the user message
+/// a flow sent.
+pub async fn zen(rule: impl Fn(&str) -> String + Send + Sync + 'static) -> MockServer {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
         .respond_with(move |request: &wiremock::Request| {
-            let content = inputs(request);
-            ResponseTemplate::new(200).set_body_json(json!({
-                "choices": [{"message": {"role": "assistant", "content": rule(&content)}}],
-            }))
+            let answer = rule(&prompt(request));
+            let first = json!({"model": "zen-test", "choices": [{"delta": {"content": answer}}]});
+            let last = json!({"model": "zen-test", "choices": [], "usage": {"prompt_tokens": 100, "completion_tokens": 20}});
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(format!("data: {first}\n\ndata: {last}\n\ndata: [DONE]\n\n"))
         })
         .mount(&server)
         .await;
     server
 }
 
-/// The inputs of a chat completion a flow sent.
-pub fn inputs(request: &wiremock::Request) -> Value {
+/// The user message of a chat completion a flow sent.
+pub fn prompt(request: &wiremock::Request) -> String {
     let body: Value = serde_json::from_slice(&request.body).unwrap();
-    let text = body["messages"][1]["content"].as_str().unwrap_or_default();
-    let json = text
-        .split_once("Inputs, as JSON:\n")
-        .map_or("null", |(_, j)| j);
-    serde_json::from_str(json).unwrap()
+    body["messages"][1]["content"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// What Kai did to a thread.

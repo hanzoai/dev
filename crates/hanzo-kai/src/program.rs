@@ -26,8 +26,7 @@ pub const SHIPPED: &[&str] = &[
     include_str!("../programs/context.select@1.json"),
     include_str!("../programs/agent.progress@1.json"),
     include_str!("../programs/agent.complete@1.json"),
-    include_str!("../programs/fix.pick@1.json"),
-    include_str!("../programs/fix.next@1.json"),
+    include_str!("../programs/fix.turn@1.json"),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -11,21 +11,24 @@ workspace = true
 [dependencies]
 hanzo-config = { path = "../hanzo-config", version = "0.7.0-dev.1" }
 hanzo-loop = { path = "../hanzo-loop", version = "0.7.0-dev.1" }
+# Hanzo's one search engine (tgrep), the library hanzo-mcp's search actions run on.
+hanzo-trigram = { git = "https://github.com/hanzoai/mcp", rev = "e9e6096ce46c3d3bf61e6830de6487a5b5b5b849" }
 chrono = { workspace = true }
 codex-core = { workspace = true }
 codex-extension-api = { workspace = true }
 codex-protocol = { workspace = true }
 futures = { workspace = true, features = ["std"] }
 indexmap = { workspace = true, features = ["serde"] }
+regex = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true, features = ["derive"] }
 # Option order is a question's meaning: a choice's labels are its options in order.
 serde_json = { workspace = true, features = ["preserve_order"] }
 sha2 = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "process", "rt", "rt-multi-thread", "sync", "time"] }
 tracing = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
-tempfile = { workspace = true }
 wiremock = { workspace = true }

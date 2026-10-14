@@ -11,8 +11,15 @@
 
 pub mod agent;
 pub mod decide;
+pub mod diagnostic;
+pub mod edit;
+pub mod find;
 pub mod flow;
+pub mod ledger;
+pub mod locate;
+pub mod mutate;
 pub mod program;
+pub mod symbols;
 #[cfg(test)]
 mod testing;
 pub mod tools;

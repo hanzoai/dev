@@ -127,14 +127,36 @@ pub struct Op {
     pub k: Option<usize>,
 }
 
+/// The generator as written.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct Writing {
+    url: Option<String>,
+    model: Option<String>,
+    spend: Option<PathBuf>,
+    budget: Option<f64>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct File {
     url: Option<String>,
     model: Option<String>,
     trace: Option<PathBuf>,
-    zen: Option<String>,
+    generate: Writing,
     ops: BTreeMap<String, Written>,
+}
+
+/// The model that writes code: Zen over an OpenAI-compatible `POST {url}/chat/completions`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Generate {
+    /// Hanzo's API, or any server that speaks it; Hanzo's credential goes to Hanzo's alone.
+    pub url: String,
+    pub model: String,
+    /// Where each paid call is recorded, JSON lines with the model that served it and its cost.
+    pub spend: PathBuf,
+    /// Dollars the spend file may hold before a call is refused; none, no limit.
+    pub budget: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -145,8 +167,8 @@ pub struct Kai {
     pub model: String,
     /// The decision trace, JSON lines, one per decision.
     pub trace: PathBuf,
-    /// The Zen model a flow's generation nodes call.
-    pub zen: String,
+    /// The model a flow's generation nodes call.
+    pub generate: Generate,
     ops: BTreeMap<&'static str, Op>,
 }
 
@@ -208,7 +230,21 @@ impl Kai {
                 file.trace
                     .unwrap_or_else(|| PathBuf::from("kai/decisions.jsonl")),
             ),
-            zen: file.zen.unwrap_or_else(|| "zen6-coder".to_string()),
+            generate: Generate {
+                url: file
+                    .generate
+                    .url
+                    .unwrap_or_else(|| crate::API_BASE.to_string())
+                    .trim_end_matches('/')
+                    .to_string(),
+                model: file.generate.model.unwrap_or_else(|| "zen6-coder".to_string()),
+                spend: home.join(
+                    file.generate
+                        .spend
+                        .unwrap_or_else(|| PathBuf::from("kai/spend.jsonl")),
+                ),
+                budget: file.generate.budget,
+            },
             ops,
         })
     }
