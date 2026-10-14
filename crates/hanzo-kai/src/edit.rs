@@ -78,6 +78,14 @@ pub struct Applied {
 }
 
 impl Applied {
+    /// Each file changed with the digest of its text before the change.
+    pub fn originals(&self) -> Vec<(String, String)> {
+        self.before
+            .iter()
+            .map(|(f, t)| (f.clone(), crate::ledger::digest(t.as_bytes())))
+            .collect()
+    }
+
     pub fn files(&self) -> Vec<String> {
         self.before.keys().cloned().collect()
     }

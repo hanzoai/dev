@@ -183,8 +183,9 @@ pub fn shell_until(root: &Path, script: &str, limit: Duration, stop: &dyn Fn() -
             Ok(None) if started.elapsed() > limit || stop() => {
                 let timed = started.elapsed() > limit;
                 #[cfg(unix)]
+                // `--`: without it `kill -9 -PGID` reads the group as an option and kills nothing.
                 let _ = Command::new("kill")
-                    .args(["-9", &format!("-{}", child.id())])
+                    .args(["-9", "--", &format!("-{}", child.id())])
                     .status();
                 let _ = child.kill();
                 let _ = child.wait();
@@ -332,9 +333,21 @@ mod tests {
     }
 
     #[test]
-    fn a_slow_command_is_killed() {
+    fn a_slow_command_is_killed_with_everything_it_started() {
         let dir = tempfile::tempdir().unwrap();
-        let run = shell(dir.path(), "sleep 5", Duration::from_millis(200));
+        let began = Instant::now();
+        let run = shell(dir.path(), "sleep 8 & sleep 8; wait", Duration::from_millis(200));
         assert_eq!(run["code"], -2);
+        assert!(began.elapsed() < Duration::from_secs(3), "{:?}: the children held the pipe", began.elapsed());
+    }
+
+    #[test]
+    fn a_command_stopped_from_outside_ends_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let began = Instant::now();
+        let stop = || began.elapsed() > Duration::from_millis(100);
+        let run = shell_until(dir.path(), "sleep 8 & sleep 8; wait", Duration::from_secs(60), &stop);
+        assert_eq!(run["code"], -3);
+        assert!(began.elapsed() < Duration::from_secs(3), "{:?}", began.elapsed());
     }
 }

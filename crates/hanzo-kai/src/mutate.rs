@@ -27,9 +27,9 @@ use std::time::Instant;
 /// Functions whose lines are tried.
 const SITES: usize = 4;
 /// Most candidates a site contributes.
-const PER_SITE: usize = 64;
+const PER_SITE: usize = 96;
 /// Most candidates in all.
-const CANDIDATES: usize = 96;
+const CANDIDATES: usize = 160;
 /// Most tests run at once.
 const WORKERS: usize = 8;
 /// A tree larger than this is not copied for a search.
@@ -155,6 +155,8 @@ fn changes(line: &str, m: &[u8], python: bool) -> Vec<(&'static str, usize, usiz
     let text = |t: &Token| &line[t.start..t.end];
     let mut out: Vec<(&'static str, usize, usize, String)> = Vec::new();
     let first = tokens.first().map(|t| text(t));
+    // A `for` waiting for its `in`: that `in` is a loop's, not a membership test.
+    let mut looping = false;
     let condition = python && matches!(first, Some("if" | "elif" | "while")) && line.trim_end().ends_with(':');
     for (i, t) in tokens.iter().enumerate() {
         let prev = i.checked_sub(1).and_then(|p| tokens.get(p));
@@ -176,12 +178,12 @@ fn changes(line: &str, m: &[u8], python: bool) -> Vec<(&'static str, usize, usiz
                     out.push(("compare", t.start, t.end, (*r).to_string()));
                 }
                 let arith: &[&str] = match s {
-                    "+" if binary => &["-", "*"],
-                    "-" if binary => &["+", "*"],
-                    "*" if binary => &["/", "+"],
-                    "/" if binary => &["*", "//"],
-                    "//" if binary => &["/", "*"],
-                    "%" if binary => &["*", "//"],
+                    "+" if binary => &["-", "*", "/", "//", "%"],
+                    "-" if binary => &["+", "*", "/", "//", "%"],
+                    "*" if binary => &["/", "+", "-", "//", "%"],
+                    "/" if binary => &["*", "//", "+", "-", "%"],
+                    "//" if binary => &["/", "*", "+", "-", "%"],
+                    "%" if binary => &["*", "//", "/", "+", "-"],
                     "**" if binary => &["*"],
                     "+=" => &["-="],
                     "-=" => &["+="],
@@ -209,11 +211,13 @@ fn changes(line: &str, m: &[u8], python: bool) -> Vec<(&'static str, usize, usiz
                             _ => out.push(("boolean", t.start, t.end, "is not".into())),
                         },
                         "in" => {
-                            let membership = first != Some("for") && !prev.is_some_and(|p| text(p) == "not");
+                            let membership = !looping && !prev.is_some_and(|p| text(p) == "not");
+                            looping = false;
                             if membership {
                                 out.push(("boolean", t.start, t.end, "not in".into()));
                             }
                         }
+                        "for" => looping = true,
                         _ => {}
                     }
                     if s == "not" && next.map(|n| text(n)) == Some("in") {
@@ -235,6 +239,14 @@ fn changes(line: &str, m: &[u8], python: bool) -> Vec<(&'static str, usize, usiz
                     if v > 0 {
                         out.push(("constant", t.start, t.end, (v - 1).to_string()));
                     }
+                } else if s.contains('.')
+                    && let Ok(v) = digits.parse::<f64>()
+                    && v.is_finite()
+                    && v != 0.0
+                {
+                    // A float doubled or halved.
+                    out.push(("constant", t.start, t.end, format!("{:?}", v / 2.0)));
+                    out.push(("constant", t.start, t.end, format!("{:?}", v * 2.0)));
                 }
             }
             _ => {}
@@ -429,12 +441,14 @@ pub fn propose(tree: &mut Tree, plan: &Plan, order: &[usize]) -> Vec<Candidate> 
                     && !has_assignment(body)
                     && !body.ends_with([':', ',', '\\'])
                     && balance_zero(body);
+                // A call may be meant for its effect: it is tried after the lines that say more.
                 let call = body.ends_with(')');
-                if bare && (!call || number == sym.end) {
+                if bare {
                     let pad = &line[..line.len() - trimmed.len()];
                     let new = format!("{pad}return {body}");
                     if seen.insert((sym.file.clone(), number, new.clone())) {
-                        site.push((base, Candidate { file: sym.file.clone(), line: number, old: line.to_string(), new, kind: "return", site: rank }));
+                        let rate = if call && number != sym.end { base - 50.0 } else { base };
+                        site.push((rate, Candidate { file: sym.file.clone(), line: number, old: line.to_string(), new, kind: "return", site: rank }));
                     }
                 }
             }
@@ -561,8 +575,9 @@ fn with_line(text: &str, number: u32, new: &str) -> String {
 /// Tries `candidates` in order against `command`, `workers` at a time in copies of the tree at
 /// `root`, until one passes, `cap` has gone, or they are spent. A candidate's run is cut at
 /// `limit` (a mutation can loop). `failing` is how many tests fail now: when none passes, the
-/// candidate that leaves the fewest failing, if fewer than that, is the search's progress.
-pub fn search(root: &Path, command: &str, candidates: &[Candidate], failing: usize, cap: Duration, limit: Duration, workers: usize) -> Search {
+/// candidate that leaves the fewest failing, if fewer than that and the code still reads, is the
+/// search's progress; `errors` of the failing are tests that could not run, and may not grow.
+pub fn search(root: &Path, command: &str, candidates: &[Candidate], failing: usize, errors: usize, cap: Duration, limit: Duration, workers: usize) -> Search {
     let begun = Instant::now();
     let mut found = Search::default();
     if candidates.is_empty() {
@@ -624,7 +639,9 @@ pub fn search(root: &Path, command: &str, candidates: &[Candidate], failing: usi
                     if std::fs::write(&path, with_line(&original, c.line, &c.new)).is_err() {
                         continue;
                     }
-                    let run = tools::shell_until(&dir, command, limit, &|| beaten(i));
+                    // A test still running when the cap is reached is stopped: a round of search costs
+                    // the cap at most, however long the tests are.
+                    let run = tools::shell_until(&dir, command, limit, &|| beaten(i) || begun.elapsed() > cap);
                     let _ = std::fs::write(&path, &original);
                     let code = run["code"].as_i64().unwrap_or(-1);
                     if code == -2 || code == -3 {
@@ -637,9 +654,10 @@ pub fn search(root: &Path, command: &str, candidates: &[Candidate], failing: usi
                         if f.as_ref().is_none_or(|(x, _)| i < *x) {
                             *f = Some((i, output));
                         }
-                    } else if failing > 1 {
+                    } else if failing > 1 && !crate::diagnostic::broken(&output) {
                         let left = crate::diagnostic::failures(&output);
-                        if left >= 1 && left < failing {
+                        // Fewer failing, and no more tests that could not run than before.
+                        if left >= 1 && left < failing && crate::diagnostic::errors(&output) <= errors {
                             let mut b = step.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                             if b.as_ref().is_none_or(|(l, x, _)| (left, i) < (*l, *x)) {
                                 *b = Some((left, i, output));
@@ -687,6 +705,39 @@ mod tests {
         assert!(got.contains(&("operator", "    return a < b - 1".into())), "{got:?}");
         assert!(got.contains(&("constant", "    return a < b + 2".into())), "{got:?}");
         assert!(got.contains(&("constant", "    return a < b + 0".into())), "{got:?}");
+    }
+
+    #[test]
+    fn every_other_arithmetic_operator_and_a_float_halved_or_doubled_are_tried() {
+        let got = kinds("    return a * b", true);
+        for r in ["a / b", "a + b", "a - b", "a // b", "a % b"] {
+            assert!(got.contains(&("operator", format!("    return {r}"))), "{r}: {got:?}");
+        }
+        let got = kinds("    x = 2.0", true);
+        assert!(got.contains(&("constant", "    x = 1.0".into())) && got.contains(&("constant", "    x = 4.0".into())), "{got:?}");
+    }
+
+    #[test]
+    fn a_statement_that_is_a_bare_expression_gets_its_return_back_even_when_it_is_a_call() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("tests")).unwrap();
+        std::fs::write(dir.path().join("m.py"), "def f(a):\n    if a:\n        compute(a)\n    return 0\n\n\ndef compute(x):\n    return x\n").unwrap();
+        std::fs::write(dir.path().join("tests/test_m.py"), "from m import f\n\n\ndef test_f():\n    assert f(3) == 3\n").unwrap();
+        let failure = "m.py:4: in f\n    return 0\ntests/test_m.py:5: in test_f\n    assert f(3) == 3\nE   assert 0 == 3\nFAILED tests/test_m.py::test_f - assert 0 == 3\n";
+        let mut tree = Tree::open(dir.path());
+        let plan = crate::locate::plan(&mut tree, failure);
+        let order: Vec<usize> = (0..plan.ranked.len()).collect();
+        let got = propose(&mut tree, &plan, &order);
+        assert!(got.iter().any(|c| c.kind == "return" && c.new == "        return compute(a)"), "{:?}", got.iter().map(|c| (&c.kind, &c.new)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn the_in_of_a_loop_or_a_comprehension_is_not_a_membership_test() {
+        let got = kinds("    if any(ch.isspace() for ch in value):", true);
+        assert!(!got.iter().any(|(_, s)| s.contains("for ch not in")), "{got:?}");
+        let got = kinds("    if x in seen and any(c for c in y):", true);
+        assert!(got.contains(&("boolean", "    if x not in seen and any(c for c in y):".into())), "{got:?}");
+        assert!(!got.iter().any(|(_, s)| s.contains("c not in y")), "{got:?}");
     }
 
     #[test]
@@ -750,10 +801,10 @@ mod tests {
             .iter()
             .map(|n| Candidate { file: "m.py".into(), line: 2, old: "    return a - b".into(), new: (*n).into(), kind: "operator", site: 0 })
             .collect();
-        let found = search(dir.path(), "python3 t.py", &cands, 1, Duration::from_secs(20), Duration::from_secs(10), 2);
+        let found = search(dir.path(), "python3 t.py", &cands, 1, 0, Duration::from_secs(20), Duration::from_secs(10), 2);
         assert_eq!(found.winner, Some(1), "{found:?}");
         assert_eq!(std::fs::read_to_string(dir.path().join("m.py")).unwrap(), "def f(a, b):\n    return a - b\n");
-        let none = search(dir.path(), "python3 t.py", &cands[..1], 1, Duration::from_secs(20), Duration::from_secs(10), 1);
+        let none = search(dir.path(), "python3 t.py", &cands[..1], 1, 0, Duration::from_secs(20), Duration::from_secs(10), 1);
         assert_eq!(none.winner, None);
     }
 
@@ -771,7 +822,7 @@ mod tests {
             .iter()
             .map(|(line, n)| Candidate { file: "m.py".into(), line: *line, old: String::new(), new: (*n).into(), kind: "operator", site: 0 })
             .collect();
-        let found = search(dir.path(), "python3 t.py", &cands, 2, Duration::from_secs(20), Duration::from_secs(10), 2);
+        let found = search(dir.path(), "python3 t.py", &cands, 2, 0, Duration::from_secs(20), Duration::from_secs(10), 2);
         assert_eq!(found.winner, None, "{found:?}");
         assert_eq!(found.progress, Some(1), "the f fix leaves one failing: {found:?}");
         assert_eq!(found.remaining, 1);

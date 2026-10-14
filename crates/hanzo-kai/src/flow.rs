@@ -595,7 +595,7 @@ fn excerpts(plan: &Plan, tree: &mut Tree, order: &[usize], lines: u32, cover: f6
 }
 
 /// What the model is asked.
-fn prompt(command: &str, goal: &str, failure: &str, code: &str, last: Option<&Attempt>) -> String {
+fn prompt(command: &str, goal: &str, failure: &str, code: &str, last: Option<&Attempt>, tried: &[String]) -> String {
     let mut out = format!("Test command: `{command}`\n");
     if !goal.is_empty() {
         out.push_str(&format!("Goal: {goal}\n"));
@@ -615,6 +615,12 @@ fn prompt(command: &str, goal: &str, failure: &str, code: &str, last: Option<&At
                 last.edits.join("\n"),
                 last.after
             )),
+        }
+    }
+    if !tried.is_empty() {
+        out.push_str("\nEdits already tried that did not fix it; do not repeat them:\n");
+        for t in tried.iter().rev().take(4) {
+            out.push_str(&format!("- {t}\n"));
         }
     }
     out.push_str(&format!("\nCode:\n\n{code}\n"));
@@ -887,6 +893,8 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
     // The task state: the files the run has touched give the revision; the edits kept are in the
     // tree; the failures give recover its memory.
     let mut touched: Vec<String> = Vec::new();
+    // Each touched file's digest when the run began, so a revert is the revision it left.
+    let mut origin: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
     let mut kept: Vec<edit::Applied> = Vec::new();
     let mut kept_summary: Vec<String> = Vec::new();
     let mut failures: Vec<Failure> = Vec::new();
@@ -927,13 +935,17 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
         return Ok(report);
     }
     let mut failing = diagnostic::failures(&output).max(1);
+    let errors0 = diagnostic::errors(&output);
     report.failing = failing;
     let test_ms = steps["test0"];
 
     let mut seen: Option<Seen> = None;
     let mut look = true;
-    let mut searched: HashSet<String> = HashSet::new();
+    // The states searched, by the edits kept when they were: a reverted attempt is no new state.
+    let mut searched: HashSet<usize> = HashSet::new();
     let mut last: Option<Attempt> = None;
+    // The edits tried and put back, so the model is not asked the same question twice.
+    let mut history: Vec<String> = Vec::new();
     let mut strategy = Strategy::Retry;
     let mut refused = 0;
     let mut n = 0u32;
@@ -943,7 +955,7 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
         if guard > options.max.max(1) * 3 + STEPS as u32 {
             break;
         }
-        let revision = ledger::revision(root, &touched);
+        let revision = ledger::revision_over(root, &touched, &origin);
 
         // Look at the state: the tree as it is, the failure ranked against it, the evidence
         // search finds for it, the choice of site, action and effort.
@@ -995,7 +1007,12 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
         let fingerprint = s.fingerprint.clone();
 
         // The cheap action first: candidate edits at the best sites against the visible test.
-        if options.search && s.order.act == Act::Search && fast.rounds < STEPS && searched.insert(revision.clone()) {
+        // A test that takes longer than the cap holds cannot be tried candidate after candidate.
+        let slow = diagnostic::seconds(&output).is_some_and(|t| t * 1.5 > SEARCH.as_secs_f64());
+        if slow && options.search && s.order.act == Act::Search && searched.insert(kept.len()) {
+            ledger.fallback(&revision, "search", "rule", "model", &format!("the visible test takes {:.1} s: longer than the search cap of {:.1} s holds", diagnostic::seconds(&output).unwrap_or(0.0), SEARCH.as_secs_f64()));
+        }
+        if !slow && options.search && s.order.act == Act::Search && fast.rounds < STEPS && searched.insert(kept.len()) {
             let begun = Instant::now();
             let candidates = mutate::propose(&mut s.tree, &s.plan, &s.order.by_rank);
             *steps.entry("propose".into()).or_insert(0.0) += ms(begun);
@@ -1012,7 +1029,7 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
                 let floor = if options.failure.is_some() { 10.0 } else { 3.0 };
                 let limit = Duration::from_secs_f64((test_ms / 1000.0 * 3.0 + 1.0).clamp(floor, options.limit.as_secs_f64().max(floor)));
                 let workers = std::thread::available_parallelism().map_or(2, usize::from);
-                let found = mutate::search(root, command, &candidates, failing, SEARCH, limit, workers);
+                let found = mutate::search(root, command, &candidates, failing, errors0, SEARCH, limit, workers);
                 m.ms = ms(begun);
                 fast.tried += found.tried;
                 fast.runs += found.runs;
@@ -1040,12 +1057,15 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
                         Ok(made) => {
                             e.ms = ms(begun);
                             let files = made.files();
+                            for (f, d) in made.originals() {
+                                origin.entry(f).or_insert(d);
+                            }
                             for f in &files {
                                 if !touched.contains(f) {
                                     touched.push(f.clone());
                                 }
                             }
-                            let rev = ledger::revision(root, &touched);
+                            let rev = ledger::revision_over(root, &touched, &origin);
                             e.operation = Operation::Edit { edits: made.summary.clone() };
                             e.advance(Status::Applied);
                             e.result = json!({"files": files, "revision": rev, "kind": c.kind});
@@ -1064,7 +1084,7 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
                             let passed = test["passed"] == true;
                             let now = diagnostic::failures(&out);
                             t.advance(Status::Completed);
-                            let better = !passed && now >= 1 && now < failing;
+                            let better = !passed && now >= 1 && now < failing && !diagnostic::broken(&out) && diagnostic::errors(&out) <= errors0;
                             t.advance(if passed || better { Status::Verified } else { Status::Rejected });
                             t.result = json!({"passed": passed, "code": test["code"], "failing": now});
                             ledger.record(&t);
@@ -1139,7 +1159,7 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
             if n == 1 { COVER } else { 0.999 },
         );
         ms_of.insert("bundle".into(), ms(begun));
-        let user = prompt(command, goal, &s.shown, &code, last.as_ref());
+        let user = prompt(command, goal, &s.shown, &code, last.as_ref(), &history);
         let source = if n == 1 && kept.is_empty() { Source::Model } else { Source::Recover };
         let mut attempt = Attempt {
             n,
@@ -1193,7 +1213,7 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
         e.advance(Status::Attempted);
         let begun = Instant::now();
         let held = e.preconditions.iter().find_map(|p| match p {
-            Precondition::Revision { revision: r } if *r != ledger::revision(root, &touched) => Some(format!("the workspace is no longer at revision {r}")),
+            Precondition::Revision { revision: r } if *r != ledger::revision_over(root, &touched, &origin) => Some(format!("the workspace is no longer at revision {r}")),
             Precondition::Digest { file, digest } if ledger::digest(&std::fs::read(root.join(file)).unwrap_or_default()) != *digest => {
                 Some(format!("{file} changed since the model read it"))
             }
@@ -1207,7 +1227,10 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
         let after = match &applied {
             Ok(made) => {
                 let files = made.files();
-                let rev = ledger::revision(root, &files.iter().chain(touched.iter()).cloned().collect::<Vec<_>>());
+                for (f, d) in made.originals() {
+                    origin.entry(f).or_insert(d);
+                }
+                let rev = ledger::revision_over(root, &files.iter().chain(touched.iter()).cloned().collect::<Vec<_>>(), &origin);
                 // The same edit again is no new state: recover chooses another action.
                 if tried.contains(&rev) {
                     edit::revert(root, made);
@@ -1332,7 +1355,12 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
             .to_string();
 
         // recover: the failure's fingerprint and the state it happened in decide what is next.
-        let progress = attempt.applied && !attempt.passed && now >= 1 && now < failing;
+        let progress = attempt.applied
+            && !attempt.passed
+            && now >= 1
+            && now < failing
+            && !diagnostic::broken(test["output"].as_str().unwrap_or_default())
+            && diagnostic::errors(test["output"].as_str().unwrap_or_default()) <= errors0;
         let mut why = String::new();
         if attempt.applied && !attempt.passed {
             refused = 0;
@@ -1389,6 +1417,7 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
                 failing = now;
                 look = true;
             } else {
+                history.extend(made.summary.iter().map(|e| decide::cut(e, 300)));
                 let mut r = ledger.action(&after_rev, Operation::Revert { files: made.files() }, Source::Rule, "the attempt did not settle the task: back to the files before it");
                 r.advance(Status::Attempted);
                 let begun = Instant::now();

@@ -197,6 +197,22 @@ pub fn revision(root: &Path, files: &[String]) -> String {
     digest(format!("{seen:?}").as_bytes())
 }
 
+/// [`revision`] against the files' contents when the run began: the revision of a tree that holds
+/// them all again is `base`, so a revert returns to the revision it left.
+pub fn revision_over(root: &Path, files: &[String], origin: &BTreeMap<String, String>) -> String {
+    let mut seen: BTreeMap<&str, String> = BTreeMap::new();
+    let mut same = true;
+    for f in files {
+        let d = digest(&std::fs::read(root.join(f)).unwrap_or_default());
+        same &= origin.get(f) == Some(&d);
+        seen.insert(f, d);
+    }
+    if same {
+        return "base".into();
+    }
+    digest(format!("{seen:?}").as_bytes())
+}
+
 /// A failure with what varies from run to run taken out, so the same failure is the same
 /// fingerprint: colours, absolute paths, line numbers, addresses and ids, durations.
 pub fn fingerprint(output: &str) -> String {
@@ -358,6 +374,20 @@ mod tests {
         assert_ne!(before, during);
         assert_eq!(before, revision(dir.path(), &files));
         assert_eq!(revision(dir.path(), &[]), "base");
+    }
+
+    #[test]
+    fn a_revert_returns_to_the_base_revision() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.py"), "x = 1\n").unwrap();
+        let files = vec!["a.py".to_string()];
+        let origin = BTreeMap::from([("a.py".to_string(), digest(b"x = 1\n"))]);
+        assert_eq!(revision_over(dir.path(), &files, &origin), "base");
+        std::fs::write(dir.path().join("a.py"), "x = 2\n").unwrap();
+        let moved = revision_over(dir.path(), &files, &origin);
+        assert_ne!(moved, "base");
+        std::fs::write(dir.path().join("a.py"), "x = 1\n").unwrap();
+        assert_eq!(revision_over(dir.path(), &files, &origin), "base");
     }
 
     #[test]

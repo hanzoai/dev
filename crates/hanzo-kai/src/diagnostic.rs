@@ -103,6 +103,37 @@ pub fn failures(output: &str) -> usize {
     }
 }
 
+static ERRORS: LazyLock<Regex> = LazyLock::new(|| re(r"\b(\d+) errors?\b"));
+static BROKEN: LazyLock<Regex> = LazyLock::new(|| re(r"(?m)^(?:E\s+)?(?:SyntaxError|IndentationError|TabError)\b"));
+
+/// How many of the failures are errors (a test that could not run: an import, a fixture) and not
+/// failed assertions: pytest's `1 error`.
+pub fn errors(output: &str) -> usize {
+    output
+        .lines()
+        .rev()
+        .find(|l| COUNT.is_match(l))
+        .map_or(0, |line| ERRORS.captures_iter(line).filter_map(|c| c[1].parse::<usize>().ok()).sum())
+}
+
+/// Whether the run could not even read the code: a syntax or indentation error. An edit that
+/// makes it so is no repair, however few tests the runner then counts.
+pub fn broken(output: &str) -> bool {
+    BROKEN.is_match(output)
+}
+
+static SECONDS: LazyLock<Regex> = LazyLock::new(|| re(r"\bin (\d+(?:\.\d+)?)s\b"));
+
+/// The seconds the runner says the run took (`1 failed in 0.16s`), when it says.
+pub fn seconds(output: &str) -> Option<f64> {
+    output
+        .lines()
+        .rev()
+        .take(6)
+        .find_map(|l| SECONDS.captures(l))
+        .and_then(|c| c[1].parse().ok())
+}
+
 /// Keywords and the runners' own words: on every failing line, and no help in finding the fix.
 const NOISE: &[&str] = &[
     "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del", "elif",
@@ -381,6 +412,22 @@ pub fn parse(text: &str, root: Option<&str>) -> Diagnostic {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn errors_and_syntax_errors_are_told_from_failed_tests() {
+        assert_eq!(errors("1 failed, 2 passed, 1 error in 0.1s"), 1);
+        assert_eq!(errors("2 failed, 4 passed in 0.1s"), 0);
+        assert!(broken("  File \"m.py\", line 3\n    for ch not in value\nSyntaxError: invalid syntax\n"));
+        assert!(broken("E   IndentationError: unexpected indent"));
+        assert!(!broken("E   AssertionError: no SyntaxError here"));
+    }
+
+    #[test]
+    fn the_runners_own_seconds() {
+        assert_eq!(seconds("....F\n1 failed, 4 passed in 0.16s"), Some(0.16));
+        assert_eq!(seconds("== 2 failed in 12s =="), Some(12.0));
+        assert_eq!(seconds("no time here"), None);
+    }
 
     #[test]
     fn failures_are_the_runners_own_count() {

@@ -17,7 +17,10 @@ use std::time::Instant;
 /// Tokens an answer may be given room for.
 const TOKENS: u32 = 512;
 /// Tokens an answer that reasons first may be given room for.
-const THOUGHT: u32 = 6144;
+const THOUGHT: u32 = 3072;
+/// The longest one call may take, by effort: an answer that has not come by then is not coming.
+const LOW: Duration = Duration::from_secs(60);
+const FULL: Duration = Duration::from_secs(120);
 /// What an unpriced call is counted at, dollars per million tokens: above any Zen model's rate,
 /// so the budget is a ceiling on the spend and not a guess at it.
 const RATE: (f64, f64) = (2.0, 10.0);
@@ -128,7 +131,11 @@ impl Zen {
                 {"role": "user", "content": user},
             ],
         });
-        // At low effort the answer is the edit and nothing else: no reasoning is bought.
+        // At low effort the answer is the edit and nothing else: no reasoning is bought, and the
+        // reply is one JSON object.
+        if effort == Effort::Low {
+            body["response_format"] = json!({"type": "json_object"});
+        }
         match (self.cloud, effort) {
             (true, Effort::Low) => body["reasoning_effort"] = json!("none"),
             (true, Effort::Full) => body["reasoning_effort"] = json!("medium"),
@@ -138,6 +145,7 @@ impl Zen {
         let mut request = self
             .client
             .post(format!("{}/chat/completions", self.url))
+            .timeout(if effort == Effort::Full { FULL } else { LOW })
             .json(&body);
         if let Some(key) = &self.key {
             request = request.bearer_auth(key);

@@ -133,39 +133,57 @@ scopes an OpenAI-backend header. `crates/hanzo-dev/tests/review.rs` holds both.
 
 Kai is Dev's native controller, not an advisory service: it returns a validated operation or an
 explicit abstention, never advice. `crates/hanzo-kai` is the loop (`flow`), the ledger (`ledger`)
-and the tools they run.
+and the tools they run. Search, saved actions and the shell classifier are hanzo-mcp's library
+(`hanzoai/mcp`, crate `hanzo-trigram` today); Dev links it and keeps the seams as traits
+(`find::Finder`, `decide::Transport`).
 
 - **Task state.** One per run: objective, workspace revision, pending actions, verification
   status. The loop owns it and each action's lifecycle. An expected outcome is never accepted
   because something predicted it: only the verifier's record (exit status, the tests, the diff)
-  settles it.
+  settles it. `beneficial` is never set at run time, only by a benchmark from a measured gain.
 - **Action.** `Action { id, task, revision, evidence, operation, preconditions, authorization,
   expected, verification, source }` plus status, milliseconds and result. `operation` is typed
-  (`search`, `decide`, `generate`, `edit`, `test`, `revert`); `source` is `rule`, `kai`, `model` or
-  `recover`. A saved typed operation is an action; a plan of actions is a workflow; a reusable
-  validated result is the cache. Kai selects and binds an action's inputs and never writes shell.
+  (`search`, `decide`, `mutate`, `generate`, `edit`, `test`, `revert`); `source` is `rule`, `kai`,
+  `model` or `recover`. A saved typed operation is an action; a plan of actions is a workflow; a
+  reusable validated result is the cache. Kai selects and binds an action's inputs and never
+  writes shell. Status: eligible, attempted, completed, validated, selected, applied, verified, or
+  ended early as abstained, rejected, timed_out, failed, escalated; each action records the path.
 - **Order of cheapness, per step.** An action that applies (one candidate, preconditions hold)
-  runs with no Kai inference. Else Kai's structured decision: next action, search, effort; all of a
-  state's questions in one request. Else low-effort generation, then full-effort generation, then
-  `recover`. Every transition is a ledger line with its reason; every fall from a deterministic
-  step to a model is logged with why. No step waits on Kai when an action already applies.
+  runs with no Kai inference. Else Kai's structured decision, all of a state's questions in one
+  request (`fix.site@1`: site, action, effort; `fix.turn@1`: next, done, correct, grounded,
+  complete, risk). Else low-effort generation, then full-effort generation, then `recover`. Every
+  transition is a ledger line with its reason (`fast`, `fallback`); no step waits on Kai when an
+  action already applies. Each program has its own outage cooldown: one capability's timeout never
+  disables another.
 - **Revision-bound.** Preconditions are checked immediately before execution; an edit invalidates
-  every pending decision made against the old revision. A cached result is keyed on what it depends
-  on (files, symbols, tool versions, environment; uncommitted changes count), never on a commit.
+  every pending decision made against the old revision. A revision is the content of the files the
+  run touched, and a revert returns to `base`. A cached result is keyed on what it depends on
+  (files, symbols, tool versions, environment; uncommitted changes count), never on a commit.
 - **Recover proves progress.** A failed verification records the failure's fingerprint (paths, line
-  numbers and ids normalized), the prior action, the resulting diff and the outcome. The same
-  fingerprint with no meaningful change of state makes `recover` pick a different action or
-  escalate; it never replays the loop.
-- **Search** is one engine (tgrep): files, symbols, documents, freshness. Until it lands the
-  engine is `locate`, the learned ranker over the tree's functions (kai-gateway's preflight policy,
-  weights from bench/code/onegen/policies.py, `locate::tests` hold its features to the gateway's).
+  numbers and ids normalized), the prior action, the resulting diff and the outcome. An edit that
+  leaves fewer tests failing is progress and stays; the state is looked at again. The same
+  fingerprint with no change of state makes `recover` pick a different action or escalate; it never
+  replays the loop.
+- **Search** is one engine, tgrep (`hanzo-trigram`, in process). It puts the lines that spell the
+  failure's messages and names into the ranking; `locate` ranks every function (kai-gateway's
+  learned preflight weights, `locate::tests` hold its features to the gateway's).
+- **Fast path.** The action `mutate` tries generic token transforms (comparison and operator flips,
+  constants off by one, arguments swapped, a condition inverted, a `return` dropped) at the best
+  sites against the one visible test command, eight at once, capped in time; it names no
+  repository, file or task. It solves single faults of that kind and nothing else.
 - **Jobs** (not built): long work runs in the background and reports events into the same ledger.
   Start, progress, completion and verified outcome are four states; a finished process is not a
   finished task.
-- **Ledger.** `kai/ledger.jsonl`, replayable: stable ids for every decision, fallback, execution
-  and verification so time and cost are attributable; credentials and sensitive output redacted.
-- **Generation** is Zen or enso-flash over an OpenAI-compatible endpoint, called when needed.
-  Independent checks (the verifier) decide success and trigger `recover`.
+- **Ledger.** `kai/ledger.jsonl` beside the trace, replayable: stable ids for every decision,
+  fallback, execution and verification so time and cost are attributable; credentials and
+  sensitive output redacted.
+- **Generation** is Zen or enso-flash over an OpenAI-compatible endpoint (`kai.toml` `[generate]`),
+  called when needed, streamed so the first token and the last are both timed; a paid call is a
+  line in the spend file with the model the server says served it, and the budget stops it.
+- **Kai's transport** is `decide::Transport`: HTTP `POST /v1/decisions` today. The local engine
+  over ZAP on a Unix socket is the other implementation, and needs the engine to serve a `decisions`
+  method (the engine's ZAP module and `hanzo-zap` 0.2.1 are stubs; `zapwire` is the working Rust
+  ZAP wire).
 
 ## House rules
 
