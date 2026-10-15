@@ -1,13 +1,10 @@
 [package]
 name = "hanzo-tui"
-# Never the release's version: upstream crates depend on this one, and a version
-# that moved would recompile everything above them. Not published.
+# Never the release's version: only hanzo-dev carries it, so a release recompiles
+# that crate alone. Not published.
 version = "0.0.0"
 publish = false
 edition = "2021"
 license = "Apache-2.0"
-description = "Hanzo Dev tui integration"
+description = "The Hanzo account behind the interface's /login, /logout, /auth and /status"
 repository = "https://github.com/hanzoai/dev"
-
-[dependencies]
-hanzo-config = { workspace = true }

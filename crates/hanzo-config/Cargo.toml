@@ -1,7 +1,7 @@
 [package]
 name = "hanzo-config"
-# Never the release's version: upstream crates depend on this one, and a version
-# that moved would recompile everything above them. Not published.
+# Never the release's version: only hanzo-dev carries it, so a release recompiles
+# that crate alone. Not published.
 version = "0.0.0"
 publish = false
 edition = "2021"
@@ -10,6 +10,7 @@ description = "Hanzo Dev config integration"
 repository = "https://github.com/hanzoai/dev"
 
 [dependencies]
+hanzo = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tempfile = { workspace = true }
 toml = { workspace = true }

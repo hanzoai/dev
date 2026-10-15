@@ -209,8 +209,16 @@ struct Pick {
 
 fn main() -> Result<()> {
     // The release's version is this crate's alone; every crate beneath reads it
-    // from hanzo-version at run time, so a new release recompiles only this one.
-    hanzo_version::set(env!("CARGO_PKG_VERSION"));
+    // from the hanzo crate at run time, so a new release recompiles only this one.
+    hanzo::version::set(env!("CARGO_PKG_VERSION"));
+    // What Dev adds to upstream's engines, before any of them starts: Kai on every
+    // thread, and the Hanzo account behind /login, /logout, /auth and /status.
+    codex_app_server::register(hanzo_kai::install);
+    codex_tui::register(codex_tui::Account {
+        login: hanzo_tui::account::login,
+        logout: hanzo_tui::account::logout,
+        show: hanzo_tui::account::show,
+    });
     codex_build_info::initialize!();
     // Resolve the Hanzo home and provider before any thread or runtime starts.
     hanzo_config::initialize()?;

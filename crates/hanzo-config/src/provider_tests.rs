@@ -41,7 +41,7 @@ fn a_profile_naming_no_provider_runs_on_hanzo_and_keeps_its_own_providers() {
     let config: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     let defaults: toml::Value = toml::from_str(crate::DEFAULT_CONFIG).unwrap();
     assert_eq!(config["model_provider"].as_str(), Some("hanzo"));
-    assert_eq!(config["model"].as_str(), Some(crate::DEFAULT_MODEL));
+    assert_eq!(config["model"].as_str(), Some(hanzo::DEFAULT_MODEL));
     assert_eq!(config["model_providers"]["hanzo"], defaults["model_providers"]["hanzo"]);
     assert_eq!(config["model_providers"]["pool"]["base_url"].as_str(), Some("http://pool/v1"));
 }

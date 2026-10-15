@@ -9,7 +9,7 @@
 //! an accepted choice labelled allow/ask/deny and raises it by every escalation whose noul
 //! holds. The programs Dev asks ship in `programs/`; a path names any other.
 
-use hanzo_loop::Verdict;
+use hanzo::controller::Verdict;
 use indexmap::IndexMap;
 use serde::Deserialize;
 use serde::Serialize;

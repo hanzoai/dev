@@ -44,7 +44,7 @@ fn hanzo_names_a_model_it_serves_for_review_and_memory() {
         hanzo.memory_extraction_preferred_model(),
         hanzo.memory_consolidation_preferred_model(),
     ] {
-        assert_eq!(model, hanzo_config::DEFAULT_MODEL);
+        assert_eq!(model, hanzo::DEFAULT_MODEL);
         let listed = codex_models_manager::bundled_models_response()
             .expect("the bundled catalog parses")
             .models
@@ -69,15 +69,15 @@ fn only_hanzo_takes_the_hanzo_choice() {
     for other in [openai, lan] {
         assert_ne!(
             other.approval_review_preferred_model(),
-            hanzo_config::DEFAULT_MODEL
+            hanzo::DEFAULT_MODEL
         );
         assert_ne!(
             other.memory_extraction_preferred_model(),
-            hanzo_config::DEFAULT_MODEL
+            hanzo::DEFAULT_MODEL
         );
         assert_ne!(
             other.memory_consolidation_preferred_model(),
-            hanzo_config::DEFAULT_MODEL
+            hanzo::DEFAULT_MODEL
         );
     }
 }

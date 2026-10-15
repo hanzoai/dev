@@ -4,16 +4,15 @@ members = [
     "crates/hanzo-config",
     "crates/hanzo-tui",
     "crates/hanzo-kai",
-    "crates/hanzo-loop",
 ]
 exclude = ["upstream"]
 resolver = "2"
 
 [workspace.package]
 # The release's version, set by hand with npm/package.json's and the tag. Only
-# hanzo-dev takes it: the libraries stay 0.0.0, because codex-tui, codex-core,
-# app-server and models-manager depend on them, and a version that moved there
-# would recompile the whole graph above them for every release.
+# hanzo-dev takes it, and every crate beneath reads it at run time (the fork's
+# hanzo::version), so a release recompiles hanzo-dev alone; Dev's libraries stay
+# 0.0.0 for the same reason.
 version = "0.7.0"
 # Track the edition for all workspace crates in one place. Individual
 # crates can still override this value, but keeping it here means new
@@ -173,12 +172,11 @@ codex-workload-identity = { path = "upstream/codex/codex-rs/workload-identity" }
 codex-windows-sandbox = { path = "upstream/codex/codex-rs/windows-sandbox-rs" }
 codex-windows-sandbox-test-support = { path = "upstream/codex/codex-rs/windows-sandbox-rs/tests/support" }
 core_test_support = { path = "upstream/codex/codex-rs/core/tests/common" }
-hanzo-version = { path = "upstream/codex/codex-rs/hanzo-version" }
+hanzo = { path = "upstream/codex/codex-rs/hanzo" }
 
-# Hanzo Dev's own crates, which the fork's workspace names too.
+# Hanzo Dev's own crates. They depend on the fork, never the reverse.
 hanzo-config = { path = "crates/hanzo-config" }
 hanzo-kai = { path = "crates/hanzo-kai" }
-hanzo-loop = { path = "crates/hanzo-loop" }
 hanzo-tui = { path = "crates/hanzo-tui" }
 
 # External

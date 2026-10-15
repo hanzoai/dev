@@ -6,7 +6,7 @@ use crate::agent::Act;
 use crate::program::Kind;
 use crate::program::Question;
 use crate::program::argmax;
-use hanzo_loop::Answer;
+use hanzo::controller::Answer;
 use indexmap::IndexMap;
 use serde_json::Map;
 use serde_json::Value;

@@ -17,28 +17,28 @@ const MISSING: &str =
 const PATIENCE: Duration = Duration::from_secs(15);
 
 /// Who is signed in, as `hanzo auth show` reports it.
-pub fn show(mut emit: impl FnMut(String)) {
+pub fn show(emit: &mut dyn FnMut(String)) {
     let text = capture(PROGRAM, &["auth", "show"]);
     if text.to_ascii_lowercase().contains("not signed in") {
         emit("Not signed in. Use /login to sign in.".to_string());
         return;
     }
-    each_line(&text, &mut emit);
+    each_line(&text, emit);
 }
 
 /// Sign out of the active Hanzo identity.
-pub fn logout(mut emit: impl FnMut(String)) {
-    each_line(&capture(PROGRAM, &["auth", "logout"]), &mut emit);
+pub fn logout(emit: &mut dyn FnMut(String)) {
+    each_line(&capture(PROGRAM, &["auth", "logout"]), emit);
 }
 
 /// Sign in through Hanzo IAM without leaving the interface. The sign-in runs
 /// beside it, and every line it prints, such as the address to open, reaches
 /// `emit` as it arrives.
-pub fn login(emit: impl Fn(String) + Send + Sync + 'static) {
+pub fn login(emit: Box<dyn Fn(String) + Send + Sync>) {
     std::thread::spawn(move || stream(PROGRAM, &["auth", "login", "--provider", "hanzo"], emit));
 }
 
-fn each_line(text: &str, emit: &mut impl FnMut(String)) {
+fn each_line(text: &str, emit: &mut dyn FnMut(String)) {
     text.lines()
         .map(str::trim_end)
         .filter(|line| !line.trim().is_empty())

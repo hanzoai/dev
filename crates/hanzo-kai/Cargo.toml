@@ -1,7 +1,7 @@
 [package]
 name = "hanzo-kai"
-# Never the release's version: upstream crates depend on this one, and a version
-# that moved would recompile everything above them. Not published.
+# Never the release's version: only hanzo-dev carries it, so a release recompiles
+# that crate alone. Not published.
 version = "0.0.0"
 publish = false
 edition.workspace = true
@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 hanzo-config = { workspace = true }
-hanzo-loop = { workspace = true }
+hanzo = { workspace = true }
 # Hanzo's one search engine (tgrep), the library hanzo-mcp's search actions run on.
 hanzo-trigram = { git = "https://github.com/hanzoai/mcp", rev = "e9e6096ce46c3d3bf61e6830de6487a5b5b5b849" }
 chrono = { workspace = true }

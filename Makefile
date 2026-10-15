@@ -27,10 +27,10 @@ test:
 
 ## test-upstream: run hanzoai/codex's own suite against the pinned checkout
 # voice-host wants GStreamer >= 1.28, which no current distribution ships, and
-# nothing else in the workspace depends on it. The fork's workspace names Dev's
-# crates, so cargo resolves them into codex-rs/Cargo.lock as it runs.
+# nothing else in the workspace depends on it. The fork resolves on its own, so
+# its lock holds.
 test-upstream: v8
-	@. target/v8-env.sh && $(CARGO) nextest run --no-fail-fast \
+	@. target/v8-env.sh && $(CARGO) nextest run --locked --no-fail-fast \
 		--manifest-path upstream/codex/codex-rs/Cargo.toml \
 		--workspace --exclude codex-voice-host $(ARGS)
 
@@ -48,7 +48,7 @@ v8:
 
 ## fmt: format the crates Hanzo owns
 fmt:
-	@$(CARGO) fmt -p hanzo-dev -p hanzo-config -p hanzo-tui -p hanzo-kai -p hanzo-loop
+	@$(CARGO) fmt -p hanzo-dev -p hanzo-config -p hanzo-tui -p hanzo-kai
 
 ## clean: discard build output
 clean:

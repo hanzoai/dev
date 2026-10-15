@@ -379,7 +379,7 @@ impl Setup {
     /// Zen asks for none. Call from within the async runtime.
     pub fn new(home: &Path, key: impl FnOnce() -> Option<String>) -> Result<Setup, String> {
         let settings = hanzo_config::kai::Kai::load_or_default(home).map_err(|e| e.to_string())?;
-        let key = hanzo_config::is_hanzo(Some(&settings.generate.url)).then(key).flatten();
+        let key = hanzo::is_hanzo(Some(&settings.generate.url)).then(key).flatten();
         let mut turn = Program::load("fix.turn@1")?;
         turn.configure([])?;
         Ok(Setup {

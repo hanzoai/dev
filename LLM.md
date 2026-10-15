@@ -9,8 +9,8 @@ Hanzo owns the front door; upstream owns the engines.
 - `crates/hanzo-dev` is the binary. Its `main.rs` is the entire command
   surface, and every subcommand hands off to a library. Nothing is generated
   and no upstream source is compiled through an `include!`.
-- `crates/hanzo-config` picks the provider and the product home.
-  `crates/hanzo-tui` holds the strings and colors that make the interface ours.
+- `crates/hanzo-config` picks the provider and the product home. `crates/hanzo-tui`
+  is the Hanzo account behind /login, /logout, /auth and /status. `crates/hanzo-kai` is Kai.
 - `upstream/codex` is hanzoai/codex, the engines with Hanzo's commits on them.
 
 ## The loop the cloud drives
@@ -39,22 +39,32 @@ A bump is a merge, and its conflicts are git's:
 
 `make bump` prints those steps. The root `Cargo.toml`'s `[workspace.dependencies]` and
 `[patch]` tables mirror the fork's `codex-rs/Cargo.toml` (paths rewritten from the root),
-because patches apply only from the root workspace; refresh them on a bump. Measured on
+because patches apply only from the root workspace; refresh them on a bump. The fork
+builds and tests on its own (`cargo build` in `codex-rs`, `make test-upstream` here) and
+keeps its own `codex-rs/Cargo.lock`, as upstream does: it names no path outside its tree. Measured on
 the move from 11da6b9e to 3ee47c105 (288 upstream commits, 1,608 files), with the whole
 delta committed on the old base: the merge stopped on 5 files (one doc comment the
 delta rewords, two test fixtures and two strings upstream rewrote), and with upstream's
 side taken there, 16 files differed from what the old build-time rules made of the new
 tree: the strings and version reads upstream added, which step 2 finds.
 
-The delta, as first committed on 3ee47c105:
+The delta on 3ee47c105 (`git log 3ee47c105..main` in `upstream/codex`):
 
-- `hanzo:` the fork's workspace names Dev's crates (hanzo-config, hanzo-kai, hanzo-loop,
-  hanzo-tui) by the checkout's relative path, `../../../crates/`. The fork builds as
-  this repository's submodule and not alone.
+- `codex-rs/hanzo`, one crate: Dev's names and the TUI's defaults, `API_BASE`,
+  `DEFAULT_MODEL`, `is_hanzo`, the model catalog, `model::pick` (the `/model <name>`
+  match), the controller interface the loop consults (`controller::{Controller, Handle,
+  Verdict, Card, Request, Shortlist}`) and `version`. Upstream crates read these; Dev's
+  crates depend on this one, never the reverse.
+- Two hooks, each a no-op until a binary fills it, so with nothing registered the engines
+  behave as upstream's: `codex_app_server::register(Extension)` adds an extension to every
+  thread (process-global: the TUI and exec start the app server in process), and
+  `codex_tui::register(Account { login, logout, show })` puts an account behind /login,
+  /auth, /logout and /status (without one, /login and /auth are not offered). hanzo-dev's
+  `main` registers `hanzo_kai::install` and `hanzo_tui::account` before anything starts.
 - `tui:`, `cli:`, `config:`, `core:`, `words:` the edits that were anchored strings:
-  Dev's words and colors, `/login` `/logout` `/model <name>`, the published `mcp_cmd`,
-  `plugin_cmd` and `doctor` (they belong upstream as a pull request), `.hanzo` homes,
-  Kai and the controller in the loop, Hanzo's catalog and reviewers.
+  Dev's words and colors, `/model <name>`, the published `mcp_cmd`, `plugin_cmd` and
+  `doctor` (they belong upstream as a pull request), `.hanzo` homes, the controller's
+  calls in the loop, Hanzo's catalog and reviewers.
 - `brand:` Dev's name in every user-facing string literal of non-test code.
 - `version:` the version, below.
 
@@ -62,15 +72,15 @@ Dev reads only Hanzo's directories. Its home is `~/.hanzo/dev` (or `DEV_HOME`), 
 settings live in `<repo>/.hanzo/dev/`, and system ones in `/etc/hanzo/dev/`; a `.codex` beside
 them belongs to another product and is not read. Its server runs inside the process: upstream's
 shared background server is installed from a package directory Dev does not ship
-(`hanzo_tui::BACKGROUND_SERVER`). A profile that names no provider is set to Hanzo at startup.
+(`hanzo::BACKGROUND_SERVER`). A profile that names no provider is set to Hanzo at startup.
 `crates/hanzo-dev/tests/launch.rs` launches a bare `dev` in a terminal and holds all three.
 
 The version is the release's, set by hand in the root `Cargo.toml`'s `[workspace.package]`,
 in `npm/package.json` and in the tag, and `release.yml` refuses a tag the two manifests do
 not both say. hanzo-dev alone takes it: its `main` hands its own `CARGO_PKG_VERSION` to
-`hanzo_version::set`, and every upstream crate asks `hanzo_version::get()` at run time
-(`codex-rs/hanzo-version` in the fork). Dev's libraries stay `0.0.0`, since upstream crates
-depend on them. So a release recompiles hanzo-dev and the link, nothing beneath.
+`hanzo::version::set`, and every upstream crate asks `hanzo::version::get()` at run time.
+Dev's libraries stay `0.0.0`. So a release recompiles hanzo-dev and the link, nothing
+beneath.
 `crates/hanzo-dev/tests/cli.rs` and `launch.rs` hold `--version`, the doctor and the TUI
 header to the version the binary was built as, and fail on any upstream read of its own.
 
@@ -129,7 +139,7 @@ and save steps and is never exported, so no build script sees it.
 
 Automatic approval review and memory extraction and consolidation name a model
 of their own. Upstream's ids are OpenAI's; api.hanzo.ai serves none of them. On
-the Hanzo provider (`hanzo_config::is_hanzo`, base URL `API_BASE`) all three are
+the Hanzo provider (`hanzo::is_hanzo`, base URL `hanzo::API_BASE`) all three are
 `DEFAULT_MODEL`. The reviewer takes its preferred id only when the catalog serves
 it, else the parent's model, and off OpenAI only a listed entry is served: the
 bundled OpenAI entries ride along unlisted in every catalog, for lookups. So a LAN
@@ -221,7 +231,7 @@ and the tools they run. Search, saved actions and the shell classifier are hanzo
 
 ## Runtime & Model Fixes (2026-10-07)
 
-- **Model metadata**: a model hanzo-config's catalog knows (`enso-auto` among them) gets its
+- **Model metadata**: a model the fork's catalog (`hanzo::catalog`) knows (`enso-auto` among them) gets its
   window and modalities from the catalog, so it raises no "Unknown model ... fallback
   metadata" warning (hanzoai/codex `core:` commit, models-manager).
 - **Sandbox permissions**: a justification with no escalation asked for runs at the default

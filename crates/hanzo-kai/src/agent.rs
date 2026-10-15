@@ -27,11 +27,11 @@ use crate::trace::Step;
 use hanzo_config::kai::Mode;
 use hanzo_config::kai::Op;
 use hanzo_config::kai::Operation;
-use hanzo_loop::Answer;
-use hanzo_loop::Card;
-use hanzo_loop::Controller;
-use hanzo_loop::Request;
-use hanzo_loop::Verdict;
+use hanzo::controller::Answer;
+use hanzo::controller::Card;
+use hanzo::controller::Controller;
+use hanzo::controller::Request;
+use hanzo::controller::Verdict;
 use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -1095,7 +1095,7 @@ pub mod extension {
                 let thread = Arc::new(Thread::new(kai, sku, act));
                 input
                     .thread_store
-                    .insert(hanzo_loop::Handle(Arc::new(Shared(Arc::clone(&thread)))));
+                    .insert(hanzo::controller::Handle(Arc::new(Shared(Arc::clone(&thread)))));
                 input.thread_store.insert(Shared(thread));
             })
         }

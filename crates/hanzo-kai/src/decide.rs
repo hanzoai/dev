@@ -13,7 +13,7 @@ use crate::program::Program;
 use crate::program::Signal;
 use crate::program::digest;
 use hanzo_config::kai::Mode;
-use hanzo_loop::Verdict;
+use hanzo::controller::Verdict;
 use indexmap::IndexMap;
 use serde_json::Value;
 use serde_json::json;

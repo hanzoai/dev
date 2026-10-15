@@ -1802,7 +1802,7 @@ dependencies = [
  "codex-protocol",
  "crypto_box",
  "ed25519-dalek",
- "hanzo-version",
+ "hanzo",
  "http 1.4.0",
  "jsonwebtoken",
  "rand 0.9.3",
@@ -1878,7 +1878,7 @@ dependencies = [
  "codex-protocol",
  "codex-state",
  "codex-utils-path-uri",
- "hanzo-version",
+ "hanzo",
  "os_info",
  "serde",
  "serde_json",
@@ -2000,8 +2000,7 @@ dependencies = [
  "codex-websocket-auth",
  "codex-windows-sandbox",
  "futures",
- "hanzo-kai",
- "hanzo-version",
+ "hanzo",
  "libc",
  "serde",
  "serde_json",
@@ -2059,7 +2058,7 @@ dependencies = [
  "codex-uds",
  "codex-utils-home-dir",
  "futures",
- "hanzo-version",
+ "hanzo",
  "libc",
  "semver",
  "serde",
@@ -2114,7 +2113,7 @@ dependencies = [
  "codex-otel",
  "codex-protocol",
  "codex-utils-cli",
- "hanzo-version",
+ "hanzo",
  "serde",
  "serde_json",
  "tokio",
@@ -2146,7 +2145,7 @@ dependencies = [
  "codex-websocket-client",
  "futures",
  "gethostname",
- "hanzo-version",
+ "hanzo",
  "httpdate",
  "libc",
  "owo-colors",
@@ -2353,7 +2352,7 @@ dependencies = [
  "codex-windows-sandbox",
  "crossterm",
  "futures",
- "hanzo-version",
+ "hanzo",
  "http 1.4.0",
  "libc",
  "os_info",
@@ -2430,7 +2429,7 @@ dependencies = [
  "codex-tui",
  "codex-utils-cli",
  "crossterm",
- "hanzo-version",
+ "hanzo",
  "http 1.4.0",
  "owo-colors",
  "ratatui",
@@ -2686,8 +2685,7 @@ dependencies = [
  "dunce",
  "eventsource-stream",
  "futures",
- "hanzo-loop",
- "hanzo-version",
+ "hanzo",
  "http 1.4.0",
  "hyper-util",
  "iana-time-zone",
@@ -2815,7 +2813,7 @@ dependencies = [
  "codex-utils-path-uri",
  "codex-utils-sandbox-summary",
  "codex-worktree",
- "hanzo-version",
+ "hanzo",
  "owo-colors",
  "serde",
  "serde_json",
@@ -2864,7 +2862,7 @@ dependencies = [
  "codex-websocket-client",
  "dirs",
  "futures",
- "hanzo-version",
+ "hanzo",
  "http 1.4.0",
  "libc",
  "opentelemetry",
@@ -3012,7 +3010,7 @@ dependencies = [
  "codex-rollout",
  "codex-state",
  "flate2",
- "hanzo-version",
+ "hanzo",
  "http 1.4.0",
  "httpdate",
  "mime_guess",
@@ -3032,7 +3030,7 @@ dependencies = [
  "anyhow",
  "clap",
  "crossbeam-channel",
- "hanzo-version",
+ "hanzo",
  "ignore 0.4.25 (registry+https://github.com/rust-lang/crates.io-index)",
  "nucleo",
  "serde",
@@ -3143,7 +3141,7 @@ dependencies = [
  "codex-otel",
  "codex-prompts",
  "codex-protocol",
- "hanzo-version",
+ "hanzo",
  "rand 0.9.3",
  "serde",
  "serde_json",
@@ -3377,7 +3375,7 @@ dependencies = [
  "codex-utils-process",
  "codex-utils-template",
  "codex-workload-identity",
- "hanzo-version",
+ "hanzo",
  "http 1.4.0",
  "once_cell",
  "os_info",
@@ -3417,7 +3415,7 @@ dependencies = [
  "codex-utils-plugins",
  "codex-utils-process",
  "futures",
- "hanzo-version",
+ "hanzo",
  "lru",
  "regex-lite",
  "rmcp",
@@ -3553,7 +3551,7 @@ dependencies = [
  "codex-response-debug-context",
  "codex-secrets",
  "codex-utils-process",
- "hanzo-config",
+ "hanzo",
  "http 1.4.0",
  "serde",
  "serde_json",
@@ -3570,7 +3568,7 @@ dependencies = [
  "codex-client",
  "codex-protocol",
  "codex-utils-redacted-string",
- "hanzo-version",
+ "hanzo",
  "http 1.4.0",
  "schemars 0.8.22",
  "serde",
@@ -3588,8 +3586,7 @@ dependencies = [
  "codex-prompts",
  "codex-protocol",
  "codex-utils-output-truncation",
- "hanzo-config",
- "hanzo-version",
+ "hanzo",
  "serde",
  "serde_json",
  "tokio",
@@ -3694,7 +3691,7 @@ dependencies = [
  "codex-utils-string",
  "eventsource-stream",
  "gethostname",
- "hanzo-version",
+ "hanzo",
  "http 1.4.0",
  "opentelemetry",
  "opentelemetry-appender-tracing",
@@ -3872,7 +3869,7 @@ dependencies = [
  "codex-utils-path-uri",
  "codex-utils-pty",
  "futures",
- "hanzo-version",
+ "hanzo",
  "http 1.4.0",
  "keyring",
  "libc",
@@ -3914,7 +3911,7 @@ dependencies = [
  "codex-utils-path",
  "codex-utils-process",
  "codex-utils-string",
- "hanzo-version",
+ "hanzo",
  "memchr",
  "regex",
  "serde",
@@ -4040,7 +4037,7 @@ dependencies = [
  "codex-utils-string",
  "dirs",
  "futures",
- "hanzo-version",
+ "hanzo",
  "schemars 0.8.22",
  "serde",
  "serde_json",
@@ -4125,7 +4122,7 @@ dependencies = [
  "codex-utils-path",
  "codex-utils-path-uri",
  "futures",
- "hanzo-version",
+ "hanzo",
  "pulldown-cmark",
  "serde",
  "serde_json",
@@ -4227,8 +4224,7 @@ dependencies = [
  "dirs",
  "dunce",
  "futures",
- "hanzo-tui",
- "hanzo-version",
+ "hanzo",
  "image",
  "itertools",
  "lazy_static",
@@ -4595,7 +4591,7 @@ dependencies = [
  "dirs-next",
  "dunce",
  "glob",
- "hanzo-version",
+ "hanzo",
  "rand 0.8.6",
  "serde",
  "serde_json",
@@ -7340,9 +7336,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hanzo"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "hanzo-config"
 version = "0.0.0"
 dependencies = [
+ "hanzo",
  "serde",
  "tempfile",
  "toml 0.9.11+spec-1.1.0",
@@ -7409,10 +7413,10 @@ dependencies = [
  "codex-windows-sandbox",
  "crossterm",
  "dialoguer",
+ "hanzo",
  "hanzo-config",
  "hanzo-kai",
  "hanzo-tui",
- "hanzo-version",
  "http 1.4.0",
  "insta",
  "libc",
@@ -7448,8 +7452,8 @@ dependencies = [
  "codex-extension-api",
  "codex-protocol",
  "futures",
+ "hanzo",
  "hanzo-config",
- "hanzo-loop",
  "hanzo-trigram",
  "indexmap 2.14.0",
  "pretty_assertions",
@@ -7462,14 +7466,6 @@ dependencies = [
  "tokio",
  "tracing",
  "wiremock",
-]
-
-[[package]]
-name = "hanzo-loop"
-version = "0.0.0"
-dependencies = [
- "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -7487,13 +7483,6 @@ dependencies = [
 
 [[package]]
 name = "hanzo-tui"
-version = "0.0.0"
-dependencies = [
- "hanzo-config",
-]
-
-[[package]]
-name = "hanzo-version"
 version = "0.0.0"
 
 [[package]]

@@ -234,13 +234,13 @@ impl Kai {
         let generate_url = file
             .generate
             .url
-            .unwrap_or_else(|| crate::API_BASE.to_string())
+            .unwrap_or_else(|| hanzo::API_BASE.to_string())
             .trim_end_matches('/')
             .to_string();
         let escalate = match file.generate.escalate {
             Some(name) if name.trim().is_empty() => None,
             Some(name) => Some(name),
-            None => crate::is_hanzo(Some(&generate_url)).then(|| ESCALATE.to_string()),
+            None => hanzo::is_hanzo(Some(&generate_url)).then(|| ESCALATE.to_string()),
         };
         if let Some(name) = &escalate {
             let lower = name.to_lowercase();
@@ -253,7 +253,7 @@ impl Kai {
         Ok(Kai {
             url: file
                 .url
-                .unwrap_or_else(|| crate::API_BASE.to_string())
+                .unwrap_or_else(|| hanzo::API_BASE.to_string())
                 .trim_end_matches('/')
                 .to_string(),
             model: file.model.unwrap_or_else(|| "laya-agent".to_string()),

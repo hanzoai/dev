@@ -4,7 +4,8 @@
 //! that Dev does not ship, so a launch has to run its server inside the process or the
 //! first command ends in an error. And a project keeps Dev's settings in `.hanzo/dev`, the
 //! layout of `~/.hanzo/dev`: another product's `.codex` beside it is that product's, and
-//! its model must not become ours.
+//! its model must not become ours. And the binary registers the Hanzo account with the
+//! TUI, which offers /login only then.
 
 #![cfg(unix)]
 
@@ -12,6 +13,7 @@ use portable_pty::CommandBuilder;
 use portable_pty::PtySize;
 use portable_pty::native_pty_system;
 use std::io::Read;
+use std::io::Write;
 use std::sync::mpsc;
 use std::time::Duration;
 use std::time::Instant;
@@ -76,17 +78,33 @@ fn a_bare_launch_starts_in_process_and_reads_only_the_projects_hanzo_config() {
             }
         }
     }
+    let mut offered = String::new();
+    if shown.contains(COMPOSER) {
+        let mut writer = pair.master.take_writer().expect("a writer");
+        writer.write_all(b"/log").expect("typed");
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < deadline && !offered.contains("sign in to Hanzo") {
+            if let Ok(bytes) = received.recv_timeout(Duration::from_millis(200)) {
+                screen.process(&bytes);
+                offered = screen.screen().contents();
+            }
+        }
+    }
     let _ = child.kill();
 
     assert!(!shown.contains(PACKAGE_ERROR), "a bare launch asked for a package:\n{shown}");
     assert!(shown.contains(COMPOSER), "a bare launch never reached the composer:\n{shown}");
     assert!(shown.contains("project-model"), "the project's own config was not read:\n{shown}");
     // The header names the version this binary was built as, which upstream's
-    // TUI reads from hanzo-version at run time.
+    // TUI reads from the hanzo crate at run time.
     let built = env!("CARGO_PKG_VERSION");
     assert!(shown.contains(&format!("Hanzo Dev (v{built})")), "the header does not say v{built}:\n{shown}");
     assert!(
         !shown.to_ascii_lowercase().contains("gpt-6"),
         "another product's project config set the model:\n{shown}"
+    );
+    assert!(
+        offered.contains("/login") && offered.contains("sign in to Hanzo"),
+        "no account was registered with the TUI, so /login is not offered:\n{offered}"
     );
 }

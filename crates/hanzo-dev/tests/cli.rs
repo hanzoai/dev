@@ -110,7 +110,7 @@ fn the_product_states_one_version() {
     assert!(doctor.contains(&number), "doctor reports a different version: {doctor:.120}");
 }
 
-/// Upstream code asks hanzo-version for the version this binary set. A merge
+/// Upstream code asks the hanzo crate for the version this binary set. A merge
 /// from upstream that brings its own compile-time read back would state the
 /// fork's 0.0.0 wherever that read lands; a build script keeps its own.
 #[test]
@@ -123,7 +123,7 @@ fn upstream_reads_the_version_the_binary_sets() {
             let path = entry.expect("a directory entry").path();
             let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
             if path.is_dir() {
-                if name != "target" && name != "hanzo-version" {
+                if name != "target" && path != source.join("hanzo") {
                     pending.push(path);
                 }
             } else if name.ends_with(".rs")

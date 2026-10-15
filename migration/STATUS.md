@@ -15,7 +15,7 @@ been ported or tested.
 | --- | --- | --- |
 | Union command surface | `crates/hanzo-dev/src/main.rs` covers the interactive session, `exec`, `login`/`logout`, `serve`, `cloud`, `sandbox`, `completion` | The rest of the upstream surface — `agents`, `review`, `mcp`, `plugin`, `doctor`, `resume`, `fork`, `queue`, `archive`, `features`, `worktree`. Their logic lives in upstream's binary rather than its library, so each needs either a library entry point upstream or an owned implementation. |
 | Hanzo provider and Enso default | `hanzo-config` | Provider request and override integration tests |
-| Branding and input surface | `hanzo-tui`, through hanzoai/codex's `tui:` commit | Render snapshots and an interactive pass |
+| Branding and input surface | hanzoai/codex's `hanzo` crate and `tui:` commit | Render snapshots and an interactive pass |
 | Branding outside the island | `-p/--profile` help still reads `$CODEX_HOME` | The string lives in `utils/cli`, which most of the workspace depends on, so it cannot join the island without dragging everything in. Either upstream a product-name indirection, or own the flag. |
 | Native Hanzo tools | `hanzo-mcp` executable configuration | Unified session integration |
 | Hanzo account login | `dev login --hanzo` selects the provider and reads what `hanzo login` stored | Device flow, and tests that do not depend on a signed-in machine |

@@ -7,7 +7,7 @@ fn new_home_loads_hanzo_provider_and_native_mcp() {
     let config: toml::Value = toml::from_str(&std::fs::read_to_string(directory.path().join("config.toml"))
         .unwrap()).unwrap();
     assert_eq!(config["model_provider"].as_str(), Some("hanzo"));
-    assert_eq!(config["model_providers"]["hanzo"]["base_url"].as_str(), Some(API_BASE));
+    assert_eq!(config["model_providers"]["hanzo"]["base_url"].as_str(), Some(hanzo::API_BASE));
     assert_eq!(config["mcp_servers"]["hanzo"]["command"].as_str(), Some("hanzo-mcp"));
     assert!(config["mcp_servers"]["hanzo"]["args"].as_array().unwrap().is_empty());
 }
@@ -122,14 +122,9 @@ fn a_sign_in_writes_the_shared_credential() {
     assert!(std::fs::symlink_metadata(home.join("auth.json")).unwrap().is_symlink());
 }
 
-/// The default profile's provider is the one that serves the Hanzo catalog; a LAN
-/// engine or any other host is not, however it is named.
+/// The default profile's provider is the one that serves the Hanzo catalog.
 #[test]
-fn only_the_hanzo_api_is_hanzo() {
+fn the_default_provider_is_hanzo() {
     let config: toml::Value = toml::from_str(DEFAULT_CONFIG).unwrap();
-    assert!(is_hanzo(config["model_providers"]["hanzo"]["base_url"].as_str()));
-    assert!(is_hanzo(Some("https://api.hanzo.ai/v1/")));
-    assert!(!is_hanzo(Some("http://dgx.local:1235/v1")));
-    assert!(!is_hanzo(Some("https://api.hanzo.ai.example/v1")));
-    assert!(!is_hanzo(None));
+    assert!(hanzo::is_hanzo(config["model_providers"]["hanzo"]["base_url"].as_str()));
 }

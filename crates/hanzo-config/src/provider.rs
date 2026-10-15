@@ -26,12 +26,12 @@ pub fn activate_provider(home: &Path, provider: Provider) -> io::Result<()> {
                 config["model_providers"]["hanzo"] = defaults["model_providers"]["hanzo"].clone();
             }
             config["model_provider"] = toml_edit::value("hanzo");
-            config["model"] = toml_edit::value(super::DEFAULT_MODEL);
+            config["model"] = toml_edit::value(hanzo::DEFAULT_MODEL);
         }
         Provider::OpenAi => {
             config["model_provider"] = toml_edit::value("openai");
             // Allow the authenticated model catalog to choose its current default.
-            if config.get("model").and_then(toml_edit::Item::as_str) == Some(super::DEFAULT_MODEL) {
+            if config.get("model").and_then(toml_edit::Item::as_str) == Some(hanzo::DEFAULT_MODEL) {
                 config.remove("model");
             }
         }
@@ -228,7 +228,7 @@ pub(super) fn upgrade_auth(home: &Path) {
             provider.get("env_key").and_then(toml_edit::Item::as_str),
             Some("HANZO_USER_KEY" | "HANZO_API_KEY")
         )
-        || provider.get("base_url").and_then(toml_edit::Item::as_str) != Some(super::API_BASE)
+        || provider.get("base_url").and_then(toml_edit::Item::as_str) != Some(hanzo::API_BASE)
     {
         return;
     }

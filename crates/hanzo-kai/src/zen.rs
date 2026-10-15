@@ -152,7 +152,7 @@ impl Zen {
     /// Zen as `generate` names it, signed with `key` when its URL is Hanzo's. Call from within
     /// the async runtime; generation then blocks a thread off it.
     pub fn new(generate: &Generate, key: Option<String>) -> Zen {
-        let cloud = hanzo_config::is_hanzo(Some(&generate.url));
+        let cloud = hanzo::is_hanzo(Some(&generate.url));
         Zen {
             url: generate.url.trim_end_matches('/').to_string(),
             model: generate.model.clone(),
