@@ -21,7 +21,7 @@ build, lives in `hanzo-inc/dev`. Nothing here depends on it.
 
 ## Upstream
 
-`upstream/codex` and `upstream/code` are submodules. The gitlink is the pin —
+`upstream/codex` is a submodule. The gitlink is the pin —
 no lockfile of hashes sits beside it. Crates are consumed straight from the
 checkout by ordinary path dependency.
 
@@ -73,12 +73,8 @@ at the next `make bump`.
 
 ## The Code fork
 
-`upstream/code` is reference, not a build input. Its crates depend on its own
-fork of `codex-core`, so importing them would link two cores into one binary.
-Its additions worth having — Auto Drive, the browser bridge — get rebuilt as
-`hanzo-*` crates against `codex-core`. `migration/code-v1.patch` records what
-v1 carried, including the defects it was already carrying; see
-`migration/STATUS.md` before porting anything from it.
+just-every/code is reference, never a build input (its crates carry their own codex-core); its
+clone lives at `~/work/just-every/code`, and what was ported from it is recorded in `migration/`.
 
 ## Working here
 

@@ -2,7 +2,3 @@
 	path = upstream/codex
 	url = https://github.com/openai/codex.git
 	branch = main
-[submodule "code"]
-	path = upstream/code
-	url = https://github.com/just-every/code.git
-	branch = main
