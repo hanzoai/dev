@@ -1,6 +1,6 @@
 [package]
 name = "hanzo-loop"
-version.workspace = true
+version = "0.0.0"
 edition.workspace = true
 license.workspace = true
 description = "What a controller decides inside the agent loop, as data the loop applies."

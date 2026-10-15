@@ -6,8 +6,8 @@
 //! decided: a verdict joins the policy's on `allow < ask < deny`, a shortlist only moves tools
 //! out of direct view, and a hint is metadata the gateway may read.
 //!
-//! The loop finds the controller as a [`Handle`] in the thread's extension data. The patched
-//! upstream calls in `patches/upstream.json` are the only readers.
+//! The loop finds the controller as a [`Handle`] in the thread's extension data. Its only
+//! readers are the calls hanzoai/codex's `core:` commit adds to codex-core.
 
 use std::collections::BTreeMap;
 use std::collections::HashSet;

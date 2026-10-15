@@ -1,5 +1,5 @@
 # hanzoai/dev — the `dev` CLI. Hanzo owns the command surface in crates/;
-# the engines are pinned upstream submodules under upstream/.
+# the engines are hanzoai/codex, pinned as the submodule upstream/codex.
 #
 # Gate only: no image, nothing to deploy. The release — five per-platform
 # binaries, npm, Homebrew — is .hanzo/workflows/release.yml, one job on the
@@ -23,9 +23,9 @@
 # already there. --default-toolchain none leaves the choice to
 # rust-toolchain.toml.
 #
-# The engines are submodules, and `make prepare` applies our edits to that
-# checkout — so the gate must fetch them before it can build anything. A
-# shallow init is enough: nothing here reads upstream history.
+# The engines are a submodule, built as committed — so the gate must fetch it
+# before it can build anything. A shallow init is enough: nothing here reads
+# upstream history.
 test:
   # Cheap, and first, so a 300 KB blob fails in seconds rather than after the
   # workspace compiles. This is .github/workflows/blob-size-policy.yml, which

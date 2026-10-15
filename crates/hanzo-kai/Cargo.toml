@@ -1,6 +1,6 @@
 [package]
 name = "hanzo-kai"
-version.workspace = true
+version = "0.0.0"
 edition.workspace = true
 license.workspace = true
 description = "Kai in the Dev loop over the Decisions API: decisions per turn, their trace, and flows."
@@ -9,8 +9,8 @@ description = "Kai in the Dev loop over the Decisions API: decisions per turn, t
 workspace = true
 
 [dependencies]
-hanzo-config = { path = "../hanzo-config", version = "0.7.0-dev.1" }
-hanzo-loop = { path = "../hanzo-loop", version = "0.7.0-dev.1" }
+hanzo-config = { workspace = true }
+hanzo-loop = { workspace = true }
 # Hanzo's one search engine (tgrep), the library hanzo-mcp's search actions run on.
 hanzo-trigram = { git = "https://github.com/hanzoai/mcp", rev = "e9e6096ce46c3d3bf61e6830de6487a5b5b5b849" }
 chrono = { workspace = true }

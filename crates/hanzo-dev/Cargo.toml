@@ -15,10 +15,10 @@ path = "src/main.rs"
 workspace = true
 
 [dependencies]
-hanzo-config = { path = "../hanzo-config", version = "0.7.0-dev.1" }
-hanzo-kai = { path = "../hanzo-kai", version = "0.7.0-dev.1" }
-hanzo-tui = { path = "../hanzo-tui", version = "0.7.0-dev.1" }
-hanzo-version = { path = "../hanzo-version", version = "0.7.0-dev.1" }
+hanzo-config = { workspace = true }
+hanzo-kai = { workspace = true }
+hanzo-tui = { workspace = true }
+hanzo-version = { workspace = true }
 anyhow = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }

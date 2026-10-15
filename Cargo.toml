@@ -5,12 +5,15 @@ members = [
     "crates/hanzo-tui",
     "crates/hanzo-kai",
     "crates/hanzo-loop",
-    "crates/hanzo-version",
 ]
-exclude = ["upstream", "crates/hanzo-upstream"]
+exclude = ["upstream"]
 resolver = "2"
 
 [workspace.package]
+# The release's version, set by hand with npm/package.json's and the tag. Only
+# hanzo-dev takes it: the libraries stay 0.0.0, because codex-tui, codex-core,
+# app-server and models-manager depend on them, and a version that moved there
+# would recompile the whole graph above them for every release.
 version = "0.7.0-dev.1"
 # Track the edition for all workspace crates in one place. Individual
 # crates can still override this value, but keeping it here means new
@@ -126,7 +129,6 @@ codex-rollout-trace = { path = "upstream/codex/codex-rs/rollout-trace" }
 codex-sandboxing = { path = "upstream/codex/codex-rs/sandboxing" }
 codex-secrets = { path = "upstream/codex/codex-rs/secrets" }
 codex-shell-command = { path = "upstream/codex/codex-rs/shell-command" }
-codex-shell-escalation = { path = "upstream/codex/codex-rs/shell-escalation" }
 codex-skills-extension = { path = "upstream/codex/codex-rs/ext/skills" }
 codex-skills = { path = "upstream/codex/codex-rs/skills" }
 codex-state = { path = "upstream/codex/codex-rs/state" }
@@ -171,11 +173,21 @@ codex-workload-identity = { path = "upstream/codex/codex-rs/workload-identity" }
 codex-windows-sandbox = { path = "upstream/codex/codex-rs/windows-sandbox-rs" }
 codex-windows-sandbox-test-support = { path = "upstream/codex/codex-rs/windows-sandbox-rs/tests/support" }
 core_test_support = { path = "upstream/codex/codex-rs/core/tests/common" }
+hanzo-version = { path = "upstream/codex/codex-rs/hanzo-version" }
+
+# Hanzo Dev's own crates, which the fork's workspace names too.
+hanzo-config = { path = "crates/hanzo-config" }
+hanzo-kai = { path = "crates/hanzo-kai" }
+hanzo-loop = { path = "crates/hanzo-loop" }
+hanzo-tui = { path = "crates/hanzo-tui" }
 
 # External
+learning_mode_windows = { git = "https://github.com/microsoft/mxc", rev = "6cd3d58f05d3447e67109cfb75e042803b843ca4" }
+wxc_common = { git = "https://github.com/microsoft/mxc", rev = "6cd3d58f05d3447e67109cfb75e042803b843ca4" }
 age = "0.12.1"
 ansi-to-tui = "8.0.1"
 anyhow = "1"
+appcontainer_common = { git = "https://github.com/microsoft/mxc", rev = "6cd3d58f05d3447e67109cfb75e042803b843ca4" }
 arboard = { version = "3", features = ["wayland-data-control"] }
 arc-swap = "1.9.0"
 assert_cmd = "2"
@@ -229,13 +241,14 @@ file-id = "0.2.3"
 flate2 = "1.1.8"
 futures = { version = "0.3", default-features = false }
 gethostname = "1.1.0"
-gix = { version = "0.81.0", default-features = false, features = ["sha1"] }
-gix-url = "0.35.2"
+gix = { version = "0.89.0", default-features = false, features = ["sha1"] }
+gix-url = "0.40.0"
 glob = "0.3"
 globset = "0.4"
 hmac = "0.12.1"
 http = "1.3.1"
 httpdate = "1.0.3"
+hyper-util = { version = "0.1.20", features = ["tokio"] }
 iana-time-zone = "0.1.64"
 icu_decimal = "2.1"
 icu_locale_core = "2.1"
@@ -256,13 +269,13 @@ libc = "0.2.182"
 # Keep SQLx's bundled SQLite on a version containing the WAL-reset corruption fix:
 # https://www.sqlite.org/wal.html#the_wal_reset_bug
 libsqlite3-sys = { version = "0.37", default-features = false }
+linkify = "0.11"
 log = "0.4"
 lru = "0.18.2"
 maplit = "1.0.2"
 memchr = "2.7.6"
 mime_guess = "2.0.5"
 multimap = "0.10.0"
-mxc-sdk = { git = "https://github.com/microsoft/mxc", rev = "a846837d827b496fc4a08dfe60554515758c6647" }
 notify = "8.2.0"
 nucleo = { git = "https://github.com/helix-editor/nucleo.git", rev = "4253de9faabb4e5c6d81d946a5e35a90f87347ee" }
 once_cell = "1.20.2"
@@ -297,11 +310,10 @@ regex-automata = { version = "0.4.13", default-features = false, features = ["st
 regex-lite = "0.1.8"
 regex-syntax = "0.8.8"
 reqwest = { version = "0.12", features = ["cookies"] }
-# rmcp-v3.3.0 includes enterprise authorization helpers (rust-sdk#1234).
-rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", rev = "3e636cab26c013eca5131103c03d20237f12c4df", version = "=3.3.0", default-features = false }
+rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", rev = "4048ac40e958fb1a7d614617a2ae8d26666ee2fa", version = "=3.5.1", default-features = false }
 runfiles = { git = "https://github.com/dzbarsky/rules_rust", rev = "b56cbaa8465e74127f1ea216f813cd377295ad81" }
 rustix = { version = "1.1.4", features = ["net"] }
-rustls = { version = "0.23.45", default-features = false, features = [
+rustls = { version = "0.23.46", default-features = false, features = [
     "aws_lc_rs",
     "std",
 ] }
@@ -331,7 +343,6 @@ symphonia = { version = "0.6.0", default-features = false, features = [
     "ogg",
     "wav",
 ] }
-socket2 = "0.6.1"
 # Keep SQLx versions in sync; when bumping, audit the SQLite constructor deny list in clippy.toml.
 sqlx = { version = "=0.9.0", default-features = false, features = [
     "chrono",

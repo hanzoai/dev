@@ -1,4 +1,4 @@
 [submodule "codex"]
 	path = upstream/codex
-	url = https://github.com/openai/codex.git
+	url = https://github.com/hanzoai/codex.git
 	branch = main

@@ -2,24 +2,19 @@ CARGO_HOME ?= $(HOME)/.cargo
 export PATH := $(CARGO_HOME)/bin:$(PATH)
 export NEXTEST_HIDE_PROGRESS_BAR := true
 
-TOOL := cargo run --quiet --manifest-path crates/hanzo-upstream/Cargo.toml --
 CARGO := RUST_MIN_STACK=8388608 cargo
 
-.PHONY: all prepare build release install test test-upstream bump v8 fmt clean reset help
+.PHONY: all build release install test test-upstream bump v8 fmt clean help
 .DEFAULT_GOAL := build
 
 all: build
 
-## prepare: apply the owned edits to the pinned upstream checkout
-prepare:
-	@$(TOOL) prepare
-
 ## build: build the dev binary
-build: prepare
+build:
 	@$(CARGO) build --locked -p hanzo-dev --bin dev
 
 ## release: build the optimized dev binary
-release: prepare
+release:
 	@$(CARGO) build --locked --release -p hanzo-dev --bin dev
 
 ## install: put the release binary on PATH
@@ -27,42 +22,37 @@ install: release
 	@$(CARGO) install --locked --path crates/hanzo-dev --bin dev
 
 ## test: run the Hanzo test suite
-# hanzo-upstream is a detached workspace, so the root run cannot see it — and it
-# is the code that edits upstream in place, which is the last thing to leave
-# untested.
-test: prepare
+test:
 	@$(CARGO) nextest run --locked --no-fail-fast $(ARGS)
-	@$(CARGO) nextest run --no-fail-fast --manifest-path crates/hanzo-upstream/Cargo.toml $(ARGS)
 
-## test-upstream: run the upstream suite against the pinned submodule
+## test-upstream: run hanzoai/codex's own suite against the pinned checkout
 # voice-host wants GStreamer >= 1.28, which no current distribution ships, and
-# nothing else in the workspace depends on it.
+# nothing else in the workspace depends on it. The fork's workspace names Dev's
+# crates, so cargo resolves them into codex-rs/Cargo.lock as it runs.
 test-upstream: v8
 	@. target/v8-env.sh && $(CARGO) nextest run --no-fail-fast \
 		--manifest-path upstream/codex/codex-rs/Cargo.toml \
 		--workspace --exclude codex-voice-host $(ARGS)
 
-## bump: move the upstream submodules to newer revisions
+## bump: say how to move upstream/codex forward (it runs nothing)
 bump:
-	@$(TOOL) bump $(ARGS)
-	@$(TOOL) prepare
+	@echo 'upstream/codex is hanzoai/codex: its main is openai/codex plus our commits.'
+	@echo '  git -C upstream/codex remote add upstream https://github.com/openai/codex.git   # once'
+	@echo '  git -C upstream/codex switch main && git -C upstream/codex pull --ff-only origin main'
+	@echo '  git -C upstream/codex fetch upstream && git -C upstream/codex merge upstream/main'
+	@echo '  make build test        # then push main to hanzoai/codex and commit the gitlink here'
 
-## v8: download and verify the V8 build the JavaScript runtime links
+## v8: download and verify the V8 build the upstream suite links
 v8:
-	@$(TOOL) v8
+	@scripts/v8.sh
 
 ## fmt: format the crates Hanzo owns
 fmt:
-	@$(CARGO) fmt -p hanzo-dev -p hanzo-config -p hanzo-tui -p hanzo-kai -p hanzo-loop -p hanzo-version
-	@$(CARGO) fmt --manifest-path crates/hanzo-upstream/Cargo.toml
+	@$(CARGO) fmt -p hanzo-dev -p hanzo-config -p hanzo-tui -p hanzo-kai -p hanzo-loop
 
 ## clean: discard build output
 clean:
 	@$(CARGO) clean
-
-## reset: return the upstream checkout to its pinned revision
-reset:
-	@git submodule foreach --quiet 'git reset --quiet --hard'
 
 help:
 	@grep -hE '^## ' $(MAKEFILE_LIST) | sed 's/## /  make /' | sort

@@ -105,12 +105,38 @@ fn the_product_states_one_version() {
     let version = text(&dev(home.path(), &["--version"]));
     let number = version.split_whitespace().nth(1).expect("`dev <version>`").to_string();
     assert!(version.starts_with("dev "), "{version}");
-    // A release names its version as DEV_VERSION when it builds; without one the
-    // binary states the tree's own.
-    let built = option_env!("DEV_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
-    assert_eq!(number, built, "{version}");
+    assert_eq!(number, env!("CARGO_PKG_VERSION"), "{version}");
     let doctor = text(&dev(home.path(), &["doctor", "--summary", "--no-color"]));
     assert!(doctor.contains(&number), "doctor reports a different version: {doctor:.120}");
+}
+
+/// Upstream code asks hanzo-version for the version this binary set. A merge
+/// from upstream that brings its own compile-time read back would state the
+/// fork's 0.0.0 wherever that read lands; a build script keeps its own.
+#[test]
+fn upstream_reads_the_version_the_binary_sets() {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../upstream/codex/codex-rs");
+    let mut pending = vec![source.clone()];
+    let mut readers = Vec::new();
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(&directory).expect("the upstream checkout is readable") {
+            let path = entry.expect("a directory entry").path();
+            let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+            if path.is_dir() {
+                if name != "target" && name != "hanzo-version" {
+                    pending.push(path);
+                }
+            } else if name.ends_with(".rs")
+                && name != "build.rs"
+                && std::fs::read_to_string(&path)
+                    .is_ok_and(|text| text.contains("env!(\"CARGO_PKG_VERSION\")"))
+            {
+                readers.push(path.strip_prefix(&source).unwrap_or(&path).display().to_string());
+            }
+        }
+    }
+    readers.sort();
+    assert!(readers.is_empty(), "these read the fork's own version, not the binary's: {readers:?}");
 }
 
 /// The first feature upstream still offers as a switch. Names come and go with

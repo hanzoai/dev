@@ -1,10 +1,10 @@
 [package]
 name = "hanzo-tui"
-version.workspace = true
+version = "0.0.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Hanzo Dev tui integration"
 repository = "https://github.com/hanzoai/dev"
 
 [dependencies]
-hanzo-config = { path = "../hanzo-config", version = "0.7.0-dev.1" }
+hanzo-config = { workspace = true }

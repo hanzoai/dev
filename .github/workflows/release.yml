@@ -1,11 +1,12 @@
 # Release — a tag `vX.Y.Z` ships `dev` at that version, from the Linux pool.
 #
-# The version is assigned by hand, never computed here: a person sets
-# npm/package.json's `version`, commits, and pushes the tag `v<that version>`.
-# This workflow refuses a tag that does not match the manifest and writes no
-# commit, no tag and no version anywhere. (Until 2026-10-15 every push to main
-# took the next patch above whatever was published and committed the bump back;
-# the owner's rule is that no pipeline mints a semver.)
+# The version is assigned by hand, never computed here: a person sets it in the
+# root Cargo.toml's [workspace.package] and in npm/package.json, commits, and
+# pushes the tag `v<that version>`. This workflow refuses a tag that either
+# manifest does not say and writes no commit, no tag and no version anywhere.
+# (Until 2026-10-15 every push to main took the next patch above whatever was
+# published and committed the bump back; the owner's rule is that no pipeline
+# mints a semver.)
 #
 # THIS FILE LIVES IN .github/workflows BECAUSE GITHUB READS NOTHING ELSE. From
 # 2026-09-08 it sat in .hanzo/workflows, where GitHub never looks and the forge,
@@ -24,12 +25,13 @@
 # SDK and the musl targets natively, and `cargo-xwin` builds windows-msvc with
 # LLVM's clang-cl — all from ordinary amd64 containers, five at once.
 #
-# Shape: `version` reads the version off the tag, holds npm/package.json to it
-# and opens a DRAFT GitHub release for the tag; five `build` jobs each compile
-# one target and upload its assets into the draft by id; `publish` verifies all
-# 28 assets, publishes the release, publishes npm (five platform packages, then
-# @hanzo/dev) and pushes the Homebrew formula to the tap. The forge mirrors
-# this repository, tags included, so nothing here pushes to it.
+# Shape: `version` reads the version off the tag, holds Cargo.toml and
+# npm/package.json to it and opens a DRAFT GitHub release for the tag; five
+# `build` jobs each compile one target and upload its assets into the draft by
+# id; `publish` verifies all 28 assets, publishes the release, publishes npm
+# (five platform packages, then @hanzo/dev) and pushes the Homebrew formula to
+# the tap. The forge mirrors this repository, tags included, so nothing here
+# pushes to it.
 #
 # A runner lives for one job, so each build would compile all ~1,000 crates
 # from nothing. sccache wraps every rustc call and keys each object by the hash
@@ -121,7 +123,9 @@ jobs:
           esac
           printf '%s' "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::$GITHUB_REF_NAME is not vX.Y.Z"; exit 1; }
           m=$(jq -r .version npm/package.json)
-          [ "$m" = "$v" ] || { echo "::error::the tag says $v and npm/package.json says $m: the version is assigned by hand, in the manifest, before the tag"; exit 1; }
+          [ "$m" = "$v" ] || { echo "::error::the tag says $v and npm/package.json says $m: the version is assigned by hand, in the manifests, before the tag"; exit 1; }
+          c=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          [ "$c" = "$v" ] || { echo "::error::the tag says $v and Cargo.toml's [workspace.package] says $c: the version is assigned by hand, in the manifests, before the tag"; exit 1; }
           auth=(-H "Authorization: Bearer $GH_PAT" -H "Accept: application/vnd.github+json")
           # A rerun of the same tag finds its own draft; a published release at
           # this version is a version already taken, which no run may ship again.
@@ -198,10 +202,10 @@ jobs:
       - name: sccache, and the org's cache tool
         # sccache keys an object by the hash of what went into it — source
         # bytes, flags, the compiler, the CARGO_* environment — never by mtime,
-        # so the upstream files `make prepare` rewrites on every run still hit
-        # when their bytes did not move. The wrapper is set for every later
-        # step: cargo-zigbuild and cargo-xwin both run rustc through it, and
-        # cc-rs routes the C the crates carry through it too.
+        # so a fresh checkout hits wherever the bytes did not move. The wrapper
+        # is set for every later step: cargo-zigbuild and cargo-xwin both run
+        # rustc through it, and cc-rs routes the C the crates carry through it
+        # too.
         #
         # An accelerator, not a dependency: a download that fails or does not
         # match its pin leaves RUSTC_WRAPPER unset and the build runs cold.
@@ -238,19 +242,18 @@ jobs:
             echo "::notice::hanzoai/ci@$CI_SHA bin/cache did not download, so nothing is carried between runs"
           fi
       - name: Restore the Rust cache (this org's store)
-        # Before Zig, so `cargo install` starts warm too, and before `make
-        # prepare`, so the key hashes the tree as it was committed.
+        # Before Zig, so `cargo install` starts warm too.
         #
         # The name is what an archive is only valid for: the compiler, the host
         # it runs on, sccache's own version, and the target. The key is what
         # decides its contents: every tracked file that goes into the binary
-        # (git's own hashes of the manifests, the lock, the toolchain pin, the
-        # owned edits, crates/, and the upstream pin) and every flag and
-        # cross-toolchain pin in the environment, which sccache hashes too. The
-        # release's version is in none of them, so a release that changed no
-        # source restores its key exactly and recompiles only the binary crate.
-        # One that did misses, restores the newest key saved for that name, and
-        # recompiles what moved; main then saves the new key.
+        # (git's own hashes of the manifests, the lock, the toolchain pin,
+        # crates/, and the upstream pin) and every flag and cross-toolchain pin
+        # in the environment, which sccache hashes too. The release's version is
+        # in the root manifest and the lock, so a release misses its key,
+        # restores the newest key saved for that name, and recompiles hanzo-dev,
+        # which alone carries the version, and whatever else moved; it then
+        # saves the new key.
         #
         # The IAM token is minted here and handed to bin/cache alone, never to
         # GITHUB_ENV: the Build step runs every crate's build script and proc
@@ -266,7 +269,7 @@ jobs:
           set -uo pipefail
           [ -x "$RUNNER_TEMP/cache" ] || { echo "::notice::no bin/cache, so this build starts cold"; exit 0; }
           name="$({ rustc -vV; sccache --version; } | sha256sum | cut -c1-16)-$TARGET"
-          key=$({ git ls-tree -r HEAD -- Cargo.toml Cargo.lock rust-toolchain.toml patches crates upstream/codex
+          key=$({ git ls-tree -r HEAD -- Cargo.toml Cargo.lock rust-toolchain.toml crates upstream/codex
                   env | grep -E '^(RUSTFLAGS|CARGO_[A-Z0-9_]+|ZIG[A-Z0-9_]*|LLVM_[A-Z0-9_]+|XWIN_[A-Z0-9_]+|MACOS_SDK_[A-Z0-9_]+)=' | sort
                 } | sha256sum | cut -c1-32)
           echo "name=$name" >> "$GITHUB_OUTPUT"; echo "key=$key" >> "$GITHUB_OUTPUT"
@@ -317,18 +320,12 @@ jobs:
           echo "$HOME/llvm/bin" >> "$GITHUB_PATH"
           "$HOME/llvm/bin/clang-cl" --version | head -1
           cargo install cargo-xwin --version "${XWIN_CRATE_VERSION}" --locked
-      - name: Apply the owned edits to the pinned upstream
-        run: make prepare
       - name: Build
-        # The Cargo tree names the line it is heading for (0.7.0-dev.1); a
-        # release is the tag's version, and it reaches the binary crate alone:
-        # hanzo-dev's main hands DEV_VERSION to hanzo-version, and every reader
-        # beneath asks that at run time. So the manifests, the lock and every
-        # crate under the binary are the same from one release to the next, and
-        # the cache serves them. Stamping the number into the manifests instead
-        # changed every first-party crate's version, and with it every object.
-        env:
-          DEV_VERSION: ${{ needs.version.outputs.version }}
+        # The release's version is hanzo-dev's own (the root manifest's, which
+        # the version job held to the tag). Its main hands it to hanzo-version,
+        # and every reader beneath asks that at run time; Dev's libraries stay
+        # 0.0.0. So every crate under the binary is the same from one release
+        # to the next, and the cache serves them.
         run: |
           set -euo pipefail
           ulimit -n 65536 2>/dev/null || ulimit -n 10240 2>/dev/null || true
