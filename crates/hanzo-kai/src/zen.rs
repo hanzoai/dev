@@ -6,10 +6,15 @@
 //! A call streams, so the time to the first token and the time to the last are both known, and
 //! each paid call is a line in the spend file with the model Hanzo says served it.
 //!
-//! Every answered call is kept under `calls`, named by the SHA-256 of its endpoint, model and
-//! canonical request body, with the request, the response and the timings. A request that was
+//! Every call that reached the model is kept under `calls`, named by the SHA-256 of its endpoint,
+//! model and canonical request body, with the request, the response (its finish reason and the
+//! usage the server reported, reasoning tokens apart) and the timings. A request that was
 //! answered before is answered from there, makes no call and costs nothing, and its [`Generation`]
-//! says `cached`: its times are those of the lookup, not of the model.
+//! says `cached`: its times are those of the lookup, not of the model. A call that came back
+//! without an answer is kept with its error and is asked again; its tokens are spent and counted.
+//!
+//! An edit is asked for as a JSON schema (`response_format`, strict) where the server is Hanzo's,
+//! which constrains the decoding: the answer cannot be prose, nor a string with a bare quote in it.
 
 use hanzo_config::kai::Generate;
 use serde_json::Value;
@@ -21,13 +26,17 @@ use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
 
-/// Tokens an answer may be given room for.
-const TOKENS: u32 = 512;
-/// Tokens an answer that reasons first may be given room for.
+/// Tokens an answer that does not reason may be given room for: the edit, and a generator's
+/// thinking aloud before it (700 to 900 tokens, where 512 cut the JSON off).
+const TOKENS: u32 = 2048;
+/// Tokens an answer that reasons first may be given room for: the reasoning and the answer share
+/// this one cap. Measured on `openai/gpt-6-sol` over ten failing tests, a cap of 3,072 at medium
+/// effort lost five answers of ten to reasoning alone (finish length, no text); the reasoning ran
+/// 221 to 3,106 tokens at medium and 58 to 1,001 at low.
 const THOUGHT: u32 = 16384;
 /// The longest one call may take, by effort: an answer that has not come by then is not coming.
 const LOW: Duration = Duration::from_secs(60);
-const FULL: Duration = Duration::from_secs(120);
+const FULL: Duration = Duration::from_secs(240);
 /// What an unpriced call is counted at, dollars per million tokens: above any model this flow
 /// calls (`openai/gpt-6-sol`'s listed rate), so the budget is a ceiling on the spend and not a
 /// guess at it.
@@ -56,6 +65,10 @@ pub struct Generation {
     pub completion: u64,
     /// The model the server says answered.
     pub served: String,
+    /// Why the server stopped: `stop`, or `length` when the tokens ran out.
+    pub finish: String,
+    /// Tokens of `completion` the model spent reasoning, when the server says.
+    pub reasoning: u64,
     /// The model the request named.
     pub model: String,
     /// Answered from a call kept earlier: nothing was sent, nothing was spent.
@@ -87,6 +100,39 @@ pub fn key(endpoint: &str, model: &str, body: &Value) -> String {
         hash.update(part.as_bytes());
     }
     hash.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The edits an answer holds, as a strict JSON schema: what [`crate::edit::parse`] reads.
+fn schema() -> Value {
+    json!({
+        "type": "json_schema",
+        "json_schema": {
+            "name": "edits",
+            "strict": true,
+            "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["edits"],
+                "properties": {
+                    "edits": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": ["file", "line", "old", "new"],
+                            "properties": {
+                                "file": {"type": "string"},
+                                "line": {"type": "integer"},
+                                "old": {"type": "string"},
+                                "new": {"type": "string"}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    })
 }
 
 /// Zen over `POST {url}/chat/completions` as `model`.
@@ -128,6 +174,13 @@ impl Zen {
     /// The model that writes the first attempts.
     pub fn model(&self) -> &str {
         &self.model
+    }
+
+    /// The model an escalated attempt that has no edit falls back to: the generator, and never an
+    /// Anthropic model (the rule `hanzo-config` holds `generate.escalate` to).
+    pub fn fallback(&self) -> Option<&str> {
+        let lower = self.model.to_lowercase();
+        (!lower.contains("anthropic") && !lower.contains("claude")).then_some(self.model.as_str())
     }
 
     /// The model an escalated attempt is written by, when there is one.
@@ -183,9 +236,11 @@ impl Zen {
                 {"role": "user", "content": user},
             ],
         });
-        // At low effort the answer is the edit and nothing else: no reasoning is bought, and the
-        // reply is one JSON object.
-        if effort == Effort::Low {
+        // The answer is the edit and nothing else. Hanzo's API constrains the decoding to the
+        // schema; a server of another kind is asked for a JSON object.
+        if self.cloud {
+            body["response_format"] = schema();
+        } else if effort == Effort::Low {
             body["response_format"] = json!({"type": "json_object"});
         }
         match (self.cloud, effort) {
@@ -197,6 +252,8 @@ impl Zen {
         body
     }
 
+    /// One request. A reply that is not an error is a [`Generation`] whether or not it holds text:
+    /// its tokens were spent either way.
     async fn once(&self, model: &str, body: &Value, effort: Effort) -> Result<(Generation, Value), String> {
         let mut request = self
             .client
@@ -225,7 +282,8 @@ impl Zen {
             return Err(format!("zen: {status}: {msg}"));
         }
         let (mut pending, mut answer, mut first) = (String::new(), String::new(), None);
-        let (mut prompt_tokens, mut completion_tokens, mut served) = (0, 0, String::new());
+        let (mut prompt_tokens, mut completion_tokens, mut reasoning_tokens) = (0, 0, 0);
+        let (mut served, mut finish) = (String::new(), String::new());
         while let Some(chunk) = response.chunk().await.map_err(|e| format!("zen: {}", e.without_url()))? {
             pending.push_str(&String::from_utf8_lossy(&chunk));
             while let Some(at) = pending.find('\n') {
@@ -251,9 +309,13 @@ impl Zen {
                     first.get_or_insert_with(|| begun.elapsed().as_secs_f64() * 1000.0);
                     answer.push_str(piece);
                 }
+                if let Some(why) = event["choices"][0]["finish_reason"].as_str() {
+                    finish = why.to_string();
+                }
                 if let Some(u) = event.get("usage").filter(|u| u.is_object()) {
                     prompt_tokens = u["prompt_tokens"].as_u64().unwrap_or(prompt_tokens);
                     completion_tokens = u["completion_tokens"].as_u64().unwrap_or(completion_tokens);
+                    reasoning_tokens = u["completion_tokens_details"]["reasoning_tokens"].as_u64().unwrap_or(reasoning_tokens);
                 }
                 if let Some(m) = event["model"].as_str() {
                     served = m.to_string();
@@ -261,9 +323,6 @@ impl Zen {
             }
         }
         let total = begun.elapsed().as_secs_f64() * 1000.0;
-        if answer.is_empty() {
-            return Err("zen: an answer without text".into());
-        }
         if let Some(s) = headers["served"].as_str() {
             served = s.to_string();
         }
@@ -275,6 +334,8 @@ impl Zen {
                 prompt: prompt_tokens,
                 completion: completion_tokens,
                 served,
+                finish,
+                reasoning: reasoning_tokens,
                 model: model.to_string(),
                 cached: false,
             },
@@ -282,25 +343,28 @@ impl Zen {
         ))
     }
 
-    /// The call kept for `name`, when there is one.
+    /// The call kept for `name`, when there is one and it answered.
     fn kept(&self, name: &str) -> Option<Generation> {
         let dir = self.calls.as_ref()?;
         let doc: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(format!("{name}.json"))).ok()?).ok()?;
         let r = &doc["response"];
         Some(Generation {
-            text: r["text"].as_str().filter(|t| !t.is_empty())?.to_string(),
+            text: r["text"].as_str().filter(|t| !t.is_empty() && doc["error"].is_null())?.to_string(),
             first: 0.0,
             total: 0.0,
             prompt: r["prompt_tokens"].as_u64()?,
             completion: r["completion_tokens"].as_u64()?,
             served: r["served"].as_str()?.to_string(),
+            finish: r["finish_reason"].as_str().unwrap_or_default().to_string(),
+            reasoning: r["reasoning_tokens"].as_u64().unwrap_or_default(),
             model: doc["model"].as_str()?.to_string(),
             cached: true,
         })
     }
 
-    /// Keeps an answered call: its request, its response and its timings.
-    fn keep(&self, name: &str, body: &Value, g: &Generation, headers: &Value) {
+    /// Keeps a call that reached the model: its request, its response and its timings, and the
+    /// error when it had no answer.
+    fn keep(&self, name: &str, body: &Value, g: &Generation, headers: &Value, error: Option<&str>) {
         let Some(dir) = &self.calls else {
             return;
         };
@@ -309,7 +373,15 @@ impl Zen {
             "endpoint": self.url,
             "model": g.model,
             "request": body,
-            "response": {"text": g.text, "prompt_tokens": g.prompt, "completion_tokens": g.completion, "served": g.served},
+            "response": {
+                "text": g.text,
+                "prompt_tokens": g.prompt,
+                "completion_tokens": g.completion,
+                "reasoning_tokens": g.reasoning,
+                "finish_reason": g.finish,
+                "served": g.served,
+            },
+            "error": error,
             "timings": {"first_ms": g.first, "total_ms": g.total},
             "headers": headers,
             "time": crate::trace::now(),
@@ -343,7 +415,25 @@ impl Zen {
                     // A retry's wait is part of the time the answer took.
                     g.total = begun.elapsed().as_secs_f64() * 1000.0;
                     self.record(&g, &headers);
-                    self.keep(&name, &body, &g, &headers);
+                    if g.finish == "error" {
+                        // The server ended the answer with an error: what it wrote is not an answer.
+                        let why = format!("zen: the server ended the answer with an error after {} completion tokens", g.completion);
+                        self.keep(&name, &body, &g, &headers, Some(&why));
+                        last = why;
+                        tokio::time::sleep(Duration::from_millis(500 * u64::from(attempt + 1))).await;
+                        continue;
+                    }
+                    if g.text.is_empty() {
+                        let why = format!(
+                            "zen: an answer without text (finish {}, {} of {} completion tokens reasoning)",
+                            if g.finish.is_empty() { "none" } else { &g.finish },
+                            g.reasoning,
+                            g.completion
+                        );
+                        self.keep(&name, &body, &g, &headers, Some(&why));
+                        return Err(why);
+                    }
+                    self.keep(&name, &body, &g, &headers, None);
                     return Ok(g);
                 }
                 Err(e) if e.contains("503") || e.contains("502") || e.contains("429") => {
@@ -422,6 +512,111 @@ mod tests {
         assert_eq!(doc["request"]["model"], "base");
         assert_eq!(doc["response"]["text"], "{\"edits\":[]}");
         assert!(doc["timings"]["total_ms"].as_f64().unwrap() > 0.0);
+    }
+
+    /// A server answering one streamed completion by `reply(request body)`: its content, finish reason and usage.
+    async fn server(reply: impl Fn(&Value) -> (String, &'static str, Value) + Send + Sync + 'static) -> wiremock::MockServer {
+        use wiremock::matchers::{method, path};
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(move |request: &wiremock::Request| {
+                let body: Value = serde_json::from_slice(&request.body).unwrap();
+                let (content, finish, usage) = reply(&body);
+                let first = json!({"model": "m", "choices": [{"delta": {"content": content}, "finish_reason": null}]});
+                let last = json!({"model": "m", "choices": [{"delta": {}, "finish_reason": finish}]});
+                let usage = json!({"model": "m", "choices": [], "usage": usage});
+                wiremock::ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(format!("data: {first}\n\ndata: {last}\n\ndata: {usage}\n\ndata: [DONE]\n\n"))
+            })
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_answer_the_tokens_ran_out_before_is_an_error_that_is_kept_with_its_usage_and_asked_again() {
+        let usage = json!({"prompt_tokens": 70, "completion_tokens": 3072, "completion_tokens_details": {"reasoning_tokens": 3072}});
+        let server = server(move |_| (String::new(), "length", usage.clone())).await;
+        let home = tempfile::tempdir().unwrap();
+        let (calls, spend) = (home.path().join("calls"), home.path().join("spend.jsonl"));
+        let zen = zen_at(&server, &calls, &spend);
+        for _ in 0..2 {
+            let why = tokio::task::block_in_place(|| zen.generate("base", "sys", "user", Effort::Full)).unwrap_err();
+            assert_eq!(why, "zen: an answer without text (finish length, 3072 of 3072 completion tokens reasoning)");
+        }
+        assert_eq!(server.received_requests().await.unwrap().len(), 2, "a call without an answer is asked again");
+        let name = key(&zen.url, "base", &zen.body("base", "sys", "user", Effort::Full));
+        let doc: Value = serde_json::from_str(&std::fs::read_to_string(calls.join(format!("{name}.json"))).unwrap()).unwrap();
+        assert_eq!(doc["response"]["finish_reason"], "length");
+        assert_eq!(doc["response"]["reasoning_tokens"], 3072);
+        assert_eq!(doc["request"]["messages"][1]["content"], "user", "the request is kept");
+        assert!(doc["error"].as_str().unwrap().contains("without text"));
+        assert!(zen.kept(&name).is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_call_the_server_ended_with_an_error_is_asked_again_and_a_good_one_is_kept_with_what_it_cost() {
+        let usage = json!({"prompt_tokens": 10, "completion_tokens": 40, "completion_tokens_details": {"reasoning_tokens": 25}});
+        let n = std::sync::atomic::AtomicUsize::new(0);
+        let server = server(move |_| match n.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
+            0 => ("{\"edits\":[] ruin".to_string(), "error", usage.clone()),
+            _ => ("{\"edits\":[]}".to_string(), "stop", usage.clone()),
+        })
+        .await;
+        let home = tempfile::tempdir().unwrap();
+        let (calls, spend) = (home.path().join("calls"), home.path().join("spend.jsonl"));
+        let zen = zen_at(&server, &calls, &spend);
+        let g = tokio::task::block_in_place(|| zen.generate("base", "sys", "user", Effort::Low)).unwrap();
+        assert_eq!((g.text.as_str(), g.finish.as_str(), g.reasoning, g.completion), ("{\"edits\":[]}", "stop", 25, 40));
+        assert_eq!(server.received_requests().await.unwrap().len(), 2);
+        let again = tokio::task::block_in_place(|| zen.generate("base", "sys", "user", Effort::Low)).unwrap();
+        assert!(again.cached && (again.finish.as_str(), again.reasoning) == ("stop", 25));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn at_hanzos_api_an_edit_is_asked_for_as_a_schema_with_room_for_the_reasoning_and_the_answer() {
+        let generate = Generate {
+            url: "https://api.hanzo.ai/v1".into(),
+            model: "enso-flash".into(),
+            spend: std::path::PathBuf::from("/nonexistent/spend.jsonl"),
+            budget: None,
+            escalate: Some("openai/gpt-6-sol".into()),
+            calls: None,
+        };
+        let zen = Zen::new(&generate, Some("key".into()));
+        let low = zen.body("enso-flash", "s", "u", Effort::Low);
+        let full = zen.body("openai/gpt-6-sol", "s", "u", Effort::Full);
+        assert_eq!((low["reasoning_effort"].as_str(), low["max_tokens"].as_u64()), (Some("none"), Some(u64::from(TOKENS))));
+        assert_eq!((full["reasoning_effort"].as_str(), full["max_tokens"].as_u64()), (Some("low"), Some(u64::from(THOUGHT))));
+        assert_eq!(full["max_completion_tokens"], full["max_tokens"]);
+        assert!(full["max_tokens"].as_u64().unwrap() > 3072, "the answer cannot be starved by a cap of 3,072");
+        for body in [&low, &full] {
+            let format = &body["response_format"];
+            assert_eq!((format["type"].as_str(), format["json_schema"]["strict"].as_bool()), (Some("json_schema"), Some(true)));
+            let edits = &format["json_schema"]["schema"]["properties"]["edits"];
+            assert_eq!(edits["minItems"], 1);
+            assert_eq!(edits["items"]["required"], json!(["file", "line", "old", "new"]));
+        }
+        // Another server is asked for a JSON object at low effort and for nothing at full.
+        let local = Zen::new(&Generate { url: "http://127.0.0.1:1/v1".into(), ..generate }, None);
+        assert_eq!(local.body("m", "s", "u", Effort::Low)["response_format"]["type"], "json_object");
+        assert!(local.body("m", "s", "u", Effort::Full).get("response_format").is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_fallback_is_the_generator_and_never_an_anthropic_model() {
+        let at = |model: &str| {
+            Zen::new(
+                &Generate { url: "http://127.0.0.1:1/v1".into(), model: model.into(), spend: PathBuf::from("/nonexistent"), budget: None, escalate: None, calls: None },
+                None,
+            )
+        };
+        assert_eq!(at("enso-flash").fallback(), Some("enso-flash"));
+        for model in ["claude-sonnet-5-5", "anthropic/claude-haiku-5.5", "Anthropic/x"] {
+            assert_eq!(at(model).fallback(), None, "{model}");
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]
