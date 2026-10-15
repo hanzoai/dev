@@ -22,61 +22,67 @@ pub struct Edit {
     pub new: String,
 }
 
-/// The edits in a model's answer: `{"edits": [...]}`, one edit object, or a list of them.
-/// Markdown fences and prose around or before the JSON are handled robustly.
-pub fn parse(answer: &str) -> Result<Vec<Edit>, String> {
-    // 1. Try markdown code blocks: ```json ... ``` or ``` ... ```
-    if let Some(edits) = parse_code_blocks(answer) {
-        if !edits.is_empty() {
-            return Ok(edits);
-        }
-    }
-
-    // 2. Scan through all opening braces/brackets for a valid edit JSON structure
-    let mut pos = 0;
-    while let Some(offset) = answer[pos..].find(['{', '[']) {
-        let at = pos + offset;
-        pos = at + 1;
-        let mut de = serde_json::Deserializer::from_str(&answer[at..]).into_iter::<Value>();
-        if let Some(Ok(value)) = de.next() {
-            if let Ok(edits) = extract_edits(&value) {
-                if !edits.is_empty() {
-                    return Ok(edits);
-                }
-            }
-        }
-    }
-
-    Err("the answer holds no JSON".to_string())
+/// What was wrong with the JSON values that held no edits.
+#[derive(Default)]
+struct Miss {
+    /// A value that said there are none: `{"edits": []}`.
+    empty: bool,
+    /// The first value that was no edit, or did not read.
+    bad: Option<String>,
 }
 
-fn parse_code_blocks(answer: &str) -> Option<Vec<Edit>> {
-    let mut search = answer;
-    while let Some(start) = search.find("```") {
-        let after_fence = &search[start + 3..];
-        let content_start = after_fence.find('\n').map(|i| i + 1).unwrap_or(0);
-        let block_content = &after_fence[content_start..];
-        if let Some(end) = block_content.find("```") {
-            let snippet = block_content[..end].trim();
-            let mut pos = 0;
-            while let Some(offset) = snippet[pos..].find(['{', '[']) {
-                let at = pos + offset;
-                pos = at + 1;
-                let mut de = serde_json::Deserializer::from_str(&snippet[at..]).into_iter::<Value>();
-                if let Some(Ok(value)) = de.next() {
-                    if let Ok(edits) = extract_edits(&value) {
-                        if !edits.is_empty() {
-                            return Some(edits);
-                        }
-                    }
+/// The first non-empty edits among the JSON values that open in `text`.
+fn first(text: &str, miss: &mut Miss) -> Option<Vec<Edit>> {
+    let mut pos = 0;
+    while let Some(offset) = text[pos..].find(['{', '[']) {
+        let at = pos + offset;
+        pos = at + 1;
+        match serde_json::Deserializer::from_str(&text[at..]).into_iter::<Value>().next() {
+            Some(Ok(value)) => match extract_edits(&value) {
+                Ok(edits) => return Some(edits),
+                Err(why) if why == "no edits" => miss.empty = true,
+                Err(why) => {
+                    miss.bad.get_or_insert(why);
                 }
+            },
+            Some(Err(e)) => {
+                miss.bad.get_or_insert(format!("the answer's JSON does not parse: {e}"));
             }
-            search = &block_content[end + 3..];
-        } else {
-            break;
+            None => {}
         }
     }
     None
+}
+
+/// The edits in a model's answer: `{"edits": [...]}`, one edit object, or a list of them.
+/// Markdown fences and prose around or before the JSON are handled robustly. When there are
+/// none, the error says which of three it is: no edits, JSON that does not read or is no edit,
+/// or no JSON.
+pub fn parse(answer: &str) -> Result<Vec<Edit>, String> {
+    let mut miss = Miss::default();
+    // 1. Markdown code blocks: ```json ... ``` or ``` ... ```
+    let mut search = answer;
+    while let Some(start) = search.find("```") {
+        let after_fence = &search[start + 3..];
+        let content_start = after_fence.find('\n').map_or(0, |i| i + 1);
+        let block = &after_fence[content_start..];
+        let Some(end) = block.find("```") else {
+            break;
+        };
+        if let Some(edits) = first(block[..end].trim(), &mut miss) {
+            return Ok(edits);
+        }
+        search = &block[end + 3..];
+    }
+    // 2. Every opening brace or bracket of the answer, for a valid edit JSON structure.
+    if let Some(edits) = first(answer, &mut miss) {
+        return Ok(edits);
+    }
+    match miss {
+        Miss { empty: true, .. } => Err("no edits".into()),
+        Miss { bad: Some(why), .. } => Err(why),
+        _ => Err("the answer holds no JSON".into()),
+    }
 }
 
 fn extract_edits(value: &Value) -> Result<Vec<Edit>, String> {
@@ -95,6 +101,58 @@ fn extract_edits(value: &Value) -> Result<Vec<Edit>, String> {
         return Err("no edits".into());
     }
     list.iter().map(edit).collect()
+}
+
+/// Whether a refusal is about how an answer is written and not about what it says: the model can
+/// state the same edit again so that it reads and applies.
+pub fn spelling(why: &str) -> bool {
+    [
+        "holds no JSON",
+        "does not parse",
+        "is not a list",
+        "is not an edit",
+        "an edit lacks",
+        "does not stand in the file",
+        "name a longer text",
+        "is empty",
+        "no such file",
+    ]
+    .iter()
+    .any(|m| why.contains(m))
+}
+
+/// For an answer whose old text is not in its file: the file's own lines around where the edit
+/// says it stands (or where its first line is found), numbered, for the model to say it again.
+pub fn near(root: &Path, answer: &str) -> String {
+    let Ok(edits) = parse(answer) else {
+        return String::new();
+    };
+    let mut out = String::new();
+    for e in edits.iter().take(3) {
+        if !safe(&e.file) || is_test(&e.file) {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(root.join(&e.file)) else {
+            continue;
+        };
+        if locate(&text, e).is_ok() {
+            continue;
+        }
+        let lines: Vec<&str> = text.lines().collect();
+        let first = e.old.lines().map(str::trim).find(|l| !l.is_empty());
+        let at = Some(e.line as usize)
+            .filter(|l| (1..=lines.len()).contains(l))
+            .or_else(|| first.and_then(|f| lines.iter().position(|l| l.contains(f)).map(|i| i + 1)));
+        let Some(at) = at else {
+            continue;
+        };
+        let (lo, hi) = (at.saturating_sub(8).max(1), (at + 8).min(lines.len()));
+        out.push_str(&format!("\n{} as it stands, lines {lo} to {hi} (line numbers are not part of the code):\n", e.file));
+        for i in lo..=hi {
+            out.push_str(&format!("{i:>5}  {}\n", lines[i - 1]));
+        }
+    }
+    out
 }
 
 fn edit(v: &Value) -> Result<Edit, String> {
@@ -317,6 +375,41 @@ mod tests {
         assert_eq!(parse(single).unwrap()[0].line, 3);
         assert!(parse("no json here").is_err());
         assert!(parse("{\"edits\":[]}").is_err());
+    }
+
+    #[test]
+    fn a_miss_says_which_it_is_no_edits_json_that_is_no_edit_or_that_does_not_read_or_no_json() {
+        assert_eq!(parse("so {\"edits\":[]}").unwrap_err(), "no edits");
+        // Braces in the prose that do not read do not hide an honest empty answer.
+        assert_eq!(parse("I looked at {function_name}. {\"edits\":[]}").unwrap_err(), "no edits");
+        assert_eq!(parse("a {\"b\":1} c").unwrap_err(), "the answer's JSON is not an edit");
+        assert!(parse("{\"edits\":[{\"file\":\"a.py\",\"old\":\"x").unwrap_err().contains("does not parse"));
+        assert_eq!(parse("{\"edits\": 3}").unwrap_err(), "`edits` is not a list");
+        assert_eq!(parse("{\"edits\":[{\"file\":\"a.py\"}]}").unwrap_err(), "an edit lacks `old`");
+        assert_eq!(parse("no json here").unwrap_err(), "the answer holds no JSON");
+        // An answer that reasons first and ends in the edit still parses.
+        let edit = "{\"edits\":[{\"file\":\"a.py\",\"line\":1,\"old\":\"p\",\"new\":\"q\"}]}";
+        assert_eq!(parse(&format!("Try {{x}}, [] and then: {edit}")).unwrap()[0].old, "p");
+    }
+
+    #[test]
+    fn only_how_an_answer_is_written_is_said_again_and_the_file_is_shown_where_it_was_meant() {
+        for why in ["the answer holds no JSON", "the answer's JSON does not parse: x", "an edit lacks `file`", "the old text of a.py:3 does not stand in the file", "the old text of a.py:3 stands in 2 places; name a longer text"] {
+            assert!(spelling(why), "{why}");
+        }
+        for why in ["no edits", "a.py is a test file; tests are not edited", "\"\" is not a path in the tree", "the edit repeats an earlier attempt's: the workspace would be in a state already tried"] {
+            assert!(!spelling(why), "{why}");
+        }
+        let dir = tree(&[("pkg/a.py", "one\ntwo\nthree\nfour\n")]);
+        let said = "{\"edits\":[{\"file\":\"pkg/a.py\",\"line\":3,\"old\":\"thr33\",\"new\":\"x\"}]}";
+        let shown = near(dir.path(), said);
+        assert!(shown.contains("pkg/a.py as it stands, lines 1 to 4") && shown.contains("    3  three"), "{shown}");
+        // Where the line is not given, the file's own line that holds the old text's first line is found.
+        let by_text = near(dir.path(), "{\"edits\":[{\"file\":\"pkg/a.py\",\"line\":0,\"old\":\"two\\nzzz\",\"new\":\"x\"}]}");
+        assert!(by_text.contains("    2  two"), "{by_text}");
+        // A text that stands, a test file and an answer that does not read show nothing.
+        assert_eq!(near(dir.path(), "{\"edits\":[{\"file\":\"pkg/a.py\",\"line\":3,\"old\":\"three\",\"new\":\"x\"}]}"), "");
+        assert_eq!(near(dir.path(), "not json"), "");
     }
 
     #[test]
