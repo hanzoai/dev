@@ -19,6 +19,7 @@ pub mod ledger;
 pub mod locate;
 pub mod mutate;
 pub mod program;
+pub mod resolver;
 pub mod symbols;
 #[cfg(test)]
 mod testing;
@@ -30,6 +31,7 @@ pub mod zen;
 pub use agent::extension::install;
 pub use decide::Decider;
 pub use hanzo_config::kai::Kai as Settings;
+pub use resolver::ToolResolver;
 
 use hanzo_config::kai::Operation;
 use program::Program;

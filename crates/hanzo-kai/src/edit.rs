@@ -22,24 +22,73 @@ pub struct Edit {
     pub new: String,
 }
 
-/// The edits in a model's answer: `{"edits": [...]}`, one edit object, or a list of them, as the
-/// first JSON value in the text (fences and prose around it are ignored).
+/// The edits in a model's answer: `{"edits": [...]}`, one edit object, or a list of them.
+/// Markdown fences and prose around or before the JSON are handled robustly.
 pub fn parse(answer: &str) -> Result<Vec<Edit>, String> {
-    let at = answer
-        .find(['{', '['])
-        .ok_or_else(|| "the answer holds no JSON".to_string())?;
-    let value: Value = serde_json::Deserializer::from_str(&answer[at..])
-        .into_iter::<Value>()
-        .next()
-        .ok_or_else(|| "the answer holds no JSON".to_string())?
-        .map_err(|e| format!("the answer's JSON does not parse: {e}"))?;
-    let list: Vec<Value> = match &value {
+    // 1. Try markdown code blocks: ```json ... ``` or ``` ... ```
+    if let Some(edits) = parse_code_blocks(answer) {
+        if !edits.is_empty() {
+            return Ok(edits);
+        }
+    }
+
+    // 2. Scan through all opening braces/brackets for a valid edit JSON structure
+    let mut pos = 0;
+    while let Some(offset) = answer[pos..].find(['{', '[']) {
+        let at = pos + offset;
+        pos = at + 1;
+        let mut de = serde_json::Deserializer::from_str(&answer[at..]).into_iter::<Value>();
+        if let Some(Ok(value)) = de.next() {
+            if let Ok(edits) = extract_edits(&value) {
+                if !edits.is_empty() {
+                    return Ok(edits);
+                }
+            }
+        }
+    }
+
+    Err("the answer holds no JSON".to_string())
+}
+
+fn parse_code_blocks(answer: &str) -> Option<Vec<Edit>> {
+    let mut search = answer;
+    while let Some(start) = search.find("```") {
+        let after_fence = &search[start + 3..];
+        let content_start = after_fence.find('\n').map(|i| i + 1).unwrap_or(0);
+        let block_content = &after_fence[content_start..];
+        if let Some(end) = block_content.find("```") {
+            let snippet = block_content[..end].trim();
+            let mut pos = 0;
+            while let Some(offset) = snippet[pos..].find(['{', '[']) {
+                let at = pos + offset;
+                pos = at + 1;
+                let mut de = serde_json::Deserializer::from_str(&snippet[at..]).into_iter::<Value>();
+                if let Some(Ok(value)) = de.next() {
+                    if let Ok(edits) = extract_edits(&value) {
+                        if !edits.is_empty() {
+                            return Some(edits);
+                        }
+                    }
+                }
+            }
+            search = &block_content[end + 3..];
+        } else {
+            break;
+        }
+    }
+    None
+}
+
+fn extract_edits(value: &Value) -> Result<Vec<Edit>, String> {
+    let list: Vec<Value> = match value {
         Value::Array(a) => a.clone(),
         Value::Object(o) if o.contains_key("edits") => value["edits"]
             .as_array()
             .cloned()
             .ok_or_else(|| "`edits` is not a list".to_string())?,
-        Value::Object(_) => vec![value.clone()],
+        Value::Object(o) if o.contains_key("file") || (o.contains_key("old") && o.contains_key("new")) => {
+            vec![value.clone()]
+        }
         _ => return Err("the answer's JSON is not an edit".into()),
     };
     if list.is_empty() {
@@ -257,6 +306,11 @@ mod tests {
         let a = "Here:\n```json\n{\"edits\":[{\"file\":\"a.py\",\"line\":3,\"old\":\"x - 1\",\"new\":\"x + 1\"}]}\n```\n";
         assert_eq!(
             parse(a).unwrap(),
+            vec![Edit { file: "a.py".into(), line: 3, old: "x - 1".into(), new: "x + 1".into() }]
+        );
+        let with_braces_in_prose = "I looked at {function_name} and [array_index]. The fix is:\n```json\n{\"edits\":[{\"file\":\"a.py\",\"line\":3,\"old\":\"x - 1\",\"new\":\"x + 1\"}]}\n```\n";
+        assert_eq!(
+            parse(with_braces_in_prose).unwrap(),
             vec![Edit { file: "a.py".into(), line: 3, old: "x - 1".into(), new: "x + 1".into() }]
         );
         let single = "{\"file\":\"a.py\",\"line\":\"3\",\"old\":\"a\",\"new\":\"b\"}";

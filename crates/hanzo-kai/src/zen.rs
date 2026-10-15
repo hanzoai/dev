@@ -24,7 +24,7 @@ use std::time::Instant;
 /// Tokens an answer may be given room for.
 const TOKENS: u32 = 512;
 /// Tokens an answer that reasons first may be given room for.
-const THOUGHT: u32 = 3072;
+const THOUGHT: u32 = 16384;
 /// The longest one call may take, by effort: an answer that has not come by then is not coming.
 const LOW: Duration = Duration::from_secs(60);
 const FULL: Duration = Duration::from_secs(120);
@@ -170,10 +170,12 @@ impl Zen {
 
     /// The request `model` is asked for `user` under `system`.
     fn body(&self, model: &str, system: &str, user: &str, effort: Effort) -> Value {
+        let max_tokens = if effort == Effort::Full { THOUGHT } else { TOKENS };
         let mut body = json!({
             "model": model,
             "temperature": 0,
-            "max_tokens": if effort == Effort::Full { THOUGHT } else { TOKENS },
+            "max_tokens": max_tokens,
+            "max_completion_tokens": max_tokens,
             "stream": true,
             "stream_options": {"include_usage": true},
             "messages": [
@@ -188,7 +190,7 @@ impl Zen {
         }
         match (self.cloud, effort) {
             (true, Effort::Low) => body["reasoning_effort"] = json!("none"),
-            (true, Effort::Full) => body["reasoning_effort"] = json!("medium"),
+            (true, Effort::Full) => body["reasoning_effort"] = json!("low"),
             (false, Effort::Low) => body["chat_template_kwargs"] = json!({"enable_thinking": false}),
             (false, Effort::Full) => body["chat_template_kwargs"] = json!({"enable_thinking": true}),
         }

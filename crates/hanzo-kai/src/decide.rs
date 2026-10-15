@@ -22,7 +22,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 /// How long a specific capability stays in cooldown after a failure before a half-open probe.
@@ -135,17 +134,6 @@ impl Call {
     }
 }
 
-impl Call {
-    pub fn simple(mode: Mode, k: Option<usize>, base: Option<Verdict>) -> Self {
-        Self {
-            mode,
-            k,
-            base,
-            capability: None,
-            timeout: None,
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Decision {
@@ -255,13 +243,6 @@ impl Decider {
             .and_then(|h| h.until)
             .is_some_and(|until| Instant::now() < until)
     }
-
-<<<<<<< HEAD
-    fn fell(&self, program: &str, why: &str) {
-        let mut all = self.health();
-        let h = all.entry(program.to_string()).or_default();
-=======
-    /// Whether a specific capability is down. Returns false if Closed or HalfOpen (permits probe).
     pub fn is_capability_down(&self, capability: &str) -> bool {
         let mut caps = self
             .capabilities
