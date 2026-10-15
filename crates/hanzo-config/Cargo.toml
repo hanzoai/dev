@@ -1,6 +1,9 @@
 [package]
 name = "hanzo-config"
+# Never the release's version: upstream crates depend on this one, and a version
+# that moved would recompile everything above them. Not published.
 version = "0.0.0"
+publish = false
 edition = "2021"
 license = "Apache-2.0"
 description = "Hanzo Dev config integration"

@@ -1,6 +1,9 @@
 [package]
 name = "hanzo-kai"
+# Never the release's version: upstream crates depend on this one, and a version
+# that moved would recompile everything above them. Not published.
 version = "0.0.0"
+publish = false
 edition.workspace = true
 license.workspace = true
 description = "Kai in the Dev loop over the Decisions API: decisions per turn, their trace, and flows."
