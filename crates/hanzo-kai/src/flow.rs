@@ -30,6 +30,11 @@
 //! configured, does `escalate` end the flow for a person to look. A run that passes the failing
 //! command is not done until the tests around it ([`crate::wide`]) show no new failure.
 //!
+//! An answer refused for how it is written goes back to the model once to say again, and an
+//! escalated attempt that still has no edit goes to the generator once; each call is an action in
+//! the ledger and a line of the trace's `generations`. Neither is an attempt: the tests judge the
+//! edit that results, as for any other.
+//!
 //! Every step is timed, and the trace carries the times with Kai's answers.
 
 use crate::decide;
@@ -220,7 +225,8 @@ pub struct Attempt {
     pub escalated: bool,
     /// Who moved the next attempt to the escalation model: `kai`, `failed twice` or `recover`.
     pub switch: Option<String>,
-    pub generation: Option<Generation>,
+    /// Every call the attempt made, in order: the model's, its repair, the fallback's.
+    pub generations: Vec<Generation>,
     /// The end of the tests' output after the edit.
     pub after: String,
     /// Step -> milliseconds.
@@ -306,7 +312,7 @@ impl Report {
             ));
             let times: Vec<String> = a.ms.iter().map(|(k, v)| format!("{k} {v:.0}")).collect();
             out.push_str(&format!("  ms: {}\n", times.join(", ")));
-            if let Some(g) = &a.generation {
+            for g in &a.generations {
                 out.push_str(&format!(
                     "  model {}{}: first token {:.0} ms, {:.0} ms, {} in, {} out\n",
                     g.served,
@@ -646,6 +652,15 @@ fn prompt(command: &str, goal: &str, failure: &str, code: &str, last: Option<&At
     }
     out.push_str(&format!("\nCode:\n\n{code}\n"));
     out
+}
+
+/// What a refused answer is asked again with: the prompt it was given, the answer, why it was
+/// refused and where the file stands. The reply is the edit, in the same schema.
+fn repair(user: &str, answer: &str, why: &str, near: &str) -> String {
+    format!(
+        "{user}\nYour answer was:\n{}\n\nIt was refused: {why}. The files are unchanged.\n{near}\nSay the same edit again so that it reads and applies. The reply is the edit and nothing else.\n",
+        decide::cut(answer, 2000)
+    )
 }
 
 /// A short stable id for a run.
@@ -1249,90 +1264,133 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
             escalated: escalation.is_some(),
             switch: None,
             kai_applied: false,
-            generation: None,
+            generations: Vec::new(),
             after: String::new(),
             ms: IndexMap::new(),
         };
-        let mut g = ledger.action(&revision, Operation::Generate { model: model.clone(), effort: attempt.effort.clone() }, source, if escalation.is_some() { "recover: the escalation model writes the attempt" } else if n == 1 { "the first edit" } else { "recover: another attempt" });
-        g.evidence = saw.iter().map(|(f, d)| format!("{f}@{d}")).collect();
-        g.expected = "one JSON edit that applies".into();
-        g.advance(Status::Attempted);
-        let begun = Instant::now();
-        let generated = setup.zen.generate(&model, SYSTEM, &user, effort);
-        g.ms = ms(begun);
-        ms_of.insert("generate".into(), g.ms);
-        let answer = match generated {
-            Ok(x) => {
-                g.result = json!({"model": x.model, "served": x.served, "cached": x.cached, "escalated": escalation.is_some(), "first_ms": x.first, "total_ms": x.total, "prompt_tokens": x.prompt, "completion_tokens": x.completion});
-                let text = x.text.clone();
-                attempt.generation = Some(x);
-                g.advance(Status::Completed);
-                Ok(text)
-            }
-            Err(why) => {
-                g.fail(&why);
-                g.result = json!({"error": why});
-                Err(why)
-            }
-        };
-        ledger.record(&g);
+        // An answer refused for how it is written (it does not read as an edit, or its text is not
+        // in the file) goes back to the model once, with the reason and the file where it was
+        // meant, to say again. An escalated attempt that still has no edit goes to the generator
+        // once, over the same prompt. Each call is an action of its own.
+        let fallback = escalation.and(setup.zen.fallback()).map(str::to_string);
+        let mut asking = (
+            model.clone(),
+            effort,
+            user.clone(),
+            if escalation.is_some() { "recover: the escalation model writes the attempt" } else if n == 1 { "the first edit" } else { "recover: another attempt" },
+            "first",
+        );
+        let (g, e, after, model) = loop {
+            let (model, effort, user, why, stage) = asking.clone();
+            let mut g = ledger.action(&revision, Operation::Generate { model: model.clone(), effort: format!("{effort:?}").to_lowercase() }, source, why);
+            g.evidence = saw.iter().map(|(f, d)| format!("{f}@{d}")).collect();
+            g.expected = "one JSON edit that applies".into();
+            g.advance(Status::Attempted);
+            let begun = Instant::now();
+            let generated = setup.zen.generate(&model, SYSTEM, &user, effort);
+            g.ms = ms(begun);
+            *ms_of.entry("generate".into()).or_insert(0.0) += g.ms;
+            let answer = match generated {
+                Ok(x) => {
+                    g.result = json!({
+                        "model": x.model, "served": x.served, "cached": x.cached, "escalated": escalation.is_some(), "stage": stage,
+                        "first_ms": x.first, "total_ms": x.total, "prompt_tokens": x.prompt, "completion_tokens": x.completion,
+                        "reasoning_tokens": x.reasoning, "finish": x.finish,
+                    });
+                    let text = x.text.clone();
+                    attempt.generations.push(x);
+                    g.advance(Status::Completed);
+                    Ok(text)
+                }
+                Err(why) => {
+                    g.fail(&why);
+                    g.result = json!({"error": why, "stage": stage});
+                    Err(why)
+                }
+            };
+            ledger.record(&g);
 
-        // The edit is made against the revision and the files the model saw.
-        let mut e = ledger.action(&revision, Operation::Edit { edits: Vec::new() }, source, "make the model's edit");
-        e.preconditions = std::iter::once(Precondition::Revision { revision: revision.clone() })
-            .chain(saw.iter().map(|(f, d)| Precondition::Digest { file: f.clone(), digest: d.clone() }))
-            .collect();
-        e.authorization = "auto: a source file of the tree, never a test".into();
-        e.expected = "the edit applies and the tests then pass".into();
-        e.advance(Status::Attempted);
-        let begun = Instant::now();
-        let held = e.preconditions.iter().find_map(|p| match p {
-            Precondition::Revision { revision: r } if *r != ledger::revision_over(root, &touched, &origin) => Some(format!("the workspace is no longer at revision {r}")),
-            Precondition::Digest { file, digest } if ledger::digest(&std::fs::read(root.join(file)).unwrap_or_default()) != *digest => {
-                Some(format!("{file} changed since the model read it"))
-            }
-            _ => None,
-        });
-        let applied = match (&answer, held) {
-            (_, Some(why)) => Err(format!("a precondition does not hold: {why}")),
-            (Ok(text), None) => edit::parse(text).and_then(|edits| edit::apply(root, &edits)),
-            (Err(why), None) => Err(why.clone()),
-        };
-        let after = match &applied {
-            Ok(made) => {
-                let files = made.files();
-                for (f, d) in made.originals() {
-                    origin.entry(f).or_insert(d);
+            // The edit is made against the revision and the files the model saw.
+            let mut e = ledger.action(&revision, Operation::Edit { edits: Vec::new() }, source, "make the model's edit");
+            e.preconditions = std::iter::once(Precondition::Revision { revision: revision.clone() })
+                .chain(saw.iter().map(|(f, d)| Precondition::Digest { file: f.clone(), digest: d.clone() }))
+                .collect();
+            e.authorization = "auto: a source file of the tree, never a test".into();
+            e.expected = "the edit applies and the tests then pass".into();
+            e.advance(Status::Attempted);
+            let begun = Instant::now();
+            let held = e.preconditions.iter().find_map(|p| match p {
+                Precondition::Revision { revision: r } if *r != ledger::revision_over(root, &touched, &origin) => Some(format!("the workspace is no longer at revision {r}")),
+                Precondition::Digest { file, digest } if ledger::digest(&std::fs::read(root.join(file)).unwrap_or_default()) != *digest => {
+                    Some(format!("{file} changed since the model read it"))
                 }
-                let rev = ledger::revision_over(root, &files.iter().chain(touched.iter()).cloned().collect::<Vec<_>>(), &origin);
-                // The same edit again is no new state: recover chooses another action.
-                if tried.contains(&rev) {
-                    edit::revert(root, made);
-                    Err("the edit repeats an earlier attempt's: the workspace would be in a state already tried".to_string())
-                } else {
-                    Ok((made.clone(), files, rev))
+                _ => None,
+            });
+            let applied = match (&answer, held) {
+                (_, Some(why)) => Err(format!("a precondition does not hold: {why}")),
+                (Ok(text), None) => edit::parse(text).and_then(|edits| edit::apply(root, &edits)),
+                (Err(why), None) => Err(why.clone()),
+            };
+            let after = match &applied {
+                Ok(made) => {
+                    let files = made.files();
+                    for (f, d) in made.originals() {
+                        origin.entry(f).or_insert(d);
+                    }
+                    let rev = ledger::revision_over(root, &files.iter().chain(touched.iter()).cloned().collect::<Vec<_>>(), &origin);
+                    // The same edit again is no new state: recover chooses another action.
+                    if tried.contains(&rev) {
+                        edit::revert(root, made);
+                        Err("the edit repeats an earlier attempt's: the workspace would be in a state already tried".to_string())
+                    } else {
+                        Ok((made.clone(), files, rev))
+                    }
+                }
+                Err(why) => Err(why.clone()),
+            };
+            e.ms = ms(begun);
+            *ms_of.entry("apply".into()).or_insert(0.0) += e.ms;
+            match &after {
+                Ok((made, files, rev)) => {
+                    e.advance(Status::Applied);
+                    e.operation = Operation::Edit { edits: made.summary.clone() };
+                    e.result = json!({"files": files, "revision": rev, "model": model, "stage": stage});
+                    attempt.applied = true;
+                    attempt.refused = None;
+                    attempt.edits = made.summary.clone();
+                }
+                Err(why) => {
+                    e.advance(Status::Rejected);
+                    e.result = json!({"error": why, "model": model, "stage": stage});
+                    attempt.refused = Some(why.clone());
                 }
             }
-            Err(why) => Err(why.clone()),
+            ledger.record(&e);
+            let Err(why) = &after else {
+                break (g, e, after, model);
+            };
+            asking = if let (true, Ok(text)) = (stage == "first" && edit::spelling(why), &answer) {
+                (
+                    model.clone(),
+                    Effort::Low,
+                    repair(&user, text, why, &edit::near(root, text)),
+                    "repair: the answer is said again so that it reads and applies",
+                    "repair",
+                )
+            } else if let (Some(generator), "first" | "repair") = (&fallback, stage) {
+                (
+                    generator.clone(),
+                    Effort::Low,
+                    user.clone(),
+                    "fallback: the escalation model gave no edit that applies; the generator writes it",
+                    "fallback",
+                )
+            } else {
+                break (g, e, after, model);
+            };
         };
-        e.ms = ms(begun);
-        ms_of.insert("apply".into(), e.ms);
+        attempt.model.clone_from(&model);
         let mut test = Value::Null;
-        match &after {
-            Ok((made, files, rev)) => {
-                e.advance(Status::Applied);
-                e.operation = Operation::Edit { edits: made.summary.clone() };
-                e.result = json!({"files": files, "revision": rev, "model": model});
-                attempt.applied = true;
-                attempt.edits = made.summary.clone();
-            }
-            Err(why) => {
-                e.advance(Status::Rejected);
-                e.result = json!({"error": why, "model": model});
-                attempt.refused = Some(why.clone());
-            }
-        }
-        ledger.record(&e);
 
         // The tests are the verifier: only their record settles the outcome.
         let mut after_rev = revision.clone();
@@ -1618,17 +1676,22 @@ fn line(order: &Order, turn: Option<&Decision>, attempt: &Attempt, run: &str, wh
         step.applied = attempt.kai_applied;
         ops.insert("turn".to_string(), step);
     }
-    let generation = attempt.generation.as_ref().map(|g| {
-        json!({"model": g.model, "served": g.served, "cached": g.cached, "first_ms": g.first, "total_ms": g.total, "prompt_tokens": g.prompt, "completion_tokens": g.completion})
-    });
+    let generations: Vec<Value> = attempt
+        .generations
+        .iter()
+        .map(|g| {
+            json!({"model": g.model, "served": g.served, "cached": g.cached, "first_ms": g.first, "total_ms": g.total, "prompt_tokens": g.prompt,
+                   "completion_tokens": g.completion, "reasoning_tokens": g.reasoning, "finish": g.finish})
+        })
+        .collect();
     Line {
         time: crate::trace::now(),
         request: format!("{run}#{}", attempt.n),
         family: "dev.flow".into(),
         sku: SKU.into(),
         ms: attempt.ms.values().sum(),
-        prompt_tokens: attempt.generation.as_ref().map_or(0, |g| g.prompt as i64),
-        completion_tokens: attempt.generation.as_ref().map_or(0, |g| g.completion as i64),
+        prompt_tokens: attempt.generations.iter().map(|g| g.prompt as i64).sum(),
+        completion_tokens: attempt.generations.iter().map(|g| g.completion as i64).sum(),
         outcome: crate::trace::Outcome {
             status: i64::from(!attempt.passed),
             finish: attempt.taken.clone(),
@@ -1646,7 +1709,7 @@ fn line(order: &Order, turn: Option<&Decision>, attempt: &Attempt, run: &str, wh
                 "refused": attempt.refused,
                 "recover": why,
                 "ms": attempt.ms,
-                "generation": generation,
+                "generations": generations,
             }),
             ..Default::default()
         },

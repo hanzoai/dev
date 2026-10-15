@@ -180,6 +180,24 @@ and the tools they run. Search, saved actions and the shell classifier are hanzo
 - **Generation** is Zen or enso-flash over an OpenAI-compatible endpoint (`kai.toml` `[generate]`),
   called when needed, streamed so the first token and the last are both timed; a paid call is a
   line in the spend file with the model the server says served it, and the budget stops it.
+- **The edit's path from a model** (`zen.rs`, `edit.rs`, `flow.rs`). At Hanzo's API an edit is asked for
+  as a strict JSON schema (`edits`, at least one, each `file`, `line`, `old`, `new`). `openai/gpt-6-sol`
+  decodes under it; `enso-flash` is asked and may still think aloud before the JSON (700 to 900 tokens,
+  so an answer that does not reason has 2,048 of room), but with at least one edit required it stopped
+  answering `{"edits":[]}` (6 of 13 calls without, 0 of 19 with). A call that reasons has one cap of 16,384
+  for reasoning and answer together, at `reasoning_effort` low: a cap of 3,072 at medium lost five answers
+  of ten to reasoning alone (finish `length`, 3,072 of 3,072 completion tokens reasoning, no text), where
+  medium reasoned 221 to 3,106 tokens and low 58 to 1,001. Every call that reached the model is kept under
+  `generate.calls` with its finish reason and usage, reasoning tokens apart; a call without text, or ended by
+  the server with an error, is kept with its error, billed in the spend file, and asked again. `edit::parse`
+  says which miss it is: no edits, JSON that does not read or is no edit, or no JSON. An answer refused for
+  how it is written (it does not read, or its old text is not in the file) goes back to the model once, with
+  the reason and the file's own lines where the edit said it stood (`stage: repair`); an escalated attempt
+  that still has no edit goes to the generator once over the same prompt (`stage: fallback`, never an
+  Anthropic model). Each is an action of its own in the ledger, the trace line lists every call
+  (`generations`), and the edit is tested as ever: a parsed answer is not a solve. An answer of no edits is
+  not said again (it costs the attempt, as before); `{"edits":[]}` from a model that names the file it would
+  need to see is a context failure, not an output one.
 - **Kai's transport** is `decide::Transport`: HTTP `POST /v1/decisions` today. The local engine
   over ZAP on a Unix socket is the other implementation, and needs the engine to serve a `decisions`
   method (the engine's ZAP module and `hanzo-zap` 0.2.1 are stubs; `zapwire` is the working Rust

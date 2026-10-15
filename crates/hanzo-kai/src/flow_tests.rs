@@ -199,7 +199,7 @@ async fn the_model_writes_the_edit_when_search_finds_none_and_the_flow_is_done()
     for step in ["bundle", "generate", "apply", "test"] {
         assert!(a.ms.contains_key(step), "{step}: {:?}", a.ms);
     }
-    assert_eq!(a.generation.as_ref().unwrap().prompt, 100);
+    assert_eq!(a.generations[0].prompt, 100);
 
     let sent = asked_zen(&zen).await;
     assert_eq!(sent.len(), 1);
@@ -212,7 +212,7 @@ async fn the_model_writes_the_edit_when_search_finds_none_and_the_flow_is_done()
     assert_eq!(line["family"], "dev.flow");
     assert_eq!(line["sku"], "flow.fix@2");
     assert_eq!(line["outcome"]["finish"], "done");
-    assert_eq!(line["outcome"]["result"]["generation"]["prompt_tokens"], 100);
+    assert_eq!(line["outcome"]["result"]["generations"][0]["prompt_tokens"], 100);
 
     // A run that passes needs no inference: the ledger says so, and Kai was not asked about it.
     let led = ledger(repo.path());
@@ -605,6 +605,118 @@ async fn the_escalation_model_spent_the_flow_ends_for_a_person() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_answer_that_does_not_read_is_said_again_once_in_the_same_attempt() {
+    let repo = repo();
+    let kai = honest().await;
+    // A bare quote inside `new`: the JSON does not parse. The repair sees why and the old answer.
+    let broken = "{\"edits\":[{\"file\":\"src/add.py\",\"line\":2,\"old\":\"a ^ b\",\"new\":\"a + b\" \"}]}";
+    let zen = testing::zen(move |prompt| if prompt.contains("It was refused") { fix() } else { broken.to_string() }).await;
+    let report = run_flow(repo.path(), &kai.uri(), &zen, options(3, Control::Kai)).await;
+    assert_eq!(report.outcome, "done", "{}", report.summary());
+    assert_eq!(report.attempts.len(), 1, "the repair is no attempt of its own");
+    assert_eq!(report.attempts[0].generations.len(), 2);
+    assert_eq!(report.attempts[0].refused, None);
+    let sent = asked_zen(&zen).await;
+    assert_eq!(sent.len(), 2);
+    assert!(sent[1].contains("the answer's JSON does not parse") && sent[1].contains("Your answer was:"), "{}", sent[1]);
+    let led = ledger(repo.path());
+    let stages: Vec<&str> = ops(&led, "generate").iter().map(|l| l["result"]["stage"].as_str().unwrap()).collect();
+    assert_eq!(stages, ["first", "repair"]);
+    let edits: Vec<&str> = ops(&led, "edit").iter().map(|l| l["status"].as_str().unwrap()).collect();
+    assert_eq!(edits[0], "rejected");
+    assert!(edits[1..].iter().all(|s| *s == "applied"), "{edits:?}");
+    assert_eq!(read(repo.path()), FIXED);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_text_that_is_not_in_the_file_is_said_again_with_the_file_where_it_was_meant() {
+    let repo = repo();
+    let kai = honest().await;
+    let zen = testing::zen(|prompt| {
+        if prompt.contains("It was refused") {
+            assert!(prompt.contains("src/add.py as it stands") && prompt.contains("    2  "), "{prompt}");
+            fix()
+        } else {
+            edit_json("return a xor b", "return a + b")
+        }
+    })
+    .await;
+    let report = run_flow(repo.path(), &kai.uri(), &zen, options(3, Control::Kai)).await;
+    assert_eq!(report.outcome, "done", "{}", report.summary());
+    assert_eq!(report.attempts.len(), 1);
+    assert_eq!(asked_zen(&zen).await.len(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_answer_that_says_no_edit_is_not_said_again() {
+    let repo = repo();
+    let kai = honest().await;
+    let zen = testing::zen(|prompt| if prompt.contains("Your previous edit") { fix() } else { "{\"edits\":[]}".to_string() }).await;
+    let report = run_flow(repo.path(), &kai.uri(), &zen, options(3, Control::Kai)).await;
+    assert_eq!(report.outcome, "done", "{}", report.summary());
+    assert_eq!(report.attempts.len(), 2, "no edit costs the attempt, as before");
+    assert_eq!(report.attempts[0].generations.len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_escalated_attempt_with_no_edit_goes_to_the_generator_once() {
+    let repo = repo();
+    let kai = kai(0, |_| ("escalate", 0.9)).await;
+    // The escalation model has nothing to say; the generator, asked again over the same prompt, fixes it.
+    let n = std::sync::atomic::AtomicUsize::new(0);
+    let zen = testing::zen_model(move |model, _| match model {
+        "zen-strong" => "{\"edits\":[]}".to_string(),
+        _ if n.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 => edit_json("a ^ b", "a | b"),
+        _ => fix(),
+    })
+    .await;
+    let report = run_escalating(repo.path(), &kai.uri(), &zen, options(3, Control::Kai)).await;
+    assert_eq!(report.outcome, "done", "{}", report.summary());
+    assert_eq!(testing::models(&zen).await, ["zen-test", "zen-strong", "zen-test"]);
+    assert_eq!(report.attempts.len(), 2);
+    assert_eq!(report.attempts[1].generations.len(), 2);
+    assert_eq!(report.attempts[1].model, "zen-test", "the edit that passed was the generator's");
+    assert!(report.attempts[1].escalated);
+    let led = ledger(repo.path());
+    let stages: Vec<(&str, &str)> = ops(&led, "generate")
+        .iter()
+        .map(|l| (l["operation"]["model"].as_str().unwrap(), l["result"]["stage"].as_str().unwrap()))
+        .collect();
+    assert_eq!(stages, [("zen-test", "first"), ("zen-strong", "first"), ("zen-test", "fallback")]);
+    assert_eq!(read(repo.path()), FIXED);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_fallback_is_one_call_and_an_edit_that_applied_is_not_a_failure_to_write() {
+    let repo = repo();
+    let kai = kai(0, |_| ("escalate", 0.9)).await;
+    // The escalation model's edit is valid and wrong: it is tested and reverted, and no fallback is made.
+    let zen = testing::zen_model(|model, _| edit_json("a ^ b", if model == "zen-strong" { "a | c" } else { "a | b" })).await;
+    let report = run_escalating(repo.path(), &kai.uri(), &zen, options(2, Control::Kai)).await;
+    assert_eq!(report.outcome, "escalate");
+    assert_eq!(testing::models(&zen).await, ["zen-test", "zen-strong"]);
+
+    // The escalation model answering nothing at all, and the generator nothing either: one fallback, then the flow ends.
+    let repo = repo_with(BUGGY);
+    let zen = testing::zen(|_| "{\"edits\":[]}".to_string()).await;
+    let report = run_escalating(repo.path(), &kai.uri(), &zen, options(3, Control::Kai)).await;
+    assert_eq!(report.outcome, "escalate");
+    // The generator is asked once more over the escalated attempt's prompt; here that is the prompt it
+    // answered before, so the kept call answers and no fourth request is sent.
+    let led = ledger(repo.path());
+    let calls: Vec<(&str, &str, bool)> = ops(&led, "generate")
+        .iter()
+        .map(|l| (l["operation"]["model"].as_str().unwrap(), l["result"]["stage"].as_str().unwrap(), l["result"]["cached"].as_bool().unwrap()))
+        .collect();
+    assert_eq!(
+        calls,
+        [("zen-test", "first", false), ("zen-test", "first", false), ("zen-strong", "first", false), ("zen-test", "fallback", true)]
+    );
+    assert_eq!(testing::models(&zen).await, ["zen-test", "zen-test", "zen-strong"]);
+    assert_eq!(read(repo.path()), BUGGY);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn rule_control_escalates_after_two_failures_and_asks_kai_nothing() {
     let repo = repo();
     let kai = honest().await;
@@ -627,12 +739,12 @@ async fn a_kept_call_answers_a_rerun_and_the_ledger_says_cached() {
         let setup = setup_with(repo.path(), &kai.uri(), &zen, None, calls.path());
         let report = run_with(setup, repo.path().to_path_buf(), options(3, Control::Kai)).await.unwrap();
         assert_eq!(report.outcome, "done");
-        seen.push((report.attempts[0].generation.as_ref().unwrap().cached, ops(&ledger(repo.path()), "generate").last().unwrap()["result"]["cached"].clone()));
+        seen.push((report.attempts[0].generations[0].cached, ops(&ledger(repo.path()), "generate").last().unwrap()["result"]["cached"].clone()));
     }
     assert_eq!(seen, [(false, json!(false)), (true, json!(true))]);
     assert_eq!(asked_zen(&zen).await.len(), 1, "the second run made no call");
     let lines = testing::lines(&trace(repo.path()), 2);
-    assert_eq!(lines[1]["outcome"]["result"]["generation"]["cached"], true);
+    assert_eq!(lines[1]["outcome"]["result"]["generations"][0]["cached"], true);
 }
 
 /// A `pytest` that runs every `test_*.py` under the paths it is given with python3, naming those
