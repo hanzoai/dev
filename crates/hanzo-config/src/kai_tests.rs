@@ -67,3 +67,30 @@ fn an_unknown_operation_or_mode_is_refused() {
     assert!(Kai::parse("[ops.risk]\nmode = \"strict\"", home.path()).is_err());
     assert!(Kai::parse("[ops.risk]\nmodel = \"x\"", home.path()).is_err());
 }
+
+#[test]
+fn the_escalation_model_is_gpt_6_sol_at_hanzo_and_never_an_anthropic_model() {
+    let home = tempfile::tempdir().unwrap();
+    let kai = Kai::parse("", home.path()).unwrap();
+    assert_eq!(kai.generate.escalate.as_deref(), Some("openai/gpt-6-sol"));
+    let named = Kai::parse("[generate]\nescalate = \"openai/gpt-6-astra\"\n", home.path()).unwrap();
+    assert_eq!(named.generate.escalate.as_deref(), Some("openai/gpt-6-astra"));
+    // A local server has no such model unless kai.toml names one.
+    let local = Kai::parse("[generate]\nurl = \"http://127.0.0.1:18310/v1\"\n", home.path()).unwrap();
+    assert_eq!(local.generate.escalate, None);
+    let off = Kai::parse("[generate]\nescalate = \"\"\n", home.path()).unwrap();
+    assert_eq!(off.generate.escalate, None);
+    for model in ["anthropic/claude-sonnet-5.5", "claude-opus-5-5", "Anthropic/x"] {
+        let err = Kai::parse(&format!("[generate]\nescalate = \"{model}\"\n"), home.path()).unwrap_err();
+        assert!(err.to_string().contains("Anthropic"), "{model}: {err}");
+    }
+}
+
+#[test]
+fn calls_are_kept_under_the_home_unless_kai_toml_names_a_directory() {
+    let home = tempfile::tempdir().unwrap();
+    let kai = Kai::parse("[generate]\ncalls = \"calls\"\n", home.path()).unwrap();
+    assert_eq!(kai.generate.calls, Some(home.path().join("calls")));
+    let abs = Kai::parse("[generate]\ncalls = \"/var/calls\"\n", home.path()).unwrap();
+    assert_eq!(abs.generate.calls, Some(PathBuf::from("/var/calls")));
+}

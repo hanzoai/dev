@@ -23,6 +23,13 @@
 //! nothing; under rule control, or when Kai does not answer, the ranking, the tests and the
 //! budget decide alone. A flow that ends anywhere but `done` leaves the tree as it found it.
 //!
+//! To escalate is to hand the next attempt to a stronger model (`generate.escalate` in
+//! `kai.toml`, `openai/gpt-6-sol` at Hanzo's API): Kai's `fix.turn@1` answering `escalate`, two
+//! attempts failed, or recovery finding nothing changed moves the flow to it, and the ledger says
+//! which, and which model wrote each edit. Only when the stronger model is spent too, or none is
+//! configured, does `escalate` end the flow for a person to look. A run that passes the failing
+//! command is not done until the tests around it ([`crate::wide`]) show no new failure.
+//!
 //! Every step is timed, and the trace carries the times with Kai's answers.
 
 use crate::decide;
@@ -35,6 +42,7 @@ use crate::find::Finder;
 use crate::find::Tgrep;
 use crate::ledger;
 use crate::ledger::Ledger;
+use crate::ledger::Action;
 use crate::ledger::Operation;
 use crate::ledger::Precondition;
 use crate::ledger::Source;
@@ -52,6 +60,8 @@ use crate::tools;
 use crate::trace::Line;
 use crate::trace::Step;
 use crate::trace::Trace;
+use crate::wide;
+use crate::wide::Wide;
 use crate::zen::Effort;
 use crate::zen::Generation;
 use hanzo_config::kai::Mode;
@@ -199,9 +209,17 @@ pub struct Attempt {
     pub kept: bool,
     /// Kai's answer to `next` and its probability.
     pub kai: Option<(String, f64)>,
+    /// Kai's answer was what moved the flow off the rule's path.
+    pub kai_applied: bool,
     pub rule: String,
     pub taken: String,
     pub effort: String,
+    /// The model that wrote the edit.
+    pub model: String,
+    /// Written by the escalation model.
+    pub escalated: bool,
+    /// Who moved the next attempt to the escalation model: `kai`, `failed twice` or `recover`.
+    pub switch: Option<String>,
     pub generation: Option<Generation>,
     /// The end of the tests' output after the edit.
     pub after: String,
@@ -269,11 +287,12 @@ impl Report {
                 .map(|(s, p)| format!(", site {s} ({p:.2})"))
                 .unwrap_or_default();
             out.push_str(&format!(
-                "attempt {}: {} (by {}{site}, {} effort), edit {}, tests {}; next: kai {kai}, rule {} -> {}\n",
+                "attempt {}: {} (by {}{site}, {} effort, {}), edit {}, tests {}; next: kai {kai}, rule {} -> {}{}\n",
                 a.n,
                 a.shown.first().map_or("-", String::as_str),
                 a.by,
                 a.effort,
+                a.model,
                 match (&a.refused, a.applied, a.kept) {
                     (Some(why), _, _) => format!("refused ({why})"),
                     (None, true, true) => "applied and kept".into(),
@@ -283,13 +302,19 @@ impl Report {
                 if a.passed { "pass" } else { "fail" },
                 a.rule,
                 a.taken,
+                a.switch.as_ref().map_or(String::new(), |by| format!(" (the next attempt by the escalation model: {by})")),
             ));
             let times: Vec<String> = a.ms.iter().map(|(k, v)| format!("{k} {v:.0}")).collect();
             out.push_str(&format!("  ms: {}\n", times.join(", ")));
             if let Some(g) = &a.generation {
                 out.push_str(&format!(
-                    "  model {}: first token {:.0} ms, {:.0} ms, {} in, {} out\n",
-                    g.served, g.first, g.total, g.prompt, g.completion
+                    "  model {}{}: first token {:.0} ms, {:.0} ms, {} in, {} out\n",
+                    g.served,
+                    if g.cached { " (kept call)" } else { "" },
+                    g.first,
+                    g.total,
+                    g.prompt,
+                    g.completion
                 ));
             }
         }
@@ -749,6 +774,24 @@ fn discover(finder: &dyn Finder, root: &Path, plan: &mut Plan, ledger: &Ledger, 
     (added, a.ms)
 }
 
+/// The tests around the failing ones, after an edit that passed the failing command: the run and
+/// the tests failing that did not before. Recorded as an action of its own. `None` without a
+/// wider command.
+fn widen(wide: &Option<Wide>, root: &Path, ledger: &Ledger, revision: &str) -> Option<wide::Verdict> {
+    let w = wide.as_ref()?;
+    let mut a = ledger.action(revision, Operation::Test { command: w.command.clone() }, Source::Rule, "the tests around the failing ones, before done");
+    a.preconditions = vec![Precondition::Revision { revision: revision.into() }];
+    a.expected = "no test fails that did not fail before the edit".into();
+    a.advance(Status::Attempted);
+    let v = w.check(root);
+    a.ms = v.run["ms"].as_f64().unwrap_or(0.0);
+    a.advance(Status::Completed);
+    a.advance(if v.new.is_empty() { Status::Verified } else { Status::Rejected });
+    a.result = json!({"new": v.new, "timed_out": v.timed_out, "code": v.run["code"]});
+    ledger.record(&a);
+    Some(v)
+}
+
 /// What the choice of site, action and effort is made from.
 struct Context<'a> {
     goal: &'a str,
@@ -938,6 +981,18 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
     let errors0 = diagnostic::errors(&output);
     report.failing = failing;
     let test_ms = steps["test0"];
+    // The tests around the failing ones, once before any edit: what fails there already.
+    let begun = Instant::now();
+    let wide = Wide::before(root, command, &output);
+    if let Some(w) = &wide {
+        let mut a = ledger.action("base", Operation::Test { command: w.command.clone() }, Source::Rule, "the tests around the failing ones, before any edit: what already fails there");
+        a.advance(Status::Attempted);
+        a.advance(Status::Completed);
+        a.ms = ms(begun);
+        a.result = json!({"code": w.before_code, "failing": w.before});
+        ledger.record(&a);
+        steps.insert("wide0".into(), a.ms);
+    }
 
     let mut seen: Option<Seen> = None;
     let mut look = true;
@@ -947,6 +1002,9 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
     // The edits tried and put back, so the model is not asked the same question twice.
     let mut history: Vec<String> = Vec::new();
     let mut strategy = Strategy::Retry;
+    // The next attempts are the escalation model's, and the attempts that did not pass so far.
+    let mut stronger = false;
+    let mut lost = 0u32;
     let mut refused = 0;
     let mut n = 0u32;
     let mut guard = 0u32;
@@ -1080,8 +1138,20 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
                             let test = tools::test(root, command, options.limit);
                             t.ms = ms(begun);
                             *steps.entry("verify".into()).or_insert(0.0) += t.ms;
-                            let out = test["output"].as_str().unwrap_or_default().to_string();
-                            let passed = test["passed"] == true;
+                            let mut out = test["output"].as_str().unwrap_or_default().to_string();
+                            let mut passed = test["passed"] == true;
+                            let mut test = test;
+                            // Passing the failing command is not done until the tests around it agree.
+                            let mut broke = None;
+                            if passed && let Some(v) = widen(&wide, root, &ledger, &rev) {
+                                *steps.entry("wide".into()).or_insert(0.0) += v.run["ms"].as_f64().unwrap_or(0.0);
+                                if !v.new.is_empty() {
+                                    broke = Some(format!("the candidate passed the failing command and broke {}", v.new.join(", ")));
+                                    passed = false;
+                                    out = v.run["output"].as_str().unwrap_or_default().to_string();
+                                    test = v.run;
+                                }
+                            }
                             let now = diagnostic::failures(&out);
                             t.advance(Status::Completed);
                             let better = !passed && now >= 1 && now < failing && !diagnostic::broken(&out) && diagnostic::errors(&out) <= errors0;
@@ -1132,7 +1202,7 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
                                 continue 'solve;
                             }
                             edit::revert(root, &made);
-                            fast.note = "the candidate passed in a copy and not in the tree".into();
+                            fast.note = broke.unwrap_or_else(|| "the candidate passed in a copy and not in the tree".into());
                         }
                         Err(why) => {
                             e.advance(Status::Rejected);
@@ -1148,14 +1218,18 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
 
         // The model writes the edit.
         n += 1;
-        let effort = if strategy == Strategy::Full { Effort::Full } else { s.order.effort };
+        // After an escalation the escalation model writes, at full effort over a wider view.
+        let escalation = stronger.then(|| setup.zen.escalation()).flatten();
+        let model = escalation.unwrap_or_else(|| setup.zen.model()).to_string();
+        let wider = strategy == Strategy::Full || escalation.is_some();
+        let effort = if wider { Effort::Full } else { s.order.effort };
         let mut ms_of: IndexMap<String, f64> = IndexMap::new();
         let begun = Instant::now();
         let (code, shown, saw) = excerpts(
             &s.plan,
             &mut s.tree,
             &s.order.by_rank,
-            LINES * n.min(3) * if strategy == Strategy::Full { 2 } else { 1 },
+            LINES * n.min(3) * if wider { 2 } else { 1 },
             if n == 1 { COVER } else { 0.999 },
         );
         ms_of.insert("bundle".into(), ms(begun));
@@ -1175,21 +1249,25 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
             rule: String::new(),
             taken: String::new(),
             effort: format!("{effort:?}").to_lowercase(),
+            model: model.clone(),
+            escalated: escalation.is_some(),
+            switch: None,
+            kai_applied: false,
             generation: None,
             after: String::new(),
             ms: IndexMap::new(),
         };
-        let mut g = ledger.action(&revision, Operation::Generate { model: setup.zen.model().into(), effort: attempt.effort.clone() }, source, if n == 1 { "the first edit" } else { "recover: another attempt" });
+        let mut g = ledger.action(&revision, Operation::Generate { model: model.clone(), effort: attempt.effort.clone() }, source, if escalation.is_some() { "recover: the escalation model writes the attempt" } else if n == 1 { "the first edit" } else { "recover: another attempt" });
         g.evidence = saw.iter().map(|(f, d)| format!("{f}@{d}")).collect();
         g.expected = "one JSON edit that applies".into();
         g.advance(Status::Attempted);
         let begun = Instant::now();
-        let generated = setup.zen.generate(SYSTEM, &user, effort);
+        let generated = setup.zen.generate(&model, SYSTEM, &user, effort);
         g.ms = ms(begun);
         ms_of.insert("generate".into(), g.ms);
         let answer = match generated {
             Ok(x) => {
-                g.result = json!({"served": x.served, "first_ms": x.first, "total_ms": x.total, "prompt_tokens": x.prompt, "completion_tokens": x.completion});
+                g.result = json!({"model": x.model, "served": x.served, "cached": x.cached, "escalated": escalation.is_some(), "first_ms": x.first, "total_ms": x.total, "prompt_tokens": x.prompt, "completion_tokens": x.completion});
                 let text = x.text.clone();
                 attempt.generation = Some(x);
                 g.advance(Status::Completed);
@@ -1248,13 +1326,13 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
             Ok((made, files, rev)) => {
                 e.advance(Status::Applied);
                 e.operation = Operation::Edit { edits: made.summary.clone() };
-                e.result = json!({"files": files, "revision": rev});
+                e.result = json!({"files": files, "revision": rev, "model": model});
                 attempt.applied = true;
                 attempt.edits = made.summary.clone();
             }
             Err(why) => {
                 e.advance(Status::Rejected);
-                e.result = json!({"error": why});
+                e.result = json!({"error": why, "model": model});
                 attempt.refused = Some(why.clone());
             }
         }
@@ -1279,6 +1357,15 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
             test = tools::test(root, command, options.limit);
             t.ms = ms(begun);
             ms_of.insert("test".into(), t.ms);
+            // Passing the failing command is not done until the tests around it agree.
+            if test["passed"] == true
+                && let Some(v) = widen(&wide, root, &ledger, rev)
+            {
+                ms_of.insert("wide".into(), v.run["ms"].as_f64().unwrap_or(0.0));
+                if !v.new.is_empty() {
+                    test = v.run;
+                }
+            }
             let text = test["output"].as_str().unwrap_or_default();
             attempt.after = tail(text, OUTPUT);
             attempt.passed = test["passed"] == true;
@@ -1295,6 +1382,7 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
         // A run that passes needs no decision. A run that fails: Kai says what next, and reads
         // the patch, in one request.
         let mut turn: Option<Decision> = None;
+        let mut turn_action: Option<Action> = None;
         if attempt.applied && !attempt.passed {
             if kai {
                 ledger.fallback(&after_rev, "turn", "rule", "kai", "the verifier failed: what next, and is the patch correct and grounded");
@@ -1326,7 +1414,7 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
                     a.fail(report.missing.as_deref().unwrap_or(""));
                 }
                 a.result = json!({"answers": turn.as_ref().and_then(decide::first).map(|r| r.answers.clone())});
-                ledger.record(&a);
+                turn_action = Some(a);
             }
         } else if attempt.passed {
             ledger.write(
@@ -1348,11 +1436,8 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
             "retry" => &["retry", "escalate"],
             _ => &["escalate"],
         };
-        let mut taken = signal
-            .and_then(decide::accepted)
-            .filter(|answer| permitted.contains(answer))
-            .unwrap_or(rule)
-            .to_string();
+        let answer = signal.and_then(decide::accepted).filter(|answer| permitted.contains(answer));
+        let kai_escalates = answer == Some("escalate") && !attempt.passed;
 
         // recover: the failure's fingerprint and the state it happened in decide what is next.
         let progress = attempt.applied
@@ -1362,15 +1447,14 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
             && !diagnostic::broken(test["output"].as_str().unwrap_or_default())
             && diagnostic::errors(test["output"].as_str().unwrap_or_default()) <= errors0;
         let mut why = String::new();
+        let mut stuck = false;
         if attempt.applied && !attempt.passed {
             refused = 0;
             failures.push(Failure { fingerprint: after_fp.clone(), revision: after_rev.clone() });
             let (next, reason) = recover(&failures, strategy, remaining);
             why = reason;
             // Fewer tests failing is a change of state: recover does not call it a replay.
-            if taken == "retry" && next == Strategy::Escalate && !progress {
-                taken = "escalate".into();
-            }
+            stuck = remaining > 0 && next == Strategy::Escalate && !progress;
             strategy = if progress { Strategy::Retry } else { next };
         } else if !attempt.applied {
             // An edit that was refused is not a failed run: the model is told why, and twice in a
@@ -1379,16 +1463,68 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
             strategy = if refused >= 2 { Strategy::Full } else { Strategy::Retry };
             why = format!("the edit was refused: {}", attempt.refused.clone().unwrap_or_default());
         }
+        // To escalate is to hand the next attempt to the escalation model: Kai said so, two
+        // attempts have failed, or recovery found nothing changed. With none to hand it to, or
+        // with it spent, there is nothing stronger and a person must look.
+        let mut switch: Option<&str> = None;
+        let mut ends = false;
+        if !attempt.passed {
+            lost += 1;
+            let can = setup.zen.escalation().is_some();
+            if remaining == 0 {
+                ends = true;
+            } else if can && !stronger {
+                switch = if kai_escalates {
+                    Some("kai")
+                } else if lost >= 2 {
+                    Some("failed twice")
+                } else if stuck {
+                    Some("recover")
+                } else {
+                    None
+                };
+            } else if stuck || (kai_escalates && !can) {
+                ends = true;
+            }
+        }
+        stronger |= switch.is_some();
+        let taken = if attempt.passed {
+            "done".to_string()
+        } else if ends || switch.is_some() {
+            "escalate".to_string()
+        } else {
+            "retry".to_string()
+        };
+        // Kai's answer acted when it was what moved the flow off the rule's path.
+        let kai_applied = kai_escalates && (switch == Some("kai") || (ends && remaining > 0));
+        if let Some(mut a) = turn_action {
+            let effect = match (switch, ends) {
+                (Some(_), _) => format!("the next attempt is by {}", setup.zen.escalation().unwrap_or_default()),
+                (None, true) => "the flow ends: a person must look".to_string(),
+                (None, false) => "the next attempt is the same model's".to_string(),
+            };
+            if turn.is_some() {
+                a.advance(if answer.is_some() { Status::Selected } else { Status::Abstained });
+            }
+            a.result["answer"] = json!(signal.map(|s| json!({"answer": s.answer, "certainty": s.certainty, "accepted": s.accepted})));
+            a.result["applied"] = json!(kai_applied);
+            a.result["taken"] = json!(taken);
+            a.result["effect"] = json!(effect);
+            ledger.record(&a);
+        }
         if !attempt.passed {
             ledger.write(
                 "recover",
                 json!({"id": ledger.next(), "attempt": n, "fingerprint": after_fp, "revision": after_rev,
                        "prior": e.id, "strategy": strategy.name(), "taken": taken, "reason": why,
+                       "model": model, "switch": switch, "next_model": if stronger { setup.zen.escalation() } else { Some(setup.zen.model()) },
                        "failing": {"before": failing, "now": now}, "progress": progress,
-                       "status": if taken == "escalate" { "escalated" } else { "attempted" }}),
+                       "status": if ends { "escalated" } else { "attempted" }}),
             );
         }
         attempt.kai = signal.map(|s| (s.answer.clone(), s.certainty));
+        attempt.kai_applied = kai_applied;
+        attempt.switch = switch.map(str::to_string);
         attempt.rule = rule.into();
         attempt.taken = taken.clone();
         attempt.ms = ms_of;
@@ -1403,7 +1539,7 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
             && let Ok((made, _, _)) = &after
             && attempt.applied
         {
-            if progress && taken == "retry" {
+            if progress && !ends {
                 attempt.kept = true;
                 kept_summary.extend(made.summary.clone());
                 kept.push(made.clone());
@@ -1439,8 +1575,8 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
             report.outcome = taken;
             break;
         }
-        if taken != "retry" {
-            report.outcome = taken;
+        if ends {
+            report.outcome = "escalate".into();
             break;
         }
         last = Some(attempt);
@@ -1483,15 +1619,11 @@ fn line(order: &Order, turn: Option<&Decision>, attempt: &Attempt, run: &str, wh
             .map(|(a, _)| a)
             .unwrap_or_default();
         step.taken = attempt.taken.clone();
-        step.applied = attempt
-            .kai
-            .as_ref()
-            .is_some_and(|(a, _)| *a == attempt.taken)
-            && attempt.taken != attempt.rule;
+        step.applied = attempt.kai_applied;
         ops.insert("turn".to_string(), step);
     }
     let generation = attempt.generation.as_ref().map(|g| {
-        json!({"served": g.served, "first_ms": g.first, "total_ms": g.total, "prompt_tokens": g.prompt, "completion_tokens": g.completion})
+        json!({"model": g.model, "served": g.served, "cached": g.cached, "first_ms": g.first, "total_ms": g.total, "prompt_tokens": g.prompt, "completion_tokens": g.completion})
     });
     Line {
         time: crate::trace::now(),
@@ -1512,6 +1644,9 @@ fn line(order: &Order, turn: Option<&Decision>, attempt: &Attempt, run: &str, wh
                 "shown": attempt.shown,
                 "by": attempt.by,
                 "effort": attempt.effort,
+                "model": attempt.model,
+                "escalated": attempt.escalated,
+                "switch": attempt.switch,
                 "refused": attempt.refused,
                 "recover": why,
                 "ms": attempt.ms,

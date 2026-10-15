@@ -24,6 +24,7 @@ pub mod symbols;
 mod testing;
 pub mod tools;
 pub mod trace;
+pub mod wide;
 pub mod zen;
 
 pub use agent::extension::install;

@@ -8,7 +8,7 @@
       "criteria": {
         "done": "the tests pass: the fix is finished",
         "retry": "the tests still fail, and another attempt could fix them",
-        "escalate": "the tests still fail, and more attempts will not help: a person must look"
+        "escalate": "the tests still fail, and this model's attempts will not fix them: a stronger model should write the next"
       }
     },
     "done": {
@@ -38,6 +38,6 @@
     }
   },
   "thresholds": {
-    "next": 0.5
+    "next": 0.34
   }
 }

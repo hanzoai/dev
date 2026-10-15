@@ -135,6 +135,8 @@ struct Writing {
     model: Option<String>,
     spend: Option<PathBuf>,
     budget: Option<f64>,
+    escalate: Option<String>,
+    calls: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -157,7 +159,17 @@ pub struct Generate {
     pub spend: PathBuf,
     /// Dollars the spend file may hold before a call is refused; none, no limit.
     pub budget: Option<f64>,
+    /// The model the attempt after an escalation is written by, at the same endpoint and with
+    /// the same credential: `openai/gpt-6-sol` at Hanzo's API, none elsewhere. Never an
+    /// Anthropic model.
+    pub escalate: Option<String>,
+    /// Where each model call is kept, by the hash of its request; a repeated request is answered
+    /// from there. `$HOME/.cache/hanzo/dev/calls` unless `kai.toml` names another.
+    pub calls: Option<PathBuf>,
 }
+
+/// The escalation model at Hanzo's API unless `kai.toml` names another.
+pub const ESCALATE: &str = "openai/gpt-6-sol";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Kai {
@@ -219,6 +231,25 @@ impl Kai {
                 (op.name(), settings)
             })
             .collect();
+        let generate_url = file
+            .generate
+            .url
+            .unwrap_or_else(|| crate::API_BASE.to_string())
+            .trim_end_matches('/')
+            .to_string();
+        let escalate = match file.generate.escalate {
+            Some(name) if name.trim().is_empty() => None,
+            Some(name) => Some(name),
+            None => crate::is_hanzo(Some(&generate_url)).then(|| ESCALATE.to_string()),
+        };
+        if let Some(name) = &escalate {
+            let lower = name.to_lowercase();
+            if lower.contains("anthropic") || lower.contains("claude") {
+                return Err(invalid(format!(
+                    "generate.escalate: {name:?} is an Anthropic model; the escalation model is not"
+                )));
+            }
+        }
         Ok(Kai {
             url: file
                 .url
@@ -231,12 +262,7 @@ impl Kai {
                     .unwrap_or_else(|| PathBuf::from("kai/decisions.jsonl")),
             ),
             generate: Generate {
-                url: file
-                    .generate
-                    .url
-                    .unwrap_or_else(|| crate::API_BASE.to_string())
-                    .trim_end_matches('/')
-                    .to_string(),
+                url: generate_url,
                 model: file.generate.model.unwrap_or_else(|| "zen6-coder".to_string()),
                 spend: home.join(
                     file.generate
@@ -244,6 +270,10 @@ impl Kai {
                         .unwrap_or_else(|| PathBuf::from("kai/spend.jsonl")),
                 ),
                 budget: file.generate.budget,
+                escalate,
+                calls: file.generate.calls.map(|dir| home.join(dir)).or_else(|| {
+                    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/hanzo/dev/calls"))
+                }),
             },
             ops,
         })

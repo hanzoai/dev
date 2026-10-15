@@ -79,19 +79,26 @@ async fn honest() -> MockServer {
     .await
 }
 
-/// Kai and Zen at their servers, the trace and the ledger in the repository's `.git`.
-fn setup(root: &Path, kai: &str, zen: &MockServer) -> Setup {
+/// Kai and Zen at their servers, the trace and the ledger in the repository's `.git`. Kept calls
+/// are in `calls`; `escalate` names the model an escalated attempt is written by.
+fn setup_with(root: &Path, kai: &str, zen: &MockServer, escalate: Option<&str>, calls: &Path) -> Setup {
     let home = root.join(".git/dev");
     std::fs::create_dir_all(&home).unwrap();
+    let escalate = escalate.map(|m| format!("escalate = \"{m}\"\n")).unwrap_or_default();
     std::fs::write(
         home.join("kai.toml"),
         format!(
-            "url = \"{kai}/v1\"\ntrace = \"kai.jsonl\"\n[generate]\nurl = \"{}/v1\"\nmodel = \"zen-test\"\n",
-            zen.uri()
+            "url = \"{kai}/v1\"\ntrace = \"kai.jsonl\"\n[generate]\nurl = \"{}/v1\"\nmodel = \"zen-test\"\n{escalate}calls = \"{}\"\n",
+            zen.uri(),
+            calls.display()
         ),
     )
     .unwrap();
     Setup::new(&home, || None).unwrap()
+}
+
+fn setup(root: &Path, kai: &str, zen: &MockServer) -> Setup {
+    setup_with(root, kai, zen, None, &root.join(".git/dev/calls"))
 }
 
 fn options(max: u32, control: Control) -> Options {
@@ -108,6 +115,13 @@ fn options(max: u32, control: Control) -> Options {
 
 async fn run_flow(root: &Path, kai: &str, zen: &MockServer, options: Options) -> Report {
     let setup = setup(root, kai, zen);
+    let root = root.to_path_buf();
+    run_with(setup, root, options).await.unwrap()
+}
+
+/// [`run_flow`] with `zen-strong` as the escalation model.
+async fn run_escalating(root: &Path, kai: &str, zen: &MockServer, options: Options) -> Report {
+    let setup = setup_with(root, kai, zen, Some("zen-strong"), &root.join(".git/dev/calls"));
     let root = root.to_path_buf();
     run_with(setup, root, options).await.unwrap()
 }
@@ -514,4 +528,191 @@ fn spelled_takes_quoted_messages_and_error_tails_and_leaves_paths_and_asserts() 
     assert!(got.contains(&"negative values are not allowed here".to_string()), "{got:?}");
     assert!(got.contains(&"missing key in the table".to_string()), "{got:?}");
     assert!(!got.iter().any(|s| s.contains("src/a.py") || s.starts_with("assert")), "{got:?}");
+}
+
+/// The ledger's actions of one operation.
+fn ops<'a>(led: &'a [Value], op: &str) -> Vec<&'a Value> {
+    led.iter().filter(|l| l["operation"]["type"] == op).collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn kai_answering_escalate_hands_the_next_attempt_to_the_escalation_model() {
+    let repo = repo();
+    let kai = kai(0, |_| ("escalate", 0.9)).await;
+    let zen = testing::zen_model(|model, _| if model == "zen-strong" { fix() } else { edit_json("a ^ b", "a | b") }).await;
+    let report = run_escalating(repo.path(), &kai.uri(), &zen, options(3, Control::Kai)).await;
+    assert_eq!(report.outcome, "done", "{}", report.summary());
+    assert_eq!(testing::models(&zen).await, ["zen-test", "zen-strong"]);
+    let models: Vec<&str> = report.attempts.iter().map(|a| a.model.as_str()).collect();
+    assert_eq!(models, ["zen-test", "zen-strong"]);
+    assert_eq!(report.attempts[0].switch.as_deref(), Some("kai"));
+    assert!(report.attempts[0].kai_applied && !report.attempts[1].escalated == false);
+    assert_eq!(read(repo.path()), FIXED);
+
+    let led = ledger(repo.path());
+    // The turn decision is Kai's, selected, and applied; it says what it moved.
+    let turn = ops(&led, "decide").into_iter().find(|l| l["operation"]["program"] == "fix.turn@1").unwrap();
+    assert_eq!((turn["source"].as_str(), turn["status"].as_str()), (Some("kai"), Some("selected")));
+    assert_eq!(turn["result"]["applied"], true);
+    assert_eq!(turn["result"]["taken"], "escalate");
+    assert!(turn["result"]["effect"].as_str().unwrap().contains("zen-strong"), "{turn}");
+    // Which model wrote each edit.
+    let generates: Vec<&str> = ops(&led, "generate").iter().map(|l| l["operation"]["model"].as_str().unwrap()).collect();
+    assert_eq!(generates, ["zen-test", "zen-strong"]);
+    let edits: Vec<&str> = ops(&led, "edit").iter().filter_map(|l| l["result"]["model"].as_str()).collect();
+    assert_eq!(edits, ["zen-test", "zen-strong"]);
+    assert!(led.iter().any(|l| l["kind"] == "recover" && l["switch"] == "kai" && l["next_model"] == "zen-strong"));
+    // The trace line says the same.
+    let lines = testing::lines(&trace(repo.path()), 2);
+    assert_eq!(lines[0]["ops"]["turn"]["applied"], true);
+    assert_eq!(lines[0]["outcome"]["escalated"], true);
+    assert_eq!(lines[1]["outcome"]["result"]["model"], "zen-strong");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_failed_attempts_hand_the_third_to_the_escalation_model_whatever_kai_says() {
+    let repo = repo();
+    let kai = kai(0, |_| ("retry", 0.9)).await;
+    let n = std::sync::atomic::AtomicUsize::new(0);
+    let zen = testing::zen_model(move |model, _| {
+        if model == "zen-strong" {
+            fix()
+        } else {
+            edit_json("a ^ b", &format!("a | {}", n.fetch_add(1, std::sync::atomic::Ordering::SeqCst)))
+        }
+    })
+    .await;
+    let report = run_escalating(repo.path(), &kai.uri(), &zen, options(3, Control::Kai)).await;
+    assert_eq!(report.outcome, "done", "{}", report.summary());
+    assert_eq!(testing::models(&zen).await, ["zen-test", "zen-test", "zen-strong"]);
+    assert_eq!(report.attempts[1].switch.as_deref(), Some("failed twice"));
+    assert!(report.attempts.iter().all(|a| !a.kai_applied), "Kai asked for nothing the rule did not");
+    let led = ledger(repo.path());
+    let turns: Vec<&Value> = ops(&led, "decide").into_iter().filter(|l| l["operation"]["program"] == "fix.turn@1").collect();
+    assert!(turns.iter().all(|t| t["result"]["applied"] == false && t["status"] == "selected"), "{turns:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_escalation_model_spent_the_flow_ends_for_a_person() {
+    let repo = repo();
+    let kai = kai(0, |_| ("escalate", 0.9)).await;
+    let zen = testing::zen(|_| edit_json("a ^ b", "0")).await;
+    let report = run_escalating(repo.path(), &kai.uri(), &zen, options(3, Control::Kai)).await;
+    assert_eq!(report.outcome, "escalate");
+    assert_eq!(testing::models(&zen).await.first().map(String::as_str), Some("zen-test"));
+    assert_eq!(testing::models(&zen).await.get(1).map(String::as_str), Some("zen-strong"));
+    assert_eq!(read(repo.path()), BUGGY, "the tree is as it was");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rule_control_escalates_after_two_failures_and_asks_kai_nothing() {
+    let repo = repo();
+    let kai = honest().await;
+    let zen = testing::zen_model(|model, _| if model == "zen-strong" { fix() } else { edit_json("a ^ b", "a | 7") }).await;
+    let report = run_escalating(repo.path(), &kai.uri(), &zen, options(3, Control::Rule)).await;
+    assert_eq!(report.outcome, "done", "{}", report.summary());
+    assert_eq!(testing::models(&zen).await, ["zen-test", "zen-test", "zen-strong"]);
+    assert_eq!(testing::asked(&kai).await, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_kept_call_answers_a_rerun_and_the_ledger_says_cached() {
+    let calls = tempfile::tempdir().unwrap();
+    let kai = honest().await;
+    let zen = testing::zen(|_| fix()).await;
+    let repo = repo();
+    let mut seen = Vec::new();
+    for _ in 0..2 {
+        std::fs::write(repo.path().join("src/add.py"), BUGGY).unwrap();
+        let setup = setup_with(repo.path(), &kai.uri(), &zen, None, calls.path());
+        let report = run_with(setup, repo.path().to_path_buf(), options(3, Control::Kai)).await.unwrap();
+        assert_eq!(report.outcome, "done");
+        seen.push((report.attempts[0].generation.as_ref().unwrap().cached, ops(&ledger(repo.path()), "generate").last().unwrap()["result"]["cached"].clone()));
+    }
+    assert_eq!(seen, [(false, json!(false)), (true, json!(true))]);
+    assert_eq!(asked_zen(&zen).await.len(), 1, "the second run made no call");
+    let lines = testing::lines(&trace(repo.path()), 2);
+    assert_eq!(lines[1]["outcome"]["result"]["generation"]["cached"], true);
+}
+
+/// A `pytest` that runs every `test_*.py` under the paths it is given with python3, naming those
+/// that fail as pytest's summary does.
+const PYTEST: &str = "#!/bin/sh\nfail=0\nfor p in \"$@\"; do\n  for f in $(find \"$p\" -name 'test_*.py' | sort); do\n    if ! out=$(PYTHONPATH=src python3 \"$f\" 2>&1); then\n      echo \"$out\"\n      echo \"FAILED $f::test - failed\"\n      fail=1\n    fi\n  done\ndone\nexit $fail\n";
+const MUL_TEST: &str = "from add import mul\n\n\ndef test_mul():\n    assert mul(2, 3) == 6\n\n\ntest_mul()\n";
+
+fn with_neighbour(extra: Option<(&str, &str)>) -> tempfile::TempDir {
+    let dir = repo();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("tools")).unwrap();
+    std::fs::write(root.join("tools/pytest"), PYTEST).unwrap();
+    std::fs::write(root.join("tests/test_mul.py"), MUL_TEST).unwrap();
+    if let Some((name, text)) = extra {
+        std::fs::write(root.join("tests").join(name), text).unwrap();
+    }
+    dir
+}
+
+fn wide_options() -> Options {
+    Options {
+        task: json!({"test": "sh tools/pytest tests/test_add.py", "goal": "make the test pass"}),
+        ..options(3, Control::Kai)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn passing_the_failing_command_is_not_done_while_a_test_beside_it_fails() {
+    let repo = with_neighbour(None);
+    let kai = honest().await;
+    // The first edit fixes add and breaks mul, which the failing command does not run.
+    let zen = testing::zen(|prompt| {
+        if prompt.contains("Your previous edit") {
+            fix()
+        } else {
+            json!({"edits": [
+                {"file": "src/add.py", "line": 2, "old": "a ^ b", "new": "a + b"},
+                {"file": "src/add.py", "line": 6, "old": "a * b", "new": "a * b + 1"},
+            ]})
+            .to_string()
+        }
+    })
+    .await;
+    let report = run_flow(repo.path(), &kai.uri(), &zen, wide_options()).await;
+    assert_eq!(report.outcome, "done", "{}", report.summary());
+    assert_eq!(report.attempts.len(), 2, "{}", report.summary());
+    assert!(!report.attempts[0].passed, "the failing command passed and the attempt was not done");
+    assert!(report.attempts[0].after.contains("test_mul.py"), "{}", report.attempts[0].after);
+    assert_eq!(read(repo.path()), FIXED);
+    let sent = asked_zen(&zen).await;
+    assert!(sent[1].contains("test_mul.py"), "the retry sees what the wider tests said: {}", sent[1]);
+    let led = ledger(repo.path());
+    let wide: Vec<&Value> = ops(&led, "test").into_iter().filter(|l| l["operation"]["command"] == "sh tools/pytest tests").collect();
+    assert!(wide.iter().any(|l| l["status"] == "rejected" && l["result"]["new"][0].as_str().is_some_and(|n| n.contains("test_mul.py"))), "{wide:?}");
+    assert!(wide.iter().any(|l| l["status"] == "verified"), "and the last, clean: {wide:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failure_beside_the_failing_test_that_was_there_before_the_edit_is_not_the_edits() {
+    let repo = with_neighbour(Some(("test_old.py", "assert False\n")));
+    let kai = honest().await;
+    let zen = testing::zen(|_| fix()).await;
+    let report = run_flow(repo.path(), &kai.uri(), &zen, wide_options()).await;
+    assert_eq!(report.outcome, "done", "{}", report.summary());
+    assert_eq!(report.attempts.len(), 1);
+    assert_eq!(read(repo.path()), FIXED);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_search_candidate_that_breaks_a_neighbour_is_undone_and_the_model_writes_the_edit() {
+    let repo = repo_with(SIMPLE);
+    let root = repo.path();
+    std::fs::create_dir_all(root.join("tools")).unwrap();
+    std::fs::write(root.join("tools/pytest"), PYTEST).unwrap();
+    // A neighbour that passes only while `a - b` is not what add does... and fails once add adds.
+    std::fs::write(root.join("tests/test_neighbour.py"), "from add import add\n\n\ndef test_n():\n    assert add(5, 3) == 2\n\n\ntest_n()\n").unwrap();
+    let kai = honest().await;
+    let zen = testing::zen(|_| json!({"edits": [{"file": "src/add.py", "line": 2, "old": "a - b", "new": "abs(a) + abs(b)"}]}).to_string()).await;
+    let report = run_flow(root, &kai.uri(), &zen, Options { task: json!({"test": "sh tools/pytest tests/test_add.py", "goal": "make the test pass"}), ..options(1, Control::Kai) }).await;
+    // The one-operator fix passes the failing command and breaks the neighbour: it is not kept as done.
+    assert!(!report.fast.as_ref().unwrap().solved, "{}", report.summary());
+    assert!(report.fast.as_ref().unwrap().note.contains("test_neighbour.py"), "{:?}", report.fast);
 }

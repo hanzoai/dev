@@ -118,11 +118,17 @@ pub fn on(q: &Question, label: &str, p: f64) -> Vec<f64> {
 /// Zen answering streamed chat completions by `rule(prompt)`, the prompt being the user message
 /// a flow sent.
 pub async fn zen(rule: impl Fn(&str) -> String + Send + Sync + 'static) -> MockServer {
+    zen_model(move |_, prompt| rule(prompt)).await
+}
+
+/// Zen answering by `rule(model, prompt)`, the model being the one the request named.
+pub async fn zen_model(rule: impl Fn(&str, &str) -> String + Send + Sync + 'static) -> MockServer {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
         .respond_with(move |request: &wiremock::Request| {
-            let answer = rule(&prompt(request));
+            let body: Value = serde_json::from_slice(&request.body).unwrap();
+            let answer = rule(body["model"].as_str().unwrap_or_default(), &prompt(request));
             let first = json!({"model": "zen-test", "choices": [{"delta": {"content": answer}}]});
             let last = json!({"model": "zen-test", "choices": [], "usage": {"prompt_tokens": 100, "completion_tokens": 20}});
             ResponseTemplate::new(200)
@@ -132,6 +138,20 @@ pub async fn zen(rule: impl Fn(&str) -> String + Send + Sync + 'static) -> MockS
         .mount(&server)
         .await;
     server
+}
+
+/// The model each chat completion `server` received named, in order.
+pub async fn models(server: &MockServer) -> Vec<String> {
+    server
+        .received_requests()
+        .await
+        .unwrap_or_default()
+        .iter()
+        .map(|r| {
+            let body: Value = serde_json::from_slice(&r.body).unwrap();
+            body["model"].as_str().unwrap_or_default().to_string()
+        })
+        .collect()
 }
 
 /// The user message of a chat completion a flow sent.
