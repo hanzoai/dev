@@ -1,11 +1,18 @@
 # Changelog
 
 > [!TIP]
-> We're constantly improving Code! This page documents the core changes. You can also check our [releases page](https://github.com/just-every/code/releases) for additional information.
+> This page documents the core changes. Each release and its assets are on the [releases page](https://github.com/hanzoai/dev/releases).
 
 ## [Unreleased]
 
 - (none)
+
+## [0.7.0] - 2026-10-15
+
+- Upstream: the engines are hanzoai/codex, openai/codex with Hanzo's commits on its `main`, pinned as upstream/codex and built as committed. The anchored edits, the name and version rules and `make prepare` are gone, and a bump is a merge of upstream/main. (8cd3a7d2, c0fabbb7; hanzoai/codex a74e3d01 to 09c9177e)
+- Upstream: openai/codex moves from 11da6b9e to 3ee47c105 (288 commits). The patched zsh shell backend and the shell-escalation crate are gone; commands and file operations pass sandbox integrity checks first (bubblewrap, Seatbelt, MXC); `/config` is a searchable panel that applies settings live; compaction runs in the background and a failed one keeps the history; threads keep a durable read state; read-only tools run in parallel; gateway sign-in is a reusable OAuth session; the transcript previews images and colors Markdown prose; an incomplete response ends the turn as an error. (8cd3a7d2)
+- Kai: every model call is kept with its finish reason and usage, an edit is asked for as a strict JSON schema, a miss says which it is, an answer that does not read or apply is said again once, and an escalated attempt with no edit goes to the generator once. (3bbcdba6, e6a813c3, 6397df24)
+- Release: the version is assigned by hand, in Cargo.toml, npm/package.json and the tag, which the release holds to each other, and never minted by the pipeline; `dev` states the version its binary crate carries. (ee4089c2, 8cd3a7d2)
 
 ## [0.6.169] - 2026-08-05
 
