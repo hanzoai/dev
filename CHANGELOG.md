@@ -7,6 +7,13 @@
 
 - (none)
 
+## [0.7.1] - 2026-10-15
+
+- Upstream: hanzoai/codex stands alone. Its `codex-rs/hanzo/` crate carries the brand, the defaults, the model catalog, the controller interface and the version hook; `codex_app_server::register` installs Kai and `codex_tui::register` the account commands, so Dev fills two hooks and patches nothing at build time. The `upstream/code` reference submodule is gone. (ad468d97, bcb26d73)
+- Build: the root's copies of upstream's Bazel build and the `patches/` and `make prepare` layer are gone; the tree builds with cargo alone. (7ee3d3d3)
+- Crates: hanzo-config, hanzo-kai, hanzo-loop and hanzo-tui are workspace libraries at 0.0.0 and are not published; `dev` alone carries the release version. (a8af775a)
+- Kai: the tree copy makes a symlink on Windows too, so the windows-amd64 build no longer fails at hanzo-kai. (0f0f83ce)
+
 ## [0.7.0] - 2026-10-15
 
 - Upstream: the engines are hanzoai/codex, openai/codex with Hanzo's commits on its `main`, pinned as upstream/codex and built as committed. The anchored edits, the name and version rules and `make prepare` are gone, and a bump is a merge of upstream/main. (8cd3a7d2, c0fabbb7; hanzoai/codex a74e3d01 to 09c9177e)
