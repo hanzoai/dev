@@ -552,7 +552,14 @@ fn copy(from: &Path, to: &Path) -> std::io::Result<()> {
         let dest = to.join(&name);
         if kind.is_symlink() {
             if let Ok(target) = std::fs::read_link(e.path()) {
-                let _ = std::os::unix::fs::symlink(target, dest);
+                #[cfg(unix)]
+                let _ = std::os::unix::fs::symlink(&target, &dest);
+                #[cfg(windows)]
+                let _ = if e.path().is_dir() {
+                    std::os::windows::fs::symlink_dir(&target, &dest)
+                } else {
+                    std::os::windows::fs::symlink_file(&target, &dest)
+                };
             }
         } else if kind.is_dir() {
             if !skipped(&name.to_string_lossy()) {
