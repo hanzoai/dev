@@ -7,6 +7,12 @@
 
 - (none)
 
+## [0.7.2] - 2026-10-16
+
+- Updates: Dev checks hanzoai/dev's latest release and updates itself the way it was installed: `@hanzo/dev` by npm, bun or pnpm, `hanzoai/tap/hanzo-dev` by Homebrew, hanzo.sh otherwise. It no longer offers to install another product. (hanzoai/codex e7a4d438)
+- Welcome: the empty-state animation draws the Hanzo mark. (hanzoai/codex e7a4d438)
+- Tests: hanzoai/codex's doctor, daemon and composer snapshots say Dev. (hanzoai/codex 6fd3f345)
+
 ## [0.7.1] - 2026-10-15
 
 - Upstream: hanzoai/codex stands alone. Its `codex-rs/hanzo/` crate carries the brand, the defaults, the model catalog, the controller interface and the version hook; `codex_app_server::register` installs Kai and `codex_tui::register` the account commands, so Dev fills two hooks and patches nothing at build time. The `upstream/code` reference submodule is gone. (ad468d97, bcb26d73)
