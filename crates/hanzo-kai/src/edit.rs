@@ -196,6 +196,11 @@ impl Applied {
     pub fn files(&self) -> Vec<String> {
         self.before.keys().cloned().collect()
     }
+
+    /// Each file changed with its text before the change.
+    pub fn texts(&self) -> &BTreeMap<String, String> {
+        &self.before
+    }
 }
 
 fn safe(file: &str) -> bool {

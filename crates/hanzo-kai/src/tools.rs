@@ -160,6 +160,14 @@ pub fn shell_until(root: &Path, script: &str, limit: Duration, stop: &dyn Fn() -
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    // A cache a test framework keeps in the working directory is the run's own, kept outside the
+    // tree and gone with the run, so no run sees another's examples and none lands in the tree.
+    let caches = tempfile::tempdir().ok();
+    if let Some(dir) = &caches
+        && std::env::var_os("HYPOTHESIS_STORAGE_DIRECTORY").is_none()
+    {
+        command.env("HYPOTHESIS_STORAGE_DIRECTORY", dir.path().join("hypothesis"));
+    }
     // Its own process group, so a timeout stops everything the script started.
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
@@ -204,6 +212,55 @@ pub fn shell_until(root: &Path, script: &str, limit: Duration, stop: &dyn Fn() -
 }
 
 /// Runs the tests: `{passed, code, output, ms}`.
+/// The files under a repository that git neither tracks nor ignores, and the untracked
+/// directories as git names them (`dir/`): what `git status` would show beside the change.
+/// `None` outside a repository.
+fn untracked(root: &Path, directories: bool) -> Option<HashSet<String>> {
+    let mut git = Command::new("git");
+    git.args(["ls-files", "--others", "--exclude-standard", "-z"]);
+    if directories {
+        git.arg("--directory");
+    }
+    let out = git.current_dir(root).stderr(Stdio::null()).output().ok().filter(|o| o.status.success())?;
+    Some(out.stdout.split(|b| *b == 0).filter(|p| !p.is_empty()).map(|p| String::from_utf8_lossy(p).into_owned()).collect())
+}
+
+/// What a repository holds beside its tracked files before a run in it: the run's own files are
+/// what it adds to that ([`Litter::sweep`]).
+pub struct Litter {
+    files: Option<HashSet<String>>,
+    entries: HashSet<String>,
+}
+
+impl Litter {
+    pub fn before(root: &Path) -> Litter {
+        Litter { files: untracked(root, false), entries: untracked(root, true).unwrap_or_default() }
+    }
+
+    /// Removes the files a run in `root` wrote that were not there before it and that git neither
+    /// tracks nor ignores, with the directories they emptied that were not there before either:
+    /// they are the run's, never an edit's. What `.gitignore` names is left alone, and so is
+    /// anything outside a repository. The paths removed.
+    pub fn sweep(&self, root: &Path) -> Vec<String> {
+        let (Some(before), Some(now)) = (&self.files, untracked(root, false)) else {
+            return Vec::new();
+        };
+        let mut gone: Vec<String> = now.difference(before).filter(|p| std::fs::remove_file(root.join(p)).is_ok()).cloned().collect();
+        gone.sort();
+        for p in &gone {
+            let mut dir = Path::new(p).parent();
+            while let Some(d) = dir.filter(|d| !d.as_os_str().is_empty()) {
+                let name = format!("{}/", d.to_string_lossy());
+                if self.entries.contains(&name) || std::fs::remove_dir(root.join(d)).is_err() {
+                    break;
+                }
+                dir = d.parent();
+            }
+        }
+        gone
+    }
+}
+
 pub fn test(root: &Path, command: &str, limit: Duration) -> Value {
     let mut run = shell(root, command, limit);
     let passed = run["code"] == 0;
@@ -306,6 +363,57 @@ pub fn revert(root: &Path, answer: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn git(root: &Path, args: &[&str]) {
+        let ok = Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(root)
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "git {args:?}");
+    }
+
+    #[test]
+    fn what_a_test_run_writes_beside_the_tree_is_swept_and_nothing_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("m.py"), "x = 1\n").unwrap();
+        std::fs::write(root.join(".gitignore"), "cache/\n").unwrap();
+        git(root, &["init", "-q"]);
+        git(root, &["add", "."]);
+        git(root, &["commit", "-q", "-m", "start"]);
+        // Already there before the run: an untracked file and an empty directory, both kept.
+        std::fs::write(root.join("notes.txt"), "mine").unwrap();
+        std::fs::create_dir_all(root.join("empty")).unwrap();
+        let litter = Litter::before(root);
+        let run = shell(root, "mkdir -p .hypothesis/examples/ab cache && echo e > .hypothesis/examples/ab/1 && echo o > out.log && echo c > cache/x && echo 'x = 2' > m.py", Duration::from_secs(10));
+        assert_eq!(run["code"], 0);
+        let gone = litter.sweep(root);
+        assert_eq!(gone, [".hypothesis/examples/ab/1", "out.log"]);
+        assert!(!root.join(".hypothesis").exists(), "the directories it emptied go too");
+        assert!(root.join("notes.txt").exists() && root.join("empty").is_dir(), "what was there before stays");
+        assert!(root.join("cache/x").exists(), "what .gitignore names is left alone");
+        assert_eq!(std::fs::read_to_string(root.join("m.py")).unwrap(), "x = 2\n", "a tracked file is never touched");
+        // Outside a repository nothing is swept.
+        let plain = tempfile::tempdir().unwrap();
+        let litter = Litter::before(plain.path());
+        std::fs::write(plain.path().join("new.txt"), "n").unwrap();
+        assert!(litter.sweep(plain.path()).is_empty());
+    }
+
+    #[test]
+    fn a_runs_test_framework_cache_is_its_own_and_outside_the_tree() {
+        let dir = tempfile::tempdir().unwrap();
+        let run = shell(dir.path(), "echo \"$HYPOTHESIS_STORAGE_DIRECTORY\"", Duration::from_secs(10));
+        let at = run["output"].as_str().unwrap().trim().to_string();
+        if std::env::var_os("HYPOTHESIS_STORAGE_DIRECTORY").is_none() {
+            assert!(!at.is_empty() && !Path::new(&at).starts_with(dir.path()), "{at}");
+            assert!(!Path::new(&at).parent().unwrap().exists(), "gone with the run: {at}");
+        }
+    }
 
     #[test]
     fn a_fenced_diff_is_taken_from_the_answer() {

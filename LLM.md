@@ -173,6 +173,14 @@ and the tools they run. Search, saved actions and the shell classifier are hanzo
   transition is a ledger line with its reason (`fast`, `fallback`); no step waits on Kai when an
   action already applies. Each program has its own outage cooldown: one capability's timeout never
   disables another.
+- **Nothing waits that need not.** The first state's first call is begun the moment the state is
+  ranked, beside the search (`flow::Ahead`, `zen::Zen::start`), against that state's revision. The
+  search settling the task, or a kept step moving the state, cancels it; when the search settles
+  nothing the call has had the search's time to answer, and the ledger's `generate` says how long
+  (`ahead_ms`). A cancelled call closes its stream (the server stops writing it) and leaves a
+  `cancelled` line in the spend file, its prompt counted at three characters a token at the ceiling
+  rate; the ledger has a `cancel` line, never a `generate` one. An answer asked ahead is tried
+  before any new call at its revision, and with one queued Kai is not asked `fix.turn@1`.
 - **Revision-bound.** Preconditions are checked immediately before execution; an edit invalidates
   every pending decision made against the old revision. A revision is the content of the files the
   run touched, and a revert returns to `base`. A cached result is keyed on what it depends on
@@ -188,7 +196,25 @@ and the tools they run. Search, saved actions and the shell classifier are hanzo
 - **Fast path.** The action `mutate` tries generic token transforms (comparison and operator flips,
   constants off by one, arguments swapped, a condition inverted, a `return` dropped) at the best
   sites against the one visible test command, eight at once, capped in time; it names no
-  repository, file or task. It solves single faults of that kind and nothing else.
+  repository, file or task. It solves single faults of that kind and nothing else. Past its 2.5 s
+  cap it goes on while the call asked beside it has not answered, to 8 s (`mutate::LONGEST`): that
+  wait is spent either way, and on a loaded host the cap cut 34 of 39 unsettled dev-split searches
+  short of their candidates, the fix in the top four sites in 9 of them. A visible test too slow for
+  the cap (its time x 1.5 > the cap) is narrowed to the failing tests it names (`mutate::screen`)
+  instead of the search being skipped: lark's 18 s file runs its failing tests in 1.7 s, and the
+  candidate picked is verified with the whole command in the tree as ever. A fast file narrowed
+  ran 5% faster (two measurements, 13 and 19 tasks), not worth a second command there.
+- **The tests around the failing ones** (`wide`) run beside the visible test after an edit, and a
+  failing visible test stops them. What failed among them before any edit is read only when they
+  fail after it, with the files the run touched put back as they were for that read and then as
+  they are (`flow::before`, ledger `lazy`): a run that passes shows nothing new, so on most tasks
+  it is never read, and it never competes with the search for the CPU.
+- **A test run leaves nothing.** Files a run in the tree writes that git neither tracks nor ignores
+  and that were not there before it are removed after it, with the directories they emptied
+  (`tools::Litter`, ledger `sweep`): they are the run's, never the edit's. What `.gitignore` names
+  is left alone, and so is a tree outside git. Hypothesis keeps its example database in the run's
+  own temporary directory (`HYPOTHESIS_STORAGE_DIRECTORY`, unless the caller set it), so no run
+  replays another's examples and none lands in the tree.
 - **Jobs** (not built): long work runs in the background and reports events into the same ledger.
   Start, progress, completion and verified outcome are four states; a finished process is not a
   finished task.

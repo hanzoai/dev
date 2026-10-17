@@ -3,10 +3,11 @@
 //! The failing command passing settles the failing tests and nothing near them. Before a flow
 //! says `done`, the tests around the failing ones run too: the directory of every test file the
 //! command or the failing output names, in place of the files and selectors that narrowed the
-//! command. They ran once before any edit, so a failure that was there already is not the edit's;
-//! a test failing now that was not then makes the edit not done. The run is capped at [`LIMIT`]; a
-//! run that does not end by then says nothing. Only the command and the failing output are read,
-//! never anything of the task beyond them.
+//! command. A failure that was there before any edit is not the edit's; a test failing now that
+//! was not then makes the edit not done. What failed before is read only when a run after an edit
+//! fails: a run that passes shows no new failure whatever failed before, so on most tasks it is
+//! never read. The run is capped at [`LIMIT`]; a run that does not end by then says nothing. Only
+//! the command and the failing output are read, never anything of the task beyond them.
 
 use crate::tools;
 use serde_json::Value;
@@ -17,12 +18,19 @@ use std::time::Duration;
 /// The longest a wider run may take.
 pub const LIMIT: Duration = Duration::from_secs(20);
 
-/// The wider command, and what failed in it before any edit.
+/// The wider command, and what failed in it before any edit once that is read.
 #[derive(Debug, Clone)]
 pub struct Wide {
     pub command: String,
-    pub before: BTreeSet<String>,
-    pub before_code: i64,
+    pub before: Option<Before>,
+}
+
+/// What the wider run said before any edit.
+#[derive(Debug, Clone, Default)]
+pub struct Before {
+    pub failing: BTreeSet<String>,
+    /// Its exit code; -2 when it did not end within [`LIMIT`], and then it says nothing.
+    pub code: i64,
 }
 
 /// What a wider run found.
@@ -102,34 +110,47 @@ pub fn failing(output: &str) -> BTreeSet<String> {
 }
 
 impl Wide {
-    /// The wider run on the tree as it is, before any edit, for what fails in it already. `None`
-    /// when there is no wider command or the run does not end within [`LIMIT`].
-    pub fn before(root: &Path, command_line: &str, output: &str) -> Option<Wide> {
-        let command = command(command_line, output)?;
-        let run = tools::test(root, &command, LIMIT);
-        let code = run["code"].as_i64().unwrap_or(-1);
-        if code == -2 || code == -1 {
-            return None;
-        }
-        Some(Wide {
-            before: failing(run["output"].as_str().unwrap_or_default()),
-            before_code: code,
-            command,
-        })
+    /// The wider command for `command_line` and its failing `output`; `None` when there is none.
+    pub fn new(command_line: &str, output: &str) -> Option<Wide> {
+        Some(Wide { command: command(command_line, output)?, before: None })
     }
 
-    /// The wider run on the tree as it is, against what failed before.
-    pub fn check(&self, root: &Path) -> Verdict {
-        let run = tools::test(root, &self.command, LIMIT);
+    /// The wider run on the tree as it is, `{code, output, passed, ms}`; stopped as soon as `stop`
+    /// says so (code -3).
+    pub fn run(&self, root: &Path, stop: &dyn Fn() -> bool) -> Value {
+        let mut run = tools::shell_until(root, &self.command, LIMIT, stop);
+        run["passed"] = Value::Bool(run["code"] == 0);
+        run
+    }
+
+    /// Whether `run`, after an edit, needs what failed before to be judged: it failed, and ended.
+    pub fn needs_before(run: &Value) -> bool {
+        !matches!(run["code"].as_i64(), Some(0 | -2 | -3))
+    }
+
+    /// What a run before any edit says.
+    pub fn read(run: &Value) -> Before {
+        Before { failing: failing(run["output"].as_str().unwrap_or_default()), code: run["code"].as_i64().unwrap_or(-1) }
+    }
+
+    /// What `run`, after an edit, says against what failed before.
+    pub fn verdict(&self, run: Value) -> Verdict {
         let code = run["code"].as_i64().unwrap_or(-1);
         let timed_out = code == -2;
-        let now = failing(run["output"].as_str().unwrap_or_default());
-        let mut new: Vec<String> = now.difference(&self.before).cloned().collect();
-        // A run that dies without naming a test (a collection error in a file that read before).
-        if new.is_empty() && now.is_empty() && code != 0 && !timed_out && self.before_code == 0 {
-            new.push(format!("the wider run exited {code}"));
+        let mut new = Vec::new();
+        // A run that passes shows nothing new; one before any edit that said nothing leaves
+        // nothing to judge against.
+        if let Some(before) = self.before.as_ref().filter(|b| b.code >= 0)
+            && Wide::needs_before(&run)
+        {
+            let now = failing(run["output"].as_str().unwrap_or_default());
+            new = now.difference(&before.failing).cloned().collect();
+            // A run that dies without naming a test (a collection error in a file that read before).
+            if new.is_empty() && now.is_empty() && before.code == 0 {
+                new.push(format!("the wider run exited {code}"));
+            }
         }
-        Verdict { new: if timed_out { Vec::new() } else { new }, timed_out, run }
+        Verdict { new, timed_out, run }
     }
 }
 
@@ -182,16 +203,28 @@ mod tests {
         let script = "for f in t/*.txt; do grep -q BAD $f && echo \"FAILED $f::case - boom\"; done; grep -rq BAD t && exit 1; exit 0";
         std::fs::write(root.join("t/old.txt"), "BAD").unwrap();
         std::fs::write(root.join("t/new.txt"), "good").unwrap();
-        let before = Wide {
-            command: script.to_string(),
-            before: ["t/old.txt::case".to_string()].into(),
-            before_code: 1,
-        };
-        let v = before.check(root);
+        let mut wide = Wide { command: script.to_string(), before: None };
+        let run = wide.run(root, &|| false);
+        assert!(Wide::needs_before(&run), "the run before fails");
+        wide.before = Some(Wide::read(&run));
+        let v = wide.verdict(wide.run(root, &|| false));
         assert!(v.new.is_empty(), "{:?}", v.new);
         std::fs::write(root.join("t/new.txt"), "BAD").unwrap();
-        let v = before.check(root);
+        let v = wide.verdict(wide.run(root, &|| false));
         assert_eq!(v.new, ["t/new.txt::case"]);
         assert!(!v.timed_out);
+    }
+
+    #[test]
+    fn a_run_that_passes_needs_nothing_from_before_and_a_stopped_one_says_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let wide = Wide { command: "true".into(), before: None };
+        let run = wide.run(dir.path(), &|| false);
+        assert!(!Wide::needs_before(&run));
+        assert!(wide.verdict(run).new.is_empty());
+        let wide = Wide { command: "sleep 5".into(), before: None };
+        let run = wide.run(dir.path(), &|| true);
+        assert_eq!(run["code"], -3);
+        assert!(!Wide::needs_before(&run));
     }
 }

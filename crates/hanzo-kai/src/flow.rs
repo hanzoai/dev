@@ -35,6 +35,15 @@
 //! the ledger and a line of the trace's `generations`. Neither is an attempt: the tests judge the
 //! edit that results, as for any other.
 //!
+//! Nothing waits that need not. The tests around the failing ones run beside the failing command
+//! after an edit, and what failed among them before any edit is read only when they fail then
+//! ([`crate::wide`]). The first attempt's call is begun as soon as the first state is ranked,
+//! beside the search, against that state's revision: when the search settles the task the call is
+//! cancelled, and when it does not the call has had the search's time to answer. An answer asked
+//! ahead answers an attempt only at the revision it was asked against; a state the loop leaves
+//! cancels it. What a test run in the tree writes beside it is removed after it
+//! ([`tools::Litter`]).
+//!
 //! Every step is timed, and the trace carries the times with Kai's answers.
 
 use crate::decide;
@@ -73,6 +82,7 @@ use hanzo_config::kai::Mode;
 use indexmap::IndexMap;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
@@ -103,7 +113,8 @@ const SHOWN: u32 = 100;
 const TEST: u32 = 30;
 /// Characters of the failing output shown.
 const OUTPUT: usize = 2000;
-/// How long the search of candidate edits may run before the model writes the edit.
+/// How long the search of candidate edits may run before the model writes the edit; past it, the
+/// search goes on only while the call asked beside it has not answered ([`mutate::LONGEST`]).
 const SEARCH: Duration = Duration::from_millis(2500);
 /// A line of code is shown to this many characters.
 const WIDE: usize = 300;
@@ -785,22 +796,160 @@ fn discover(finder: &dyn Finder, root: &Path, plan: &mut Plan, ledger: &Ledger, 
     (added, a.ms)
 }
 
-/// The tests around the failing ones, after an edit that passed the failing command: the run and
-/// the tests failing that did not before. Recorded as an action of its own. `None` without a
-/// wider command.
-fn widen(wide: &Option<Wide>, root: &Path, ledger: &Ledger, revision: &str) -> Option<wide::Verdict> {
-    let w = wide.as_ref()?;
+/// A model call begun before the loop came to it, and what it was asked against: the revision,
+/// the functions shown and the digests of the files the model saw. It answers an attempt at that
+/// revision and no other.
+struct Ahead {
+    revision: String,
+    ask: Ask,
+    pending: crate::zen::Pending,
+}
+
+/// What an attempt asks: the model, the effort, the prompt, and what the prompt shows.
+#[derive(Clone)]
+struct Ask {
+    model: String,
+    effort: Effort,
+    /// The escalation model's.
+    escalated: bool,
+    user: String,
+    shown: Vec<String>,
+    saw: Vec<(String, String)>,
+    bundle_ms: f64,
+}
+
+/// What attempt `n` asks over the state `s`, after `last` and with `history` tried.
+#[allow(clippy::too_many_arguments)]
+fn ask(s: &mut Seen, setup: &Setup, n: u32, strategy: Strategy, stronger: bool, command: &str, goal: &str, last: Option<&Attempt>, history: &[String]) -> Ask {
+    // After an escalation the escalation model writes, at full effort over a wider view.
+    let escalation = stronger.then(|| setup.zen.escalation()).flatten();
+    let model = escalation.unwrap_or_else(|| setup.zen.model()).to_string();
+    let wider = strategy == Strategy::Full || escalation.is_some();
+    let effort = if wider { Effort::Full } else { s.order.effort };
+    let begun = Instant::now();
+    let (code, shown, saw) = excerpts(
+        &s.plan,
+        &mut s.tree,
+        &s.order.by_rank,
+        LINES * n.min(3) * if wider { 2 } else { 1 },
+        if n == 1 { COVER } else { 0.999 },
+    );
+    let user = prompt(command, goal, &s.shown, &code, last, history);
+    Ask { model, effort, escalated: escalation.is_some(), user, shown, saw, bundle_ms: ms(begun) }
+}
+
+/// The first answer in among those asked ahead at `revision`, waiting for one when none is in
+/// yet; `None` when none was asked at it.
+fn take(ahead: &mut Vec<Ahead>, revision: &str) -> Option<Ahead> {
+    if !ahead.iter().any(|a| a.revision == revision) {
+        return None;
+    }
+    loop {
+        if let Some(i) = ahead.iter().position(|a| a.revision == revision && a.pending.done()) {
+            return Some(ahead.remove(i));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// Cancels the calls asked ahead that `drop` says go, each a ledger line with why.
+fn cancel(ahead: &mut Vec<Ahead>, ledger: &Ledger, why: &str, drop: impl Fn(&Ahead) -> bool) {
+    let (gone, kept): (Vec<Ahead>, Vec<Ahead>) = std::mem::take(ahead).into_iter().partition(|a| drop(a));
+    *ahead = kept;
+    for a in gone {
+        let age = a.pending.age();
+        let running = a.pending.cancel();
+        ledger.write(
+            "cancel",
+            json!({"id": ledger.next(), "revision": a.revision, "model": a.ask.model, "escalated": a.ask.escalated,
+                   "running": running, "ms": age, "reason": why}),
+        );
+    }
+}
+
+/// The failing command and the tests around it, at once, on the tree at `revision`: the command's
+/// run, and the wider verdict when the command passed. A failing command stops the wider run, the
+/// edit being settled without it. What the wider run failed on before any edit is read only when
+/// it fails now ([`before`]). An error when the tree cannot be put back as it was after that read.
+fn check(
+    root: &Path,
+    command: &str,
+    limit: Duration,
+    wide: Option<&mut Wide>,
+    pristine: &BTreeMap<String, String>,
+    ledger: &Ledger,
+    revision: &str,
+) -> Result<(Value, Option<wide::Verdict>), String> {
+    let litter = tools::Litter::before(root);
+    let Some(w) = wide else {
+        let test = tools::test(root, command, limit);
+        swept(root, &litter, ledger, revision);
+        return Ok((test, None));
+    };
+    let failed = std::sync::atomic::AtomicBool::new(false);
+    let shared: &Wide = w;
+    let (test, run) = std::thread::scope(|s| {
+        let around = s.spawn(|| shared.run(root, &|| failed.load(std::sync::atomic::Ordering::SeqCst)));
+        let test = tools::test(root, command, limit);
+        if test["passed"] != true {
+            failed.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        (test, around.join().ok())
+    });
+    swept(root, &litter, ledger, revision);
+    let Some(run) = run.filter(|_| test["passed"] == true) else {
+        return Ok((test, None));
+    };
+    if Wide::needs_before(&run) && w.before.is_none() {
+        w.before = Some(before(root, w, pristine, ledger)?);
+    }
     let mut a = ledger.action(revision, Operation::Test { command: w.command.clone() }, Source::Rule, "the tests around the failing ones, before done");
     a.preconditions = vec![Precondition::Revision { revision: revision.into() }];
     a.expected = "no test fails that did not fail before the edit".into();
     a.advance(Status::Attempted);
-    let v = w.check(root);
+    let v = w.verdict(run);
     a.ms = v.run["ms"].as_f64().unwrap_or(0.0);
     a.advance(Status::Completed);
     a.advance(if v.new.is_empty() { Status::Verified } else { Status::Rejected });
-    a.result = json!({"new": v.new, "timed_out": v.timed_out, "code": v.run["code"]});
+    a.result = json!({"new": v.new, "timed_out": v.timed_out, "code": v.run["code"], "beside": true});
     ledger.record(&a);
-    Some(v)
+    Ok((test, Some(v)))
+}
+
+/// What a test run in the tree wrote beside it, removed: its files are not the edit's. A ledger
+/// line names them.
+fn swept(root: &Path, litter: &tools::Litter, ledger: &Ledger, revision: &str) {
+    let gone = litter.sweep(root);
+    if !gone.is_empty() {
+        ledger.write("sweep", json!({"id": ledger.next(), "revision": revision, "removed": gone.len(), "files": gone.iter().take(20).collect::<Vec<_>>()}));
+    }
+}
+
+/// What the tests around the failing ones fail on before any edit: the files the run touched are
+/// put back as they were for the run, then as they are. An error when they cannot be put back.
+fn before(root: &Path, w: &Wide, pristine: &BTreeMap<String, String>, ledger: &Ledger) -> Result<wide::Before, String> {
+    let mut a = ledger.action("base", Operation::Test { command: w.command.clone() }, Source::Rule, "the tests around the failing ones, before any edit: what already fails there");
+    a.advance(Status::Attempted);
+    let put = |files: &[(&String, &[u8])]| files.iter().all(|(f, text)| std::fs::write(root.join(f), text).is_ok());
+    let now: Vec<(&String, Vec<u8>)> = pristine.keys().map(|f| (f, std::fs::read(root.join(f)).unwrap_or_default())).collect();
+    let now: Vec<(&String, &[u8])> = now.iter().map(|(f, b)| (*f, b.as_slice())).collect();
+    let then: Vec<(&String, &[u8])> = pristine.iter().map(|(f, t)| (f, t.as_bytes())).collect();
+    if !put(&then) {
+        let _ = put(&now);
+        return Err("the files cannot be put back as they were to read the tests around the failing ones".into());
+    }
+    let litter = tools::Litter::before(root);
+    let run = w.run(root, &|| false);
+    swept(root, &litter, ledger, "base");
+    if !put(&now) {
+        return Err("the files cannot be put back after reading the tests around the failing ones, so the working tree lacks the edit; see `git diff`".into());
+    }
+    let read = Wide::read(&run);
+    a.ms = run["ms"].as_f64().unwrap_or(0.0);
+    a.advance(Status::Completed);
+    a.result = json!({"code": read.code, "failing": read.failing, "lazy": true});
+    ledger.record(&a);
+    Ok(read)
 }
 
 /// What the choice of site, action and effort is made from.
@@ -948,7 +1097,7 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
     // tree; the failures give recover its memory.
     let mut touched: Vec<String> = Vec::new();
     // Each touched file's digest when the run began, so a revert is the revision it left.
-    let mut origin: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    let mut origin: BTreeMap<String, String> = std::collections::BTreeMap::new();
     let mut kept: Vec<edit::Applied> = Vec::new();
     let mut kept_summary: Vec<String> = Vec::new();
     let mut failures: Vec<Failure> = Vec::new();
@@ -967,7 +1116,9 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
             (given.clone(), false, 1)
         }
         None => {
+            let litter = tools::Litter::before(root);
             let run = tools::test(root, command, options.limit);
+            swept(root, &litter, &ledger, "base");
             (
                 run["output"].as_str().unwrap_or_default().to_string(),
                 run["passed"] == true,
@@ -992,18 +1143,12 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
     let errors0 = diagnostic::errors(&output);
     report.failing = failing;
     let test_ms = steps["test0"];
-    // The tests around the failing ones, once before any edit: what fails there already.
-    let begun = Instant::now();
-    let wide = Wide::before(root, command, &output);
-    if let Some(w) = &wide {
-        let mut a = ledger.action("base", Operation::Test { command: w.command.clone() }, Source::Rule, "the tests around the failing ones, before any edit: what already fails there");
-        a.advance(Status::Attempted);
-        a.advance(Status::Completed);
-        a.ms = ms(begun);
-        a.result = json!({"code": w.before_code, "failing": w.before});
-        ledger.record(&a);
-        steps.insert("wide0".into(), a.ms);
-    }
+    // The tests around the failing ones, and the files the run touched as they were: what failed
+    // there before any edit is read from them only when a run after an edit fails.
+    let mut wide = Wide::new(command, &output);
+    let mut pristine: BTreeMap<String, String> = std::collections::BTreeMap::new();
+    // Calls begun before the loop came to them.
+    let mut ahead: Vec<Ahead> = Vec::new();
 
     let mut seen: Option<Seen> = None;
     let mut look = true;
@@ -1069,15 +1214,30 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
             let cx = Context { goal, revision: &revision, fingerprint: &fingerprint, failing, previous };
             let order = choose(&plan, &mut tree, kai, setup, &ledger, &cx, &mut report.missing);
             *steps.entry("site".into()).or_insert(0.0) += ms(begun);
-            seen = Some(Seen { tree, plan, order, shown: tail(&output, OUTPUT), fingerprint });
+            // A call asked at a state the loop has left answers nothing.
+            cancel(&mut ahead, &ledger, "the state it was asked at is left", |a| a.revision != revision);
+            let mut s = Seen { tree, plan, order, shown: tail(&output, OUTPUT), fingerprint };
+            // The first state: its first attempt's call is begun now, beside the search, so a search
+            // that settles nothing has cost the call no time.
+            if n == 0 && kept.is_empty() && ahead.is_empty() {
+                let begun = Instant::now();
+                let first = ask(&mut s, setup, 1, Strategy::Retry, false, command, goal, None, &history);
+                let pending = setup.zen.start(&first.model, SYSTEM, &first.user, first.effort);
+                ahead.push(Ahead { revision: revision.clone(), ask: first, pending });
+                *steps.entry("ahead".into()).or_insert(0.0) += ms(begun);
+            }
+            seen = Some(s);
             look = false;
         }
         let Some(s) = seen.as_mut() else { break };
         let fingerprint = s.fingerprint.clone();
 
-        // The cheap action first: candidate edits at the best sites against the visible test.
-        // A test that takes longer than the cap holds cannot be tried candidate after candidate.
-        let slow = diagnostic::seconds(&output).is_some_and(|t| t * 1.5 > SEARCH.as_secs_f64());
+        // The cheap action first: candidate edits at the best sites against the visible test. A
+        // test that takes longer than the cap holds cannot be tried candidate after candidate:
+        // its failing tests alone are, where they are named, and else the search is skipped.
+        let long = diagnostic::seconds(&output).is_some_and(|t| t * 1.5 > SEARCH.as_secs_f64());
+        let screen = long.then(|| mutate::screen(root, command, &output)).flatten();
+        let slow = long && screen.is_none();
         if slow && options.search && s.order.act == Act::Search && searched.insert(kept.len()) {
             ledger.fallback(&revision, "search", "rule", "model", &format!("the visible test takes {:.1} s: longer than the search cap of {:.1} s holds", diagnostic::seconds(&output).unwrap_or(0.0), SEARCH.as_secs_f64()));
         }
@@ -1098,7 +1258,12 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
                 let floor = if options.failure.is_some() { 10.0 } else { 3.0 };
                 let limit = Duration::from_secs_f64((test_ms / 1000.0 * 3.0 + 1.0).clamp(floor, options.limit.as_secs_f64().max(floor)));
                 let workers = std::thread::available_parallelism().map_or(2, usize::from);
-                let found = mutate::search(root, command, &candidates, failing, errors0, SEARCH, limit, workers);
+                // The search goes on past its cap while the call asked beside it has not answered.
+                let waiting = || {
+                    let mut asked = ahead.iter().filter(|a| a.revision == revision).peekable();
+                    asked.peek().is_some() && asked.all(|a| !a.pending.done())
+                };
+                let found = mutate::search(root, screen.as_deref().unwrap_or(command), &candidates, failing, errors0, SEARCH, &waiting, limit, workers);
                 m.ms = ms(begun);
                 fast.tried += found.tried;
                 fast.runs += found.runs;
@@ -1112,7 +1277,7 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
                 let pick = found.winner.or(found.progress);
                 m.advance(Status::Completed);
                 m.advance(if pick.is_some() { Status::Selected } else { Status::Rejected });
-                m.result = json!({"tried": found.tried, "runs": found.runs, "workers": found.workers, "winner": found.winner, "progress": found.progress, "remaining": found.remaining, "note": found.note, "copy_ms": found.copy});
+                m.result = json!({"tried": found.tried, "runs": found.runs, "workers": found.workers, "winner": found.winner, "progress": found.progress, "remaining": found.remaining, "note": found.note, "copy_ms": found.copy, "screen": screen});
                 ledger.record(&m);
                 if let Some(w) = pick {
                     let c = &candidates[w];
@@ -1128,6 +1293,9 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
                             let files = made.files();
                             for (f, d) in made.originals() {
                                 origin.entry(f).or_insert(d);
+                            }
+                            for (f, t) in made.texts() {
+                                pristine.entry(f.clone()).or_insert_with(|| t.clone());
                             }
                             for f in &files {
                                 if !touched.contains(f) {
@@ -1145,16 +1313,18 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
                             t.preconditions = vec![Precondition::Revision { revision: rev.clone() }];
                             t.expected = "the tests pass, or fewer fail".into();
                             t.advance(Status::Attempted);
+                            // Passing the failing command is not done until the tests around it
+                            // agree; both run at once.
                             let begun = Instant::now();
-                            let test = tools::test(root, command, options.limit);
-                            t.ms = ms(begun);
-                            *steps.entry("verify".into()).or_insert(0.0) += t.ms;
+                            let (test, around) = check(root, command, options.limit, wide.as_mut(), &pristine, &ledger, &rev)?;
+                            let checked = ms(begun);
+                            t.ms = test["ms"].as_f64().unwrap_or(checked);
+                            *steps.entry("verify".into()).or_insert(0.0) += checked;
                             let mut out = test["output"].as_str().unwrap_or_default().to_string();
                             let mut passed = test["passed"] == true;
                             let mut test = test;
-                            // Passing the failing command is not done until the tests around it agree.
                             let mut broke = None;
-                            if passed && let Some(v) = widen(&wide, root, &ledger, &rev) {
+                            if let Some(v) = around {
                                 *steps.entry("wide".into()).or_insert(0.0) += v.run["ms"].as_f64().unwrap_or(0.0);
                                 if !v.new.is_empty() {
                                     broke = Some(format!("the candidate passed the failing command and broke {}", v.new.join(", ")));
@@ -1167,10 +1337,11 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
                             t.advance(Status::Completed);
                             let better = !passed && now >= 1 && now < failing && !diagnostic::broken(&out) && diagnostic::errors(&out) <= errors0;
                             t.advance(if passed || better { Status::Verified } else { Status::Rejected });
-                            t.result = json!({"passed": passed, "code": test["code"], "failing": now});
+                            t.result = json!({"passed": passed, "code": test["code"], "failing": now, "check_ms": checked});
                             ledger.record(&t);
                             ledger.verify(&t.id, &rev, passed, test["code"].as_i64().unwrap_or(-1), &ledger::fingerprint(&out), &tail(&out, 600), t.ms);
                             if passed {
+                                cancel(&mut ahead, &ledger, "the search settled the task", |_| true);
                                 fast.solved = true;
                                 fast.kind = Some(c.kind.to_string());
                                 fast.edit = made.summary.first().cloned();
@@ -1227,24 +1398,19 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
             }
         }
 
-        // The model writes the edit.
+        // The model writes the edit: an answer asked ahead at this revision before a new call.
         n += 1;
-        // After an escalation the escalation model writes, at full effort over a wider view.
-        let escalation = stronger.then(|| setup.zen.escalation()).flatten();
-        let model = escalation.unwrap_or_else(|| setup.zen.model()).to_string();
-        let wider = strategy == Strategy::Full || escalation.is_some();
-        let effort = if wider { Effort::Full } else { s.order.effort };
         let mut ms_of: IndexMap<String, f64> = IndexMap::new();
-        let begun = Instant::now();
-        let (code, shown, saw) = excerpts(
-            &s.plan,
-            &mut s.tree,
-            &s.order.by_rank,
-            LINES * n.min(3) * if wider { 2 } else { 1 },
-            if n == 1 { COVER } else { 0.999 },
-        );
-        ms_of.insert("bundle".into(), ms(begun));
-        let user = prompt(command, goal, &s.shown, &code, last.as_ref(), &history);
+        let mut early = take(&mut ahead, &revision);
+        let asked = match &early {
+            Some(a) => a.ask.clone(),
+            None => ask(s, setup, n, strategy, stronger, command, goal, last.as_ref(), &history),
+        };
+        ms_of.insert("bundle".into(), asked.bundle_ms);
+        let Ask { model, effort, escalated, user, shown, saw, .. } = asked;
+        // An attempt the escalation model writes makes the ones after it its own too.
+        stronger |= escalated;
+        let escalation = escalated.then_some(model.as_str());
         let source = if n == 1 && kept.is_empty() { Source::Model } else { Source::Recover };
         let mut attempt = Attempt {
             n,
@@ -1277,7 +1443,12 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
             model.clone(),
             effort,
             user.clone(),
-            if escalation.is_some() { "recover: the escalation model writes the attempt" } else if n == 1 { "the first edit" } else { "recover: another attempt" },
+            match (escalation.is_some(), n) {
+                (true, 1) => "the first edit, by the escalation model",
+                (true, _) => "recover: the escalation model writes the attempt",
+                (false, 1) => "the first edit",
+                (false, _) => "recover: another attempt",
+            },
             "first",
         );
         let (g, e, after, model) = loop {
@@ -1287,15 +1458,22 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
             g.expected = "one JSON edit that applies".into();
             g.advance(Status::Attempted);
             let begun = Instant::now();
-            let generated = setup.zen.generate(&model, SYSTEM, &user, effort);
+            // The call asked ahead answers the first stage: the loop waits only for what is left of it.
+            let (generated, ahead_ms) = match early.take() {
+                Some(a) => {
+                    let age = a.pending.age();
+                    (a.pending.wait(), Some(age))
+                }
+                None => (setup.zen.generate(&model, SYSTEM, &user, effort), None),
+            };
             g.ms = ms(begun);
             *ms_of.entry("generate".into()).or_insert(0.0) += g.ms;
             let answer = match generated {
                 Ok(x) => {
                     g.result = json!({
                         "model": x.model, "served": x.served, "cached": x.cached, "escalated": escalation.is_some(), "stage": stage,
-                        "first_ms": x.first, "total_ms": x.total, "prompt_tokens": x.prompt, "completion_tokens": x.completion,
-                        "reasoning_tokens": x.reasoning, "finish": x.finish,
+                        "first_ms": x.first, "last_ms": x.last, "total_ms": x.total, "prompt_tokens": x.prompt, "completion_tokens": x.completion,
+                        "reasoning_tokens": x.reasoning, "finish": x.finish, "ahead_ms": ahead_ms,
                     });
                     let text = x.text.clone();
                     attempt.generations.push(x);
@@ -1304,7 +1482,7 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
                 }
                 Err(why) => {
                     g.fail(&why);
-                    g.result = json!({"error": why, "stage": stage});
+                    g.result = json!({"error": why, "stage": stage, "ahead_ms": ahead_ms});
                     Err(why)
                 }
             };
@@ -1336,6 +1514,9 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
                     let files = made.files();
                     for (f, d) in made.originals() {
                         origin.entry(f).or_insert(d);
+                    }
+                    for (f, t) in made.texts() {
+                        pristine.entry(f.clone()).or_insert_with(|| t.clone());
                     }
                     let rev = ledger::revision_over(root, &files.iter().chain(touched.iter()).cloned().collect::<Vec<_>>(), &origin);
                     // The same edit again is no new state: recover chooses another action.
@@ -1369,6 +1550,11 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
             let Err(why) = &after else {
                 break (g, e, after, model);
             };
+            // An answer asked ahead at this revision is the next attempt: no call is made to say
+            // this one again.
+            if ahead.iter().any(|a| a.revision == revision) {
+                break (g, e, after, model);
+            }
             asking = if let (true, Ok(text)) = (stage == "first" && edit::spelling(why), &answer) {
                 (
                     model.clone(),
@@ -1407,14 +1593,15 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
             t.preconditions = vec![Precondition::Revision { revision: rev.clone() }];
             t.expected = "the tests pass".into();
             t.advance(Status::Attempted);
+            // Passing the failing command is not done until the tests around it agree; both run at
+            // once.
             let begun = Instant::now();
-            test = tools::test(root, command, options.limit);
-            t.ms = ms(begun);
-            ms_of.insert("test".into(), t.ms);
-            // Passing the failing command is not done until the tests around it agree.
-            if test["passed"] == true
-                && let Some(v) = widen(&wide, root, &ledger, rev)
-            {
+            let (run, around) = check(root, command, options.limit, wide.as_mut(), &pristine, &ledger, rev)?;
+            let checked = ms(begun);
+            test = run;
+            t.ms = test["ms"].as_f64().unwrap_or(checked);
+            ms_of.insert("test".into(), checked);
+            if let Some(v) = around {
                 ms_of.insert("wide".into(), v.run["ms"].as_f64().unwrap_or(0.0));
                 if !v.new.is_empty() {
                     test = v.run;
@@ -1427,17 +1614,33 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
             after_fp = ledger::fingerprint(text);
             t.advance(Status::Completed);
             t.advance(if attempt.passed { Status::Verified } else { Status::Rejected });
-            t.result = json!({"passed": attempt.passed, "code": test["code"], "failing": now});
+            t.result = json!({"passed": attempt.passed, "code": test["code"], "failing": now, "check_ms": checked});
             ledger.record(&t);
             ledger.verify(&t.id, rev, attempt.passed, test["code"].as_i64().unwrap_or(-1), &after_fp, &attempt.after, t.ms);
             tried.push(rev.clone());
         }
 
-        // A run that passes needs no decision. A run that fails: Kai says what next, and reads
-        // the patch, in one request.
+        // Fewer tests failing is progress: the edit stays.
+        let progress = attempt.applied
+            && !attempt.passed
+            && now >= 1
+            && now < failing
+            && !diagnostic::broken(test["output"].as_str().unwrap_or_default())
+            && diagnostic::errors(test["output"].as_str().unwrap_or_default()) <= errors0;
+        // An answer asked ahead at the revision a failed edit is undone to is tried next.
+        let queued = !progress && ahead.iter().any(|a| a.revision == revision);
+
+        // A run that passes needs no decision, nor one whose next attempt is already asked. A run
+        // that fails: Kai says what next, and reads the patch, in one request.
         let mut turn: Option<Decision> = None;
         let mut turn_action: Option<Action> = None;
-        if attempt.applied && !attempt.passed {
+        if attempt.applied && !attempt.passed && kai && queued {
+            ledger.write(
+                "fast",
+                json!({"id": ledger.next(), "revision": after_rev, "op": "turn", "source": "rule",
+                       "reason": "an answer asked ahead at the revision the edit is undone to is the next attempt: no inference"}),
+            );
+        } else if attempt.applied && !attempt.passed {
             if kai {
                 ledger.fallback(&after_rev, "turn", "rule", "kai", "the verifier failed: what next, and is the patch correct and grounded");
                 let begun = Instant::now();
@@ -1494,12 +1697,6 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
         let kai_escalates = answer == Some("escalate") && !attempt.passed;
 
         // recover: the failure's fingerprint and the state it happened in decide what is next.
-        let progress = attempt.applied
-            && !attempt.passed
-            && now >= 1
-            && now < failing
-            && !diagnostic::broken(test["output"].as_str().unwrap_or_default())
-            && diagnostic::errors(test["output"].as_str().unwrap_or_default()) <= errors0;
         let mut why = String::new();
         let mut stuck = false;
         if attempt.applied && !attempt.passed {
@@ -1638,6 +1835,7 @@ pub fn run(root: &Path, options: &Options, setup: &Setup) -> Result<Report, Stri
     if report.outcome.is_empty() {
         report.outcome = "escalate".into();
     }
+    cancel(&mut ahead, &ledger, "the flow is over", |_| true);
     // A flow that does not end done leaves the tree as it found it.
     if report.outcome != "done" {
         while let Some(made) = kept.pop() {
@@ -1680,7 +1878,7 @@ fn line(order: &Order, turn: Option<&Decision>, attempt: &Attempt, run: &str, wh
         .generations
         .iter()
         .map(|g| {
-            json!({"model": g.model, "served": g.served, "cached": g.cached, "first_ms": g.first, "total_ms": g.total, "prompt_tokens": g.prompt,
+            json!({"model": g.model, "served": g.served, "cached": g.cached, "first_ms": g.first, "last_ms": g.last, "total_ms": g.total, "prompt_tokens": g.prompt,
                    "completion_tokens": g.completion, "reasoning_tokens": g.reasoning, "finish": g.finish})
         })
         .collect();

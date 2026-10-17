@@ -6,7 +6,8 @@
 //! tokens that name no repository, file or task, at the lines of the ranked sites, best first.
 //! [`search`] tries them in order, several at once, each in its own copy of the tree, against the
 //! one test command the task shows, and stops at the first that passes. It never sees a hidden
-//! test, and it gives up at a time cap so the model writes the edit instead.
+//! test, and it gives up at a time cap so the model writes the edit instead; while the model
+//! asked beside it has not answered, that wait is the search's, to a longer cap.
 //!
 //! What this can solve is a single fault of that kind. It is a search, not a repair of anything
 //! else, and a candidate that passes the visible test is only as right as that test.
@@ -38,6 +39,8 @@ const TREE: u64 = 128 * 1024 * 1024;
 const FILE: u64 = 8 * 1024 * 1024;
 /// Lines of a function considered.
 const LINES: u32 = 150;
+/// The longest a search runs past its cap while the model it stands beside has not answered.
+pub const LONGEST: Duration = Duration::from_secs(8);
 
 /// One change to one line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -497,6 +500,52 @@ fn has_assignment(body: &str) -> bool {
     false
 }
 
+/// pytest's options whose value is the next word.
+const VALUED: &[&str] = &[
+    "-p", "-k", "-m", "-o", "-c", "-W", "-r", "--rootdir", "--deselect", "--ignore", "--ignore-glob", "--confcutdir", "--basetemp",
+    "--override-ini", "--config-file", "--junitxml", "--junit-xml", "--tb", "--maxfail", "--durations", "--log-file", "--import-mode",
+];
+
+/// The command a candidate is tried with when the visible one is too slow to try candidate after
+/// candidate: a plain pytest command narrowed to the tests the failing `output` names, its paths
+/// and node ids in the tree at `root` replaced by theirs. Only those tests can tell a candidate
+/// that mends the fault from one that does not, so the rest of their files need not run; the
+/// candidate the search picks is verified with the whole command in the tree all the same.
+/// `None` for a command that is not plain pytest or an output that names no failing test.
+pub fn screen(root: &Path, command: &str, output: &str) -> Option<String> {
+    if command.contains(['"', '\'', '\\']) {
+        return None;
+    }
+    let mut tokens = command.split_whitespace();
+    let mut kept: Vec<&str> = Vec::new();
+    let mut pytest = false;
+    for t in tokens.by_ref() {
+        kept.push(t);
+        if t == "pytest" || t.ends_with("/pytest") {
+            pytest = true;
+            break;
+        }
+    }
+    if !pytest {
+        return None;
+    }
+    // After pytest: a path in the tree, or a node id in one, selects tests; every other word is an
+    // option or the value of one and stays.
+    let mut value = false;
+    for t in tokens {
+        let selects = !value && !t.starts_with('-') && root.join(t.split("::").next().unwrap_or(t)).exists();
+        value = VALUED.contains(&t);
+        if !selects {
+            kept.push(t);
+        }
+    }
+    let ids = crate::wide::failing(output);
+    if ids.is_empty() || ids.iter().any(|id| id.contains('\'') || id.starts_with('-')) {
+        return None;
+    }
+    Some(format!("{} {}", kept.join(" "), ids.iter().map(|id| format!("'{id}'")).collect::<Vec<_>>().join(" ")))
+}
+
 /// What a search found and what it cost.
 #[derive(Debug, Clone, Default)]
 pub struct Search {
@@ -580,11 +629,24 @@ fn with_line(text: &str, number: u32, new: &str) -> String {
 }
 
 /// Tries `candidates` in order against `command`, `workers` at a time in copies of the tree at
-/// `root`, until one passes, `cap` has gone, or they are spent. A candidate's run is cut at
-/// `limit` (a mutation can loop). `failing` is how many tests fail now: when none passes, the
-/// candidate that leaves the fewest failing, if fewer than that and the code still reads, is the
-/// search's progress; `errors` of the failing are tests that could not run, and may not grow.
-pub fn search(root: &Path, command: &str, candidates: &[Candidate], failing: usize, errors: usize, cap: Duration, limit: Duration, workers: usize) -> Search {
+/// `root`, until one passes, `cap` has gone, or they are spent. While `waiting` says the model
+/// asked beside the search has not answered, the search goes on past `cap`, to [`LONGEST`] at
+/// most: that time is spent waiting either way. A candidate's run is cut at `limit` (a mutation
+/// can loop). `failing` is how many tests fail now: when none passes, the candidate that leaves
+/// the fewest failing, if fewer than that and the code still reads, is the search's progress;
+/// `errors` of the failing are tests that could not run, and may not grow.
+#[allow(clippy::too_many_arguments)]
+pub fn search(
+    root: &Path,
+    command: &str,
+    candidates: &[Candidate],
+    failing: usize,
+    errors: usize,
+    cap: Duration,
+    waiting: &(dyn Fn() -> bool + Sync),
+    limit: Duration,
+    workers: usize,
+) -> Search {
     let begun = Instant::now();
     let mut found = Search::default();
     if candidates.is_empty() {
@@ -614,9 +676,13 @@ pub fn search(root: &Path, command: &str, candidates: &[Candidate], failing: usi
     let step: Mutex<Option<(usize, usize, String)>> = Mutex::new(None);
     let copy_ms = Mutex::new(0.0_f64);
     let beaten = |i: usize| winner.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().is_some_and(|(w, _)| *w < i);
+    let over = || {
+        let t = begun.elapsed();
+        t > cap && (t > LONGEST.max(cap) || !waiting())
+    };
     std::thread::scope(|s| {
         for w in 0..workers {
-            let (next, tried, runs, winner, step, copy_ms, beaten) = (&next, &tried, &runs, &winner, &step, &copy_ms, &beaten);
+            let (next, tried, runs, winner, step, copy_ms, beaten, over) = (&next, &tried, &runs, &winner, &step, &copy_ms, &beaten, &over);
             let dir: PathBuf = scratch.path().join(format!("w{w}"));
             s.spawn(move || {
                 let copying = Instant::now();
@@ -629,7 +695,7 @@ pub fn search(root: &Path, command: &str, candidates: &[Candidate], failing: usi
                 }
                 let mut originals: std::collections::HashMap<String, String> = std::collections::HashMap::new();
                 loop {
-                    if begun.elapsed() > cap {
+                    if over() {
                         break;
                     }
                     let i = next.fetch_add(1, Ordering::SeqCst);
@@ -648,7 +714,7 @@ pub fn search(root: &Path, command: &str, candidates: &[Candidate], failing: usi
                     }
                     // A test still running when the cap is reached is stopped: a round of search costs
                     // the cap at most, however long the tests are.
-                    let run = tools::shell_until(&dir, command, limit, &|| beaten(i) || begun.elapsed() > cap);
+                    let run = tools::shell_until(&dir, command, limit, &|| beaten(i) || over());
                     let _ = std::fs::write(&path, &original);
                     let code = run["code"].as_i64().unwrap_or(-1);
                     if code == -2 || code == -3 {
@@ -808,11 +874,53 @@ mod tests {
             .iter()
             .map(|n| Candidate { file: "m.py".into(), line: 2, old: "    return a - b".into(), new: (*n).into(), kind: "operator", site: 0 })
             .collect();
-        let found = search(dir.path(), "python3 t.py", &cands, 1, 0, Duration::from_secs(20), Duration::from_secs(10), 2);
+        let found = search(dir.path(), "python3 t.py", &cands, 1, 0, Duration::from_secs(20), &|| false, Duration::from_secs(10), 2);
         assert_eq!(found.winner, Some(1), "{found:?}");
         assert_eq!(std::fs::read_to_string(dir.path().join("m.py")).unwrap(), "def f(a, b):\n    return a - b\n");
-        let none = search(dir.path(), "python3 t.py", &cands[..1], 1, 0, Duration::from_secs(20), Duration::from_secs(10), 1);
+        let none = search(dir.path(), "python3 t.py", &cands[..1], 1, 0, Duration::from_secs(20), &|| false, Duration::from_secs(10), 1);
         assert_eq!(none.winner, None);
+    }
+
+    #[test]
+    fn a_candidate_is_tried_on_the_failing_tests_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("tests")).unwrap();
+        std::fs::write(dir.path().join("tests/test_a.py"), "").unwrap();
+        let out = "FAILED tests/test_a.py::test_x[a&b?c] - assert 1 == 2\nFAILED tests/test_a.py::test_y - boom\n2 failed, 9 passed in 0.31s\n";
+        let base = "PYTHONPATH=src:. python -m pytest -q -p no:cacheprovider -o addopts=";
+        assert_eq!(
+            screen(dir.path(), &format!("{base} tests/test_a.py"), out).as_deref(),
+            Some(&*format!("{base} 'tests/test_a.py::test_x[a&b?c]' 'tests/test_a.py::test_y'"))
+        );
+        // A directory or a node id is a selector too; an option's value is not.
+        assert_eq!(
+            screen(dir.path(), &format!("{base} tests tests/test_a.py::test_y"), out).as_deref(),
+            Some(&*format!("{base} 'tests/test_a.py::test_x[a&b?c]' 'tests/test_a.py::test_y'"))
+        );
+        assert_eq!(
+            screen(dir.path(), "pytest -q --rootdir tests -c tests/test_a.py tests/test_a.py", out).as_deref(),
+            Some("pytest -q --rootdir tests -c tests/test_a.py 'tests/test_a.py::test_x[a&b?c]' 'tests/test_a.py::test_y'"),
+            "the value of an option that takes one stays"
+        );
+        assert_eq!(screen(dir.path(), "cargo test", out), None, "not pytest");
+        assert_eq!(screen(dir.path(), &format!("{base} tests"), "1 failed in 0.1s\n"), None, "no failing test named");
+        assert_eq!(screen(dir.path(), "pytest 'tests/test a.py'", out), None, "quoted words are left alone");
+    }
+
+    #[test]
+    fn a_search_goes_on_past_its_cap_while_the_model_beside_it_has_not_answered() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("m.py"), "def f(a, b):\n    return a - b\n").unwrap();
+        std::fs::write(dir.path().join("t.py"), "import time\nfrom m import f\ntime.sleep(0.05)\nassert f(3, 2) == 5\n").unwrap();
+        let cands: Vec<Candidate> = (0..200)
+            .map(|k| Candidate { file: "m.py".into(), line: 2, old: "    return a - b".into(), new: format!("    return a - b - {k}"), kind: "constant", site: 0 })
+            .collect();
+        let alone = search(dir.path(), "python3 t.py", &cands, 1, 0, Duration::ZERO, &|| false, Duration::from_secs(10), 1);
+        assert_eq!(alone.tried, 0, "past its cap with nothing to wait for, the search stops: {alone:?}");
+        let begun = Instant::now();
+        let beside = search(dir.path(), "python3 t.py", &cands, 1, 0, Duration::ZERO, &|| begun.elapsed() < Duration::from_millis(1500), Duration::from_secs(10), 1);
+        assert!(beside.tried >= 1 && beside.total >= 1400.0, "it went on while the model wrote: {beside:?}");
+        assert!(beside.tried < cands.len(), "and stopped short of its candidates: {beside:?}");
     }
 
     #[test]
@@ -829,7 +937,7 @@ mod tests {
             .iter()
             .map(|(line, n)| Candidate { file: "m.py".into(), line: *line, old: String::new(), new: (*n).into(), kind: "operator", site: 0 })
             .collect();
-        let found = search(dir.path(), "python3 t.py", &cands, 2, 0, Duration::from_secs(20), Duration::from_secs(10), 2);
+        let found = search(dir.path(), "python3 t.py", &cands, 2, 0, Duration::from_secs(20), &|| false, Duration::from_secs(10), 2);
         assert_eq!(found.winner, None, "{found:?}");
         assert_eq!(found.progress, Some(1), "the f fix leaves one failing: {found:?}");
         assert_eq!(found.remaining, 1);

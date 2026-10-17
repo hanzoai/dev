@@ -15,6 +15,11 @@
 //!
 //! An edit is asked for as a JSON schema (`response_format`, strict) where the server is Hanzo's,
 //! which constrains the decoding: the answer cannot be prose, nor a string with a bare quote in it.
+//!
+//! A call may be begun before the loop needs it ([`Zen::start`]) and waited for later. Dropping
+//! the [`Pending`] cancels it: the stream is closed, so the server stops writing and billing it,
+//! and the spend file gets a line for what it was sent (`cancelled`, its prompt counted from the
+//! request's characters at the ceiling rate, as every unpriced call is).
 
 use hanzo_config::kai::Generate;
 use serde_json::Value;
@@ -59,7 +64,9 @@ pub struct Generation {
     pub text: String,
     /// Request sent to the first token, milliseconds.
     pub first: f64,
-    /// Request sent to the last token, milliseconds; retries included.
+    /// Request sent to the last token of the answer's text, milliseconds.
+    pub last: f64,
+    /// Request sent to the end of the stream, milliseconds; retries included.
     pub total: f64,
     pub prompt: u64,
     pub completion: u64,
@@ -136,6 +143,7 @@ fn schema() -> Value {
 }
 
 /// Zen over `POST {url}/chat/completions` as `model`.
+#[derive(Clone)]
 pub struct Zen {
     url: String,
     model: String,
@@ -213,6 +221,35 @@ impl Zen {
             "cost_basis": format!("ceiling at ${}/M in, ${}/M out", RATE.0, RATE.1),
             "headers": headers,
         });
+        Self::append(path, &line);
+    }
+
+    /// The line a call cancelled before its end leaves in the spend file: the prompt it was sent,
+    /// counted at three characters a token (more tokens than text takes, so the budget stays a
+    /// ceiling), and the pieces it had streamed, a token each.
+    fn record_cut(&self, model: &str, body: &Value, streamed: u64, ms: f64) {
+        let Some((path, _)) = &self.spend else {
+            return;
+        };
+        let chars: usize = body["messages"]
+            .as_array()
+            .map(|m| m.iter().filter_map(|x| x["content"].as_str()).map(str::len).sum())
+            .unwrap_or_default();
+        let prompt = chars.div_ceil(3) as u64;
+        let line = json!({
+            "time": crate::trace::now(),
+            "model": model,
+            "cancelled": true,
+            "prompt_tokens": prompt,
+            "completion_tokens": streamed,
+            "ms": ms,
+            "cost": (prompt as f64 * RATE.0 + streamed as f64 * RATE.1) / 1e6,
+            "cost_basis": format!("estimated: the prompt at 3 characters a token, a token a piece streamed, at ${}/M in, ${}/M out", RATE.0, RATE.1),
+        });
+        Self::append(path, &line);
+    }
+
+    fn append(path: &PathBuf, line: &Value) {
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
@@ -264,7 +301,16 @@ impl Zen {
             request = request.bearer_auth(key);
         }
         let begun = Instant::now();
-        let mut response = request.send().await.map_err(|e| format!("zen: {}", e.without_url()))?;
+        // Until the stream has ended, a drop of this future is a cancelled call: it leaves its
+        // line in the spend file.
+        let mut cut = Cut { zen: self, model, body, streamed: 0, begun, armed: true };
+        let mut response = match request.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                cut.armed = false;
+                return Err(format!("zen: {}", e.without_url()));
+            }
+        };
         let status = response.status();
         let headers = json!({
             "served": response.headers().get("x-hanzo-served").and_then(|v| v.to_str().ok()),
@@ -272,6 +318,8 @@ impl Zen {
             "paid_by": response.headers().get("x-hanzo-paid-by").and_then(|v| v.to_str().ok()),
         });
         if !status.is_success() {
+            // A request the server refused wrote nothing.
+            cut.armed = false;
             let body = response.text().await.unwrap_or_default();
             let why: Value = serde_json::from_str(&body).unwrap_or_default();
             let msg = why["error"]["message"]
@@ -281,7 +329,7 @@ impl Zen {
                 .unwrap_or_else(|| crate::decide::cut(&body, 200));
             return Err(format!("zen: {status}: {msg}"));
         }
-        let (mut pending, mut answer, mut first) = (String::new(), String::new(), None);
+        let (mut pending, mut answer, mut first, mut last) = (String::new(), String::new(), None, 0.0);
         let (mut prompt_tokens, mut completion_tokens, mut reasoning_tokens) = (0, 0, 0);
         let (mut served, mut finish) = (String::new(), String::new());
         while let Some(chunk) = response.chunk().await.map_err(|e| format!("zen: {}", e.without_url()))? {
@@ -302,11 +350,14 @@ impl Zen {
                 let thought = delta["reasoning_content"].as_str().or_else(|| delta["reasoning"].as_str());
                 if thought.is_some_and(|t| !t.is_empty()) {
                     first.get_or_insert_with(|| begun.elapsed().as_secs_f64() * 1000.0);
+                    cut.streamed += 1;
                 }
                 if let Some(piece) = delta["content"].as_str()
                     && !piece.is_empty()
                 {
                     first.get_or_insert_with(|| begun.elapsed().as_secs_f64() * 1000.0);
+                    last = begun.elapsed().as_secs_f64() * 1000.0;
+                    cut.streamed += 1;
                     answer.push_str(piece);
                 }
                 if let Some(why) = event["choices"][0]["finish_reason"].as_str() {
@@ -323,6 +374,7 @@ impl Zen {
             }
         }
         let total = begun.elapsed().as_secs_f64() * 1000.0;
+        cut.armed = false;
         if let Some(s) = headers["served"].as_str() {
             served = s.to_string();
         }
@@ -330,6 +382,7 @@ impl Zen {
             Generation {
                 text: answer,
                 first: first.unwrap_or(total),
+                last: if last > 0.0 { last } else { total },
                 total,
                 prompt: prompt_tokens,
                 completion: completion_tokens,
@@ -351,6 +404,7 @@ impl Zen {
         Some(Generation {
             text: r["text"].as_str().filter(|t| !t.is_empty() && doc["error"].is_null())?.to_string(),
             first: 0.0,
+            last: 0.0,
             total: 0.0,
             prompt: r["prompt_tokens"].as_u64()?,
             completion: r["completion_tokens"].as_u64()?,
@@ -399,7 +453,7 @@ impl Zen {
         let looked = Instant::now();
         if let Some(mut g) = self.kept(&name) {
             let took = looked.elapsed().as_secs_f64() * 1000.0;
-            (g.first, g.total) = (took, took);
+            (g.first, g.last, g.total) = (took, took, took);
             return Ok(g);
         }
         if let Some((path, budget)) = &self.spend
@@ -449,6 +503,83 @@ impl Zen {
     /// `model`'s answer to `user` under `system`. Blocks: call it off the async runtime.
     pub fn generate(&self, model: &str, system: &str, user: &str, effort: Effort) -> Result<Generation, String> {
         self.runtime.block_on(self.complete(model, system, user, effort))
+    }
+
+    /// [`Zen::generate`] begun now and waited for later: the call runs on the runtime while the
+    /// caller does other work. Dropping the [`Pending`] cancels it.
+    pub fn start(&self, model: &str, system: &str, user: &str, effort: Effort) -> Pending {
+        let zen = self.clone();
+        let (m, s, u) = (model.to_string(), system.to_string(), user.to_string());
+        Pending {
+            handle: Some(self.runtime.spawn(async move { zen.complete(&m, &s, &u, effort).await })),
+            runtime: self.runtime.clone(),
+            begun: Instant::now(),
+        }
+    }
+}
+
+/// A call begun with [`Zen::start`].
+pub struct Pending {
+    handle: Option<tokio::task::JoinHandle<Result<Generation, String>>>,
+    runtime: tokio::runtime::Handle,
+    begun: Instant,
+}
+
+impl Pending {
+    /// Whether the answer is in.
+    pub fn done(&self) -> bool {
+        self.handle.as_ref().is_none_or(tokio::task::JoinHandle::is_finished)
+    }
+
+    /// Milliseconds since the call was begun.
+    pub fn age(&self) -> f64 {
+        self.begun.elapsed().as_secs_f64() * 1000.0
+    }
+
+    /// The answer, waiting for it if it is not in. Blocks: call it off the async runtime.
+    pub fn wait(mut self) -> Result<Generation, String> {
+        let handle = self.handle.take().ok_or("zen: the call was already waited for")?;
+        self.runtime.block_on(handle).map_err(|e| format!("zen: the call did not finish: {e}"))?
+    }
+
+    /// Cancels the call and returns once it has stopped, its line in the spend file written;
+    /// `true` when it had not finished. Blocks: call it off the async runtime.
+    pub fn cancel(mut self) -> bool {
+        let Some(handle) = self.handle.take() else {
+            return false;
+        };
+        let running = !handle.is_finished();
+        handle.abort();
+        let _ = self.runtime.block_on(handle);
+        running
+    }
+}
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            handle.abort();
+        }
+    }
+}
+
+/// While armed, a call that is dropped before its stream ends: its drop records the call as
+/// cancelled.
+struct Cut<'a> {
+    zen: &'a Zen,
+    model: &'a str,
+    body: &'a Value,
+    /// Pieces of text the stream had written.
+    streamed: u64,
+    begun: Instant,
+    armed: bool,
+}
+
+impl Drop for Cut<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            self.zen.record_cut(self.model, self.body, self.streamed, self.begun.elapsed().as_secs_f64() * 1000.0);
+        }
     }
 }
 
@@ -617,6 +748,51 @@ mod tests {
         for model in ["claude-sonnet-5-5", "anthropic/claude-haiku-5.5", "Anthropic/x"] {
             assert_eq!(at(model).fallback(), None, "{model}");
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_call_begun_ahead_answers_when_waited_for_as_the_same_call_would() {
+        let server = testing::zen(|_| "{\"edits\":[]}".to_string()).await;
+        let home = tempfile::tempdir().unwrap();
+        let (calls, spend) = (home.path().join("calls"), home.path().join("spend.jsonl"));
+        let zen = zen_at(&server, &calls, &spend);
+        let pending = zen.start("base", "sys", "user", Effort::Low);
+        let g = tokio::task::block_in_place(|| pending.wait()).unwrap();
+        assert!(!g.cached && g.text == "{\"edits\":[]}" && g.first <= g.last && g.last <= g.total, "{g:?}");
+        // It was kept as any call is: the same request again is answered from there.
+        let again = tokio::task::block_in_place(|| zen.generate("base", "sys", "user", Effort::Low)).unwrap();
+        assert!(again.cached);
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_cancelled_call_stops_and_leaves_its_line_in_the_spend_file() {
+        use wiremock::matchers::{method, path};
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_delay(Duration::from_secs(30)))
+            .mount(&server)
+            .await;
+        let home = tempfile::tempdir().unwrap();
+        let (calls, spend) = (home.path().join("calls"), home.path().join("spend.jsonl"));
+        let mut zen = zen_at(&server, &calls, &spend);
+        // Paid, as every call to Hanzo's API is.
+        zen.spend = Some((spend.clone(), f64::INFINITY));
+        let pending = zen.start("base", "sys", "user", Effort::Low);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(!pending.done());
+        let begun = Instant::now();
+        assert!(tokio::task::block_in_place(|| pending.cancel()), "it was running");
+        assert!(begun.elapsed() < Duration::from_secs(5), "a cancel does not wait for the answer");
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
+        let lines: Vec<Value> = std::fs::read_to_string(&spend).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(lines.len(), 1);
+        assert_eq!((lines[0]["cancelled"].as_bool(), lines[0]["model"].as_str()), (Some(true), Some("base")));
+        // "sys" and "user": seven characters, three tokens at three characters a token; nothing streamed.
+        assert_eq!((lines[0]["prompt_tokens"].as_u64(), lines[0]["completion_tokens"].as_u64()), (Some(3), Some(0)));
+        assert!(lines[0]["cost"].as_f64().unwrap() > 0.0);
+        assert!(!calls.exists() || std::fs::read_dir(&calls).unwrap().next().is_none(), "a cancelled call is not kept");
     }
 
     #[tokio::test(flavor = "multi_thread")]

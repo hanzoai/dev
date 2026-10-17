@@ -153,14 +153,19 @@ async fn asked_zen(zen: &MockServer) -> Vec<String> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_single_fault_is_found_by_search_and_the_model_is_never_asked() {
+async fn a_single_fault_is_found_by_search_and_the_call_begun_beside_it_is_cancelled() {
     let repo = repo_with(SIMPLE);
     let kai = honest().await;
     let zen = testing::zen(|_| String::new()).await;
     let report = run_flow(repo.path(), &kai.uri(), &zen, options(3, Control::Kai)).await;
     assert_eq!(report.outcome, "done");
     assert!(report.attempts.is_empty());
-    assert!(asked_zen(&zen).await.is_empty(), "no generation");
+    assert!(asked_zen(&zen).await.len() <= 1, "at most the call begun beside the search");
+    let led = ledger(repo.path());
+    assert!(ops(&led, "generate").is_empty(), "no answer was used: {led:?}");
+    let cancelled: Vec<&Value> = led.iter().filter(|l| l["kind"] == "cancel").collect();
+    assert_eq!(cancelled.len(), 1, "{led:?}");
+    assert_eq!((cancelled[0]["model"].as_str(), cancelled[0]["reason"].as_str()), (Some("zen-test"), Some("the search settled the task")));
     let fast = report.fast.as_ref().unwrap();
     assert!(fast.solved && fast.tried >= 1 && fast.runs >= 1, "{fast:?}");
     assert_eq!(fast.kind.as_deref(), Some("operator"));
@@ -224,6 +229,32 @@ async fn the_model_writes_the_edit_when_search_finds_none_and_the_flow_is_done()
     let generate = led.iter().find(|l| l["operation"]["type"] == "generate").unwrap();
     assert_eq!(generate["source"], "model");
     assert!(led.iter().any(|l| l["kind"] == "fallback" && l["op"] == "search"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_first_call_is_begun_before_the_search_and_answers_the_first_attempt() {
+    let repo = repo();
+    let kai = honest().await;
+    let asked: Arc<std::sync::Mutex<Vec<std::time::SystemTime>>> = Arc::default();
+    let at = asked.clone();
+    let zen = testing::zen(move |_| {
+        at.lock().unwrap().push(std::time::SystemTime::now());
+        fix()
+    })
+    .await;
+    let report = run_flow(repo.path(), &kai.uri(), &zen, options(3, Control::Kai)).await;
+    assert_eq!(report.outcome, "done", "{}", report.summary());
+    assert_eq!(report.attempts.len(), 1);
+    assert_eq!(asked_zen(&zen).await.len(), 1, "one call, asked once");
+    let led = ledger(repo.path());
+    let mutate = ops(&led, "mutate")[0];
+    let searched: std::time::SystemTime = chrono::DateTime::parse_from_rfc3339(mutate["time"].as_str().unwrap()).unwrap().into();
+    assert!(asked.lock().unwrap()[0] < searched, "the call was made before the search ended");
+    let generate = ops(&led, "generate")[0];
+    let ahead = generate["result"]["ahead_ms"].as_f64().unwrap();
+    assert!(ahead >= mutate["ms"].as_f64().unwrap(), "the call had the search's time: {generate}");
+    assert_eq!(generate["result"]["stage"], "first");
+    assert_eq!(read(repo.path()), FIXED);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -467,7 +498,7 @@ async fn a_step_that_fixes_one_of_two_faults_is_kept_and_the_state_looked_at_aga
     options.task["test"] = json!("python3 tests/test_both.py");
     let report = run_flow(repo.path(), &kai.uri(), &zen, options).await;
     assert_eq!(report.outcome, "done", "{}", report.summary());
-    assert!(asked_zen(&zen).await.is_empty(), "no generation: the search did both");
+    assert!(asked_zen(&zen).await.len() <= 1, "at most the call begun beside the first search");
     let fast = report.fast.as_ref().unwrap();
     assert!(fast.solved && fast.kept == 1 && fast.rounds == 2, "{fast:?}");
     assert_eq!(report.failing, 2);
@@ -479,6 +510,12 @@ async fn a_step_that_fixes_one_of_two_faults_is_kept_and_the_state_looked_at_aga
     assert_eq!(mutates, 2);
     let verifies: Vec<&Value> = led.iter().filter(|l| l["kind"] == "verify").collect();
     assert_eq!(verifies.iter().filter(|v| v["passed"] == true).count(), 1, "one pass, the last");
+    // No answer was used: the call asked at the first state was cancelled when the step moved it.
+    assert!(ops(&led, "generate").is_empty(), "{led:?}");
+    let cancelled: Vec<&Value> = led.iter().filter(|l| l["kind"] == "cancel").collect();
+    assert_eq!(cancelled.len(), 1, "{led:?}");
+    assert_eq!(cancelled[0]["revision"], "base");
+    assert_eq!(cancelled[0]["reason"], "the state it was asked at is left");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -800,6 +837,48 @@ async fn passing_the_failing_command_is_not_done_while_a_test_beside_it_fails() 
     let wide: Vec<&Value> = ops(&led, "test").into_iter().filter(|l| l["operation"]["command"] == "sh tools/pytest tests").collect();
     assert!(wide.iter().any(|l| l["status"] == "rejected" && l["result"]["new"][0].as_str().is_some_and(|n| n.contains("test_mul.py"))), "{wide:?}");
     assert!(wide.iter().any(|l| l["status"] == "verified"), "and the last, clean: {wide:?}");
+    let first = wide.iter().find(|l| l["revision"] == "base").unwrap();
+    assert_eq!(first["result"]["lazy"], true, "what failed before was read when a run after the edit failed: {first}");
+}
+
+#[test]
+fn the_failing_command_and_the_tests_around_it_run_at_once_and_a_failure_stops_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::new("t", dir.path().join("ledger.jsonl"));
+    let mut slow = Wide { command: "sleep 30".into(), before: None };
+    let begun = Instant::now();
+    let (test, around) = check(dir.path(), "exit 1", Duration::from_secs(60), Some(&mut slow), &BTreeMap::new(), &ledger, "r").unwrap();
+    assert_eq!(test["passed"], false);
+    assert!(around.is_none(), "a failing command settles the edit without them");
+    assert!(begun.elapsed() < Duration::from_secs(25), "they were stopped: {:?}", begun.elapsed());
+    // The failing command passes only if the wider run began while it ran: at once, not one after the other.
+    let mut both = Wide { command: "touch began && sleep 3".into(), before: None };
+    let (test, around) = check(dir.path(), "sleep 3 && test -e began", Duration::from_secs(60), Some(&mut both), &BTreeMap::new(), &ledger, "r").unwrap();
+    assert_eq!(test["passed"], true, "{test}");
+    assert!(around.is_some_and(|v| v.new.is_empty()));
+    assert!(both.before.is_none(), "a wider run that passes needs nothing from before any edit");
+}
+
+#[test]
+fn what_failed_before_any_edit_is_read_with_the_files_as_they_were_and_the_edit_is_put_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("m.txt"), "edited").unwrap();
+    std::fs::write(root.join("old.txt"), "BAD").unwrap();
+    let ledger = Ledger::new("t", root.join("ledger.jsonl"));
+    // The "runner" fails each file that says BAD, and m.txt fails until it is edited.
+    let script = "for f in m.txt old.txt; do grep -q BAD $f && echo \"FAILED $f::case - boom\"; done; grep -q BAD m.txt old.txt && exit 1; exit 0";
+    let mut wide = Wide { command: script.into(), before: None };
+    let pristine: BTreeMap<String, String> = [("m.txt".to_string(), "BAD".to_string())].into();
+    let (test, around) = check(root, "true", Duration::from_secs(20), Some(&mut wide), &pristine, &ledger, "r").unwrap();
+    assert_eq!(test["passed"], true);
+    let v = around.unwrap();
+    assert!(v.new.is_empty(), "old.txt failed before the edit too: {:?}", v.new);
+    let before = wide.before.as_ref().unwrap();
+    assert_eq!(before.failing.iter().map(String::as_str).collect::<Vec<_>>(), ["m.txt::case", "old.txt::case"]);
+    assert_eq!(std::fs::read_to_string(root.join("m.txt")).unwrap(), "edited", "the edit is put back");
+    let led: Vec<Value> = std::fs::read_to_string(root.join("ledger.jsonl")).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert!(led.iter().any(|l| l["result"]["lazy"] == true && l["revision"] == "base"), "{led:?}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
