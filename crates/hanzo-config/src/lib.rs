@@ -11,6 +11,7 @@ pub use provider::clear_hanzo_api_key;
 pub use provider::hanzo_credential;
 pub use provider::save_hanzo_api_key;
 pub use provider::set_feature;
+pub use provider::set_memory_provider;
 pub use provider::Provider;
 
 /// The active product home. Meaningful once [`initialize`] has run.
@@ -126,6 +127,26 @@ fn initialize_home(home: &Path) -> std::io::Result<()> {
 
 pub const DEFAULT_CONFIG: &str = r#"model_provider = "hanzo"
 model = "enso-auto"
+
+[features]
+memories = true
+
+# Background learning uses the local engine independently of the foreground
+# model. An unavailable local engine leaves retryable work, never a billed fallback.
+[memories]
+model_provider = "local_memory"
+extract_model = "halogen-qwen3.8-flash-next"
+consolidation_model = "halogen-qwen3.8-flash-next"
+max_rollouts_per_startup = 4
+min_rollout_idle_hours = 1
+
+[model_providers.local_memory]
+name = "Local memory"
+base_url = "http://127.0.0.1:8731/v1"
+wire_api = "responses"
+requires_openai_auth = false
+request_max_retries = 0
+stream_max_retries = 0
 
 [model_providers.hanzo]
 name = "Hanzo"

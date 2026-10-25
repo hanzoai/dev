@@ -1,11 +1,64 @@
 use super::*;
 
 #[test]
+fn memory_provider_keeps_foreground_and_replaces_only_background_auth() {
+    let home = tempfile::tempdir().unwrap();
+    crate::initialize_home(home.path()).unwrap();
+    edit(home.path(), |config| {
+        config["model"] = toml_edit::value("foreground-model");
+        config["model_providers"]["local_memory"]["env_key"] = toml_edit::value("OLD_API_KEY");
+    })
+    .unwrap();
+    set_memory_provider(
+        home.path(),
+        "http://evo.local:8731/v1",
+        "halogen-qwen3.8-flash-next",
+    )
+    .unwrap();
+    let config: toml::Value =
+        toml::from_str(&std::fs::read_to_string(home.path().join("config.toml")).unwrap()).unwrap();
+    assert_eq!(config["model"].as_str(), Some("foreground-model"));
+    assert_eq!(config["model_provider"].as_str(), Some("hanzo"));
+    assert_eq!(config["features"]["memories"].as_bool(), Some(true));
+    assert_eq!(
+        config["memories"]["model_provider"].as_str(),
+        Some("local_memory")
+    );
+    assert_eq!(
+        config["model_providers"]["local_memory"]["base_url"].as_str(),
+        Some("http://evo.local:8731/v1")
+    );
+    assert!(config["model_providers"]["local_memory"]
+        .get("env_key")
+        .is_none());
+}
+
+#[test]
+fn memory_configuration_refuses_embedded_credentials_and_invalid_models() {
+    let home = tempfile::tempdir().unwrap();
+    crate::initialize_home(home.path()).unwrap();
+    let before = std::fs::read_to_string(home.path().join("config.toml")).unwrap();
+    for url in [
+        "file:///tmp/model",
+        "https://user:secret@host/v1",
+        "https://host/v1?api_key=secret",
+    ] {
+        assert!(set_memory_provider(home.path(), url, "local").is_err());
+    }
+    assert!(set_memory_provider(home.path(), "http://localhost:8731/v1", "bad model").is_err());
+    assert_eq!(
+        std::fs::read_to_string(home.path().join("config.toml")).unwrap(),
+        before
+    );
+}
+
+#[test]
 fn chatgpt_login_selects_openai_without_sending_hanzo_model_or_key() {
     let home = tempfile::tempdir().unwrap();
     crate::initialize_home(home.path()).unwrap();
     activate_provider(home.path(), Provider::OpenAi).unwrap();
-    let config: toml::Value = toml::from_str(&std::fs::read_to_string(home.path().join("config.toml")).unwrap()).unwrap();
+    let config: toml::Value =
+        toml::from_str(&std::fs::read_to_string(home.path().join("config.toml")).unwrap()).unwrap();
     let mut expected: toml::Value = toml::from_str(crate::DEFAULT_CONFIG).unwrap();
     expected["model_provider"] = "openai".into();
     expected.as_table_mut().unwrap().remove("model");
@@ -18,7 +71,11 @@ fn switching_back_to_hanzo_preserves_unrelated_preferences() {
     crate::initialize_home(home.path()).unwrap();
     let path = home.path().join("config.toml");
     let text = std::fs::read_to_string(&path).unwrap();
-    std::fs::write(&path, format!("# My preferences\nmodel_reasoning_effort = 'high'\n{text}")).unwrap();
+    std::fs::write(
+        &path,
+        format!("# My preferences\nmodel_reasoning_effort = 'high'\n{text}"),
+    )
+    .unwrap();
     activate_provider(home.path(), Provider::OpenAi).unwrap();
     activate_provider(home.path(), Provider::Hanzo).unwrap();
     let text = std::fs::read_to_string(path).unwrap();
@@ -36,21 +93,32 @@ fn switching_back_to_hanzo_preserves_unrelated_preferences() {
 fn a_profile_naming_no_provider_runs_on_hanzo_and_keeps_its_own_providers() {
     let home = tempfile::tempdir().unwrap();
     let path = home.path().join("config.toml");
-    std::fs::write(&path, "[model_providers.pool]\nname = \"Pool\"\nbase_url = \"http://pool/v1\"\n").unwrap();
+    std::fs::write(
+        &path,
+        "[model_providers.pool]\nname = \"Pool\"\nbase_url = \"http://pool/v1\"\n",
+    )
+    .unwrap();
     default_to_hanzo(home.path());
     let config: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     let defaults: toml::Value = toml::from_str(crate::DEFAULT_CONFIG).unwrap();
     assert_eq!(config["model_provider"].as_str(), Some("hanzo"));
     assert_eq!(config["model"].as_str(), Some(hanzo::DEFAULT_MODEL));
-    assert_eq!(config["model_providers"]["hanzo"], defaults["model_providers"]["hanzo"]);
-    assert_eq!(config["model_providers"]["pool"]["base_url"].as_str(), Some("http://pool/v1"));
+    assert_eq!(
+        config["model_providers"]["hanzo"],
+        defaults["model_providers"]["hanzo"]
+    );
+    assert_eq!(
+        config["model_providers"]["pool"]["base_url"].as_str(),
+        Some("http://pool/v1")
+    );
 }
 
 #[test]
 fn a_profile_that_names_a_provider_is_left_as_it_is() {
     let home = tempfile::tempdir().unwrap();
     let path = home.path().join("config.toml");
-    let text = "model_provider = \"pool\"\nmodel = \"qwen\"\n\n[model_providers.pool]\nname = \"Pool\"\n";
+    let text =
+        "model_provider = \"pool\"\nmodel = \"qwen\"\n\n[model_providers.pool]\nname = \"Pool\"\n";
     std::fs::write(&path, text).unwrap();
     default_to_hanzo(home.path());
     assert_eq!(std::fs::read_to_string(path).unwrap(), text);
@@ -60,16 +128,21 @@ const JWT: &str = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ6In0.c2ln";
 
 #[test]
 fn an_api_key_in_the_environment_wins() {
-    let chosen = pick(Some("hk-live-key".into()), Some("saved".into()), || Some(JWT.into()));
+    let chosen = pick(Some("hk-live-key".into()), Some("saved".into()), || {
+        Some(JWT.into())
+    });
     assert_eq!(chosen.as_deref(), Some("hk-live-key"));
 }
 
 #[test]
 fn a_key_the_host_hands_the_run_is_used_as_given() {
     // A cloud sandbox has no CLI to ask: the delegated token in HANZO_API_KEY is it.
-    let chosen = choose(Some(JWT.into()), Some("hk-live-key".into()), Some("saved".into()), || {
-        panic!("a run handed a key never asks the CLI")
-    });
+    let chosen = choose(
+        Some(JWT.into()),
+        Some("hk-live-key".into()),
+        Some("saved".into()),
+        || panic!("a run handed a key never asks the CLI"),
+    );
     assert_eq!(chosen.as_deref(), Some(JWT));
     let fallback = choose(None, None, None, || Some("fresh".into()));
     assert_eq!(fallback.as_deref(), Some("fresh"));
@@ -78,8 +151,14 @@ fn a_key_the_host_hands_the_run_is_used_as_given() {
 #[test]
 fn an_inherited_sign_in_token_yields_to_a_fresh_one() {
     let fresh = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJmcmVzaCJ9.c2ln";
-    assert_eq!(pick(Some(JWT.into()), None, || Some(fresh.into())).as_deref(), Some(fresh));
-    assert_eq!(pick(Some(JWT.into()), Some("saved".into()), || None).as_deref(), Some("saved"));
+    assert_eq!(
+        pick(Some(JWT.into()), None, || Some(fresh.into())).as_deref(),
+        Some(fresh)
+    );
+    assert_eq!(
+        pick(Some(JWT.into()), Some("saved".into()), || None).as_deref(),
+        Some("saved")
+    );
     // With nothing fresher, the inherited token is still better than none.
     assert_eq!(pick(Some(JWT.into()), None, || None).as_deref(), Some(JWT));
 }
@@ -88,11 +167,22 @@ fn an_inherited_sign_in_token_yields_to_a_fresh_one() {
 fn the_default_provider_refreshes_its_token() {
     let config: toml::Value = toml::from_str(crate::DEFAULT_CONFIG).unwrap();
     let provider = &config["model_providers"]["hanzo"];
-    assert!(provider.get("env_key").is_none(), "auth and env_key cannot both be set");
+    assert!(
+        provider.get("env_key").is_none(),
+        "auth and env_key cannot both be set"
+    );
     assert_eq!(provider["auth"]["command"].as_str(), Some("dev"));
-    assert_eq!(provider["auth"]["args"].as_array().unwrap()[0].as_str(), Some("token"));
+    assert_eq!(
+        provider["auth"]["args"].as_array().unwrap()[0].as_str(),
+        Some("token")
+    );
     // Shorter than the hour a sign-in token lives.
-    assert!(provider["auth"]["refresh_interval_ms"].as_integer().unwrap() < 3_600_000);
+    assert!(
+        provider["auth"]["refresh_interval_ms"]
+            .as_integer()
+            .unwrap()
+            < 3_600_000
+    );
 }
 
 const OLD_PROVIDER: &str = r#"# mine
@@ -118,7 +208,10 @@ fn a_startup_only_credential_is_upgraded_to_the_refreshing_one() {
     assert!(text.starts_with("# mine\n"));
     let config: toml::Value = toml::from_str(&text).unwrap();
     let defaults: toml::Value = toml::from_str(crate::DEFAULT_CONFIG).unwrap();
-    assert_eq!(config["model_providers"]["hanzo"], defaults["model_providers"]["hanzo"]);
+    assert_eq!(
+        config["model_providers"]["hanzo"],
+        defaults["model_providers"]["hanzo"]
+    );
     // Twice changes nothing more.
     upgrade_auth(home.path());
     assert_eq!(std::fs::read_to_string(&path).unwrap(), text);

@@ -13,7 +13,7 @@ use std::process::Output;
 const COMMANDS: &[&str] = &[
     "exec", "login", "logout", "serve", "resume", "fork", "review", "agents", "queue", "archive",
     "unarchive", "delete", "cloud", "mcp", "plugin", "doctor", "features", "flow", "sandbox",
-    "completion",
+    "completion", "memory",
 ];
 
 fn dev(home: &Path, arguments: &[&str]) -> Output {

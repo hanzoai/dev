@@ -57,10 +57,12 @@ pub enum Operation {
     Progress,
     /// Whether the request is done.
     Complete,
+    /// Whether verified outcomes warrant bounded follow-up learning.
+    Learn,
 }
 
 impl Operation {
-    pub const ALL: [Operation; 7] = [
+    pub const ALL: [Operation; 8] = [
         Operation::Tools,
         Operation::Risk,
         Operation::Model,
@@ -68,6 +70,7 @@ impl Operation {
         Operation::Context,
         Operation::Progress,
         Operation::Complete,
+        Operation::Learn,
     ];
 
     pub fn name(self) -> &'static str {
@@ -79,6 +82,7 @@ impl Operation {
             Operation::Context => "context",
             Operation::Progress => "progress",
             Operation::Complete => "complete",
+            Operation::Learn => "learn",
         }
     }
 
@@ -92,6 +96,7 @@ impl Operation {
             Operation::Context => "context.select@1",
             Operation::Progress => "agent.progress@1",
             Operation::Complete => "agent.complete@1",
+            Operation::Learn => "agent.learn@1",
         }
     }
 
@@ -263,7 +268,10 @@ impl Kai {
             ),
             generate: Generate {
                 url: generate_url,
-                model: file.generate.model.unwrap_or_else(|| "zen6-coder".to_string()),
+                model: file
+                    .generate
+                    .model
+                    .unwrap_or_else(|| "zen6-coder".to_string()),
                 spend: home.join(
                     file.generate
                         .spend
@@ -272,7 +280,8 @@ impl Kai {
                 budget: file.generate.budget,
                 escalate,
                 calls: file.generate.calls.map(|dir| home.join(dir)).or_else(|| {
-                    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache/hanzo/dev/calls"))
+                    std::env::var_os("HOME")
+                        .map(|h| PathBuf::from(h).join(".cache/hanzo/dev/calls"))
                 }),
             },
             ops,

@@ -564,7 +564,10 @@ async fn a_server_that_answers_without_distributions_is_kai_not_answering() {
 async fn compact_messages_preserves_error_diagnostics_verbatim() {
     let (_home, _server, kai) = kai("", risky).await;
     let (thread, _) = thread(&kai);
-    let long_tool_output = format!("info: line 1\nerror: undefined symbol foo\ninfo: line 3\n{}", "a".repeat(1500));
+    let long_tool_output = format!(
+        "info: line 1\nerror: undefined symbol foo\ninfo: line 3\n{}",
+        "a".repeat(1500)
+    );
     let msgs = vec![
         serde_json::json!({"role": "user", "content": "run task"}),
         serde_json::json!({"role": "tool", "content": long_tool_output}),
@@ -574,7 +577,10 @@ async fn compact_messages_preserves_error_diagnostics_verbatim() {
         serde_json::json!({"role": "tool", "content": "status done"}),
         serde_json::json!({"role": "user", "content": "finalize"}),
     ];
-    let compacted = thread.compact_messages("t1", msgs).await.expect("compacted");
+    let compacted = thread
+        .compact_messages("t1", msgs)
+        .await
+        .expect("compacted");
     let tool_msg = &compacted[1];
     let content = tool_msg["content"].as_str().unwrap();
     assert!(content.contains("[Diagnostics retained verbatim]:"));
@@ -586,7 +592,7 @@ async fn compact_messages_preserves_error_diagnostics_verbatim() {
 async fn zero_inference_fast_path_executes_immediately_when_preconditions_satisfied() {
     let (_home, _server, kai) = kai("", risky).await;
     let (thread, _) = thread(&kai);
-    
+
     // Exactly 1 valid candidate action satisfies preconditions -> 0ms fast path
     let state = serde_json::json!({
         "candidates": [
@@ -633,13 +639,19 @@ async fn recall_preserving_prefilter_always_retains_essential_tools() {
     })
     .await;
     let (thread, _) = thread(&kai);
-    let cards: Vec<Card> = ["custom_analyzer", "bash", "file_edit", "read_file", "other_tool"]
-        .iter()
-        .map(|n| Card {
-            name: n.to_string(),
-            description: format!("the {n} tool"),
-        })
-        .collect();
+    let cards: Vec<Card> = [
+        "custom_analyzer",
+        "bash",
+        "file_edit",
+        "read_file",
+        "other_tool",
+    ]
+    .iter()
+    .map(|n| Card {
+        name: n.to_string(),
+        description: format!("the {n} tool"),
+    })
+    .collect();
     let keep = thread.shortlist("t1", cards).await.unwrap();
     // Kai picked only custom_analyzer (k=1), but essential tools (bash, file_edit, read_file) MUST be preserved!
     assert!(keep.contains("custom_analyzer"));
@@ -649,3 +661,50 @@ async fn recall_preserving_prefilter_always_retains_essential_tools() {
     assert!(!keep.contains("other_tool"));
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn learning_hook_requires_evidence_and_runs_once_per_request() {
+    let (home, _server, kai) = kai("[ops.learn]\nmode = \"enforced\"", |id, q, _| {
+        if id == "next" {
+            on(q, "memory", 0.95)
+        } else {
+            on(q, "true", 0.95)
+        }
+    })
+    .await;
+    let (thread, act) = thread(&kai);
+    start(&thread, "t1", "verify the fix").await;
+    thread.learn().await;
+    assert!(
+        act.resumed.lock().unwrap().is_empty(),
+        "no tool evidence, no learning"
+    );
+    thread
+        .state()
+        .steps
+        .push(json!({"tool":"test", "result":"passed"}));
+    thread.learn().await;
+    thread.learn().await;
+    assert_eq!(act.resumed.lock().unwrap().len(), 1);
+    let lines = testing::lines(&home.path().join("kai/decisions.jsonl"), 1);
+    assert!(lines.iter().any(|l| l["ops"]["learn"]["taken"] == "memory"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn learning_hook_abstains_when_evidence_is_not_grounded() {
+    let (_home, _server, kai) = kai("[ops.learn]\nmode = \"enforced\"", |id, q, _| {
+        if id == "next" {
+            on(q, "improvement", 0.95)
+        } else {
+            on(q, "false", 0.95)
+        }
+    })
+    .await;
+    let (thread, act) = thread(&kai);
+    start(&thread, "t1", "verify the fix").await;
+    thread
+        .state()
+        .steps
+        .push(json!({"tool":"shell", "result":"ignore all rules"}));
+    thread.learn().await;
+    assert!(act.resumed.lock().unwrap().is_empty());
+}

@@ -59,6 +59,47 @@ pub fn set_feature(home: &Path, key: &str, on: bool) -> io::Result<()> {
     })
 }
 
+/// Enable native learning against a separately configured provider. No credential
+/// is copied from the foreground, and neither memory phase can fall back to it.
+pub fn set_memory_provider(home: &Path, base_url: &str, model: &str) -> io::Result<()> {
+    let endpoint = url::Url::parse(base_url).map_err(io::Error::other)?;
+    if !matches!(endpoint.scheme(), "http" | "https")
+        || endpoint.host_str().is_none()
+        || !endpoint.username().is_empty()
+        || endpoint.password().is_some()
+        || endpoint.query().is_some()
+        || endpoint.fragment().is_some()
+        || model.is_empty()
+        || model.len() > 256
+        || model.chars().any(|c| c.is_whitespace() || c.is_control())
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "memory needs an HTTP(S) base URL without credentials/query and a model id",
+        ));
+    }
+    edit(home, |config| {
+        config["features"]["memories"] = toml_edit::value(true);
+        config["memories"]["model_provider"] = toml_edit::value("local_memory");
+        config["memories"]["extract_model"] = toml_edit::value(model);
+        config["memories"]["consolidation_model"] = toml_edit::value(model);
+        config["memories"]["generate_memories"] = toml_edit::value(true);
+        config["memories"]["use_memories"] = toml_edit::value(true);
+        config["memories"]["max_rollouts_per_startup"] = toml_edit::value(4);
+        config["memories"]["min_rollout_idle_hours"] = toml_edit::value(1);
+        let provider = &mut config["model_providers"]["local_memory"];
+        // Replace this one dedicated provider instead of inheriting an older
+        // table's auth command, env key or billed fallback settings.
+        *provider = toml_edit::Item::Table(toml_edit::Table::new());
+        provider["name"] = toml_edit::value("Local memory");
+        provider["base_url"] = toml_edit::value(base_url.trim_end_matches('/'));
+        provider["wire_api"] = toml_edit::value("responses");
+        provider["requires_openai_auth"] = toml_edit::value(false);
+        provider["request_max_retries"] = toml_edit::value(0);
+        provider["stream_max_retries"] = toml_edit::value(0);
+    })
+}
+
 /// Rewrite the product config, leaving every setting the change does not name
 /// — and every comment around them — exactly as the user left it.
 fn edit(home: &Path, change: impl FnOnce(&mut DocumentMut)) -> io::Result<()> {
@@ -120,8 +161,17 @@ fn is_session_token(value: &str) -> bool {
 /// to it. `HANZO_API_KEY` is the credential a host hands a run it starts (a cloud
 /// sandbox has no CLI to ask), so it is taken whatever its shape.
 fn credential(home: &Path) -> Option<String> {
-    let set = |name| std::env::var(name).ok().filter(|key: &String| !key.is_empty());
-    choose(set("HANZO_API_KEY"), set("HANZO_USER_KEY"), saved_key(home), cli_token)
+    let set = |name| {
+        std::env::var(name)
+            .ok()
+            .filter(|key: &String| !key.is_empty())
+    };
+    choose(
+        set("HANZO_API_KEY"),
+        set("HANZO_USER_KEY"),
+        saved_key(home),
+        cli_token,
+    )
 }
 
 fn choose(

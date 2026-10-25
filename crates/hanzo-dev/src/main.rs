@@ -13,6 +13,7 @@ use codex_config::LoaderOverrides;
 use codex_utils_cli::CliConfigOverrides;
 
 mod login;
+mod memory;
 
 #[derive(Parser)]
 #[command(
@@ -105,6 +106,12 @@ enum Command {
 
     /// Report on this installation and its configuration.
     Doctor(codex_cli::doctor::DoctorCommand),
+
+    /// Configure continuous native memory extraction and consolidation.
+    Memory {
+        #[command(subcommand)]
+        command: memory::MemoryCommand,
+    },
 
     /// Inspect and change which features are on.
     Features {
@@ -315,6 +322,7 @@ async fn run(paths: Arg0DispatchPaths) -> Result<()> {
         }
         Some(Command::Plugin(cli)) => run_plugin(cli, overrides).await?,
         Some(Command::Features { command }) => run_features(command, overrides).await?,
+        Some(Command::Memory { command }) => memory::run(command, overrides).await?,
         Some(Command::Doctor(cli)) => {
             codex_cli::doctor::run_doctor(cli, overrides, &interactive, &paths).await?;
         }
