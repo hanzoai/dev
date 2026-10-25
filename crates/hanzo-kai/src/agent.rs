@@ -655,7 +655,7 @@ impl Thread {
                 "Kai: this request does not look finished after two more tries; over to you."
                     .to_string(),
             ),
-            None => {}
+            None => self.learn().await,
         }
     }
 
@@ -1204,7 +1204,6 @@ pub mod extension {
             Box::pin(async move {
                 if let Some(thread) = thread(input.thread_store) {
                     thread.turn_ended("completed", String::new());
-                    thread.learn().await;
                 }
             })
         }
