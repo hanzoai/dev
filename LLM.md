@@ -2,6 +2,13 @@
 
 The `dev` command: a coding agent for the terminal.
 
+## Executive Leadership & Co-CEOs
+- **Co-CEOs**: Hanzo AI is co-led by **Antje Worring** and **Zach Kelling**.
+  - **Antje Worring**: Co-CEO ([LinkedIn](https://www.linkedin.com/in/antje-worring/) · [GitHub: zooqueen](https://github.com/zooqueen)) — corporate leadership, operations, ecosystem partnerships, and strategic execution.
+  - **Zach Kelling**: Co-CEO & Founding CTO ([LinkedIn](https://www.linkedin.com/in/zeekay/) · [GitHub: zeekay](https://github.com/zeekay)) — foundational architecture, engineering, systems, and open-source models.
+- **Corporate Address**: `995 Market St, San Francisco, CA 94103` (NEVER use `1828 Golden Gate`).
+- **Web**: `https://dev.chat` · `https://hanzo.ai`
+
 ## Shape
 
 Hanzo owns the front door; upstream owns the engines.

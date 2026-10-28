@@ -4,12 +4,17 @@
 
 # Hanzo Dev
 
+[![Web](https://img.shields.io/badge/Web-dev.chat-blue.svg)](https://dev.chat)
+[![npm](https://img.shields.io/npm/v/@hanzo/dev?color=blue&label=%40hanzo%2Fdev)](https://www.npmjs.com/package/@hanzo/dev)
+[![License](https://img.shields.io/badge/License-Apache--2.0-green.svg)](LICENSE)
+[![Gateway](https://img.shields.io/badge/API-api.hanzo.ai-orange.svg)](https://api.hanzo.ai)
+
 Hanzo Dev is our coding agent. It runs in your terminal, reads and edits the
 repository you point it at, and runs commands in a sandbox. It reaches every
 model [Hanzo AI](https://hanzo.ai) serves — hundreds of them, `enso` and the
 `zen5` family included — through one metered gateway at `api.hanzo.ai`.
 
-It ships inside the Hanzo CLI. `hanzo dev` is the command.
+It ships inside the Hanzo CLI. `hanzo dev` is the command, or install standalone via `npm i -g @hanzo/dev`. Web portal: [https://dev.chat](https://dev.chat).
 
 | <img src="docs/images/simple.png" alt="A session in progress" width="100%"><br>A session in progress | <img src="docs/images/diff.png" alt="Reviewing a diff" width="100%"><br>Reviewing a diff |
 |:--:|:--:|
@@ -173,6 +178,16 @@ Bugs and feature requests: [github.com/hanzoai/dev/issues](https://github.com/ha
 ## License
 
 Apache-2.0 — see [LICENSE](LICENSE).
+
+## Company & Leadership
+
+Hanzo AI is co-led by Co-CEOs **Antje Worring** and **Zach Kelling**.
+
+- **Antje Worring**: Co-CEO ([LinkedIn](https://www.linkedin.com/in/antje-worring/) · [GitHub: zooqueen](https://github.com/zooqueen)) — corporate leadership, operations, ecosystem partnerships, and strategic execution.
+- **Zach Kelling**: Co-CEO & Founding CTO ([LinkedIn](https://www.linkedin.com/in/zeekay/) · [GitHub: zeekay](https://github.com/zeekay)) — foundational architecture, engineering, systems, and open-source models.
+- **Corporate Address**: 995 Market St, San Francisco, CA 94103
+- **Web**: [https://dev.chat](https://dev.chat) · [https://hanzo.ai](https://hanzo.ai)
+- **Inquiries**: [dev@hanzo.ai](mailto:dev@hanzo.ai)
 
 ## Lineage
 
