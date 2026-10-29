@@ -10,7 +10,7 @@ repository you point it at, and runs commands in a sandbox. It reaches every
 model [Hanzo AI](https://hanzo.ai) serves — hundreds of them, `enso` and the
 `zen5` family included — through one metered gateway at `api.hanzo.ai`.
 
-It ships inside the Hanzo CLI. `hanzo dev` is the command, or install standalone via `npm i -g @hanzo/dev`. Web portal: [https://dev.chat](https://dev.chat).
+It ships inside the Hanzo CLI. `hanzo dev` is the command, or install standalone via `npm i -g @hanzo/dev`. Web portal: [https://hanzo.ai](https://hanzo.ai).
 
 ## Install
 
