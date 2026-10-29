@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="docs/images/logo.png" alt="Hanzo Dev" width="400">
-</p>
-
 # Hanzo Dev
 
 [![Web](https://img.shields.io/badge/Web-dev.chat-blue.svg)](https://dev.chat)
