@@ -48,7 +48,7 @@ fn plain_frame(columns: u16, rows: u16) -> String {
         .join("\n")
 }
 
-fn render_frame(
+fn encode_frame(
     output: &mut impl Write,
     columns: u16,
     rows: u16,
@@ -69,16 +69,18 @@ fn render_frame(
     let y = rows.saturating_sub(height) / 2;
     for (index, line) in ascii::render(width, height, phase).iter().enumerate() {
         execute!(output, cursor::MoveTo(x, y + index as u16))?;
-        let mut previous: Option<u8> = None;
+        let mut previous: Option<u32> = None;
         for cell in line {
-            if cell.glyph != ' ' && (truecolor || ansi256) && previous != Some(cell.shade) {
-                let gray = 52 + u16::from(cell.shade) * 8;
+            if cell.glyph != ' ' && (truecolor || ansi256) && previous != Some(cell.rgb) {
+                let [_, r, g, b] = cell.rgb.to_be_bytes();
+                let shade =
+                    ((u16::from(r) + u16::from(g) + u16::from(b)) / 3).saturating_sub(8) / 10;
                 if truecolor {
-                    write!(output, "\x1b[38;2;{gray};{gray};{gray}m")?;
+                    write!(output, "\x1b[38;2;{r};{g};{b}m")?;
                 } else {
-                    write!(output, "\x1b[38;5;{}m", 232 + cell.shade)?;
+                    write!(output, "\x1b[38;5;{}m", 232 + shade.min(23))?;
                 }
-                previous = Some(cell.shade);
+                previous = Some(cell.rgb);
             }
             write!(output, "{}", cell.glyph)?;
         }
@@ -86,6 +88,25 @@ fn render_frame(
             output.write_all(b"\x1b[0m")?;
         }
     }
+    output.flush()?;
+    Ok(())
+}
+
+// Encode before touching stdout: clearing the live screen before ray casting
+// left a visible blank interval on every frame, especially on taller terminals.
+fn render_frame(
+    output: &mut impl Write,
+    columns: u16,
+    rows: u16,
+    phase: f64,
+    truecolor: bool,
+    ansi256: bool,
+) -> Result<()> {
+    let mut frame = Vec::new();
+    frame.extend_from_slice(b"\x1b[?2026h");
+    encode_frame(&mut frame, columns, rows, phase, truecolor, ansi256)?;
+    frame.extend_from_slice(b"\x1b[?2026l");
+    output.write_all(&frame)?;
     output.flush()?;
     Ok(())
 }
@@ -123,7 +144,7 @@ pub(crate) fn play() -> Result<()> {
         let phase = if reduced {
             0.0
         } else {
-            (started.elapsed().as_secs_f64() / 8.0).fract()
+            (started.elapsed().as_secs_f64() / hanzo::logo::LOOP_SECONDS).fract()
         };
         render_frame(&mut output, cols, rows, phase, truecolor, ansi256)?;
         if reduced {
