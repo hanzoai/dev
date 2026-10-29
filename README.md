@@ -1,6 +1,6 @@
 # Hanzo Dev
 
-[![Web](https://img.shields.io/badge/Web-dev.chat-blue.svg)](https://dev.chat)
+[![Web](https://img.shields.io/badge/Web-hanzo.ai-blue.svg)](https://hanzo.ai)
 [![npm](https://img.shields.io/npm/v/@hanzo/dev?color=blue&label=%40hanzo%2Fdev)](https://www.npmjs.com/package/@hanzo/dev)
 [![License](https://img.shields.io/badge/License-Apache--2.0-green.svg)](LICENSE)
 [![Gateway](https://img.shields.io/badge/API-api.hanzo.ai-orange.svg)](https://api.hanzo.ai)
