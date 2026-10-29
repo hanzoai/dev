@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 use crossterm::cursor;
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind};
 use crossterm::execute;
 use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
 
@@ -21,7 +21,7 @@ struct RestoreTerminal;
 impl Drop for RestoreTerminal {
     fn drop(&mut self) {
         let mut output = io::stdout();
-        let _ = execute!(output, cursor::Show, LeaveAlternateScreen);
+        let _ = execute!(output, DisableMouseCapture, cursor::Show, LeaveAlternateScreen);
         let _ = terminal::disable_raw_mode();
     }
 }
@@ -87,13 +87,13 @@ fn render_frame(
 
 pub(crate) fn play() -> Result<()> {
     let stdout = io::stdout();
-    if !stdout.is_terminal() || !io::stdin().is_terminal() {
+    let term = std::env::var("TERM").unwrap_or_default();
+    if !stdout.is_terminal() || !io::stdin().is_terminal() || term == "dumb" {
         // Pipes, CI, shell completions and captured output never receive
         // escape sequences or an unbounded animation.
         println!("{}", plain_frame(40, 14));
         return Ok(());
     }
-    let term = std::env::var("TERM").unwrap_or_default();
     let no_color = std::env::var_os("NO_COLOR").is_some() || term == "dumb";
     let color_term = std::env::var("COLORTERM").unwrap_or_default().to_lowercase();
     let truecolor = !no_color && (color_term.contains("truecolor") || color_term.contains("24bit"));
@@ -103,7 +103,7 @@ pub(crate) fn play() -> Result<()> {
     terminal::enable_raw_mode()?;
     let _restore = RestoreTerminal;
     let mut output = io::stdout();
-    execute!(output, EnterAlternateScreen, cursor::Hide)?;
+    execute!(output, EnterAlternateScreen, EnableMouseCapture, cursor::Hide)?;
     let started = Instant::now();
 
     loop {
