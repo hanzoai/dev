@@ -12,6 +12,8 @@ use codex_arg0::arg0_dispatch_or_else;
 use codex_config::LoaderOverrides;
 use codex_utils_cli::CliConfigOverrides;
 
+mod ascii;
+mod idle;
 mod login;
 mod memory;
 
@@ -37,12 +39,24 @@ struct Dev {
     #[clap(flatten)]
     overrides: CliConfigOverrides,
 
+    /// Play the 3D ASCII Hanzo idle animation in the terminal.
+    #[arg(long)]
+    idle: bool,
+
+    /// Route inference through the active model and session in the Hanzo Browser Extension.
+    #[arg(long = "ext", visible_alias = "extension", global = true)]
+    ext: bool,
+
     #[command(subcommand)]
     command: Option<Command>,
 }
 
 #[derive(Subcommand)]
 enum Command {
+    /// Play the 3D ASCII Hanzo idle animation in the terminal.
+    #[command(visible_alias = "screensaver", visible_alias = "logo")]
+    Idle,
+
     /// Run a task to completion without the interactive interface.
     #[command(visible_alias = "e")]
     Exec(codex_exec::Cli),
@@ -235,16 +249,32 @@ fn main() -> Result<()> {
 async fn run(paths: Arg0DispatchPaths) -> Result<()> {
     let Dev {
         mut interactive,
-        overrides,
+        mut overrides,
+        idle,
+        ext,
         command,
     } = Dev::parse();
     let sandbox = paths.codex_linux_sandbox_exe.clone();
+
+    if idle {
+        return idle::play();
+    }
+
+    if ext {
+        overrides
+            .raw_overrides
+            .push("model_provider=\"ext\"".to_string());
+        overrides
+            .raw_overrides
+            .push("model=\"chatgpt-web\"".to_string());
+    }
 
     match command {
         None => {
             interactive.config_overrides = overrides;
             codex_tui::run_main(interactive, paths, LoaderOverrides::default(), None).await?;
         }
+        Some(Command::Idle) => idle::play()?,
         Some(Command::Exec(mut cli)) => {
             cli.config_overrides = overrides;
             codex_exec::run_main(cli, paths).await?;
