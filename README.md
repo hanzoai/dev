@@ -171,6 +171,3 @@ Bugs and feature requests: [github.com/hanzoai/dev/issues](https://github.com/ha
 ## License
 
 Apache-2.0 — see [LICENSE](LICENSE).
-itself a fork of [openai/codex](https://github.com/openai/codex). Both are Apache-2.0,
-and this repository preserves the upstream `LICENSE` and `NOTICE`. Hanzo Dev is not
-affiliated with, sponsored by, or endorsed by either project.
