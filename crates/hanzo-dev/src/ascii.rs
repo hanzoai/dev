@@ -10,6 +10,15 @@ pub(crate) struct Cell {
 }
 
 pub(crate) fn render(columns: u16, rows: u16, phase: f64) -> Vec<Vec<Cell>> {
+    render_with_tilt(columns, rows, phase, hanzo::logo::Tilt::default())
+}
+
+pub(crate) fn render_with_tilt(
+    columns: u16,
+    rows: u16,
+    phase: f64,
+    tilt: hanzo::logo::Tilt,
+) -> Vec<Vec<Cell>> {
     let columns = columns.min(MAX_WIDTH);
     let rows = rows.min(MAX_HEIGHT);
     if columns == 0 || rows == 0 {
@@ -18,7 +27,7 @@ pub(crate) fn render(columns: u16, rows: u16, phase: f64) -> Vec<Vec<Cell>> {
     let mut renderer = hanzo::logo::Renderer::default();
     let light = hanzo::logo::Lighting::terminal((210, 221, 235), (15, 20, 37));
     renderer
-        .frame(columns, rows, phase, &light)
+        .frame_with_tilt(columns, rows, phase, tilt, &light)
         .chunks(usize::from(columns))
         .map(|row| {
             row.iter()
@@ -40,14 +49,19 @@ mod tests {
         let mut shared = hanzo::logo::Renderer::default();
         for (width, height) in [(40, 14), (60, 21)] {
             for phase in [0.0, 0.125, 0.25, 0.5, 1.0] {
-                let native = render(width, height, phase);
-                for (a, b) in native
-                    .iter()
-                    .flatten()
-                    .zip(shared.frame(width, height, phase, &light))
-                {
-                    assert_eq!(a.rgb, b.rgb);
-                    assert_eq!(a.glyph, b.glyph());
+                for tilt in [
+                    hanzo::logo::Tilt::default(),
+                    hanzo::logo::Tilt { x: 0.18, y: -0.22 },
+                ] {
+                    let native = render_with_tilt(width, height, phase, tilt);
+                    for (a, b) in native
+                        .iter()
+                        .flatten()
+                        .zip(shared.frame_with_tilt(width, height, phase, tilt, &light))
+                    {
+                        assert_eq!(a.rgb, b.rgb);
+                        assert_eq!(a.glyph, b.glyph());
+                    }
                 }
             }
         }

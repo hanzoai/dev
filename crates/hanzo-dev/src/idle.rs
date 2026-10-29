@@ -10,7 +10,9 @@ use std::time::Instant;
 
 use anyhow::Result;
 use crossterm::cursor;
-use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind, MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen};
 
@@ -50,12 +52,13 @@ fn plain_frame(columns: u16, rows: u16) -> String {
 
 fn encode_frame(
     output: &mut impl Write,
-    columns: u16,
-    rows: u16,
+    size: (u16, u16),
     phase: f64,
+    tilt: hanzo::logo::Tilt,
     truecolor: bool,
     ansi256: bool,
 ) -> Result<()> {
+    let (columns, rows) = size;
     let (width, height) = stage_size(columns, rows);
     execute!(output, cursor::MoveTo(0, 0), Clear(ClearType::All))?;
     if width < 32 || height < 12 {
@@ -67,7 +70,10 @@ fn encode_frame(
 
     let x = columns.saturating_sub(width) / 2;
     let y = rows.saturating_sub(height) / 2;
-    for (index, line) in ascii::render(width, height, phase).iter().enumerate() {
+    for (index, line) in ascii::render_with_tilt(width, height, phase, tilt)
+        .iter()
+        .enumerate()
+    {
         execute!(output, cursor::MoveTo(x, y + index as u16))?;
         let mut previous: Option<u32> = None;
         for cell in line {
@@ -96,15 +102,15 @@ fn encode_frame(
 // left a visible blank interval on every frame, especially on taller terminals.
 fn render_frame(
     output: &mut impl Write,
-    columns: u16,
-    rows: u16,
+    size: (u16, u16),
     phase: f64,
+    tilt: hanzo::logo::Tilt,
     truecolor: bool,
     ansi256: bool,
 ) -> Result<()> {
     let mut frame = Vec::new();
     frame.extend_from_slice(b"\x1b[?2026h");
-    encode_frame(&mut frame, columns, rows, phase, truecolor, ansi256)?;
+    encode_frame(&mut frame, size, phase, tilt, truecolor, ansi256)?;
     frame.extend_from_slice(b"\x1b[?2026l");
     output.write_all(&frame)?;
     output.flush()?;
@@ -138,6 +144,8 @@ pub(crate) fn play() -> Result<()> {
         cursor::Hide
     )?;
     let started = Instant::now();
+    let mut last_frame = started;
+    let mut mouse_tilt = hanzo::logo::MouseTilt::default();
 
     loop {
         let (cols, rows) = terminal::size()?;
@@ -146,12 +154,20 @@ pub(crate) fn play() -> Result<()> {
         } else {
             (started.elapsed().as_secs_f64() / hanzo::logo::LOOP_SECONDS).fract()
         };
-        render_frame(&mut output, cols, rows, phase, truecolor, ansi256)?;
+        let now = Instant::now();
+        let tilt = if reduced {
+            hanzo::logo::Tilt::default()
+        } else {
+            mouse_tilt.advance(now.saturating_duration_since(last_frame))
+        };
+        last_frame = now;
+        render_frame(&mut output, (cols, rows), phase, tilt, truecolor, ansi256)?;
         if reduced {
             // Static fallback is still interruptible.
             if event::poll(Duration::from_millis(250))? {
                 match event::read()? {
                     Event::Resize(_, _) | Event::FocusGained | Event::FocusLost => {}
+                    Event::Mouse(mouse) if mouse.kind == MouseEventKind::Moved => {}
                     _ => break,
                 }
             }
@@ -160,6 +176,21 @@ pub(crate) fn play() -> Result<()> {
         if event::poll(Duration::from_millis(50))? {
             match event::read()? {
                 Event::Resize(_, _) | Event::FocusGained | Event::FocusLost => {}
+                Event::Mouse(mouse) if mouse.kind == MouseEventKind::Moved => {
+                    let (width, height) = stage_size(cols, rows);
+                    if width > 0 && height > 0 {
+                        mouse_tilt.point(
+                            (f64::from(mouse.column) - f64::from(cols.saturating_sub(width) / 2))
+                                * 2.0
+                                / f64::from(width)
+                                - 1.0,
+                            (f64::from(mouse.row) - f64::from(rows.saturating_sub(height) / 2))
+                                * 2.0
+                                / f64::from(height)
+                                - 1.0,
+                        );
+                    }
+                }
                 Event::Key(key) if key.kind != KeyEventKind::Press => {}
                 _ => break,
             }
@@ -175,7 +206,14 @@ mod tests {
     #[test]
     fn no_color_output_retains_front_and_side_shading() -> Result<()> {
         let mut output = Vec::new();
-        render_frame(&mut output, 80, 40, 0.125, false, false)?;
+        render_frame(
+            &mut output,
+            (80, 40),
+            0.125,
+            hanzo::logo::Tilt::default(),
+            false,
+            false,
+        )?;
         let text = String::from_utf8(output)?;
         assert!(text.contains('█') && text.contains('▒'));
         assert!(!text.contains("\x1b[38;"));
