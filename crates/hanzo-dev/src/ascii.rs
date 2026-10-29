@@ -22,7 +22,10 @@ pub(crate) struct Cell {
 
 impl Default for Cell {
     fn default() -> Self {
-        Self { glyph: ' ', shade: 0 }
+        Self {
+            glyph: ' ',
+            shade: 0,
+        }
     }
 }
 
@@ -33,9 +36,7 @@ fn number(path: &str, index: &mut usize) -> f64 {
     }
     let start = *index;
     while *index < bytes.len()
-        && (bytes[*index].is_ascii_digit()
-            || bytes[*index] == b'.'
-            || bytes[*index] == b'-')
+        && (bytes[*index].is_ascii_digit() || bytes[*index] == b'.' || bytes[*index] == b'-')
     {
         *index += 1;
     }
@@ -90,9 +91,8 @@ fn inside_polygon(point: [f64; 2], polygon: &[[f64; 2]]) -> bool {
     let mut prev = polygon[polygon.len() - 1];
     for &next in polygon {
         if (next[1] > point[1]) != (prev[1] > point[1]) {
-            let intercept = (prev[0] - next[0]) * (point[1] - next[1])
-                / (prev[1] - next[1])
-                + next[0];
+            let intercept =
+                (prev[0] - next[0]) * (point[1] - next[1]) / (prev[1] - next[1]) + next[0];
             if point[0] < intercept {
                 inside = !inside;
             }
@@ -129,9 +129,7 @@ fn filled(x: f64, y: f64) -> bool {
 }
 
 fn face_brightness(normal: [f64; 3]) -> f64 {
-    (0.27 + 0.72 * (normal[0] * -0.45
-        + normal[1] * 0.55
-        + normal[2] * 0.70).max(0.0)).min(1.0)
+    (0.27 + 0.72 * (normal[0] * -0.45 + normal[1] * 0.55 + normal[2] * 0.70).max(0.0)).min(1.0)
 }
 
 fn ray(x: f64, y: f64, yaw: f64) -> Option<f64> {
@@ -164,10 +162,8 @@ fn ray(x: f64, y: f64, yaw: f64) -> Option<f64> {
             let local_normal = if (pz.abs() - HALF_DEPTH).abs() < 0.018 {
                 [0.0, 0.0, if pz > 0.0 { 1.0 } else { -1.0 }]
             } else {
-                let dx = (filled(px - 0.026, py) as i8)
-                    - (filled(px + 0.026, py) as i8);
-                let dy = (filled(px, py - 0.026) as i8)
-                    - (filled(px, py + 0.026) as i8);
+                let dx = (filled(px - 0.026, py) as i8) - (filled(px + 0.026, py) as i8);
+                let dy = (filled(px, py - 0.026) as i8) - (filled(px, py + 0.026) as i8);
                 let len = (f64::from(dx).hypot(f64::from(dy))).max(1e-9);
                 if len < 0.5 {
                     [-direction[0], 0.0, -direction[2]]

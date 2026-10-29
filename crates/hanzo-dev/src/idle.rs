@@ -21,7 +21,12 @@ struct RestoreTerminal;
 impl Drop for RestoreTerminal {
     fn drop(&mut self) {
         let mut output = io::stdout();
-        let _ = execute!(output, DisableMouseCapture, cursor::Show, LeaveAlternateScreen);
+        let _ = execute!(
+            output,
+            DisableMouseCapture,
+            cursor::Show,
+            LeaveAlternateScreen
+        );
         let _ = terminal::disable_raw_mode();
     }
 }
@@ -95,7 +100,9 @@ pub(crate) fn play() -> Result<()> {
         return Ok(());
     }
     let no_color = std::env::var_os("NO_COLOR").is_some() || term == "dumb";
-    let color_term = std::env::var("COLORTERM").unwrap_or_default().to_lowercase();
+    let color_term = std::env::var("COLORTERM")
+        .unwrap_or_default()
+        .to_lowercase();
     let truecolor = !no_color && (color_term.contains("truecolor") || color_term.contains("24bit"));
     let ansi256 = !no_color && !truecolor && term.contains("256color");
     let reduced = std::env::var_os("HANZO_REDUCED_MOTION").is_some() || term == "dumb";
@@ -103,7 +110,12 @@ pub(crate) fn play() -> Result<()> {
     terminal::enable_raw_mode()?;
     let _restore = RestoreTerminal;
     let mut output = io::stdout();
-    execute!(output, EnterAlternateScreen, EnableMouseCapture, cursor::Hide)?;
+    execute!(
+        output,
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        cursor::Hide
+    )?;
     let started = Instant::now();
 
     loop {
@@ -145,7 +157,7 @@ mod tests {
         let (cols, rows) = stage_size(80, 24);
         assert!(cols <= 60);
         assert!(rows <= 20);
-        assert_eq!(stage_size(30, 10).1 < 12, true);
+        assert!(stage_size(30, 10).1 < 12);
     }
 
     #[test]
