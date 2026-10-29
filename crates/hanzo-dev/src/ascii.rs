@@ -28,6 +28,9 @@ impl Default for Cell {
 
 fn number(path: &str, index: &mut usize) -> f64 {
     let bytes = path.as_bytes();
+    while *index < bytes.len() && bytes[*index].is_ascii_whitespace() {
+        *index += 1;
+    }
     let start = *index;
     while *index < bytes.len()
         && (bytes[*index].is_ascii_digit()
@@ -161,10 +164,10 @@ fn ray(x: f64, y: f64, yaw: f64) -> Option<f64> {
             let local_normal = if (pz.abs() - HALF_DEPTH).abs() < 0.018 {
                 [0.0, 0.0, if pz > 0.0 { 1.0 } else { -1.0 }]
             } else {
-                let dx = i8::from(filled(px - 0.026, py))
-                    - i8::from(filled(px + 0.026, py));
-                let dy = i8::from(filled(px, py - 0.026))
-                    - i8::from(filled(px, py + 0.026));
+                let dx = (filled(px - 0.026, py) as i8)
+                    - (filled(px + 0.026, py) as i8);
+                let dy = (filled(px, py - 0.026) as i8)
+                    - (filled(px, py + 0.026) as i8);
                 let len = (f64::from(dx).hypot(f64::from(dy))).max(1e-9);
                 if len < 0.5 {
                     [-direction[0], 0.0, -direction[2]]
