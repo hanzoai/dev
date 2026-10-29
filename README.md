@@ -12,9 +12,6 @@ model [Hanzo AI](https://hanzo.ai) serves — hundreds of them, `enso` and the
 
 It ships inside the Hanzo CLI. `hanzo dev` is the command, or install standalone via `npm i -g @hanzo/dev`. Web portal: [https://dev.chat](https://dev.chat).
 
-| <img src="docs/images/simple.png" alt="A session in progress" width="100%"><br>A session in progress | <img src="docs/images/diff.png" alt="Reviewing a diff" width="100%"><br>Reviewing a diff |
-|:--:|:--:|
-
 ## Install
 
 ```bash
