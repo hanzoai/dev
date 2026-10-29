@@ -173,6 +173,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn no_color_output_retains_front_and_side_shading() -> Result<()> {
+        let mut output = Vec::new();
+        render_frame(&mut output, 80, 40, 0.125, false, false)?;
+        let text = String::from_utf8(output)?;
+        assert!(text.contains('█') && text.contains('▒'));
+        assert!(!text.contains("\x1b[38;"));
+        Ok(())
+    }
+
+    #[test]
     fn stage_never_overflows_80_columns() {
         assert_eq!(stage_size(80, 40), (60, 21));
         let (cols, rows) = stage_size(80, 24);

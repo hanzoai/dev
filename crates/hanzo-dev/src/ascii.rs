@@ -23,11 +23,7 @@ pub(crate) fn render(columns: u16, rows: u16, phase: f64) -> Vec<Vec<Cell>> {
         .map(|row| {
             row.iter()
                 .map(|cell| Cell {
-                    glyph: if cell.dots == 0 {
-                        ' '
-                    } else {
-                        char::from_u32(0x2800 + u32::from(cell.dots)).unwrap_or(' ')
-                    },
+                    glyph: cell.glyph(),
                     rgb: cell.rgb,
                 })
                 .collect()
@@ -51,14 +47,7 @@ mod tests {
                     .zip(shared.frame(width, height, phase, &light))
                 {
                     assert_eq!(a.rgb, b.rgb);
-                    assert_eq!(
-                        a.glyph,
-                        if b.dots == 0 {
-                            ' '
-                        } else {
-                            char::from_u32(0x2800 + u32::from(b.dots)).unwrap()
-                        }
-                    );
+                    assert_eq!(a.glyph, b.glyph());
                 }
             }
         }
