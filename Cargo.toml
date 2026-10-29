@@ -13,7 +13,7 @@ resolver = "2"
 # hanzo-dev takes it, and every crate beneath reads it at run time (the fork's
 # hanzo::version), so a release recompiles hanzo-dev alone; Dev's libraries stay
 # 0.0.0 for the same reason.
-version = "0.7.3"
+version = "0.7.4"
 # Track the edition for all workspace crates in one place. Individual
 # crates can still override this value, but keeping it here means new
 # crates created with `cargo new -w ...` automatically inherit the 2024
