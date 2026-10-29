@@ -147,7 +147,7 @@ pub(crate) fn play() -> Result<()> {
     let mut last_frame = started;
     let mut mouse_tilt = hanzo::logo::MouseTilt::default();
 
-    loop {
+    'animation: loop {
         let (cols, rows) = terminal::size()?;
         let phase = if reduced {
             0.0
@@ -173,7 +173,13 @@ pub(crate) fn play() -> Result<()> {
             }
             continue;
         }
-        if event::poll(Duration::from_millis(50))? {
+        // Coalesce pointer reports inside one frame budget. A busy mouse must
+        // not drive ray casting faster than the idle frame rate.
+        let deadline = now + Duration::from_millis(50);
+        loop {
+            if !event::poll(deadline.saturating_duration_since(Instant::now()))? {
+                break;
+            }
             match event::read()? {
                 Event::Resize(_, _) | Event::FocusGained | Event::FocusLost => {}
                 Event::Mouse(mouse) if mouse.kind == MouseEventKind::Moved => {
@@ -192,7 +198,10 @@ pub(crate) fn play() -> Result<()> {
                     }
                 }
                 Event::Key(key) if key.kind != KeyEventKind::Press => {}
-                _ => break,
+                _ => break 'animation,
+            }
+            if Instant::now() >= deadline {
+                break;
             }
         }
     }
