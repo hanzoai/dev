@@ -171,20 +171,6 @@ Bugs and feature requests: [github.com/hanzoai/dev/issues](https://github.com/ha
 ## License
 
 Apache-2.0 — see [LICENSE](LICENSE).
-
-## Company & Leadership
-
-Hanzo AI is co-led by Co-CEOs **Antje Worring** and **Zach Kelling**.
-
-- **Antje Worring**: Co-CEO ([LinkedIn](https://www.linkedin.com/in/antje-worring/) · [GitHub: zooqueen](https://github.com/zooqueen)) — corporate leadership, operations, ecosystem partnerships, and strategic execution.
-- **Zach Kelling**: Co-CEO & Founding CTO ([LinkedIn](https://www.linkedin.com/in/zeekay/) · [GitHub: zeekay](https://github.com/zeekay)) — foundational architecture, engineering, systems, and open-source models.
-- **Corporate Address**: 995 Market St, San Francisco, CA 94103
-- **Web**: [https://dev.chat](https://dev.chat) · [https://hanzo.ai](https://hanzo.ai)
-- **Inquiries**: [dev@hanzo.ai](mailto:dev@hanzo.ai)
-
-## Lineage
-
-Hanzo Dev is a fork of [just-every/code](https://github.com/just-every/code), which is
 itself a fork of [openai/codex](https://github.com/openai/codex). Both are Apache-2.0,
 and this repository preserves the upstream `LICENSE` and `NOTICE`. Hanzo Dev is not
 affiliated with, sponsored by, or endorsed by either project.
