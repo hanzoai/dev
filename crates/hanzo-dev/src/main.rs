@@ -231,7 +231,12 @@ struct Pick {
 fn main() -> Result<()> {
     // The release's version is this crate's alone; every crate beneath reads it
     // from the hanzo crate at run time, so a new release recompiles only this one.
-    hanzo::version::set(env!("CARGO_PKG_VERSION"));
+    // The binary version is set at startup; all downstream crates read it from the
+    // hanzo version service at run time, ensuring consistency across the product.
+    let binary_version = env!("CARGO_PKG_VERSION");
+    hanzo::version::set(binary_version);
+    // Store the binary version for use in version-reporting commands.
+    std::env::set_var("DEV_BINARY_VERSION", binary_version);
     // What Dev adds to upstream's engines, before any of them starts: Kai on every
     // thread, and the Hanzo account behind /login, /logout, /auth and /status.
     codex_app_server::register(hanzo_kai::install);
