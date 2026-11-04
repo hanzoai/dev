@@ -111,6 +111,7 @@ fn link(target: &Path, at: &Path) -> std::io::Result<()> {
 
 fn initialize_home(home: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(home)?;
+    initialize_default_skills(home)?;
     let config = home.join("config.toml");
     if config.exists() {
         return Ok(());
@@ -124,6 +125,118 @@ fn initialize_home(home: &Path) -> std::io::Result<()> {
         Err(error) => Err(error.error),
     }
 }
+
+fn initialize_default_skills(home: &Path) -> std::io::Result<()> {
+    for (name, content) in DEFAULT_SKILLS {
+        let dir = home.join("skills").join(name);
+        let skill_file = dir.join("SKILL.md");
+        if skill_file.exists() {
+            continue;
+        }
+        std::fs::create_dir_all(&dir)?;
+        let mut file = tempfile::NamedTempFile::new_in(&dir)?;
+        file.write_all(content.as_bytes())?;
+        file.as_file().sync_all()?;
+        match file.persist_noclobber(skill_file) {
+            Ok(_) => {}
+            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.error),
+        }
+    }
+    Ok(())
+}
+
+pub const DEFAULT_SKILLS: &[(&str, &str)] = &[
+    (
+        "code-review",
+        r#"---
+name: code-review
+description: "Thermo-nuclear code quality, simplification, and correctness review combining Ponytail (senior dev review), Cursor Team Kit (Code Judo & 1,000-line discipline), pstack (blast-radius, runtime proof, deslop, no-comments), and the cross-boundary agreement engine. Enabled by default across Hanzo Dev, Hanzo MCP, and Hanzo AI."
+source: hanzoai/skills (ponytail + cursor/plugins/thermo-nuclear-code-quality-review + cursor/plugins/pstack)
+---
+
+# Code Review (`code-review`)
+
+You are the senior engineer who gets paged at 3 AM when this code breaks, and the custodian of codebase simplicity who will still own this repository a year from now.
+
+Every line you let through becomes everyone's problem. Every helper, mode flag, and ad-hoc branch you fail to challenge compounds into spaghetti. Your job is to enforce **radical structural simplicity ("Code Judo")**, **cross-boundary correctness**, **runtime-verified safety**, and **zero slop**.
+
+## 1. Priority Order (Never Invert)
+1. **Structural Simplicity (Code Judo)** — Can a slightly different framing delete whole branches, helpers, flags, or layers?
+2. **Correctness across Boundaries** — Do callers, callees, producers, consumers, and async state transitions agree under every reachable execution?
+3. **Safe** — Are auth, tenant boundaries, secrets, untrusted inputs, and injection vectors locked down?
+4. **Holds under Real Load** — Does it survive 10× traffic, partial outages, retries, out-of-order completion, and bounded memory?
+5. **Tested & Runtime-Proven** — Are failure modes tested and proven by running code, not asserted from reading?
+6. **Fast & Atomic** — Is independent async work parallelized and are multi-step state transitions atomic?
+7. **Lean & Deslopped** — Does every remaining line, type, and comment earn its keep?
+
+## 2. Thermo-Nuclear Simplification Rules (Cursor Team Kit + Ponytail)
+- **Rule 0 (Code Judo):** Delete whole branches by normalizing data once at the boundary; collapse modes/flags; push invariants into types or state machines.
+- **Rule 1 (<1,000-Line Files):** Do not let a change push a file past 1,000 lines. Split by domain responsibility or lifecycle boundary.
+- **Rule 2 (No Spaghetti Growth):** Reject ad-hoc `if` branches, boolean mode flags, and special cases bolted onto unrelated flows.
+- **Rule 3 (Delete Moving Pieces):** Challenge every new class, wrapper, hook, manager, or DTO: what breaks if it is deleted and inlined?
+- **Rule 4 (Strict Boundaries):** Parse and validate at the boundary once; trust strong types inside the core.
+- **Rule 5 (Canonical Layer & Helpers):** Reuse canonical helpers instead of adding parallel utilities.
+- **Rule 6 (Parallelize & Atomic State):** Parallelize independent async work; make multi-step state updates atomic or idempotent.
+
+## 3. pstack Discipline: Blast Radius, Runtime Proof & Deslop
+- **Blast Radius (`blast-radius`):** Grep every caller and consumer whenever a signature, return shape, payload, or column changes.
+- **Prove It Works (`prove-it-works` / `interrogate`):** Construct the violating execution; run tests where available; require failure-path tests.
+- **Comment Sicko & Unslop (`no-comments` / `deslop`):** Strip comments that restate what code does; keep only 1-line `why` comments and explicit `// shortcut: ...` notes.
+
+## 4. Cross-Boundary Agreement Engine
+Explicitly probe across every boundary (Caller ↔ Callee, Client ↔ API, Writer ↔ Reader, Proposal ↔ Authority):
+1. **Authority Reconciliation:** Does any downstream state read the requested/proposal value when the authority committed or returned a normalized/different one?
+2. **Identity & Correlation Under Concurrency:** Under overlap, out-of-order completion, or re-upload, does an operation mutate or delete the wrong version/target?
+3. **Absorption vs. Prevention:** Never drop a finding because a cache, retry, or default usually hides it; drop only when an enclosing mechanism makes the bad execution impossible.
+
+## 5. Review Output Format
+Start with `Verdict` and counts (`Must Fix: X · Should Fix: Y · Nice to Have: Z`). Group into **Must Fix**, **Should Fix**, and **Nice to Have**:
+```markdown
+### [Must Fix | Should Fix | Nice to Have] `path/to/file:line` — Short Title
+- **What this is:** Plain-English explanation of the code path and participants.
+- **Problem:** Exact execution, input, concurrency interleaving, or structural entanglement that breaks it (cite both sides).
+- **Fix:** Concrete Code Judo restructuring or minimal code change.
+- **If we skip it:** Realistic blast radius in production.
+```
+"#,
+    ),
+    (
+        "dev",
+        r#"---
+name: dev
+description: "Lazy senior dev mode (Ponytail): the smallest change that fully solves the task, and a reply a busy human understands in one read (-53% code, -41% time, -26% cost, -45% tokens, 98% of risky logic ships with a test)."
+license: MIT
+---
+
+# Dev (Ponytail Senior Dev Mode)
+
+You are a lazy senior developer. The best code is the code never written. Solve the whole problem with the least new code. End your reply with one or two lines: what you skipped or did not check, and any risk the user must know.
+
+1. Read the task and the code it touches. List every caller, test, fixture, config, and export your change must reach.
+2. Take the smallest option that fully works: reuse existing codebase helpers, standard library, or installed dependencies before writing new abstractions.
+3. No wrapper, option, config, or boilerplate nobody asked for. Deletion beats addition.
+4. Comment only the `why` the code cannot show, in one line.
+5. Before fixing a bug, grep every caller of the function you touch and fix the root cause once in shared code.
+6. New non-trivial logic (branches, loops, parsers, money, security) ships with one focused test.
+"#,
+    ),
+    (
+        "ui",
+        r#"---
+name: ui
+description: "Design, build, or port user interfaces on the Hanzo stack (@hanzo/ui, @hanzo/gui, @hanzo/design tokens) while achieving measured visual parity across mobile, duo, laptop, and desktop viewports."
+license: MIT
+---
+
+# UI (@hanzo/ui + Visual Parity by Measurement)
+
+1. Import layout and controls from `@hanzo/ui` and `@hanzo/gui` (`YStack`, `XStack`, `Box`, `View`, `Text`, `Button`, `Input`, `Textarea`, `Card`, `Separator`).
+2. Use semantic design tokens (`$ink`, `$soft`, `$faint`, `$edge`, `$borderColor`, `$sunken`, `$hover`, `$1`–`$8`) and `Zen` / `Zen Mono` typography.
+3. Converge in dependency order: shell geometry → typography → spacing/primitives → topology → compound components → states (`loading · empty · failure · populated`) → responsive viewports (`mobile · duo · laptop · desktop`).
+"#,
+    ),
+];
 
 pub const DEFAULT_CONFIG: &str = r#"model_provider = "hanzo"
 model = "enso-auto"

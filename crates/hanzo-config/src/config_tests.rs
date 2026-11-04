@@ -128,3 +128,13 @@ fn the_default_provider_is_hanzo() {
     let config: toml::Value = toml::from_str(DEFAULT_CONFIG).unwrap();
     assert!(hanzo::is_hanzo(config["model_providers"]["hanzo"]["base_url"].as_str()));
 }
+
+#[test]
+fn new_home_installs_default_hanzo_skills() {
+    let directory = tempfile::tempdir().unwrap();
+    initialize_home(directory.path()).unwrap();
+    for (name, _) in DEFAULT_SKILLS {
+        let skill_path = directory.path().join("skills").join(name).join("SKILL.md");
+        assert!(skill_path.exists(), "missing default skill {name}");
+    }
+}
