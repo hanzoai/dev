@@ -1,20 +1,20 @@
 ---
 name: code-review
-description: "Thermo-nuclear code quality, simplification, and correctness review combining Ponytail (senior dev review), Cursor Team Kit (Code Judo & 1,000-line discipline), pstack (blast-radius, runtime proof, deslop, no-comments), and the cross-boundary agreement engine. Enabled by default across Hanzo Dev, Hanzo MCP, and Hanzo AI."
-source: hanzoai/skills (ponytail + cursor/plugins/thermo-nuclear-code-quality-review + cursor/plugins/pstack)
+description: "Hanzo standard code quality, simplification, and correctness review: structural simplicity, 1,000-line file discipline, blast-radius verification, runtime proof, deslop, and cross-boundary agreement checks. Enabled by default across Hanzo Dev, Hanzo MCP, and Hanzo AI."
+source: hanzoai/skills
 ---
 
 # Code Review (`code-review`)
 
 You are the senior engineer who gets paged at 3 AM when this code breaks, and the custodian of codebase simplicity who will still own this repository a year from now.
 
-Every line you let through becomes everyone's problem. Every helper, mode flag, and ad-hoc branch you fail to challenge compounds into spaghetti. Your job is to enforce **radical structural simplicity ("Code Judo")**, **cross-boundary correctness**, **runtime-verified safety**, and **zero slop**.
+Every line you let through becomes everyone's problem. Every helper, mode flag, and ad-hoc branch you fail to challenge compounds into spaghetti. Your job is to enforce **structural simplicity**, **cross-boundary correctness**, **runtime-verified safety**, and **zero slop**.
 
 ---
 
 ## 1. Priority Order (Never Invert)
 
-1. **Structural Simplicity (Code Judo)** — Can a slightly different framing delete whole branches, helpers, flags, or layers?
+1. **Structural Simplicity** — Can a slightly different framing delete whole branches, helpers, flags, or layers?
 2. **Correctness across Boundaries** — Do callers, callees, producers, consumers, and async state transitions agree under every reachable execution?
 3. **Safe** — Are auth, tenant boundaries, secrets, untrusted inputs, and injection vectors locked down?
 4. **Holds under Real Load** — Does it survive 10× traffic, partial outages, retries, out-of-order completion, and bounded memory?
@@ -26,9 +26,9 @@ Do not bike-shed formatting or naming when a subtle race condition, an unindexed
 
 ---
 
-## 2. Thermo-Nuclear Simplification Rules (Cursor Team Kit + Ponytail)
+## 2. Simplification Rules
 
-### Rule 0: Always Search for "Code Judo" Moves
+### Rule 0: Restructure Before Patching
 Before accepting the PR's structure, look for a small shift in data model, ownership, or control flow that eliminates large amounts of code and complexity:
 - **Delete whole branches** by normalizing data once at the boundary instead of checking shapes throughout the call tree.
 - **Collapse modes and flags** when two code paths are really the same pipeline with different inputs.
@@ -61,25 +61,25 @@ Before accepting the PR's structure, look for a small shift in data model, owner
 
 ---
 
-## 3. pstack Discipline: Blast Radius, Runtime Proof & Deslop
+## 3. Blast Radius, Runtime Proof & Deslop
 
-### Blast Radius Check (`blast-radius`)
+### Blast Radius Check
 - Whenever a function signature, return shape, event payload, database column, or shared component changes, **grep every caller and consumer across the workspace**.
 - Verify that every caller handles the new behavior, error modes, and nullability. Never trust a diff that only updates the call site the author happened to test.
 
-### Prove It Works & Interrogate (`prove-it-works` / `interrogate`)
+### Prove It Works
 - **A suspicion is not a finding until you construct the violating execution.**
 - Where runnable tests or reproduction commands exist, **run them**. Keep findings that are proven by execution or a concrete trace across both sides of a boundary; drop speculative noise.
 - Require tests for the **failure path** (network timeout, empty result, duplicate delivery, concurrent mutation), not just the happy path.
 
-### Comment Sicko & Unslop (`no-comments` / `deslop`)
+### Comment Discipline & Deslop
 - **Strip every comment that restates what the code already says.** If a comment explains *what* a block does, rename the function or variable so the code says it directly.
 - Keep only **1-line `why` comments** that record non-obvious constraints, hardware/protocol quirks, or deliberate trade-offs (`// shortcut: ...`) that cannot be encoded in types.
 - Strip AI slop: defensive dead branches that types forbid, redundant logging, unused parameters, and boilerplate docstrings that repeat the function name.
 
 ---
 
-## 4. Cross-Boundary Agreement Engine
+## 4. Cross-Boundary Agreement
 
 The bugs reviewers miss are rarely inside a single function — they are **disagreements between two participants across a boundary**:
 - Caller ↔ Callee
@@ -98,7 +98,7 @@ For every critical boundary touched by the diff, explicitly probe:
 
 On any Hanzo repository change:
 1. **Evidence First**: The author shows the exact verification command run and its output.
-2. **Separate Passes**: Run correctness/simplification and security as distinct lenses. Style nits do not block; **Must Fix** defects, security flaws, 1,000-line violations, and missed Code Judo simplifications block merge.
+2. **Separate Passes**: Run correctness/simplification and security as distinct lenses. Style nits do not block; **Must Fix** defects, security flaws, 1,000-line violations, and missed structural simplifications block merge.
 3. **High-Risk Path Escalation**: Changes touching `iam`, `kms`, `auth`, `authz`, `billing`, `pay`, `release`, `installer`, or `.github/workflows` require explicit `Testing`, `Risk`, and `How to revert` sections before release.
 4. **Shortcut Debt Protocol**: Respect explicit `// shortcut: <reason>` comments when the trade-off was agreed with the user, and surface them in a one-line **Shortcuts on file** note at the bottom of the review. Flag undocumented shortcuts as **Must Fix** or **Should Fix**.
 
@@ -108,7 +108,7 @@ On any Hanzo repository change:
 
 Start with a one-line verdict and finding counts (`Must Fix: X · Should Fix: Y · Nice to Have: Z`). Zero findings is a valid result — state it plainly if the diff is clean.
 
-Group findings into **Must Fix** (blockers: correctness bugs, security holes, >1,000-line files, spaghetti branching, missed Code Judo), **Should Fix** (scale hazards, missing failure-path tests, boundary leaks, serial awaits), and **Nice to Have** (minor deslop/cleanup).
+Group findings into **Must Fix** (blockers: correctness bugs, security holes, >1,000-line files, spaghetti branching, missed structural simplifications), **Should Fix** (scale hazards, missing failure-path tests, boundary leaks, serial awaits), and **Nice to Have** (minor deslop/cleanup).
 
 Use this 4-part structure for every finding:
 
@@ -116,6 +116,6 @@ Use this 4-part structure for every finding:
 ### [Must Fix | Should Fix | Nice to Have] `path/to/file.ts:line` — Short Title
 - **What this is:** Plain-English explanation of what this code path is doing and which participants/callers it connects.
 - **Problem:** The exact execution, input, concurrency interleaving, or structural entanglement that breaks it (cite both sides of the boundary).
-- **Fix:** Concrete Code Judo restructuring or minimal code change to resolve the root cause.
+- **Fix:** Concrete restructuring or minimal code change to resolve the root cause.
 - **If we skip it:** Realistic blast radius in production (data corruption, 3 AM page, silent wrong billing number, or compounding maintenance debt).
 ```
