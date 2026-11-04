@@ -10,18 +10,22 @@ repository you point it at, and runs commands in a sandbox. It reaches every
 model [Hanzo AI](https://hanzo.ai) serves — hundreds of them, `enso` and the
 `zen5` family included — through one metered gateway at `api.hanzo.ai`.
 
-It ships inside the Hanzo CLI. `hanzo dev` is the command, or install standalone via `npm i -g @hanzo/dev`. Web portal: [https://hanzo.ai](https://hanzo.ai).
+It ships inside the Hanzo CLI: `npm i -g hanzo`, then `hanzo dev`. Web portal: [https://hanzo.ai](https://hanzo.ai).
 
 ## Install
 
+Any OS, Windows included:
+
 ```bash
-curl -fsSL https://hanzo.sh | sh
+npm i -g hanzo        # or, on macOS/Linux: curl -fsSL https://hanzo.sh | sh
 hanzo auth login
 ```
 
-That fetches one prebuilt native binary per tool and verifies its checksum.
-`npm i -g @hanzo/dev` installs the agent on its own if you would rather have it
-from npm; both give you the same build.
+`npm i -g hanzo` installs a small launcher. The native binaries are fetched on
+first use and their SHA-256 checked: `hanzo dev` downloads the agent (`dev`) and
+the Hanzo MCP server it attaches (`hanzo-mcp`).
+
+Standalone alternative: `npm i -g @hanzo/dev` installs just the agent (`dev`), same build.
 
 `hanzo auth login` signs you in through Hanzo IAM and links the machine to your
 account. Then, from any repository:

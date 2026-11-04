@@ -7,10 +7,13 @@ Run Hanzo Dev headless in pipelines. Example GitHub Action step:
 ```yaml
 - name: Update changelog via Dev
   run: |
-    npm install -g @hanzo/dev
+    npm i -g hanzo
     export HANZO_API_KEY="${{ secrets.HANZO_API_KEY }}"
-    dev exec --full-auto "update CHANGELOG for next release"
+    hanzo dev "update CHANGELOG for next release"
 ```
+
+With the standalone agent instead: `npm i -g @hanzo/dev`, then
+`dev exec --full-auto "update CHANGELOG for next release"`.
 
 ### Resuming non-interactive sessions
 
