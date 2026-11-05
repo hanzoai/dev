@@ -241,6 +241,9 @@ license: MIT
 pub const DEFAULT_CONFIG: &str = r#"model_provider = "hanzo"
 model = "enso-auto"
 
+[tui]
+show_tooltips = false
+
 [features]
 memories = true
 
