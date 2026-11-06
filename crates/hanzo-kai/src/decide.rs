@@ -34,9 +34,9 @@ const CONNECT: Duration = Duration::from_secs(2);
 const REQUEST: Duration = Duration::from_secs(10);
 
 /// Bounded per-capability default timeouts
-pub const TIMEOUT_FAST: Duration = Duration::from_millis(150);
-pub const TIMEOUT_STEP: Duration = Duration::from_millis(500);
-pub const TIMEOUT_SEARCH: Duration = Duration::from_millis(1000);
+pub const TIMEOUT_FAST: Duration = Duration::from_millis(2500);
+pub const TIMEOUT_STEP: Duration = Duration::from_millis(3000);
+pub const TIMEOUT_SEARCH: Duration = Duration::from_millis(4000);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BreakerState {

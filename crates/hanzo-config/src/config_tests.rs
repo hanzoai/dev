@@ -137,4 +137,8 @@ fn new_home_installs_default_hanzo_skills() {
         let skill_path = directory.path().join("skills").join(name).join("SKILL.md");
         assert!(skill_path.exists(), "missing default skill {name}");
     }
+    let kai = kai::Kai::load(directory.path()).unwrap().expect("default kai.toml should load");
+    assert_eq!(kai.model, "kai");
+    assert_eq!(kai.op(kai::Operation::Model).mode, kai::Mode::Enforced);
+    assert_eq!(kai.op(kai::Operation::Reasoning).mode, kai::Mode::Enforced);
 }

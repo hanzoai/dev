@@ -1,7 +1,7 @@
 {
   "id": "agent.command-risk@1",
   "description": "Before an agent runs a shell command: allow it, ask the user, or deny it.",
-  "calibration": "cal_6dbb072f8109a222",
+  "calibration": "cal_c6ffe2e7b0c8819a",
   "questions": {
     "verdict": {
       "type": "choice",

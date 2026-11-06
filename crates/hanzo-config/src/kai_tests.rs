@@ -18,8 +18,15 @@ fn every_operation_defaults_to_shadow_on_its_shipped_program() {
     assert_eq!(kai.op(Operation::Context).k, Some(4));
     assert_eq!(kai.op(Operation::Risk).k, None);
     assert_eq!(kai.url, "https://api.hanzo.ai/v1");
-    assert_eq!(kai.model, "laya-agent");
+    assert_eq!(kai.model, "kai");
     assert_eq!(kai.trace, home.path().join("kai/decisions.jsonl"));
+}
+
+#[test]
+fn retired_laya_agent_model_alias_maps_to_kai() {
+    let home = tempfile::tempdir().unwrap();
+    let kai = Kai::parse("model = \"laya-agent\"\n", home.path()).unwrap();
+    assert_eq!(kai.model, "kai");
 }
 
 #[test]

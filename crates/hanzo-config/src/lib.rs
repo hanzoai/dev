@@ -112,6 +112,7 @@ fn link(target: &Path, at: &Path) -> std::io::Result<()> {
 fn initialize_home(home: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(home)?;
     initialize_default_skills(home)?;
+    initialize_default_kai(home)?;
     let config = home.join("config.toml");
     if config.exists() {
         return Ok(());
@@ -120,6 +121,21 @@ fn initialize_home(home: &Path) -> std::io::Result<()> {
     file.write_all(DEFAULT_CONFIG.as_bytes())?;
     file.as_file().sync_all()?;
     match file.persist_noclobber(config) {
+        Ok(_) => Ok(()),
+        Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error.error),
+    }
+}
+
+fn initialize_default_kai(home: &Path) -> std::io::Result<()> {
+    let kai_path = home.join(kai::FILE);
+    if kai_path.exists() {
+        return Ok(());
+    }
+    let mut file = tempfile::NamedTempFile::new_in(home)?;
+    file.write_all(DEFAULT_KAI.as_bytes())?;
+    file.as_file().sync_all()?;
+    match file.persist_noclobber(kai_path) {
         Ok(_) => Ok(()),
         Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
         Err(error) => Err(error.error),
@@ -234,9 +250,19 @@ license: MIT
 1. Import layout and controls from `@hanzo/ui` and `@hanzo/gui` (`YStack`, `XStack`, `Box`, `View`, `Text`, `Button`, `Input`, `Textarea`, `Card`, `Separator`).
 2. Use semantic design tokens (`$ink`, `$soft`, `$faint`, `$edge`, `$borderColor`, `$sunken`, `$hover`, `$1`–`$8`) and `Zen` / `Zen Mono` typography.
 3. Converge in dependency order: shell geometry → typography → spacing/primitives → topology → compound components → states (`loading · empty · failure · populated`) → responsive viewports (`mobile · duo · laptop · desktop`).
+4. Measure DOM geometry (`getBoundingClientRect()`, `getComputedStyle()`) and pixel diffs; fix token/spacing/radius root causes rather than element-specific overrides.
 "#,
     ),
 ];
+
+pub const DEFAULT_KAI: &str = r#"model = "kai"
+
+[ops.model]
+mode = "enforced"
+
+[ops.reasoning]
+mode = "enforced"
+"#;
 
 pub const DEFAULT_CONFIG: &str = r#"model_provider = "hanzo"
 model = "enso-auto"

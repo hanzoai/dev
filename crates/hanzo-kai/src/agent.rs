@@ -19,6 +19,7 @@ use crate::decide;
 use crate::decide::Call;
 use crate::decide::Decision;
 use crate::decide::cut;
+use crate::skills;
 use crate::tools;
 use crate::trace::Line;
 use crate::trace::Outcome;
@@ -43,9 +44,9 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 /// The longest the loop waits for an enforced decision before falling back.
-pub const WAIT: Duration = Duration::from_millis(1500);
+pub const WAIT: Duration = Duration::from_millis(3500);
 /// Candidate files a context decision reads.
-const CANDIDATES: usize = 16;
+const CANDIDATES: usize = 4;
 /// Continuations Kai may start for one request before it hands the request back.
 const CONTINUATIONS: u32 = 2;
 /// Steps before progress is judged.
@@ -259,9 +260,30 @@ impl Thread {
         } else {
             let op = self.op(Operation::Tools);
             let request = self.request();
-            let states = cards
+            let candidate_indices: Vec<usize> = if cards.len() <= 8 {
+                (0..cards.len()).collect()
+            } else {
+                let req_lower = request.to_lowercase();
+                let words: Vec<&str> = req_lower
+                    .split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
+                    .filter(|w| w.len() >= 3)
+                    .collect();
+                let mut scored: Vec<(usize, usize)> = cards
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| {
+                        let hay = format!("{} {}", c.name, c.description).to_lowercase();
+                        let hits = words.iter().filter(|w| hay.contains(**w)).count();
+                        (i, hits)
+                    })
+                    .collect();
+                scored.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+                scored.into_iter().take(8).map(|(i, _)| i).collect()
+            };
+            let states = candidate_indices
                 .iter()
-                .map(|c| {
+                .map(|&i| {
+                    let c = &cards[i];
                     json!({
                         "request": cut(&request, 2000),
                         "tool": {"name": c.name, "description": cut(&c.description, 500)},
@@ -270,6 +292,10 @@ impl Thread {
                 .collect();
             let record = self.open(turn, "tools", &op);
             let (turn_id, all) = (turn.to_string(), names.clone());
+            let candidate_names: Vec<String> = candidate_indices
+                .iter()
+                .map(|&i| names[i].clone())
+                .collect();
             let advisory = op.clone();
             self.decide(
                 Operation::Tools,
@@ -281,7 +307,7 @@ impl Thread {
                         .selected
                         .iter()
                         .flatten()
-                        .filter_map(|&i| all.get(i).cloned())
+                        .filter_map(|&i| candidate_names.get(i).cloned())
                         .collect();
                     step.kai = chosen.join(",");
                     let keep =
@@ -446,6 +472,97 @@ impl Thread {
         let (me, turn) = (Arc::clone(self), turn.to_string());
         tokio::spawn(async move { me.select(turn, record, text, cwd).await });
         None
+    }
+
+    /// Skills (`SKILL.md`) Kai enables for a request made in `cwd`.
+    pub async fn skills(
+        self: &Arc<Self>,
+        turn: &str,
+        text: String,
+        cwd: PathBuf,
+    ) -> Option<String> {
+        if text.trim().is_empty() {
+            return None;
+        }
+        let home = self
+            .kai
+            .settings
+            .trace
+            .parent()
+            .and_then(|p| {
+                if p.file_name().is_some_and(|n| n == "kai") {
+                    p.parent()
+                } else {
+                    Some(p)
+                }
+            })
+            .map(std::path::Path::to_path_buf);
+        let catalog = skills::discover(&cwd, home.as_deref());
+        if catalog.is_empty() {
+            return None;
+        }
+        let mut selected = skills::explicit_matches(&text, &catalog);
+        let op = self.op(Operation::Tools);
+        let enforce_skills =
+            op.mode == Mode::Enforced || self.op(Operation::Model).mode == Mode::Enforced;
+        let skills_down = self.kai.decider.down_for(skills::PROGRAM_ID)
+            || self.kai.decider.is_capability_down("skills");
+        if enforce_skills
+            && !skills_down
+            && let Some(program) = skills::program(&catalog)
+        {
+            let call = Call {
+                mode: Mode::Enforced,
+                k: Some(2),
+                base: None,
+                capability: Some("skills"),
+                timeout: Some(decide::TIMEOUT_STEP),
+            };
+            let state = json!({"task": cut(&text, 2000)});
+            if let Ok(Ok(decision)) = tokio::time::timeout(
+                WAIT,
+                self.kai.decider.decide(&program, vec![state], call),
+            )
+            .await
+            {
+                if let Some(ruled) = decide::enforced(&decision, 0) {
+                    if let Some(choice) = ruled.signals.get("skill").and_then(decide::accepted)
+                        && !selected.iter().any(|s| s == choice)
+                    {
+                        selected.push(choice.to_string());
+                    }
+                    if let Some(dist) = ruled.answers.get("skill").and_then(Value::as_object) {
+                        let min_p = (1.4 / (catalog.len() as f64)).clamp(0.22, 0.35);
+                        let mut ranked: Vec<(&str, f64)> = dist
+                            .iter()
+                            .filter_map(|(k, v)| Some((k.as_str(), v.as_f64()?)))
+                            .filter(|(_, p)| *p >= min_p)
+                            .collect();
+                        ranked.sort_by(|a, b| b.1.total_cmp(&a.1));
+                        for (name, _) in ranked.into_iter().take(2) {
+                            if !selected.iter().any(|s| s == name) {
+                                selected.push(name.to_string());
+                            }
+                        }
+                    }
+                }
+                let mut record_op = op.clone();
+                record_op.mode = Mode::Enforced;
+                record_op.program = skills::PROGRAM_ID.to_string();
+                let record = self.open(turn, "skills", &record_op);
+                let chosen = selected.join(",");
+                record.decided(|step, _| {
+                    step.fill(&decision);
+                    step.kai = decide::first(&decision)
+                        .and_then(|r| r.signals.get("skill"))
+                        .map(|s| s.answer.clone())
+                        .unwrap_or_default();
+                    step.taken = chosen;
+                    step.applied = !step.taken.is_empty();
+                });
+            }
+        }
+        skills::format_selected(&catalog, &selected)
     }
 
     /// Retrieves candidate files for `text` and asks Kai which matter.
@@ -1252,18 +1369,31 @@ pub mod extension {
                     .environments
                     .iter()
                     .find(|e| e.is_primary)
+                    .or_else(|| input.environments.first())
                     .map(|e| e.cwd.to_path_buf())
+                    .or_else(|| std::env::current_dir().ok())
                 else {
                     return Vec::new();
                 };
-                match thread.context(&input.turn_id, text.join("\n"), cwd).await {
-                    Some(body) => vec![Box::new(InternalModelContextFragment::new(
+                let joined = text.join("\n");
+                let skills_body = thread
+                    .skills(&input.turn_id, joined.clone(), cwd.clone())
+                    .await;
+                let context_body = thread.context(&input.turn_id, joined, cwd).await;
+                let mut fragments: Vec<Box<dyn ContextualUserFragment + Send>> = Vec::new();
+                if let Some(body) = skills_body {
+                    fragments.push(Box::new(InternalModelContextFragment::new(
                         InternalContextSource::from_static("kai"),
                         body,
-                    ))
-                        as Box<dyn ContextualUserFragment + Send>],
-                    None => Vec::new(),
+                    )));
                 }
+                if let Some(body) = context_body {
+                    fragments.push(Box::new(InternalModelContextFragment::new(
+                        InternalContextSource::from_static("kai"),
+                        body,
+                    )));
+                }
+                fragments
             })
         }
     }

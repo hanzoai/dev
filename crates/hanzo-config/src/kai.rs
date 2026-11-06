@@ -261,7 +261,10 @@ impl Kai {
                 .unwrap_or_else(|| hanzo::API_BASE.to_string())
                 .trim_end_matches('/')
                 .to_string(),
-            model: file.model.unwrap_or_else(|| "laya-agent".to_string()),
+            model: match file.model.as_deref() {
+                None | Some("laya-agent") => "kai".to_string(),
+                Some(m) => m.to_string(),
+            },
             trace: home.join(
                 file.trace
                     .unwrap_or_else(|| PathBuf::from("kai/decisions.jsonl")),

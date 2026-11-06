@@ -1,7 +1,7 @@
 {
   "id": "router.model@1",
   "description": "Which model tier should serve a request: the smallest that answers it correctly. State: {request, system, turns, tools, prompt_tokens, images}.",
-  "calibration": "cal_6dbb072f8109a222",
+  "calibration": "cal_c6ffe2e7b0c8819a",
   "questions": {
     "tier": {
       "type": "choice",

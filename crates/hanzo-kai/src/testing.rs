@@ -20,7 +20,7 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 
 /// The calibration the shipped agent programs pin: an answer under another runs in shadow.
-pub const CALIBRATION: &str = "cal_6dbb072f8109a222";
+pub const CALIBRATION: &str = "cal_c6ffe2e7b0c8819a";
 
 /// Kai answering each question by `rule(question id, question, state)` under `calibration`.
 pub async fn kai_with(

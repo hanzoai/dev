@@ -20,6 +20,7 @@ pub mod locate;
 pub mod mutate;
 pub mod program;
 pub mod resolver;
+pub mod skills;
 pub mod symbols;
 #[cfg(test)]
 mod testing;
