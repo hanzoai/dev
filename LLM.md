@@ -46,16 +46,21 @@ A bump is a merge, and its conflicts are git's:
 
 `make bump` prints those steps. The root `Cargo.toml`'s `[workspace.dependencies]` and
 `[patch]` tables mirror the fork's `codex-rs/Cargo.toml` (paths rewritten from the root),
-because patches apply only from the root workspace; refresh them on a bump. The fork
+because patches apply only from the root workspace; refresh them on a bump. Three
+things in the root are Dev's own: the `hanzo-*` crates in `[workspace.dependencies]`,
+the rusqlite patch, and no `v8` patch (Dev links no V8, and a patch nothing in the
+graph uses warns on every build). The fork
 builds and tests on its own (`cargo build` in `codex-rs`, `make test-upstream` here) and
 keeps its own `codex-rs/Cargo.lock`, as upstream does: it names no path outside its tree. Measured on
 the move from 11da6b9e to 3ee47c105 (288 upstream commits, 1,608 files), with the whole
 delta committed on the old base: the merge stopped on 5 files (one doc comment the
 delta rewords, two test fixtures and two strings upstream rewrote), and with upstream's
 side taken there, 16 files differed from what the old build-time rules made of the new
-tree: the strings and version reads upstream added, which step 2 finds.
+tree: the strings and version reads upstream added, which step 2 finds. The first merge,
+3ee47c105 to e0aa0434f4 (996 upstream commits), stopped on 39 files; step 2 then found
+24 files of new Codex strings and 10 version reads.
 
-The delta on 3ee47c105 (`git log 3ee47c105..main` in `upstream/codex`):
+The delta (`git log --no-merges upstream/main..main` in `upstream/codex`):
 
 - `codex-rs/hanzo`, one crate: Dev's names and the TUI's defaults, `API_BASE`,
   `DEFAULT_MODEL`, `is_hanzo`, the model catalog, `model::pick` (the `/model <name>`
@@ -266,7 +271,8 @@ and the tools they run. Search, saved actions and the shell classifier are hanzo
 
 - **Model metadata**: a model the fork's catalog (`hanzo::catalog`) knows (`enso-auto` among them) gets its
   window and modalities from the catalog, so it raises no "Unknown model ... fallback
-  metadata" warning (hanzoai/codex `core:` commit, models-manager).
+  metadata" warning (hanzoai/codex `core:` commit, models-manager): upstream marks fallback
+  metadata `ModelOrigin::Synthetic`, and a slug Hanzo's catalog knows resolves `Bundled`.
 - **Sandbox permissions**: a justification with no escalation asked for runs at the default
   permissions instead of failing the shell call (`core:` commit, core/src/tools/handlers).
 - **ChatGPT legacy plugins 401**: featured plugins are asked for only with a ChatGPT sign-in

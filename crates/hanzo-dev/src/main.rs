@@ -324,7 +324,7 @@ async fn run(paths: Arg0DispatchPaths) -> Result<()> {
         }
         Some(Command::Queue { thread, message }) => {
             let options = session_options(interactive, overrides, paths);
-            say(codex_tui::run_session_queue_command(thread, message, options).await)?;
+            say(codex_tui::run_session_queue_command(thread, message, /*resume*/ false, options).await)?;
         }
         Some(Command::Archive { session }) => {
             let options = session_options(interactive, overrides, paths);
