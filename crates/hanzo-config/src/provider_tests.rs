@@ -237,3 +237,22 @@ fn the_api_key_name_nothing_reads_is_upgraded_too() {
     assert!(text.contains("command = \"dev\""), "{text}");
     assert!(!text.contains("HANZO_API_KEY"), "{text}");
 }
+
+#[test]
+fn a_retired_effort_moves_to_instant_and_nothing_else_moves() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let path = home.path().join("config.toml");
+    let stored = "# mine\nmodel = \"enso-auto\"\nmodel_reasoning_effort = \"none\" # picked once\n\n[profiles.deep]\nmodel_reasoning_effort = \"minimal\"\nplan_mode_reasoning_effort = \"high\"\n\n[profiles.quick]\nmodel_reasoning_effort = \"low\"\n";
+    std::fs::write(&path, stored).expect("write");
+    upgrade_effort(home.path());
+    let text = std::fs::read_to_string(&path).expect("read");
+    assert_eq!(
+        text,
+        stored
+            .replace("\"none\"", "\"instant\"")
+            .replace("\"minimal\"", "\"instant\"")
+    );
+    // Twice changes nothing more, and a config with nothing retired is not rewritten.
+    upgrade_effort(home.path());
+    assert_eq!(std::fs::read_to_string(&path).expect("read"), text);
+}

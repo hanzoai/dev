@@ -89,6 +89,24 @@ The delta (`git log --no-merges upstream/main..main` in `upstream/codex`):
   carries on in the thread. hanzo-inc/cloud's coding loop (`apps/coding/loop.go`) reads the
   mark. It lives in core because only the loop holds a step's calls and their results
   together; no extension hook sees a tool's output or can end a turn.
+- Rate limits never surface. `hanzo::pace` keeps, per origin, what the provider's
+  `x-ratelimit-{limit,remaining,reset}-{requests,tokens}` and a 429/503's `Retry-After` said;
+  codex-api's request wrapper (`run_with_request_telemetry`) waits `pace::delay` before each
+  request and feeds every response back to `pace::observe`, so a spent window holds the next
+  request until it resets and a low one (a quarter of the limit) is spread over what is left.
+  What still comes back as a 429 (not a spent plan or quota), `slow_down` or a 503/overload is
+  waited out in core's one retry path (`responses_retry.rs` `slow_down`): `Retry-After`, else
+  full-jitter backoff (1 s doubling to 60 s), with no attempt cap while the turn lives. The wait
+  is the turn's status (`Session::notify_retry_wait`, no error details) and in
+  `dev exec --json` it is `turn.waiting {"message":"waiting for rate limit, retrying in 12s"}`:
+  every retried notice is, and `error` is only what ends a turn. Upstream ends a turn on an
+  overloaded model; Dev waits (the owner's rule). `crates/hanzo-dev/tests/pace.rs` holds it.
+- Reasoning effort is one table, `hanzo::effort` (`auto`, `instant`, `low`, `medium`, `high`,
+  `max`, in /model picker order; rename there). Every Hanzo model starts at `auto`, and `auto`
+  is sent as no effort, so api.hanzo.ai's router decides; the others are sent as written. A
+  stored `none` or `minimal` (the picker once saved `none` as every Hanzo model's default) is
+  rewritten to `instant` at startup (`hanzo-config` `upgrade_effort`, top level and profiles);
+  upstream's `xhigh` is shown as Max. `crates/hanzo-dev/tests/effort.rs` holds it.
 - `brand:` Dev's name in every user-facing string literal of non-test code.
 - `version:` the version, below.
 

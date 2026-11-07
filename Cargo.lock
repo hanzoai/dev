@@ -1893,6 +1893,7 @@ dependencies = [
  "codex-websocket-client",
  "eventsource-stream",
  "futures",
+ "hanzo",
  "http 1.4.0",
  "regex-lite",
  "rustls",
@@ -7617,7 +7618,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-dev"
-version = "0.7.9"
+version = "0.7.10"
 dependencies = [
  "anyhow",
  "chrono",

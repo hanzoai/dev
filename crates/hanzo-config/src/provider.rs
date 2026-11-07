@@ -295,6 +295,71 @@ pub(super) fn upgrade_auth(home: &Path) {
     });
 }
 
+/// A reasoning effort stored under a name Hanzo's table retired (`none`, `minimal`) is
+/// rewritten to its successor (`instant`), at the top of the config and in every profile.
+/// The /model picker wrote `none` as the default of every Hanzo model before the table gave
+/// them `auto`; every other value, and every comment, stays as the user left it.
+pub(super) fn upgrade_effort(home: &Path) {
+    const KEYS: &[&str] = &["model_reasoning_effort", "plan_mode_reasoning_effort"];
+    let Ok(text) = std::fs::read_to_string(home.join("config.toml")) else {
+        return;
+    };
+    let Ok(config) = text.parse::<DocumentMut>() else {
+        return;
+    };
+    let retired = |table: &dyn toml_edit::TableLike| {
+        KEYS.iter().any(|key| {
+            table
+                .get(key)
+                .and_then(toml_edit::Item::as_str)
+                .and_then(hanzo::effort::successor)
+                .is_some()
+        })
+    };
+    let profiles = config
+        .get("profiles")
+        .and_then(toml_edit::Item::as_table_like);
+    if !retired(config.as_table())
+        && !profiles.is_some_and(|profiles| {
+            profiles
+                .iter()
+                .filter_map(|(_, profile)| profile.as_table_like())
+                .any(retired)
+        })
+    {
+        return;
+    }
+    let _ = edit(home, |config| {
+        let upgrade = |table: &mut dyn toml_edit::TableLike| {
+            for key in KEYS {
+                let Some(new) = table
+                    .get(key)
+                    .and_then(toml_edit::Item::as_str)
+                    .and_then(hanzo::effort::successor)
+                else {
+                    continue;
+                };
+                if let Some(value) = table.get_mut(key).and_then(toml_edit::Item::as_value_mut) {
+                    let decor = value.decor().clone();
+                    *value = toml_edit::Value::from(new);
+                    *value.decor_mut() = decor;
+                }
+            }
+        };
+        upgrade(config.as_table_mut());
+        if let Some(profiles) = config
+            .get_mut("profiles")
+            .and_then(toml_edit::Item::as_table_like_mut)
+        {
+            for (_, profile) in profiles.iter_mut() {
+                if let Some(profile) = profile.as_table_like_mut() {
+                    upgrade(profile);
+                }
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 #[path = "provider_tests.rs"]
 mod tests;
