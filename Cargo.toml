@@ -13,7 +13,7 @@ resolver = "2"
 # hanzo-dev takes it, and every crate beneath reads it at run time (the fork's
 # hanzo::version), so a release recompiles hanzo-dev alone; Dev's libraries stay
 # 0.0.0 for the same reason.
-version = "0.7.8"
+version = "0.7.9"
 # Track the edition for all workspace crates in one place. Individual
 # crates can still override this value, but keeping it here means new
 # crates created with `cargo new -w ...` automatically inherit the 2024
@@ -404,6 +404,7 @@ tree-sitter-powershell = "=0.26.4"
 ts-rs = "11"
 tungstenite = { version = "0.27.0", features = ["deflate", "proxy"] }
 uds_windows = "1.1.0"
+unicode-linebreak = "0.1.5"
 unicode-normalization = "0.1.25"
 unicode-segmentation = "1.12.0"
 unicode-width = "0.2"
@@ -412,6 +413,7 @@ urlencoding = "2.1"
 uuid = "1"
 v8 = "=152.2.0"
 vt100 = "0.16.2"
+vtparse = "0.6.2"
 walkdir = "2.5.0"
 webbrowser = "1.2.2"
 which = "8"

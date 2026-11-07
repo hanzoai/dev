@@ -3146,8 +3146,11 @@ version = "0.0.0"
 dependencies = [
  "codex-backend-client",
  "codex-extension-api",
+ "codex-features",
  "codex-http-client",
  "codex-login",
+ "codex-model-provider",
+ "codex-runtime-agent-instance",
  "serde_json",
  "tokio",
 ]
@@ -3247,6 +3250,7 @@ name = "codex-guardian-v2"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "codex-agent-identity",
  "codex-analytics",
  "codex-api",
  "codex-config",
@@ -3262,6 +3266,7 @@ dependencies = [
  "codex-model-provider",
  "codex-prompts",
  "codex-protocol",
+ "codex-runtime-agent-instance",
  "codex-websocket-client",
  "dirs",
  "http 1.4.0",
@@ -4488,11 +4493,13 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "two-face",
+ "unicode-linebreak",
  "unicode-segmentation",
  "unicode-width 0.2.1",
  "url",
  "urlencoding",
  "uuid",
+ "vtparse",
  "webbrowser",
  "which",
  "windows-sys 0.61.2",
@@ -7610,7 +7617,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-dev"
-version = "0.7.8"
+version = "0.7.9"
 dependencies = [
  "anyhow",
  "chrono",

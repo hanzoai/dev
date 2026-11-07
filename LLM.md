@@ -58,7 +58,8 @@ delta rewords, two test fixtures and two strings upstream rewrote), and with ups
 side taken there, 16 files differed from what the old build-time rules made of the new
 tree: the strings and version reads upstream added, which step 2 finds. The first merge,
 3ee47c105 to e0aa0434f4 (996 upstream commits), stopped on 39 files; step 2 then found
-24 files of new Codex strings and 10 version reads.
+24 files of new Codex strings and 10 version reads. The next, to 0ed34eb9ce (28 commits),
+stopped on one file and brought one string.
 
 The delta (`git log --no-merges upstream/main..main` in `upstream/codex`):
 
@@ -77,6 +78,17 @@ The delta (`git log --no-merges upstream/main..main` in `upstream/codex`):
   Dev's words and colors, `/model <name>`, the published `mcp_cmd`, `plugin_cmd` and
   `doctor` (they belong upstream as a pull request), `.hanzo` homes, the controller's
   calls in the loop, Hanzo's catalog and reviewers.
+- `core:` the repeated tool-cycle guard (`core/src/session/cycle.rs`, checked in `run_turn`
+  before each sampling request): a step that repeats the one before it, the same calls (name,
+  namespace, arguments; never the call id) answered the same (exec's `Chunk ID` and `Wall time`
+  aside), fails the turn with `unsupported operation: repeated identical tool-use cycle
+  detected; refusing to continue after duplicate tool calls: ` and each call as JSON
+  (`{"type":"function_call","name":…,"namespace":…,"arguments":"…"}`, joined by `, `). In
+  `dev exec --json` that is `turn.failed`, and the exit is non-zero. A user message between
+  steps, a step without calls and compaction start the comparison over, so `exec resume`
+  carries on in the thread. hanzo-inc/cloud's coding loop (`apps/coding/loop.go`) reads the
+  mark. It lives in core because only the loop holds a step's calls and their results
+  together; no extension hook sees a tool's output or can end a turn.
 - `brand:` Dev's name in every user-facing string literal of non-test code.
 - `version:` the version, below.
 
