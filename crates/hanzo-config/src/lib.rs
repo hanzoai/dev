@@ -9,6 +9,7 @@ mod provider;
 pub use provider::activate_provider;
 pub use provider::clear_hanzo_api_key;
 pub use provider::hanzo_credential;
+pub use provider::hanzo_session_expired;
 pub use provider::save_hanzo_api_key;
 pub use provider::set_feature;
 pub use provider::set_memory_provider;

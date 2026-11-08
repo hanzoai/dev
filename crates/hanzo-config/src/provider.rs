@@ -2,6 +2,8 @@ use std::io;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 use toml_edit::DocumentMut;
 
 /// Credential and model routing selected by a successful login.
@@ -154,6 +156,27 @@ fn is_session_token(value: &str) -> bool {
     value.starts_with("eyJ") && value.split('.').count() == 3
 }
 
+/// When an IAM sign-in token stops working, in seconds since the epoch: its own `exp` claim.
+fn session_expiry(value: &str) -> Option<u64> {
+    use base64::Engine;
+    let payload = value.split('.').nth(1)?.trim_end_matches('=');
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .ok()?;
+    serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()?
+        .get("exp")?
+        .as_u64()
+}
+
+/// A sign-in token past its `exp`. An API key, or a token that names no expiry, never is.
+fn is_expired(value: &str) -> bool {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    is_session_token(value) && session_expiry(value).is_some_and(|exp| exp <= now)
+}
+
 /// The Hanzo credential, in order: `HANZO_API_KEY` as given, an API key in
 /// `HANZO_USER_KEY`, a pasted API key, a fresh token from the signed-in Hanzo CLI,
 /// and last a sign-in token in `HANZO_USER_KEY`. That sign-in token is whatever the
@@ -191,7 +214,9 @@ fn pick(
     if let Some(key) = inherited.as_ref().filter(|key| !is_session_token(key)) {
         return Some(key.clone());
     }
-    saved.or_else(cli).or(inherited)
+    saved
+        .or_else(cli)
+        .or(inherited.filter(|token| !is_expired(token)))
 }
 
 fn saved_key(home: &Path) -> Option<String> {
@@ -206,7 +231,19 @@ fn saved_key(home: &Path) -> Option<String> {
     None
 }
 
+/// A fresh token from the signed-in CLI. A token already past its expiry is no sign-in:
+/// the CLI hands the stale one back when it can no longer refresh, and sending it only
+/// earns a 401 that the agent retries.
 fn cli_token() -> Option<String> {
+    cli_token_as_given().filter(|token| !is_expired(token))
+}
+
+/// Whether the CLI holds a sign-in that has run out, as opposed to none at all.
+pub fn hanzo_session_expired() -> bool {
+    cli_token_as_given().is_some_and(|token| is_expired(&token))
+}
+
+fn cli_token_as_given() -> Option<String> {
     // The native CLI owns storage and refresh of the shared Hanzo IAM account.
     // Capture both streams so credentials never reach logs.
     let output = Command::new("hanzo")

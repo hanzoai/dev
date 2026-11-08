@@ -99,19 +99,7 @@ pub(crate) async fn run(login: Login, mut overrides: CliConfigOverrides) -> Resu
         choices[index]
     };
     match choice {
-        Choice::Hanzo => {
-            let status = tokio::process::Command::new("hanzo")
-                .args(["auth", "login", "--provider", "hanzo"])
-                .status()
-                .await
-                .context("Could not start Hanzo sign-in. Install the Hanzo CLI with `curl -fsSL https://hanzo.sh | sh`, or choose an API key")?;
-            if !status.success() {
-                bail!("Hanzo sign-in did not complete ({status}).");
-            }
-            hanzo_config::activate_provider(&home, Provider::Hanzo)?;
-            hanzo_config::clear_hanzo_api_key(&home)?;
-            println!("Signed in to Hanzo.");
-        }
+        Choice::Hanzo => sign_in_hanzo(&home).await?,
         Choice::HanzoKey => {
             let key = read_key("Hanzo")?;
             hanzo_config::save_hanzo_api_key(&home, &key)?;
@@ -174,6 +162,49 @@ pub(crate) async fn run(login: Login, mut overrides: CliConfigOverrides) -> Resu
                 }
             );
         }
+    }
+    Ok(())
+}
+
+/// Sign in to the Hanzo account through the Hanzo CLI, which owns the session and its refresh.
+async fn sign_in_hanzo(home: &std::path::Path) -> Result<()> {
+    let status = tokio::process::Command::new("hanzo")
+        .args(["auth", "login", "--provider", "hanzo"])
+        .status()
+        .await
+        .context("Could not start Hanzo sign-in. Install the Hanzo CLI with `curl -fsSL https://hanzo.sh | sh`, or choose an API key")?;
+    if !status.success() {
+        bail!("Hanzo sign-in did not complete ({status}).");
+    }
+    hanzo_config::activate_provider(home, Provider::Hanzo)?;
+    hanzo_config::clear_hanzo_api_key(home)?;
+    println!("Signed in to Hanzo.");
+    Ok(())
+}
+
+/// Starting the agent on the Hanzo provider without a sign-in that works: say so and sign in,
+/// where the first request would otherwise fail with a 401 the agent retries. Only at a
+/// terminal; a run with none (a script, a cloud sandbox) gets `dev token`'s error instead.
+pub(crate) async fn ensure_hanzo(overrides: &CliConfigOverrides) -> Result<()> {
+    if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
+        return Ok(());
+    }
+    let config =
+        codex_cli::cloud_config::load_config(overrides, LoaderOverrides::default()).await?;
+    if config.model_provider_id != "hanzo" || hanzo_config::hanzo_credential().is_some() {
+        return Ok(());
+    }
+    eprintln!(
+        "{}",
+        if hanzo_config::hanzo_session_expired() {
+            "Your Hanzo sign-in has expired. Sign in again to continue."
+        } else {
+            "You are not signed in to Hanzo."
+        }
+    );
+    sign_in_hanzo(&hanzo_config::home()).await?;
+    if hanzo_config::hanzo_credential().is_none() {
+        bail!("Signed in, but the Hanzo CLI gave no usable token. Run `dev login`.");
     }
     Ok(())
 }

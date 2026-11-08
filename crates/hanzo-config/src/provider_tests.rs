@@ -256,3 +256,31 @@ fn a_retired_effort_moves_to_instant_and_nothing_else_moves() {
     upgrade_effort(home.path());
     assert_eq!(std::fs::read_to_string(&path).expect("read"), text);
 }
+
+/// A sign-in token whose payload is `{"exp":<exp>}`.
+fn token_expiring(exp: u64) -> String {
+    use base64::Engine;
+    let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!(r#"{{"exp":{exp}}}"#));
+    format!("eyJhbGciOiJSUzI1NiJ9.{payload}.c2ln")
+}
+
+#[test]
+fn a_sign_in_past_its_expiry_is_no_credential() {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let stale = token_expiring(now - 3600);
+    let live = token_expiring(now + 3600);
+    assert!(is_expired(&stale));
+    assert!(!is_expired(&live));
+    // Neither an API key nor a token that names no expiry is ever stale.
+    assert!(!is_expired("hk-live-key"));
+    assert!(!is_expired(JWT));
+    // The CLI's stale token is dropped; the inherited one too, so nothing is sent.
+    assert_eq!(pick(Some(stale.clone()), None, || None), None);
+    assert_eq!(
+        pick(Some(stale), None, || Some(live.clone())).as_deref(),
+        Some(live.as_str())
+    );
+}

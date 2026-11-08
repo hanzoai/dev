@@ -269,6 +269,14 @@ async fn run(paths: Arg0DispatchPaths) -> Result<()> {
             .push("model=\"chatgpt-web\"".to_string());
     }
 
+    // A session that opens on an expired sign-in asks for a new one before it starts.
+    if matches!(
+        command,
+        None | Some(Command::Resume(_) | Command::Fork(_) | Command::Agents)
+    ) {
+        login::ensure_hanzo(&overrides).await?;
+    }
+
     match command {
         None => {
             interactive.config_overrides = overrides;
@@ -283,6 +291,9 @@ async fn run(paths: Arg0DispatchPaths) -> Result<()> {
         Some(Command::Logout) => login::logout(overrides).await?,
         Some(Command::Token) => match hanzo_config::hanzo_credential() {
             Some(token) => println!("{token}"),
+            None if hanzo_config::hanzo_session_expired() => {
+                anyhow::bail!("Your Hanzo sign-in has expired. Run `dev login`.")
+            }
             None => anyhow::bail!("Not signed in to Hanzo. Run `dev login`."),
         },
         Some(Command::Serve) => {
