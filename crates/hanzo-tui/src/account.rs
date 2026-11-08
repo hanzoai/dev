@@ -16,9 +16,9 @@ const MISSING: &str =
     "The Hanzo CLI is not installed. Install it with `curl -fsSL https://hanzo.sh | sh`.";
 const PATIENCE: Duration = Duration::from_secs(15);
 
-/// Who is signed in, as `hanzo auth show` reports it.
+/// Who is signed in, as `hanzo auth whoami` reports it.
 pub fn show(emit: &mut dyn FnMut(String)) {
-    let text = capture(PROGRAM, &["auth", "show"]);
+    let text = capture(PROGRAM, &["auth", "whoami"]);
     if text.to_ascii_lowercase().contains("not signed in") {
         emit("Not signed in. Use /login to sign in.".to_string());
         return;
@@ -35,7 +35,7 @@ pub fn logout(emit: &mut dyn FnMut(String)) {
 /// beside it, and every line it prints, such as the address to open, reaches
 /// `emit` as it arrives.
 pub fn login(emit: Box<dyn Fn(String) + Send + Sync>) {
-    std::thread::spawn(move || stream(PROGRAM, &["auth", "login", "--provider", "hanzo"], emit));
+    std::thread::spawn(move || stream(PROGRAM, &["auth", "login"], emit));
 }
 
 fn each_line(text: &str, emit: &mut dyn FnMut(String)) {

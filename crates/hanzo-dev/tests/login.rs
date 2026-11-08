@@ -248,7 +248,7 @@ fn hanzo_browser_login_delegates_and_only_changes_provider_on_success() {
         assert_eq!(output.status.success(), code == 0);
         assert_eq!(
             std::fs::read_to_string(home.path().join("invocation")).unwrap(),
-            "auth\nlogin\n--provider\nhanzo\n"
+            "auth\nlogin\n"
         );
         let expected = if code == 0 { "hanzo" } else { "openai" };
         assert_eq!(

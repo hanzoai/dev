@@ -169,7 +169,7 @@ pub(crate) async fn run(login: Login, mut overrides: CliConfigOverrides) -> Resu
 /// Sign in to the Hanzo account through the Hanzo CLI, which owns the session and its refresh.
 async fn sign_in_hanzo(home: &std::path::Path) -> Result<()> {
     let status = tokio::process::Command::new("hanzo")
-        .args(["auth", "login", "--provider", "hanzo"])
+        .args(["auth", "login"])
         .status()
         .await
         .context("Could not start Hanzo sign-in. Install the Hanzo CLI with `curl -fsSL https://hanzo.sh | sh`, or choose an API key")?;
