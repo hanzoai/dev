@@ -99,6 +99,8 @@ class HanzoDev < Formula
   version "__VERSION__"
   license "Apache-2.0"
 
+  depends_on "hanzoai/tap/hanzo-mcp"
+
   on_macos do
     on_arm do
       url "https://github.com/hanzoai/dev/releases/download/v#{version}/dev-aarch64-apple-darwin.tar.gz"

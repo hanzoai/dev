@@ -407,6 +407,7 @@ impl Thread {
             if !request.text.is_empty() {
                 // A new request from the user; a turn Kai started carries none.
                 s.request = request;
+                s.answer.clear();
                 s.steps.clear();
                 s.continued = 0;
                 s.learning_reviewed = false;
@@ -561,6 +562,9 @@ impl Thread {
                     step.applied = !step.taken.is_empty();
                 });
             }
+            if selected.is_empty() && catalog.iter().any(|s| s.name == "dev") {
+                selected.push("dev".to_string());
+            }
         }
         skills::format_selected(&catalog, &selected)
     }
@@ -708,7 +712,37 @@ impl Thread {
                 s.continued,
             )
         };
-        if request.trim().is_empty() || self.down_for(Operation::Complete) {
+        if request.trim().is_empty() {
+            return;
+        }
+        // Deterministic fast path: if the model ended its turn on a tool-call preamble
+        // ("Let me check...", "Now let's read...", or a line ending with ':') without
+        // actually emitting the tool call, resume immediately even when Kai's complete
+        // program is in shadow mode or unreachable.
+        if unmade_preamble(&answer) {
+            if continued < CONTINUATIONS {
+                {
+                    let mut s = self.state();
+                    s.continued += 1;
+                    s.answer.clear();
+                }
+                self.act
+                    .resume(
+                        "Kai: the last message announced a tool action without calling a tool. \
+                         Make the tool call now and continue until the request is finished."
+                            .to_string(),
+                    )
+                    .await;
+            } else {
+                self.act.warn(
+                    &turn,
+                    "Kai: this request does not look finished after two more tries; over to you."
+                        .to_string(),
+                );
+            }
+            return;
+        }
+        if self.down_for(Operation::Complete) {
             return;
         }
         let op = self.op(Operation::Complete);
@@ -969,6 +1003,111 @@ impl Thread {
     }
 }
 
+/// Whether the assistant's final message of a turn is an unmade tool-call preamble
+/// ("Let me clone the repository:", "Now let me look at existing unit test conventions...")
+/// rather than a completed answer.
+pub(crate) fn unmade_preamble(text: &str) -> bool {
+    let text = text.trim_end();
+    if text.is_empty() {
+        return false;
+    }
+    let last = text.lines().last().unwrap_or("");
+    let fenced = text.matches("```").count() % 2 == 1;
+    if text.ends_with([':', '：']) && !fenced && !last.starts_with([' ', '\t']) {
+        return true;
+    }
+    if text.len() > 360 || text.contains("```") || text.contains('?') {
+        return false;
+    }
+    let last_line = last.trim();
+    if last_line.starts_with([' ', '\t']) {
+        return false;
+    }
+    let lower = last_line.to_ascii_lowercase();
+    const PREFIXES: &[&str] = &[
+        "let me ",
+        "now let me ",
+        "first, let me ",
+        "first let me ",
+        "next, let me ",
+        "next let me ",
+        "hi! let me ",
+        "let's ",
+        "now let's ",
+        "first, let's ",
+        "first let's ",
+        "next, let's ",
+        "next let's ",
+        "i'll ",
+        "now i'll ",
+        "first, i'll ",
+        "next, i'll ",
+        "i will ",
+        "now i will ",
+        "first, i will ",
+        "next, i will ",
+        "i'm going to ",
+        "i am going to ",
+        "i'm about to ",
+        "i am about to ",
+    ];
+    const VERBS: &[&str] = &[
+        "check ",
+        "read ",
+        "look ",
+        "inspect ",
+        "examine ",
+        "search ",
+        "find ",
+        "run ",
+        "test ",
+        "verify ",
+        "explore ",
+        "view ",
+        "open ",
+        "list ",
+        "fetch ",
+        "grep ",
+        "patch ",
+        "edit ",
+        "update ",
+        "write ",
+        "create ",
+        "fix ",
+        "implement ",
+        "add ",
+        "see ",
+        "investigate ",
+        "scan ",
+        "clone ",
+        "build ",
+        "compile ",
+        "execute ",
+        "start by ",
+        "begin by ",
+    ];
+    const GERUNDS: &[&str] = &[
+        "also checking ",
+        "also looking ",
+        "also searching ",
+        "also reading ",
+        "also inspecting ",
+    ];
+    for sentence in lower.split(". ") {
+        let s = sentence.trim().trim_end_matches('.');
+        if GERUNDS.iter().any(|g| s.starts_with(g)) {
+            return true;
+        }
+        if PREFIXES.iter().any(|p| {
+            s.strip_prefix(p)
+                .is_some_and(|rest| VERBS.iter().any(|v| rest.starts_with(v)))
+        }) {
+            return true;
+        }
+    }
+    false
+}
+
 fn learning_action(row: Option<&decide::Ruled>) -> Option<&str> {
     let row = row?;
     if row.signals.get("grounded")?.holds != Some(true) {
@@ -1006,24 +1145,30 @@ fn hint_value(question: &str, answer: &str) -> String {
     .to_string()
 }
 
-/// Core universal execution primitives that must never be pruned when offered.
+/// Core universal execution primitives and native Hanzo MCP tools that must
+/// never be pruned when offered.
 fn is_essential_tool(name: &str) -> bool {
     let lower = name.to_lowercase();
-    matches!(
-        lower.as_str(),
-        "bash"
-            | "bash_run"
-            | "exec_command"
-            | "file_edit"
-            | "edit_file"
-            | "write_to_file"
-            | "read_file"
-            | "view_file"
-            | "grep"
-            | "grep_search"
-            | "glob"
-            | "glob_search"
-    )
+    lower.starts_with("mcp__hanzo__")
+        || matches!(
+            lower.as_str(),
+            "bash"
+                | "bash_run"
+                | "exec_command"
+                | "write_stdin"
+                | "apply_patch"
+                | "file_edit"
+                | "edit_file"
+                | "write_to_file"
+                | "read_file"
+                | "view_file"
+                | "grep"
+                | "grep_search"
+                | "glob"
+                | "glob_search"
+                | "update_plan"
+                | "request_user_input"
+        )
 }
 
 /// A command as Kai reads it: the tool, the command line, where it runs, why.

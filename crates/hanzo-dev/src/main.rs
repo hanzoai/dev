@@ -16,6 +16,7 @@ mod ascii;
 mod idle;
 mod login;
 mod memory;
+mod report;
 
 #[derive(Parser)]
 #[command(
@@ -120,6 +121,10 @@ enum Command {
 
     /// Report on this installation and its configuration.
     Doctor(codex_cli::doctor::DoctorCommand),
+
+    /// Collect and share a redacted session and diagnostic report with Hanzo.
+    #[command(visible_alias = "share", visible_alias = "bug", visible_alias = "feedback")]
+    Report(report::ReportArgs),
 
     /// Configure continuous native memory extraction and consolidation.
     Memory {
@@ -365,7 +370,21 @@ async fn run(paths: Arg0DispatchPaths) -> Result<()> {
         Some(Command::Features { command }) => run_features(command, overrides).await?,
         Some(Command::Memory { command }) => memory::run(command, overrides).await?,
         Some(Command::Doctor(cli)) => {
+            let share = cli.share;
+            let overrides_for_share = overrides.clone();
             codex_cli::doctor::run_doctor(cli, overrides, &interactive, &paths).await?;
+            if share {
+                report::run(
+                    report::ReportArgs::from_doctor(),
+                    overrides_for_share,
+                    &interactive,
+                    &paths,
+                )
+                .await?;
+            }
+        }
+        Some(Command::Report(args)) => {
+            report::run(args, overrides, &interactive, &paths).await?;
         }
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         Some(Command::App(cli)) => codex_cli::app_cmd::run_app(cli).await?,

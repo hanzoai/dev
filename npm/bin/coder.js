@@ -397,9 +397,24 @@ const { spawn } = await import("child_process");
 // Make the resolved native binary path visible to spawned agents/subprocesses.
 process.env.CODE_BINARY_PATH = binaryPath;
 
+// Prepend @hanzo/dev's bundled node_modules/.bin (which includes @hanzo/mcp -> hanzo-mcp)
+// and ~/.local/bin to PATH so `dev` always finds `hanzo-mcp` natively.
+const localMcpBin = path.join(__dirname, "..", "node_modules", ".bin");
+const userLocalBin = path.join(os.homedir(), ".local", "bin");
+const extraPaths = [localMcpBin, userLocalBin].filter((dir) => existsSync(dir));
+const mergedPath = extraPaths
+  .concat((process.env.PATH || "").split(path.delimiter).filter(Boolean))
+  .join(path.delimiter);
+
 const child = spawn(binaryPath, process.argv.slice(2), {
   stdio: "inherit",
-  env: { ...process.env, CODER_MANAGED_BY_NPM: "1", DEV_MANAGED_BY_NPM: "1", CODE_BINARY_PATH: binaryPath },
+  env: {
+    ...process.env,
+    PATH: mergedPath,
+    CODER_MANAGED_BY_NPM: "1",
+    DEV_MANAGED_BY_NPM: "1",
+    CODE_BINARY_PATH: binaryPath,
+  },
 });
 
 child.on("error", (err) => {

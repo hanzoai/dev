@@ -76,15 +76,18 @@ pub trait Transport: Send + Sync {
 /// `POST {url}/decisions` over HTTP, signed with `key`.
 pub struct Http {
     url: String,
-    key: Option<String>,
+    hanzo_origin: bool,
+    key: Mutex<Option<String>>,
     client: reqwest::Client,
 }
 
 impl Http {
     pub fn new(url: &str, key: Option<String>) -> Http {
+        let base = url.trim_end_matches('/');
         Http {
-            url: format!("{}/decisions", url.trim_end_matches('/')),
-            key,
+            url: format!("{base}/decisions"),
+            hanzo_origin: hanzo::is_hanzo(Some(base)),
+            key: Mutex::new(key),
             client: reqwest::Client::builder()
                 .connect_timeout(CONNECT)
                 .timeout(REQUEST)
@@ -94,13 +97,32 @@ impl Http {
                 .unwrap_or_default(),
         }
     }
+
+    fn bearer(&self) -> Option<String> {
+        let mut guard = self
+            .key
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(k) = guard.as_deref()
+            && !hanzo_config::is_expired(k)
+        {
+            return Some(k.to_string());
+        }
+        if self.hanzo_origin
+            && let Some(fresh) = hanzo_config::hanzo_credential()
+        {
+            *guard = Some(fresh.clone());
+            return Some(fresh);
+        }
+        guard.clone()
+    }
 }
 
 impl Transport for Http {
     fn send<'a>(&'a self, body: &'a Value) -> Pin<Box<dyn Future<Output = Result<(u16, String), String>> + Send + 'a>> {
         Box::pin(async move {
             let mut request = self.client.post(&self.url).json(body);
-            if let Some(key) = &self.key {
+            if let Some(key) = self.bearer() {
                 request = request.bearer_auth(key);
             }
             let response = request.send().await.map_err(|e| e.without_url().to_string())?;

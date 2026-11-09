@@ -11,6 +11,7 @@ pub use provider::clear_hanzo_api_key;
 pub use provider::hanzo_credential;
 pub use provider::hanzo_login_args;
 pub use provider::hanzo_session_expired;
+pub use provider::is_expired;
 pub use provider::save_hanzo_api_key;
 pub use provider::set_feature;
 pub use provider::set_memory_provider;
@@ -33,11 +34,36 @@ pub fn initialize() -> std::io::Result<()> {
     provider::default_to_hanzo(&home);
     provider::upgrade_auth(&home);
     provider::upgrade_effort(&home);
+    provider::upgrade_mcp(&home);
+    ensure_hanzo_bin_on_path();
     share_credential(&home);
     provider::load_hanzo_credentials(&home);
     // This function is only invoked before upstream starts threads.
     std::env::set_var("CODEX_HOME", home);
     Ok(())
+}
+
+/// Ensure `~/.local/bin` and `~/.cargo/bin` are on `PATH` so `dev` can always
+/// spawn co-installed `hanzo-mcp` and `hanzo` binaries even in non-login shells.
+fn ensure_hanzo_bin_on_path() {
+    let Some(user) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) else {
+        return;
+    };
+    let user = PathBuf::from(user);
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let mut paths: Vec<PathBuf> = std::env::split_paths(&current).collect();
+    let mut changed = false;
+    for candidate in [user.join(".local/bin"), user.join(".cargo/bin")] {
+        if candidate.is_dir() && !paths.iter().any(|p| p == &candidate) {
+            paths.push(candidate);
+            changed = true;
+        }
+    }
+    if changed {
+        if let Ok(joined) = std::env::join_paths(paths) {
+            std::env::set_var("PATH", joined);
+        }
+    }
 }
 
 fn product_home(explicit: Option<OsString>, user: Option<OsString>) -> std::io::Result<PathBuf> {
@@ -146,6 +172,9 @@ fn initialize_default_kai(home: &Path) -> std::io::Result<()> {
 }
 
 fn initialize_default_skills(home: &Path) -> std::io::Result<()> {
+    // Remove legacy upstream `.system` sample skills (`openai-docs`, `imagegen`, etc.)
+    // so Hanzo Dev profiles only expose Hanzo OSS skills and user/repo skills.
+    let _ = std::fs::remove_dir_all(home.join("skills/.system"));
     for (name, content) in DEFAULT_SKILLS {
         let dir = home.join("skills").join(name);
         let skill_file = dir.join("SKILL.md");
@@ -256,6 +285,61 @@ license: MIT
 4. Measure DOM geometry (`getBoundingClientRect()`, `getComputedStyle()`) and pixel diffs; fix token/spacing/radius root causes rather than element-specific overrides.
 "#,
     ),
+    (
+        "hanzo-mcp",
+        r#"---
+name: hanzo-mcp
+description: "Hanzo MCP (HIP-0300) Unified Tooling, Progressive Disclosure, and ZAP Native Browser Bridge: 13 orthogonal action-routed tools (fs, exec, code, git, test, fetch, workspace, computer, think, memory, hanzo, plan, tasks) across local stdio (`hanzo-mcp`) and cloud (`api.hanzo.ai/v1/mcp`)."
+source: hanzoai/skills
+---
+
+# Hanzo MCP (`hanzo-mcp` · `@hanzo/mcp` · HIP-0300)
+
+Use the 13 unified HIP-0300 tools with `action` routing instead of proliferating single-purpose tools:
+
+1. **`fs`** (`uri: file:///...`): `read`, `write`, `edit`, `patch`, `list`, `tree`, `find`, `stat`, `mkdir`, `rm`, `mv`, `cp`, `search_text`.
+2. **`exec`**: `exec` (run command), `ps` (processes), `kill`, `logs`.
+3. **`code`** (`uri: sym://...`): `parse`, `serialize`, `symbols`, `definition`, `references`, `diagnostics`, `transform` (rename, extract), `summarize`.
+4. **`git`** (`uri: git://...`): `status`, `diff`, `log`, `blame`, `commit`, `branch`, `checkout`, `stash`, `tag`, `merge`, `rebase`.
+5. **`test`**: `run`, `check` (typecheck/lint), `build`, `coverage`, `discover`.
+6. **`fetch`** (`uri: https://...`): `search`, `fetch`, `head`, `crawl`, `request`, `open`.
+7. **`workspace`**: `detect`, `help`, `status`, `schema`, `doctor`.
+8. **`computer`**: `screenshot`, `click`, `move`, `type`, `press`, `scroll`, `window`, `clipboard`, `browser` (routes to persistent `hanzo-browser` / ZAP bridge `$XDG_RUNTIME_DIR/zap/zapd.sock` / CDP `127.0.0.1:9222`).
+9. **`think`**: `think`, `critic`, `review`, `decompose`, `Hypothesize`, `Synth`.
+10. **`memory`**: `recall`, `store`, `update`, `delete`, `search`, `consolidate`, `kb`.
+11. **`hanzo`** (`uri: hanzo://service/resource`): `iam`, `kms`, `paas`, `cloud`, `base`, `commerce`, `storage`, `dns`, `certs`, `billing`, `ingress`, `Registry`, `team`, `doctor`, `social` (`accounts`, `sync`, `post`, `schedule`, `history`, `channels`).
+12. **`plan`**: `create`, `show`, `update`, `add_step`, `remove_step`, `estimate`, `archive`, `list`.
+13. **`tasks`**: `add`, `update`, `done`, `cancel`, `list`, `next`, `board`, `clear`.
+
+## Progressive Disclosure (`hanzoskills.com`)
+- **Level 0 (Index)**: `https://hanzoskills.com/mcp/index.json` (13 tools) & `https://hanzoskills.com/oss/index.json` (20 OSS repos).
+- **Level 1 (Per-Tool Schema)**: `https://hanzoskills.com/mcp/<tool>.json` or call `<tool>(action="help")`.
+- **Level 2 (Live Cloud Contract)**: `POST https://api.hanzo.ai/v1/mcp` (`describe`) or `hanzo <group> --help`.
+"#,
+    ),
+    (
+        "hanzo-oss",
+        r#"---
+name: hanzo-oss
+description: "Hanzo Open-Source Stack & Sovereign Cloud Architecture (`hanzoai/*`, `zap-proto/*`): Hanzo IAM (`hanzo.id`), KMS (`kms.hanzo.ai`), Unified Cloud API (`api.hanzo.ai/v1`), Base, Engine, Enso/Kai/Zen, ZAP zero-copy RPC, and Hanzo CD (`cd.hanzo.ai`)."
+source: hanzoai/skills
+---
+
+# Hanzo Open-Source Stack (`hanzo-oss`)
+
+Follow Hanzo sovereign architecture rules across all `hanzoai/*` and `zap-proto/*` repositories:
+
+1. **Identity & Auth**: Use **Hanzo IAM** (`https://hanzo.id`, `hanzoai/iam`) OIDC/JWT only. Never invent custom auth or JWT schemes.
+2. **Secrets**: Use **Hanzo KMS** (`https://kms.hanzo.ai`, `hanzoai/kms`) only. Never hardcode or commit plaintext secrets.
+3. **Unified API**: `https://api.hanzo.ai` is the unified API gateway. All routes use `/v1/*` (never `/api/*`).
+4. **Cloud CLI & Delivery**: Use **Hanzo CLI** (`hanzo`) for all cloud operations and **Hanzo CD** (`cd.hanzo.ai`) reconciling `git.hanzo.ai/hanzo/universe`. Never use foreign cloud CLIs (`gcloud`, `aws`) or Argo.
+5. **Models & Agents**:
+   - **Enso** (`enso`, `enso-auto`, `enso-pro`, `enso-ultra`): Multi-model coding orchestration.
+   - **Kai** (`kai`): Real-time decision agent over the Decisions API (`kai.toml` routing, skill/tool selection, risk gating, progress steering, completion checks).
+   - **Zen** (`zen5`, `zen5-pro`, `zen5-coder`, `zen6`, `zen6-flash`): Hanzo flagship reasoning and coding models (`hanzoai/engine`).
+6. **Progressive Disclosure**: Consult `https://hanzoskills.com/oss/index.json` for repository index, stack conventions, and skill references.
+"#,
+    ),
 ];
 
 pub const DEFAULT_KAI: &str = r#"model = "kai"
@@ -309,6 +393,9 @@ refresh_interval_ms = 600000
 [mcp_servers.hanzo]
 command = "hanzo-mcp"
 args = []
+
+[skills.bundled]
+enabled = false
 "#;
 
 #[cfg(test)]

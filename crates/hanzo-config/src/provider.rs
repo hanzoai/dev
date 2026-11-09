@@ -170,7 +170,7 @@ fn session_expiry(value: &str) -> Option<u64> {
 }
 
 /// A sign-in token past its `exp`. An API key, or a token that names no expiry, never is.
-fn is_expired(value: &str) -> bool {
+pub fn is_expired(value: &str) -> bool {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs());
@@ -408,6 +408,53 @@ pub(super) fn upgrade_effort(home: &Path) {
                     upgrade(profile);
                 }
             }
+        }
+    });
+}
+
+/// Ensure an existing Hanzo profile that predates native MCP bundling has
+/// `[mcp_servers.hanzo]` configured and legacy upstream `.system` bundled
+/// skills disabled when not explicitly set by the user.
+pub(super) fn upgrade_mcp(home: &Path) {
+    let path = home.join("config.toml");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(config) = text.parse::<DocumentMut>() else {
+        return;
+    };
+    if config
+        .get("model_provider")
+        .and_then(toml_edit::Item::as_str)
+        != Some("hanzo")
+        || config
+            .get("model_providers")
+            .and_then(|p| p.get("hanzo"))
+            .is_none()
+    {
+        return;
+    }
+    let needs_mcp = config.get("mcp_servers").is_none();
+    let needs_bundled_skills_off = config
+        .get("skills")
+        .and_then(|s| s.get("bundled"))
+        .is_none();
+    if !needs_mcp && !needs_bundled_skills_off {
+        return;
+    }
+    let _ = edit(home, |config| {
+        let defaults = super::DEFAULT_CONFIG
+            .parse::<DocumentMut>()
+            .expect("valid default config");
+        if config.get("mcp_servers").is_none() {
+            config["mcp_servers"]["hanzo"] = defaults["mcp_servers"]["hanzo"].clone();
+        }
+        if config
+            .get("skills")
+            .and_then(|s| s.get("bundled"))
+            .is_none()
+        {
+            config["skills"]["bundled"] = defaults["skills"]["bundled"].clone();
         }
     });
 }

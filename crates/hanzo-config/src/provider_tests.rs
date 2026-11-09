@@ -284,3 +284,19 @@ fn a_sign_in_past_its_expiry_is_no_credential() {
         Some(live.as_str())
     );
 }
+
+#[test]
+fn an_existing_hanzo_profile_without_mcp_gains_hanzo_mcp() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    std::fs::write(&path, OLD_PROVIDER).unwrap();
+    upgrade_mcp(home.path());
+    let config: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(
+        config["mcp_servers"]["hanzo"]["command"].as_str(),
+        Some("hanzo-mcp")
+    );
+    let after = std::fs::read_to_string(&path).unwrap();
+    upgrade_mcp(home.path());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), after);
+}

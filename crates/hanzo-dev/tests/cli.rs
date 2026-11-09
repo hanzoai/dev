@@ -12,8 +12,8 @@ use std::process::Output;
 /// clap only rejects a duplicate argument when it assembles that subcommand.
 const COMMANDS: &[&str] = &[
     "exec", "login", "logout", "serve", "resume", "fork", "review", "agents", "queue", "archive",
-    "unarchive", "delete", "cloud", "mcp", "plugin", "doctor", "features", "flow", "sandbox",
-    "completion", "memory",
+    "unarchive", "delete", "cloud", "mcp", "plugin", "doctor", "report", "features", "flow",
+    "sandbox", "completion", "memory",
 ];
 
 fn dev(home: &Path, arguments: &[&str]) -> Output {
@@ -188,4 +188,36 @@ fn doctor_reports_as_json() {
         serde_json::from_str::<serde_json::Value>(&report).is_ok(),
         "doctor did not emit JSON: {report:.200}"
     );
+}
+
+#[test]
+fn report_bundles_session_kai_and_doctor_diagnostics() {
+    let home = home();
+    let sessions = home.path().join("sessions/2026/11/09");
+    std::fs::create_dir_all(&sessions).unwrap();
+    let rollout = sessions.join("rollout-test-session.jsonl");
+    std::fs::write(
+        &rollout,
+        concat!(
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"sess-1234\"}}\n",
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\"}}\n",
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\",\"message\":\"Now let me look at the tests in crates/hanzo-config.\"}}\n",
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\"}}\n",
+        ),
+    )
+    .unwrap();
+    let output = dev(
+        home.path(),
+        &["share", "--local-only", "--json", "stopped on enso"],
+    );
+    assert!(
+        output.status.success(),
+        "dev share failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary: serde_json::Value = serde_json::from_str(&text(&output)).unwrap();
+    assert_eq!(summary["sessionId"].as_str(), Some("sess-1234"));
+    assert_eq!(summary["prematureStopSuspected"].as_bool(), Some(true));
+    let bundle_path = summary["localPath"].as_str().expect("localPath");
+    assert!(Path::new(bundle_path).is_file(), "missing bundle at {bundle_path}");
 }

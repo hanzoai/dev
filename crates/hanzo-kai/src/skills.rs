@@ -30,6 +30,7 @@ pub fn discover(cwd: &Path, home: Option<&Path>) -> Vec<Skill> {
 
     let mut dirs = vec![
         cwd.join(".hanzo/dev/skills"),
+        cwd.join(".hanzo/skills"),
         cwd.join(".agents/skills"),
     ];
     if let Some(h) = home {
@@ -202,6 +203,27 @@ pub fn explicit_matches(text: &str, skills: &[Skill]) -> Vec<String> {
         push("dev");
     }
 
+    if lower.contains("hanzo-mcp")
+        || lower.contains("@hanzo/mcp")
+        || lower.contains("hip-0300")
+        || lower.contains("hanzo-browser")
+        || lower.contains("hanzoskills.com/mcp")
+    {
+        push("hanzo-mcp");
+    }
+
+    if lower.contains("hanzo-oss")
+        || lower.contains("hanzoai/")
+        || lower.contains("zap-proto/")
+        || lower.contains("hanzo.id")
+        || lower.contains("kms.hanzo.ai")
+        || lower.contains("api.hanzo.ai")
+        || lower.contains("cd.hanzo.ai")
+        || lower.contains("hanzoskills.com/oss")
+    {
+        push("hanzo-oss");
+    }
+
     matched
 }
 
@@ -246,13 +268,18 @@ pub fn format_selected(skills: &[Skill], names: &[String]) -> Option<String> {
         return None;
     }
     let list: Vec<&str> = selected.iter().map(|s| s.name.as_str()).collect();
+    let all_available: Vec<String> = skills
+        .iter()
+        .map(|s| format!("`{}` ({})", s.name, s.summary))
+        .collect();
     let bodies: Vec<String> = selected
         .iter()
         .map(|s| format!("<skill name=\"{}\">\n{}\n</skill>", s.name, s.body))
         .collect();
     Some(format!(
-        "Kai: enabled skills for this request ({}):\n\n{}",
+        "Kai: enabled skills for this request ({}). Available workspace skills: {}.\n\n{}",
         list.join(", "),
+        all_available.join("; "),
         bodies.join("\n\n")
     ))
 }

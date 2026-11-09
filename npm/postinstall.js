@@ -757,6 +757,23 @@ export async function runPostinstall(options = {}) {
       ensureWrapper('code-tui', '');
       ensureWrapper('code-exec', 'exec');
 
+      // Also expose hanzo-mcp from bundled @hanzo/mcp dependency when not already in globalBin
+      const mcpBinSource = join(__dirname, 'node_modules', '.bin', isWindows ? 'hanzo-mcp.cmd' : 'hanzo-mcp');
+      if (globalBin && existsSync(mcpBinSource)) {
+        const mcpWrapperPath = join(globalBin, isWindows ? 'hanzo-mcp.cmd' : 'hanzo-mcp');
+        if (!existsSync(mcpWrapperPath)) {
+          try {
+            const content = isWindows
+              ? `@echo off\r\n"${mcpBinSource}" %*\r\n`
+              : `#!/bin/sh\nexec "${mcpBinSource}" "$@"\n`;
+            writeFileSync(mcpWrapperPath, content);
+            if (!isWindows) chmodSync(mcpWrapperPath, 0o755);
+            console.log("✓ Created 'hanzo-mcp' wrapper -> @hanzo/mcp");
+            installedCmds.add('hanzo-mcp');
+          } catch {}
+        }
+      }
+
       if (collision) {
         console.error('⚠ Detected existing `code` on PATH:');
         for (const p of conflictPaths) console.error(`   - ${p}`);

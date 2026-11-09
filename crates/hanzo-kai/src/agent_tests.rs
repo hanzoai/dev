@@ -789,3 +789,54 @@ async fn explicit_skill_aliases_enable_ui_and_repo_local_skills() {
     assert!(body.contains("<skill name=\"rust-perf\">"), "{body}");
     assert!(body.contains("Avoid clone in hot loops."), "{body}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unmade_tool_preamble_is_resumed_even_when_complete_is_in_shadow_mode() {
+    // Default kai.toml leaves ops.complete in shadow mode; an unmade tool-call
+    // preamble still resumes deterministically up to CONTINUATIONS times.
+    let (_home, _server, kai) = kai("", risky).await;
+    let (thread, act) = thread(&kai);
+    start(
+        &thread,
+        "t1",
+        "inspect crates/hanzo-config and add unit tests",
+    )
+    .await;
+    thread.answered(
+        "Now let me look at existing unit test conventions to match the style. Let me check a couple of unit tests in crates/hanzo-config and crates/hanzo-kai.".into(),
+    );
+    thread.idle().await;
+    assert_eq!(act.resumed.lock().unwrap().len(), 1);
+
+    start(&thread, "t2", "").await;
+    thread.answered("Let's read the rest of src/eval.rs and tests/eval.rs:".into());
+    thread.idle().await;
+    assert_eq!(act.resumed.lock().unwrap().len(), 2);
+
+    start(&thread, "t3", "").await;
+    thread.answered("Now let me check the remaining files:".into());
+    thread.idle().await;
+    assert_eq!(act.resumed.lock().unwrap().len(), 2);
+    assert_eq!(
+        act.warned.lock().unwrap().clone(),
+        ["Kai: this request does not look finished after two more tries; over to you."]
+    );
+}
+
+#[test]
+fn unmade_preamble_distinguishes_dangling_announcements_from_completed_answers() {
+    assert!(unmade_preamble(
+        "Now let me look at the `costsNothing` function and the `FreeModel` mapping:"
+    ));
+    assert!(unmade_preamble(
+        "Now let me look at existing unit test conventions to match the style. Let me check a couple of unit tests to understand imports, structure, and how they test functions from lib."
+    ));
+    assert!(unmade_preamble(
+        "The model selector isn't in the monorepo. Let me look at the `.codex` config and search more broadly. Also checking for hanzo CLI update mechanism."
+    ));
+    assert!(!unmade_preamble("Hello! How can I help you today?"));
+    assert!(!unmade_preamble("Fixed. The test passes now."));
+    assert!(!unmade_preamble(
+        "sure! what would you like to use instead? just let me know what character you'd prefer, and i'll use that for our interactions."
+    ));
+}
