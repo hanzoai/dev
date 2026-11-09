@@ -157,10 +157,22 @@ in cloud's `/v1/s3`. The IAM token comes from the KMS client pair inside the res
 and save steps and is never exported, so no build script sees it.
 
 - Name `<sha16 of rustc -vV + sccache --version>-<target>`; key `<sha32 of git ls-tree of
-  Cargo.toml, Cargo.lock, rust-toolchain.toml, crates/ and the upstream/codex pin, and the
-  RUSTFLAGS/CARGO_*/ZIG*/LLVM_*/XWIN_*/MACOS_SDK_* env>`. The release's version is in the
-  root manifest and the lock, so each release misses its key and restores `latest` for its
-  name, whose objects serve every crate but hanzo-dev.
+  the upstream/codex pin and rust-toolchain.toml, the root Cargo.toml and Cargo.lock
+  without the release's version (its line in `[workspace.package]` and hanzo-dev's line
+  in the lock), and the RUSTFLAGS/CARGO_*/ZIG*/LLVM_*/XWIN_*/MACOS_SDK_* env>`. `crates/`
+  is not in the key, because a release rebuilds Dev's crates and no later one can use
+  what it built. So a Dev-only release restores its own key exactly and saves nothing;
+  one that moves the pin or the lock misses, restores `latest` for its name, recompiles
+  what moved and saves the new key. The windows archive also carries the pruned LLVM
+  (`llvm`) and cargo-xwin's Windows SDK (`xwin`), which cost 2.2 and 2 minutes to
+  fetch and unpack on every run.
+- Two traps that cost a cold build each. `cargo-zigbuild` names its linker wrapper by a
+  hash of its own path, cargo hands that name to every rustc as `CARGO_TARGET_*_LINKER`,
+  and sccache hashes it into every object: the workflow installs the prebuilt binary
+  at `~/.cargo/bin`, where `cargo install` put it, and from anywhere else the build
+  found no object at all (24 minutes, 0 hits of 1,631). And sccache leaves
+  `CARGO_BUILD_JOBS` (with the jobserver and the registry tokens) out of its hash, so the
+  job count changes freely; any other `CARGO_*` variable, flag or path moves every object.
 - Only main and tags write, and only a key the store does not hold. Before a save the
   directory is cut to what that build touched: sccache bumps an object's mtime on a
   hit, and a crate file stays only if cargo unpacked it.
@@ -176,6 +188,55 @@ and save steps and is never exported, so no build script sees it.
   new version alone rebuilds hanzo-dev and nothing else (measured then with the version
   passed as `DEV_VERSION`, which reached the same one crate).
 - `sccache --show-stats` prints at the end of every Build step, pass or fail.
+
+## The release run
+
+`release.yml`, on a pushed tag: `version` (a shallow checkout of the tag, about 15 s)
+opens the draft; five `build` jobs on `xl-linux-amd64` (a 32 vCPU / 56 GiB node each:
+cloud `apps/platform/job.go`, universe `infra/aws/pool.tf`) compile and upload into
+it; `publish` checks all 28 assets, publishes, then Homebrew and npm. A branch run
+(`workflow_dispatch` from anything but the default branch) builds into a draft and
+never publishes; delete that draft by hand.
+
+Measured 2026-11-08 against v0.7.10's 109 minutes (builds on the 8-CPU ordinary pool,
+five to a node; each number a run on the xl pool, pin and lock unmoved):
+
+| | before | now |
+|---|---|---|
+| `version` | 4.1 min (3.9 of it the clone) | 11-20 s |
+| a build job's setup (checkout, Rust, cache restore, Zig, SDK) | 3-4 min | 50 s |
+| Build, warm, `hanzo-config` and `hanzo-dev` changed | 58-87 min | 4.6-6.8 min |
+| Package and upload | 1-3 min | 30-35 s |
+| `publish` (assets 26-32 s, npm 80 s as a dry run: the upload is not in it) | 6.9 min | 2.0 min |
+| Build, engine moved (codex-core and 28 crates above it) | 58-87 min | 18 min |
+| Build, nothing cached | 59.6 min on dgx | 23-27 min (20-23 with `lto = "off"`) |
+
+Every call to GitHub goes through `scripts/ghapi.sh`: a non-2xx is never parsed, a
+rate-limited call (403 or 429 with `retry-after` or `x-ratelimit-remaining: 0`) is
+waited out up to 10 minutes and asked again, a 5xx is asked again after 2, 8, 18 and
+32 s, and anything else fails at once naming the status and GitHub's message. The token
+is the account's 5,000 calls an hour, shared with every tool on it, and it ran dry
+during 0.7.11's upload (`jq` was handed the error object and died). A release makes
+about 66 calls: 3 in `version`, 33 in the builds (a list, then one upload per file),
+30 in `publish` (a list, 28 downloads, the publish). `version` reads the free
+`/rate_limit` first and stops, or waits for a reset under 10 minutes away, if less
+than 100 are left.
+
+What a warm Build still waits on, in order: the walk through ~1,400 units, 90-140 s,
+which is build scripts and proc macros (sccache cannot cache them) and the chain from
+`aws-lc-sys`; then `hanzo-dev`, one crate, 190-240 s (collector 15 s, LLVM 175 s, link
+4 s). Memory peaked at 6.7-14 GiB of 56 across every run, so cores, not memory,
+set the pace. The engine moved is core 245 s, then app-server 140 s, tui 240 s,
+cli, then `hanzo-dev` again: a serial chain no node size shortens.
+
+Not in the workflow because they change the shipped binary or the pool: `lto = "off"`
+(comment in `release.yml`), and the pool itself. The xl pool is shared with
+hanzo-inc/cloud's gates and hanzo.ai's gates and deploys. In six runs on it, all five
+builds started inside two minutes twice; in three the last one waited 4 to 11 minutes
+for a node; in the sixth four of five were still waiting after 15, behind 33 pending
+pods of other jobs, when I cancelled it. The ordinary pool's `heavy-linux-amd64`
+starts in a minute but ran the same warm Build in 16.5 minutes (hanzo-dev alone 653 s
+against 190), so it is no way round.
 
 ## Review and memory models
 
