@@ -270,6 +270,32 @@ fn hanzo_browser_login_delegates_and_only_changes_provider_on_success() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn a_hanzo_cli_that_takes_a_provider_is_told_hanzo() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::tempdir().unwrap();
+    let binary = home.path().join("hanzo");
+    std::fs::write(
+        &binary,
+        "#!/bin/sh\nif [ \"$3\" = \"--help\" ]; then echo '      --provider <PROVIDER>'; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$DEV_HOME/invocation\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_dev"))
+        .args(["login", "--hanzo"])
+        .env("DEV_HOME", home.path())
+        .env("PATH", home.path())
+        .env_remove("HANZO_USER_KEY")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        std::fs::read_to_string(home.path().join("invocation")).unwrap(),
+        "auth\nlogin\n--provider\nhanzo\n"
+    );
+}
+
 async fn read_until(
     process: &mut codex_utils_pty::SpawnedProcess,
     parser: &mut vt100::Parser,

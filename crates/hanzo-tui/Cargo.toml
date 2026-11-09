@@ -8,3 +8,6 @@ edition = "2021"
 license = "Apache-2.0"
 description = "The Hanzo account behind the interface's /login, /logout, /auth and /status"
 repository = "https://github.com/hanzoai/dev"
+
+[dependencies]
+hanzo-config = { workspace = true }

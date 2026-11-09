@@ -2,7 +2,7 @@
 source: crates/hanzo-dev/tests/login.rs
 expression: parser.screen().contents()
 ---
-Sign in to Hanzo Dev:
+Sign in to Hanzo:
 > Hanzo account (recommended)
   ChatGPT account
   Paste a Hanzo API key

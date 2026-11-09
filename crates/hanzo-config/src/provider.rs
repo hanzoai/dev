@@ -259,6 +259,21 @@ fn cli_token_as_given() -> Option<String> {
         .then(|| token.to_owned())
 }
 
+/// The arguments that sign in to Hanzo IAM through the installed Hanzo CLI. The CLI hanzo.sh
+/// installs takes `--provider hanzo` (without it, it asks which provider); the unified CLI has
+/// the one provider and refuses the flag. The CLI says which it is in its own help.
+pub fn hanzo_login_args() -> Vec<&'static str> {
+    let takes_provider = Command::new("hanzo")
+        .args(["auth", "login", "--help"])
+        .output()
+        .is_ok_and(|output| String::from_utf8_lossy(&output.stdout).contains("--provider"));
+    if takes_provider {
+        vec!["auth", "login", "--provider", "hanzo"]
+    } else {
+        vec!["auth", "login"]
+    }
+}
+
 // Called only from the synchronous entry point, before any threads start.
 pub(super) fn load_hanzo_credentials(home: &Path) {
     // Help and login commands must work without consulting a credential service.

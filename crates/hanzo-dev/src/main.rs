@@ -25,7 +25,7 @@ mod memory;
     subcommand_negates_reqs = true,
     override_usage = "dev [OPTIONS] [PROMPT]\n       dev [OPTIONS] <COMMAND> [ARGS]"
 )]
-/// Hanzo Dev — the Hanzo coding agent.
+/// Hanzo, the coding agent.
 ///
 /// With no subcommand the options below open the interactive session.
 struct Dev {

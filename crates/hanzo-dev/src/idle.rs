@@ -63,7 +63,7 @@ fn encode_frame(
     execute!(output, cursor::MoveTo(0, 0), Clear(ClearType::All))?;
     if width < 32 || height < 12 {
         execute!(output, cursor::MoveTo(0, 0))?;
-        output.write_all(b"Hanzo Dev\n")?;
+        output.write_all(b"Hanzo\n")?;
         output.flush()?;
         return Ok(());
     }

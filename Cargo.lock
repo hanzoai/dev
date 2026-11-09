@@ -2128,10 +2128,12 @@ dependencies = [
  "codex-api",
  "codex-app-server-protocol",
  "codex-core",
+ "codex-features",
  "codex-http-client",
  "codex-login",
  "codex-model-provider",
  "codex-protocol",
+ "codex-runtime-agent-instance",
  "codex-state",
  "codex-uds",
  "codex-utils-absolute-path",
@@ -2243,7 +2245,9 @@ dependencies = [
  "codex-login",
  "codex-model-provider",
  "codex-protocol",
+ "codex-response-debug-context",
  "codex-runtime-agent-instance",
+ "codex-utils-absolute-path",
  "http 1.4.0",
  "serde",
  "serde_json",
@@ -3720,6 +3724,7 @@ dependencies = [
 name = "codex-model-provider"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "chrono",
  "codex-agent-identity",
  "codex-api",
@@ -4155,8 +4160,10 @@ dependencies = [
  "codex-features",
  "codex-http-client",
  "codex-login",
+ "codex-utils-absolute-path",
  "codex-utils-redacted-string",
  "ed25519-dalek",
+ "hanzo",
  "http 1.4.0",
  "rand 0.9.3",
  "serde",
@@ -7620,7 +7627,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-dev"
-version = "0.7.10"
+version = "0.7.11"
 dependencies = [
  "anyhow",
  "chrono",
@@ -7749,6 +7756,9 @@ dependencies = [
 [[package]]
 name = "hanzo-tui"
 version = "0.0.0"
+dependencies = [
+ "hanzo-config",
+]
 
 [[package]]
 name = "hash32"

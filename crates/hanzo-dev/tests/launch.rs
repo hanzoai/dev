@@ -18,7 +18,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 use std::time::Instant;
 
-const COMPOSER: &str = "Ask Hanzo Dev to do anything";
+const COMPOSER: &str = "Ask Hanzo to do anything";
 const PACKAGE_ERROR: &str = "no complete local package";
 
 #[test]
@@ -37,7 +37,7 @@ fn a_bare_launch_starts_in_process_and_reads_only_the_projects_hanzo_config() {
     )
     .expect("a config");
     std::fs::create_dir_all(work_path.join(".hanzo/dev")).expect("the project's directory");
-    std::fs::write(work_path.join(".hanzo/dev/config.toml"), "model = \"project-model\"\n")
+    std::fs::write(work_path.join(".hanzo/dev/config.toml"), "model = \"project-model\"\n[tui]\nstatus_line = [\"model-with-reasoning\", \"current-dir\"]\n")
         .expect("the project's config");
     std::fs::create_dir(work_path.join(".codex")).expect("another product's directory");
     std::fs::write(work_path.join(".codex/config.toml"), "model = \"gpt-6-astra\"\n")
@@ -98,7 +98,7 @@ fn a_bare_launch_starts_in_process_and_reads_only_the_projects_hanzo_config() {
     // The header names the version this binary was built as, which upstream's
     // TUI reads from the hanzo crate at run time.
     let built = env!("CARGO_PKG_VERSION");
-    assert!(shown.contains(&format!("Hanzo Dev (v{built})")), "the header does not say v{built}:\n{shown}");
+    assert!(shown.contains(&format!("Hanzo (v{built})")), "the header does not say v{built}:\n{shown}");
     assert!(
         !shown.to_ascii_lowercase().contains("gpt-6"),
         "another product's project config set the model:\n{shown}"
