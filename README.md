@@ -170,7 +170,8 @@ apply inside it.
 ## Contributing
 
 Branch, make the change, make `./build-fast.sh` pass, open a pull request.
-Bugs and feature requests: [github.com/hanzoai/dev/issues](https://github.com/hanzoai/dev/issues).
+Bugs and feature requests: [github.com/hanzoai/cli/issues](https://github.com/hanzoai/cli/issues),
+the tracker for `hanzo` and the `hanzo dev` it runs (this repository has issues turned off).
 
 ## License
 
