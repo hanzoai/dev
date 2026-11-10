@@ -144,6 +144,35 @@ struct Writing {
     calls: Option<PathBuf>,
 }
 
+/// Virtual Model (`hybrid/auto`) settings as written in `kai.toml`.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct HybridWriting {
+    enabled: Option<bool>,
+    local_url: Option<String>,
+    local_model: Option<String>,
+    remote_url: Option<String>,
+    remote_model: Option<String>,
+    remote_frontier_model: Option<String>,
+    congestion_threshold: Option<f64>,
+    busy_threshold: Option<f64>,
+}
+
+/// Virtual Model (`hybrid/auto`) settings: routes between a local backend (`llama.cpp` /
+/// `qwen3.8-27b`) and a remote hosted backend (`enso-pro` / `moonshotai/kimi-k3.1-pro` /
+/// `enso-ultra`) based on query complexity and machine load.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hybrid {
+    pub enabled: bool,
+    pub local_url: String,
+    pub local_model: String,
+    pub remote_url: String,
+    pub remote_model: String,
+    pub remote_frontier_model: String,
+    pub congestion_threshold: f64,
+    pub busy_threshold: f64,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct File {
@@ -151,6 +180,7 @@ struct File {
     model: Option<String>,
     trace: Option<PathBuf>,
     generate: Writing,
+    hybrid: HybridWriting,
     ops: BTreeMap<String, Written>,
 }
 
@@ -186,6 +216,8 @@ pub struct Kai {
     pub trace: PathBuf,
     /// The model a flow's generation nodes call.
     pub generate: Generate,
+    /// Virtual Model (`hybrid/auto`) local/remote routing settings.
+    pub hybrid: Hybrid,
     ops: BTreeMap<&'static str, Op>,
 }
 
@@ -286,6 +318,35 @@ impl Kai {
                     std::env::var_os("HOME")
                         .map(|h| PathBuf::from(h).join(".cache/hanzo/dev/calls"))
                 }),
+            },
+            hybrid: Hybrid {
+                enabled: file.hybrid.enabled.unwrap_or(false),
+                local_url: file
+                    .hybrid
+                    .local_url
+                    .unwrap_or_else(|| "http://127.0.0.1:8080/v1".to_string())
+                    .trim_end_matches('/')
+                    .to_string(),
+                local_model: file
+                    .hybrid
+                    .local_model
+                    .unwrap_or_else(|| "qwen3.8-27b".to_string()),
+                remote_url: file
+                    .hybrid
+                    .remote_url
+                    .unwrap_or_else(|| hanzo::API_BASE.to_string())
+                    .trim_end_matches('/')
+                    .to_string(),
+                remote_model: file
+                    .hybrid
+                    .remote_model
+                    .unwrap_or_else(|| "enso-pro".to_string()),
+                remote_frontier_model: file
+                    .hybrid
+                    .remote_frontier_model
+                    .unwrap_or_else(|| "enso-ultra".to_string()),
+                congestion_threshold: file.hybrid.congestion_threshold.unwrap_or(0.80),
+                busy_threshold: file.hybrid.busy_threshold.unwrap_or(0.50),
             },
             ops,
         })

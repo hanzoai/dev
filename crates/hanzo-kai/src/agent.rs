@@ -394,9 +394,17 @@ impl Thread {
         decided.unwrap_or(policy).join(policy)
     }
 
-    /// Routing hints for the turn: Kai's model tier and reasoning budget, when enforced.
+    /// Whether this thread uses Virtual Model (`hybrid/auto`) local/remote routing.
+    fn is_hybrid(&self) -> bool {
+        self.kai.settings.hybrid.enabled || hanzo::model::is_hybrid_router(&self.sku)
+    }
+
+    /// Routing hints for the turn: Kai's model tier and reasoning budget, when enforced,
+    /// plus Virtual Model (`hybrid/auto`) load-aware local/remote backend selection.
     async fn route(self: &Arc<Self>, turn: &str, request: Request) -> BTreeMap<String, String> {
         let down = self.down_for(Operation::Model);
+        let req_text = request.text.clone();
+        let req_images = request.images;
         let state = {
             let mut s = self.state();
             s.turn = turn.to_string();
@@ -421,42 +429,98 @@ impl Thread {
                 "images": s.request.images,
             })
         };
-        if down {
-            return BTreeMap::new();
+        let hybrid = self.is_hybrid();
+        let load = if hybrid {
+            sample_machine_load()
+        } else {
+            0.0
+        };
+        if hybrid && load >= self.kai.settings.hybrid.congestion_threshold {
+            // Machine is heavily congested: skip local complexity classification and route straight to remote.
+            return BTreeMap::from([
+                ("kai.backend".into(), "remote".into()),
+                (
+                    "kai.model".into(),
+                    self.kai.settings.hybrid.remote_model.clone(),
+                ),
+                ("kai.tier".into(), "large".into()),
+                ("kai.effort".into(), "high".into()),
+                ("kai.load".into(), format!("{load:.2}")),
+                ("kai.congested".into(), "true".into()),
+                ("kai.skipped_classifier".into(), "true".into()),
+            ]);
         }
-        let mut asks = Vec::new();
-        for (kind, question) in [(Operation::Model, "tier"), (Operation::Reasoning, "budget")] {
-            let op = self.op(kind);
-            let record = self.open(turn, kind.name(), &op);
-            let states = vec![state.clone()];
-            let (turn_id, advisory) = (turn.to_string(), op.clone());
-            let me = Arc::clone(self);
-            asks.push(async move {
-                me.decide(kind, record, states, None, move |me, d, step, _| {
-                    let answer = decide::first(d)
-                        .and_then(|r| r.signals.get(question))
-                        .map(|s| s.answer.clone());
-                    step.kai = answer.clone().unwrap_or_default();
-                    let hint = decide::enforced(d, 0)
-                        .and_then(|r| r.signals.get(question))
-                        .and_then(decide::accepted)
-                        .map(|a| hint_value(question, a));
-                    step.taken = hint.clone().unwrap_or_default();
-                    step.applied = hint.is_some();
-                    me.advise(&advisory, &turn_id, || {
-                        Some(format!("{question} {}", hint_value(question, &answer?)))
-                    });
-                    hint.map(|h| (format!("kai.{}", hint_key(question)), h))
-                })
+        let mut hints: BTreeMap<String, String> = if down {
+            BTreeMap::new()
+        } else {
+            let mut asks = Vec::new();
+            for (kind, question) in [(Operation::Model, "tier"), (Operation::Reasoning, "budget")] {
+                let op = self.op(kind);
+                let record = self.open(turn, kind.name(), &op);
+                let states = vec![state.clone()];
+                let (turn_id, advisory) = (turn.to_string(), op.clone());
+                let me = Arc::clone(self);
+                asks.push(async move {
+                    me.decide(kind, record, states, None, move |me, d, step, _| {
+                        let answer = decide::first(d)
+                            .and_then(|r| r.signals.get(question))
+                            .map(|s| s.answer.clone());
+                        step.kai = answer.clone().unwrap_or_default();
+                        let hint = decide::enforced(d, 0)
+                            .and_then(|r| r.signals.get(question))
+                            .and_then(decide::accepted)
+                            .map(|a| hint_value(question, a));
+                        step.taken = hint.clone().unwrap_or_default();
+                        step.applied = hint.is_some();
+                        me.advise(&advisory, &turn_id, || {
+                            Some(format!("{question} {}", hint_value(question, &answer?)))
+                        });
+                        hint.map(|h| (format!("kai.{}", hint_key(question)), h))
+                    })
+                    .await
+                });
+            }
+            // Tier and budget are asked together.
+            futures::future::join_all(asks)
                 .await
-            });
+                .into_iter()
+                .flatten()
+                .collect()
+        };
+        if hybrid {
+            let (fallback_tier, fallback_effort, private) =
+                classify_hybrid_query(&req_text, req_images);
+            let tier = hints
+                .get("kai.tier")
+                .cloned()
+                .unwrap_or_else(|| fallback_tier.to_string());
+            let effort = hints
+                .get("kai.effort")
+                .cloned()
+                .unwrap_or_else(|| fallback_effort.to_string());
+            let busy = load >= self.kai.settings.hybrid.busy_threshold;
+            let stay_local = private
+                || tier == "small"
+                || (tier == "medium" && !busy && effort != "high");
+            let (backend, model) = if stay_local {
+                ("local", self.kai.settings.hybrid.local_model.clone())
+            } else if tier == "frontier" {
+                (
+                    "remote",
+                    self.kai.settings.hybrid.remote_frontier_model.clone(),
+                )
+            } else {
+                ("remote", self.kai.settings.hybrid.remote_model.clone())
+            };
+            hints.insert("kai.backend".into(), backend.into());
+            hints.insert("kai.model".into(), model);
+            hints.insert("kai.tier".into(), tier);
+            hints.insert("kai.effort".into(), effort);
+            hints.insert("kai.load".into(), format!("{load:.2}"));
+            hints.insert("kai.congested".into(), "false".into());
+            hints.insert("kai.skipped_classifier".into(), "false".into());
         }
-        // Tier and budget are asked together.
-        futures::future::join_all(asks)
-            .await
-            .into_iter()
-            .flatten()
-            .collect()
+        hints
     }
 
     /// Files the turn should start from, for a request made in `cwd`.
@@ -1130,6 +1194,94 @@ fn hint_key(question: &str) -> &'static str {
     }
 }
 
+/// Samples normalized host CPU load (`0.0` = idle, `1.0` = 1 runnable thread per core).
+fn sample_machine_load() -> f64 {
+    if let Some(parsed) = std::env::var("HANZO_MACHINE_LOAD")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+    {
+        return parsed.max(0.0);
+    }
+    if let Some(load1) = std::fs::read_to_string("/proc/loadavg")
+        .ok()
+        .and_then(|s| s.split_whitespace().next().and_then(|w| w.parse::<f64>().ok()))
+    {
+        let cpus = std::thread::available_parallelism()
+            .map(|n| n.get() as f64)
+            .unwrap_or(1.0)
+            .max(1.0);
+        return (load1 / cpus).max(0.0);
+    }
+    0.0
+}
+
+/// Deterministic query complexity and privacy classifier for `hybrid/auto` when no external
+/// classifier answers.
+fn classify_hybrid_query(text: &str, has_media: bool) -> (&'static str, &'static str, bool) {
+    let lower = text.to_ascii_lowercase();
+    let private = [
+        "private key",
+        "secret key",
+        "api_key",
+        "ssh-rsa",
+        "begin openssh private key",
+        "confidential",
+        "stay local",
+        "local only",
+    ]
+    .iter()
+    .any(|kw| lower.contains(kw));
+    let words = text.split_whitespace().count();
+    if [
+        "prove ",
+        "formal proof",
+        "theorem",
+        "lock-free",
+        "consensus protocol",
+        "byzantine",
+        "zero-knowledge",
+    ]
+    .iter()
+    .any(|kw| lower.contains(kw))
+        || words > 1500
+    {
+        return ("frontier", "high", private);
+    }
+    let code_blocks = text.matches("```").count() / 2;
+    if [
+        "architecture",
+        "refactor",
+        "redesign",
+        "across all",
+        "multi-file",
+        "distributed",
+        "deadlock",
+        "race condition",
+        "memory leak",
+        "migration",
+        "end-to-end",
+        "system design",
+    ]
+    .iter()
+    .any(|kw| lower.contains(kw))
+        || code_blocks >= 2
+        || words > 250
+        || (has_media && words > 60)
+    {
+        return ("large", "high", private);
+    }
+    if text.contains("```")
+        || words > 45
+        || has_media
+        || ["implement", "debug", "fix ", "write a ", "update "]
+            .iter()
+            .any(|kw| lower.contains(kw))
+    {
+        return ("medium", "medium", private);
+    }
+    ("small", "low", private)
+}
+
 /// Budget levels as reasoning efforts: none, low, medium, high.
 fn hint_value(question: &str, answer: &str) -> String {
     if question != "budget" {
@@ -1308,7 +1460,7 @@ pub mod extension {
     }
 
     impl Agent {
-        fn kai(&self, home: PathBuf) -> Option<Arc<Kai>> {
+        fn kai(&self, home: PathBuf, sku: &str) -> Option<Arc<Kai>> {
             let mut homes = self
                 .homes
                 .lock()
@@ -1317,7 +1469,13 @@ pub mod extension {
                 .entry(home)
                 .or_insert_with_key(|home| {
                     let settings = match hanzo_config::kai::Kai::load(home) {
-                        Ok(settings) => settings?,
+                        Ok(Some(settings)) => settings,
+                        Ok(None) if hanzo::model::is_hybrid_router(sku) => {
+                            let mut s = hanzo_config::kai::Kai::load_or_default(home).ok()?;
+                            s.hybrid.enabled = true;
+                            s
+                        }
+                        Ok(None) => return None,
                         Err(e) => {
                             tracing::warn!("kai: {e}");
                             return None;
@@ -1416,7 +1574,8 @@ pub mod extension {
                 ) {
                     return;
                 }
-                let Some(kai) = self.kai(input.config.codex_home.to_path_buf()) else {
+                let sku = input.config.model.clone().unwrap_or_default();
+                let Some(kai) = self.kai(input.config.codex_home.to_path_buf(), &sku) else {
                     return;
                 };
                 let Ok(id) = ThreadId::from_string(input.thread_store.level_id()) else {
@@ -1427,7 +1586,6 @@ pub mod extension {
                     events: Arc::clone(&self.events),
                     manager: self.manager.clone(),
                 });
-                let sku = input.config.model.clone().unwrap_or_default();
                 let thread = Arc::new(Thread::new(kai, sku, act));
                 input
                     .thread_store
