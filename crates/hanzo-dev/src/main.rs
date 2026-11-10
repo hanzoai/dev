@@ -277,7 +277,7 @@ async fn run(paths: Arg0DispatchPaths) -> Result<()> {
     // A session that opens on an expired sign-in asks for a new one before it starts.
     if matches!(
         command,
-        None | Some(Command::Resume(_) | Command::Fork(_) | Command::Agents)
+        None | Some(Command::Exec(_) | Command::Resume(_) | Command::Fork(_) | Command::Agents)
     ) {
         login::ensure_hanzo(&overrides).await?;
     }
