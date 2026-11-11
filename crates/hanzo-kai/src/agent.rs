@@ -437,12 +437,17 @@ impl Thread {
         };
         if hybrid && load >= self.kai.settings.hybrid.congestion_threshold {
             // Machine is heavily congested: skip local complexity classification and route straight to remote.
+            let remote_model = self
+                .kai
+                .settings
+                .hybrid
+                .remote_model
+                .clone()
+                .unwrap_or_else(|| "hybrid/auto".to_string());
             return BTreeMap::from([
                 ("kai.backend".into(), "remote".into()),
-                (
-                    "kai.model".into(),
-                    self.kai.settings.hybrid.remote_model.clone(),
-                ),
+                ("kai.base_url".into(), self.kai.settings.hybrid.remote_url.clone()),
+                ("kai.model".into(), remote_model),
                 ("kai.tier".into(), "large".into()),
                 ("kai.effort".into(), "high".into()),
                 ("kai.load".into(), format!("{load:.2}")),
@@ -502,17 +507,48 @@ impl Thread {
             let stay_local = private
                 || tier == "small"
                 || (tier == "medium" && !busy && effort != "high");
-            let (backend, model) = if stay_local {
-                ("local", self.kai.settings.hybrid.local_model.clone())
+            let default_remote_model = || {
+                self.kai
+                    .settings
+                    .hybrid
+                    .remote_model
+                    .clone()
+                    .unwrap_or_else(|| "hybrid/auto".to_string())
+            };
+            let (backend, base_url, model) = if stay_local {
+                if let Some((local_url, local_model)) =
+                    discover_local_hybrid_target(&self.kai.settings.hybrid).await
+                {
+                    ("local", local_url, local_model)
+                } else {
+                    hints.insert("kai.local_unavailable".into(), "true".into());
+                    (
+                        "remote",
+                        self.kai.settings.hybrid.remote_url.clone(),
+                        default_remote_model(),
+                    )
+                }
             } else if tier == "frontier" {
                 (
                     "remote",
-                    self.kai.settings.hybrid.remote_frontier_model.clone(),
+                    self.kai.settings.hybrid.remote_url.clone(),
+                    self.kai
+                        .settings
+                        .hybrid
+                        .remote_frontier_model
+                        .clone()
+                        .or_else(|| self.kai.settings.hybrid.remote_model.clone())
+                        .unwrap_or_else(|| "hybrid/auto".to_string()),
                 )
             } else {
-                ("remote", self.kai.settings.hybrid.remote_model.clone())
+                (
+                    "remote",
+                    self.kai.settings.hybrid.remote_url.clone(),
+                    default_remote_model(),
+                )
             };
             hints.insert("kai.backend".into(), backend.into());
+            hints.insert("kai.base_url".into(), base_url);
             hints.insert("kai.model".into(), model);
             hints.insert("kai.tier".into(), tier);
             hints.insert("kai.effort".into(), effort);
@@ -1215,6 +1251,230 @@ fn sample_machine_load() -> f64 {
     0.0
 }
 
+/// Dynamically discovers a live local inference target `(base_url, model_id)` for `hybrid/auto`.
+///
+/// Probes explicit `[hybrid].local_url` when configured, or automatically scans:
+/// - `zap+unix://~/.hanzo/host.zap.sock:/v1` and `zap+unix://$XDG_RUNTIME_DIR/zap/zapd.sock:/v1`
+/// - `http://127.0.0.1:{8080,8731,1234,11434,18301}/v1` (`llama.cpp`, `hanzo node`, `LM Studio`, `Ollama`, `vLLM`)
+///
+/// Results are cached for 30s per `(local_url, local_model)` key so steady-state turns add zero probe latency.
+async fn discover_local_hybrid_target(
+    hybrid: &hanzo_config::kai::Hybrid,
+) -> Option<(String, String)> {
+    type CacheKey = (Option<String>, Option<String>);
+    type CacheVal = (std::time::Instant, Option<(String, String)>);
+    static CACHE: std::sync::OnceLock<Mutex<HashMap<CacheKey, CacheVal>>> =
+        std::sync::OnceLock::new();
+
+    let key = (hybrid.local_url.clone(), hybrid.local_model.clone());
+    let ttl = Duration::from_secs(30);
+    if let Some(cached) = {
+        let map = CACHE
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        map.get(&key)
+            .and_then(|(ts, val)| (ts.elapsed() < ttl).then(|| val.clone()))
+    } {
+        return cached;
+    }
+
+    let explicit_url = hybrid.local_url.is_some();
+    let candidates: Vec<String> = if let Some(url) = &hybrid.local_url {
+        vec![url.trim_end_matches('/').to_string()]
+    } else {
+        let mut urls = Vec::with_capacity(7);
+        if let Some(home) = std::env::var_os("HOME") {
+            let sock = PathBuf::from(home).join(".hanzo/host.zap.sock");
+            if sock.exists() {
+                urls.push(format!("zap+unix://{}:/v1", sock.display()));
+            }
+        }
+        if let Some(runtime_dir) = std::env::var_os("XDG_RUNTIME_DIR") {
+            let sock = PathBuf::from(runtime_dir).join("zap/zapd.sock");
+            if sock.exists() {
+                urls.push(format!("zap+unix://{}:/v1", sock.display()));
+            }
+        }
+        for port in [8080_u16, 8731, 1234, 11434, 18301] {
+            urls.push(format!("http://127.0.0.1:{port}/v1"));
+        }
+        urls
+    };
+
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(500))
+        .build()
+        .ok();
+
+    let mut resolved = None;
+    for base in candidates {
+        if !explicit_url
+            && !codex_http_client::zap_transport::is_zap_url(&base)
+            && let Ok(parsed) = url::Url::parse(&base)
+            && let (Some(host), Some(port)) = (parsed.host_str(), parsed.port_or_known_default())
+            && tokio::time::timeout(
+                Duration::from_millis(80),
+                tokio::net::TcpStream::connect((host, port)),
+            )
+            .await
+            .is_err_and(|_| true)
+        {
+            continue;
+        }
+
+        let Some((models, is_ollama_shape)) =
+            fetch_local_models_list(&base, http_client.as_ref()).await
+        else {
+            continue;
+        };
+
+        if let Some(raw_wanted) = &hybrid.local_model {
+            let wanted = raw_wanted
+                .strip_prefix("ollama/")
+                .or_else(|| raw_wanted.strip_prefix("lmstudio/"))
+                .unwrap_or(raw_wanted.as_str())
+                .trim();
+            if models.iter().any(|m| m == wanted) {
+                resolved = Some((base, wanted.to_string()));
+                break;
+            }
+            if try_pull_local_hybrid_model(&base, wanted, is_ollama_shape).await {
+                resolved = Some((base, wanted.to_string()));
+                break;
+            }
+            if explicit_url {
+                resolved = Some((base, wanted.to_string()));
+                break;
+            }
+        } else if let Some(first) = models.into_iter().next() {
+            resolved = Some((base, first));
+            break;
+        }
+    }
+
+    {
+        let mut map = CACHE
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        map.insert(key, (std::time::Instant::now(), resolved.clone()));
+    }
+    resolved
+}
+
+async fn fetch_local_models_list(
+    base: &str,
+    http_client: Option<&reqwest::Client>,
+) -> Option<(Vec<String>, bool)> {
+    let url = format!("{}/models", base.trim_end_matches('/'));
+    let body_bytes: Vec<u8> = if codex_http_client::zap_transport::is_zap_url(&url) {
+        let mut req = codex_http_client::Request::new(http::Method::GET, url);
+        req.timeout = Some(Duration::from_millis(400));
+        codex_http_client::zap_transport::execute_zap(req)
+            .await
+            .ok()?
+            .body
+            .to_vec()
+    } else {
+        let client = http_client?;
+        let resp = client.get(&url).send().await.ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        resp.bytes().await.ok()?.to_vec()
+    };
+
+    let json: Value = serde_json::from_slice(&body_bytes).ok()?;
+    let mut ids = Vec::new();
+    let mut ollama_shape = false;
+    let mut push_id = |candidate: Option<&str>| {
+        if let Some(raw) = candidate {
+            let trimmed = raw.trim();
+            if !trimmed.is_empty()
+                && !trimmed.to_ascii_lowercase().contains("embed")
+                && !ids.iter().any(|existing| existing == trimmed)
+            {
+                ids.push(trimmed.to_string());
+            }
+        }
+    };
+
+    if let Some(arr) = json.get("data").and_then(Value::as_array) {
+        for item in arr {
+            push_id(
+                item.get("id")
+                    .or_else(|| item.get("slug"))
+                    .or_else(|| item.get("name"))
+                    .and_then(Value::as_str),
+            );
+        }
+    } else if let Some(arr) = json.get("models").and_then(Value::as_array) {
+        ollama_shape = true;
+        for item in arr {
+            push_id(
+                item.get("slug")
+                    .or_else(|| item.get("name"))
+                    .or_else(|| item.get("model"))
+                    .or_else(|| item.get("id"))
+                    .and_then(Value::as_str),
+            );
+        }
+    } else if let Some(arr) = json.as_array() {
+        for item in arr {
+            if let Some(s) = item.as_str() {
+                push_id(Some(s));
+            } else {
+                push_id(
+                    item.get("id")
+                        .or_else(|| item.get("slug"))
+                        .or_else(|| item.get("name"))
+                        .and_then(Value::as_str),
+                );
+            }
+        }
+    }
+
+    Some((ids, ollama_shape))
+}
+
+async fn try_pull_local_hybrid_model(base: &str, model: &str, is_ollama_shape: bool) -> bool {
+    let Ok(parsed) = url::Url::parse(base) else {
+        return false;
+    };
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    let port = parsed.port_or_known_default();
+    let origin = match parsed.port() {
+        Some(p) => format!("{}://{host}:{p}", parsed.scheme()),
+        None => format!("{}://{host}", parsed.scheme()),
+    };
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .build()
+    else {
+        return false;
+    };
+    if port == Some(11434) || is_ollama_shape {
+        return client
+            .post(format!("{origin}/api/pull"))
+            .json(&json!({ "model": model, "stream": false }))
+            .send()
+            .await
+            .is_ok_and(|r| r.status().is_success());
+    }
+    if port == Some(1234) {
+        return client
+            .post(format!("{origin}/api/v1/models/download"))
+            .json(&json!({ "model": model }))
+            .send()
+            .await
+            .is_ok_and(|r| r.status().is_success());
+    }
+    false
+}
+
 /// Deterministic query complexity and privacy classifier for `hybrid/auto` when no external
 /// classifier answers.
 fn classify_hybrid_query(text: &str, has_media: bool) -> (&'static str, &'static str, bool) {
@@ -1465,31 +1725,36 @@ pub mod extension {
                 .homes
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            homes
-                .entry(home)
-                .or_insert_with_key(|home| {
-                    let settings = match hanzo_config::kai::Kai::load(home) {
-                        Ok(Some(settings)) => settings,
-                        Ok(None) if hanzo::model::is_hybrid_router(sku) => {
-                            let mut s = hanzo_config::kai::Kai::load_or_default(home).ok()?;
-                            s.hybrid.enabled = true;
-                            s
-                        }
-                        Ok(None) => return None,
-                        Err(e) => {
-                            tracing::warn!("kai: {e}");
-                            return None;
-                        }
-                    };
-                    match Kai::open(settings, hanzo_config::hanzo_credential()) {
-                        Ok(kai) => Some(Arc::new(kai)),
-                        Err(e) => {
-                            tracing::warn!("kai: {e}");
-                            None
-                        }
+            if let Some(Some(existing)) = homes.get(&home) {
+                return Some(Arc::clone(existing));
+            }
+            if homes.contains_key(&home) && !hanzo::model::is_hybrid_router(sku) {
+                return None;
+            }
+            let built = (|| {
+                let settings = match hanzo_config::kai::Kai::load(&home) {
+                    Ok(Some(settings)) => settings,
+                    Ok(None) if hanzo::model::is_hybrid_router(sku) => {
+                        let mut s = hanzo_config::kai::Kai::load_or_default(&home).ok()?;
+                        s.hybrid.enabled = true;
+                        s
                     }
-                })
-                .clone()
+                    Ok(None) => return None,
+                    Err(e) => {
+                        tracing::warn!("kai: {e}");
+                        return None;
+                    }
+                };
+                match Kai::open(settings, hanzo_config::hanzo_credential()) {
+                    Ok(kai) => Some(Arc::new(kai)),
+                    Err(e) => {
+                        tracing::warn!("kai: {e}");
+                        None
+                    }
+                }
+            })();
+            homes.insert(home, built.clone());
+            built
         }
     }
 

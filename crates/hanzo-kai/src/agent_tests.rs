@@ -843,8 +843,24 @@ fn unmade_preamble_distinguishes_dangling_announcements_from_completed_answers()
 
 #[tokio::test(flavor = "multi_thread")]
 async fn hybrid_auto_routes_simple_queries_locally_and_architecture_queries_remotely() {
-    let settings = "[hybrid]\ncongestion_threshold = 1.0\nbusy_threshold = 0.99";
-    let (_home, _server, kai) = kai(settings, |_, _, _| vec![0.9, 0.1]).await;
+    let local_server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/v1/models"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "object": "list",
+            "data": [
+                { "id": "text-embedding-nomic" },
+                { "id": "local-discovered-coder" }
+            ]
+        })))
+        .mount(&local_server)
+        .await;
+
+    let local_base = format!("{}/v1", local_server.uri());
+    let settings = format!(
+        "[hybrid]\nlocal_url = \"{local_base}\"\ncongestion_threshold = 1000.0\nbusy_threshold = 999.0"
+    );
+    let (_home, _server, kai) = kai(&settings, |_, _, _| vec![0.9, 0.1]).await;
     let act = Arc::new(testing::Thread::default());
     let thread = Arc::new(Thread::new(
         Arc::clone(&kai),
@@ -863,8 +879,12 @@ async fn hybrid_auto_routes_simple_queries_locally_and_architecture_queries_remo
         .await;
     assert_eq!(simple.get("kai.backend").map(String::as_str), Some("local"));
     assert_eq!(
+        simple.get("kai.base_url").map(String::as_str),
+        Some(local_base.as_str())
+    );
+    assert_eq!(
         simple.get("kai.model").map(String::as_str),
-        Some("qwen3.8-27b")
+        Some("local-discovered-coder")
     );
     assert_eq!(simple.get("kai.tier").map(String::as_str), Some("small"));
 
@@ -882,11 +902,51 @@ async fn hybrid_auto_routes_simple_queries_locally_and_architecture_queries_remo
         Some("remote")
     );
     assert_eq!(
+        complex.get("kai.base_url").map(String::as_str),
+        Some("https://api.hanzo.ai/v1")
+    );
+    assert_eq!(
         complex.get("kai.model").map(String::as_str),
-        Some("enso-pro")
+        Some("hybrid/auto")
     );
     assert_eq!(complex.get("kai.tier").map(String::as_str), Some("large"));
     assert_eq!(complex.get("kai.effort").map(String::as_str), Some("high"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn hybrid_auto_falls_back_to_remote_when_local_backend_unavailable() {
+    let settings =
+        "[hybrid]\nlocal_url = \"http://127.0.0.1:9/v1\"\ncongestion_threshold = 1000.0\nbusy_threshold = 999.0";
+    let (_home, _server, kai) = kai(settings, |_, _, _| vec![0.9, 0.1]).await;
+    let act = Arc::new(testing::Thread::default());
+    let thread = Arc::new(Thread::new(
+        Arc::clone(&kai),
+        "hybrid/auto".into(),
+        act,
+    ));
+
+    let hints = thread
+        .route(
+            "t1",
+            Request {
+                text: "what is 2 + 2".into(),
+                images: false,
+            },
+        )
+        .await;
+    assert_eq!(hints.get("kai.backend").map(String::as_str), Some("remote"));
+    assert_eq!(
+        hints.get("kai.base_url").map(String::as_str),
+        Some("https://api.hanzo.ai/v1")
+    );
+    assert_eq!(
+        hints.get("kai.model").map(String::as_str),
+        Some("hybrid/auto")
+    );
+    assert_eq!(
+        hints.get("kai.local_unavailable").map(String::as_str),
+        Some("true")
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

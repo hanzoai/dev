@@ -691,5 +691,59 @@ async fn upload_bundle(bundle: &DiagnosticBundle, bundle_bytes: &[u8]) -> Result
         att_resp.status()
     );
 
+    // Best-effort sync to Hanzo CRM (`crm.hanzo.ai` -> Leads / Forms -> Feedback & Bugs)
+    let crm_endpoint = std::env::var("HANZO_CRM_FEEDBACK_ENDPOINT")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "https://api.hanzo.ai/v1/marketing/leads".to_string());
+    let reporter_email = std::env::var("HANZO_USER_EMAIL")
+        .ok()
+        .filter(|s| s.contains('@'))
+        .unwrap_or_else(|| {
+            let short: String = session_id.chars().filter(|c| c.is_ascii_alphanumeric()).take(12).collect();
+            format!("dev-report-{}@report.hanzo.ai", if short.is_empty() { "anon" } else { &short })
+        });
+    let summary_text = if !bundle.note.is_empty() {
+        bundle.note.clone()
+    } else if let Some(reason) = bundle.session.as_ref().and_then(|s| s.premature_stop_reason.clone()) {
+        reason
+    } else {
+        format!("Diagnostic bundle {} submitted via `dev report`", bundle.report_id)
+    };
+    let crm_payload = json!({
+        "email": reporter_email,
+        "name": format!("Hanzo Dev CLI ({})", bundle.toolchain.dev_version),
+        "program": "feedback",
+        "source": "hanzo-dev/report",
+        "need": truncate_chars(&summary_text, 3800),
+        "answers": [
+            { "question": "Report ID", "answer": bundle.report_id },
+            { "question": "Session ID", "answer": session_id },
+            { "question": "CLI & MCP Toolchain", "answer": format!(
+                "dev={} | hanzo-mcp={} (configured={}) | os={}/{}",
+                bundle.toolchain.dev_version,
+                bundle.toolchain.hanzo_mcp_installed,
+                bundle.toolchain.hanzo_mcp_configured,
+                bundle.os,
+                bundle.arch
+            ) },
+            { "question": "Premature Stop Analysis", "answer": format!(
+                "suspected={} | reason={}",
+                bundle.session.as_ref().is_some_and(|s| s.premature_stop_suspected),
+                bundle.session.as_ref().and_then(|s| s.premature_stop_reason.clone()).unwrap_or_else(|| "none".to_string())
+            ) },
+            { "question": "Kai Decision Ledger Tail", "answer": truncate_chars(
+                &serde_json::to_string(&bundle.kai_ledger_tail).unwrap_or_default(),
+                1800
+            ) }
+        ]
+    });
+    let _ = client
+        .post(&crm_endpoint)
+        .header("X-Idempotency-Key", &bundle.report_id)
+        .json(&crm_payload)
+        .send()
+        .await;
+
     Ok(())
 }

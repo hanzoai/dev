@@ -300,3 +300,19 @@ fn an_existing_hanzo_profile_without_mcp_gains_hanzo_mcp() {
     upgrade_mcp(home.path());
     assert_eq!(std::fs::read_to_string(&path).unwrap(), after);
 }
+
+#[test]
+fn existing_hanzo_profile_gains_tool_output_token_limit_without_overwriting_custom() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    std::fs::write(&path, OLD_PROVIDER).unwrap();
+    upgrade_tool_output_limit(home.path());
+    let config: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(config["tool_output_token_limit"].as_integer(), Some(25000));
+
+    // User-customized limit is never overwritten.
+    let custom = "model_provider = \"hanzo\"\ntool_output_token_limit = 50000\n";
+    std::fs::write(&path, custom).unwrap();
+    upgrade_tool_output_limit(home.path());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), custom);
+}

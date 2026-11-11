@@ -459,6 +459,33 @@ pub(super) fn upgrade_mcp(home: &Path) {
     });
 }
 
+
+/// Raise an unset `tool_output_token_limit` on existing Hanzo profiles to 25000
+/// tokens (~100KB) so tool reads don't fall back to the 10KB (~15-line) cap and
+/// stall multi-file exploration. Any explicit user value is preserved.
+pub(super) fn upgrade_tool_output_limit(home: &Path) {
+    let path = home.join("config.toml");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(config) = text.parse::<DocumentMut>() else {
+        return;
+    };
+    if config
+        .get("model_provider")
+        .and_then(toml_edit::Item::as_str)
+        != Some("hanzo")
+        || config.get("tool_output_token_limit").is_some()
+    {
+        return;
+    }
+    let _ = edit(home, |config| {
+        if config.get("tool_output_token_limit").is_none() {
+            config["tool_output_token_limit"] = toml_edit::value(25000);
+        }
+    });
+}
+
 #[cfg(test)]
 #[path = "provider_tests.rs"]
 mod tests;

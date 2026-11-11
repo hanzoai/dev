@@ -35,6 +35,7 @@ pub fn initialize() -> std::io::Result<()> {
     provider::upgrade_auth(&home);
     provider::upgrade_effort(&home);
     provider::upgrade_mcp(&home);
+    provider::upgrade_tool_output_limit(&home);
     ensure_hanzo_bin_on_path();
     share_credential(&home);
     provider::load_hanzo_credentials(&home);
@@ -353,6 +354,7 @@ mode = "enforced"
 
 pub const DEFAULT_CONFIG: &str = r#"model_provider = "hanzo"
 model = "enso-auto"
+tool_output_token_limit = 25000
 
 [tui]
 show_tooltips = false

@@ -101,3 +101,31 @@ fn calls_are_kept_under_the_home_unless_kai_toml_names_a_directory() {
     let abs = Kai::parse("[generate]\ncalls = \"/var/calls\"\n", home.path()).unwrap();
     assert_eq!(abs.generate.calls, Some(PathBuf::from("/var/calls")));
 }
+
+#[test]
+fn hybrid_defaults_have_no_hardcoded_models_or_local_url() {
+    let home = tempfile::tempdir().unwrap();
+    let kai = Kai::parse("", home.path()).unwrap();
+    assert!(!kai.hybrid.enabled);
+    assert_eq!(kai.hybrid.local_url, None);
+    assert_eq!(kai.hybrid.local_model, None);
+    assert_eq!(kai.hybrid.remote_url, "https://api.hanzo.ai/v1");
+    assert_eq!(kai.hybrid.remote_model, None);
+    assert_eq!(kai.hybrid.remote_frontier_model, None);
+
+    let configured = Kai::parse(
+        "[hybrid]\nenabled = true\nlocal_url = \"http://127.0.0.1:11434/v1/\"\nlocal_model = \"qwen3:8b\"\nremote_model = \"moonshotai/kimi-k2.5\"\n",
+        home.path(),
+    )
+    .unwrap();
+    assert!(configured.hybrid.enabled);
+    assert_eq!(
+        configured.hybrid.local_url.as_deref(),
+        Some("http://127.0.0.1:11434/v1")
+    );
+    assert_eq!(configured.hybrid.local_model.as_deref(), Some("qwen3:8b"));
+    assert_eq!(
+        configured.hybrid.remote_model.as_deref(),
+        Some("moonshotai/kimi-k2.5")
+    );
+}
