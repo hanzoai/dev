@@ -394,19 +394,19 @@ impl Thread {
         decided.unwrap_or(policy).join(policy)
     }
 
-    /// Whether this thread uses Virtual Model (`hybrid/auto`) local/remote routing.
-    /// Explicit cloud SKUs (`enso-auto`, `zen6`, etc.) must stay on their configured provider
-    /// even when `[hybrid] enabled = true` is present in `kai.toml`.
-    fn is_hybrid(&self) -> bool {
-        hanzo::model::is_hybrid_router(&self.sku)
-    }
-
     /// Routing hints for the turn: Kai's model tier and reasoning budget, when enforced,
     /// plus Virtual Model (`hybrid/auto`) load-aware local/remote backend selection.
     async fn route(self: &Arc<Self>, turn: &str, request: Request) -> BTreeMap<String, String> {
         let down = self.down_for(Operation::Model);
         let req_text = request.text.clone();
         let req_images = request.images;
+        let active_sku = request
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&self.sku)
+            .to_string();
         let state = {
             let mut s = self.state();
             s.turn = turn.to_string();
@@ -421,6 +421,8 @@ impl Thread {
                 s.steps.clear();
                 s.continued = 0;
                 s.learning_reviewed = false;
+            } else if request.model.is_some() {
+                s.request.model = request.model;
             }
             json!({
                 "request": cut(&s.request.text, 4000),
@@ -431,7 +433,7 @@ impl Thread {
                 "images": s.request.images,
             })
         };
-        let hybrid = self.is_hybrid();
+        let hybrid = hanzo::model::is_hybrid_router(&active_sku);
         let load = if hybrid {
             sample_machine_load()
         } else {
@@ -557,20 +559,25 @@ impl Thread {
             hints.insert("kai.load".into(), format!("{load:.2}"));
             hints.insert("kai.congested".into(), "false".into());
             hints.insert("kai.skipped_classifier".into(), "false".into());
-        } else if hanzo::catalog::is_local_only(&self.sku)
-            || hanzo::catalog::find(&self.sku).is_none()
+        } else if hanzo::catalog::is_local_only(&active_sku)
+            || hanzo::catalog::find(&active_sku).is_none()
         {
+            let local_only = hanzo::catalog::is_local_only(&active_sku);
             let probe = hanzo_config::kai::Hybrid {
-                local_url: None,
-                local_model: Some(self.sku.clone()),
+                local_url: if local_only {
+                    self.kai.settings.hybrid.local_url.clone()
+                } else {
+                    None
+                },
+                local_model: Some(active_sku.clone()),
                 ..self.kai.settings.hybrid.clone()
             };
             if let Some((local_url, local_model)) = discover_local_hybrid_target(&probe).await
                 && local_model.eq_ignore_ascii_case(
-                    self.sku
+                    active_sku
                         .strip_prefix("ollama/")
-                        .or_else(|| self.sku.strip_prefix("lmstudio/"))
-                        .unwrap_or(&self.sku),
+                        .or_else(|| active_sku.strip_prefix("lmstudio/"))
+                        .unwrap_or(&active_sku),
                 )
             {
                 hints.insert("kai.backend".into(), "local".into());
@@ -1318,7 +1325,7 @@ async fn discover_local_hybrid_target(
                 urls.push(format!("zap+unix://{}:/v1", sock.display()));
             }
         }
-        for port in [8080_u16, 8731, 1234, 11434, 18301] {
+        for port in [1234_u16, 8080, 8731, 11434, 18301] {
             urls.push(format!("http://127.0.0.1:{port}/v1"));
         }
         urls

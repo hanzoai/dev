@@ -50,6 +50,7 @@ async fn start(thread: &Arc<Thread>, turn: &str, text: &str) {
     let request = Request {
         text: text.into(),
         images: false,
+        model: None,
     };
     thread.route(turn, request).await;
 }
@@ -206,6 +207,7 @@ async fn enforced_routing_hints_tier_and_effort() {
             Request {
                 text: "prove the lemma".into(),
                 images: false,
+        model: None,
             },
         )
         .await;
@@ -230,6 +232,7 @@ async fn shadow_routing_sends_no_hints() {
             Request {
                 text: "hello".into(),
                 images: false,
+        model: None,
             },
         )
         .await;
@@ -366,6 +369,7 @@ async fn turn(
             Request {
                 text: "list the files".into(),
                 images: false,
+        model: None,
             },
         )
         .await;
@@ -874,6 +878,7 @@ async fn hybrid_auto_routes_simple_queries_locally_and_architecture_queries_remo
             Request {
                 text: "what is the git command to stash".into(),
                 images: false,
+        model: None,
             },
         )
         .await;
@@ -894,6 +899,7 @@ async fn hybrid_auto_routes_simple_queries_locally_and_architecture_queries_remo
             Request {
                 text: "design a multi-region distributed consensus architecture with formal verification across 12 services".into(),
                 images: false,
+        model: None,
             },
         )
         .await;
@@ -931,6 +937,7 @@ async fn hybrid_auto_falls_back_to_remote_when_local_backend_unavailable() {
             Request {
                 text: "what is 2 + 2".into(),
                 images: false,
+        model: None,
             },
         )
         .await;
@@ -966,6 +973,7 @@ async fn hybrid_auto_skips_classifier_and_routes_straight_to_remote_when_congest
             Request {
                 text: "what is 2 + 2".into(),
                 images: false,
+        model: None,
             },
         )
         .await;
@@ -1016,9 +1024,72 @@ async fn explicit_cloud_model_is_never_hijacked_when_hybrid_enabled_in_settings(
             Request {
                 text: "Reply with only: CLOUD_OK".into(),
                 images: false,
+        model: None,
             },
         )
         .await;
     assert_eq!(hints.get("kai.base_url"), None);
     assert_eq!(hints.get("kai.model"), None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn switching_model_mid_thread_to_zen6_nano_and_back_routes_per_turn() {
+    let local_server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/v1/models"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "object": "list",
+            "data": [{ "id": "zen6-nano" }]
+        })))
+        .mount(&local_server)
+        .await;
+
+    let local_base = format!("{}/v1", local_server.uri());
+    let settings = format!(
+        "[hybrid]\nenabled = true\nlocal_url = \"{local_base}\"\nlocal_model = \"zen6-nano\""
+    );
+    let (_home, _server, kai) = kai(&settings, |_, _, _| vec![0.9, 0.1]).await;
+    let act = Arc::new(testing::Thread::default());
+    // Thread starts on cloud zen6-flash, then user switches /model to zen6-nano and back.
+    let thread = Arc::new(Thread::new(
+        Arc::clone(&kai),
+        "zen6-flash".into(),
+        act,
+    ));
+
+    let local_hints = thread
+        .route(
+            "t1",
+            Request {
+                text: "4+4".into(),
+                images: false,
+                model: Some("zen6-nano".into()),
+            },
+        )
+        .await;
+    assert_eq!(
+        local_hints.get("kai.backend").map(String::as_str),
+        Some("local")
+    );
+    assert_eq!(
+        local_hints.get("kai.base_url").map(String::as_str),
+        Some(local_base.as_str())
+    );
+    assert_eq!(
+        local_hints.get("kai.model").map(String::as_str),
+        Some("zen6-nano")
+    );
+
+    let cloud_hints = thread
+        .route(
+            "t2",
+            Request {
+                text: "back to cloud".into(),
+                images: false,
+                model: Some("zen6-flash".into()),
+            },
+        )
+        .await;
+    assert_eq!(cloud_hints.get("kai.base_url"), None);
+    assert_eq!(cloud_hints.get("kai.model"), None);
 }
