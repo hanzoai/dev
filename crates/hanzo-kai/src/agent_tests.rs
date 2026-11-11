@@ -985,3 +985,40 @@ async fn hybrid_auto_skips_classifier_and_routes_straight_to_remote_when_congest
         Some("true")
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn explicit_cloud_model_is_never_hijacked_when_hybrid_enabled_in_settings() {
+    let local_server = wiremock::MockServer::start().await;
+    wiremock::Mock::given(wiremock::matchers::method("GET"))
+        .and(wiremock::matchers::path("/v1/models"))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "object": "list",
+            "data": [{ "id": "zen6-nano" }]
+        })))
+        .mount(&local_server)
+        .await;
+
+    let local_base = format!("{}/v1", local_server.uri());
+    let settings = format!(
+        "[hybrid]\nenabled = true\nlocal_url = \"{local_base}\"\nlocal_model = \"zen6-nano\"\ncongestion_threshold = 1000.0\nbusy_threshold = 999.0"
+    );
+    let (_home, _server, kai) = kai(&settings, |_, _, _| vec![0.9, 0.1]).await;
+    let act = Arc::new(testing::Thread::default());
+    let thread = Arc::new(Thread::new(
+        Arc::clone(&kai),
+        "enso-auto".into(),
+        act,
+    ));
+
+    let hints = thread
+        .route(
+            "t1",
+            Request {
+                text: "Reply with only: CLOUD_OK".into(),
+                images: false,
+            },
+        )
+        .await;
+    assert_eq!(hints.get("kai.base_url"), None);
+    assert_eq!(hints.get("kai.model"), None);
+}

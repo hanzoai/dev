@@ -395,8 +395,10 @@ impl Thread {
     }
 
     /// Whether this thread uses Virtual Model (`hybrid/auto`) local/remote routing.
+    /// Explicit cloud SKUs (`enso-auto`, `zen6`, etc.) must stay on their configured provider
+    /// even when `[hybrid] enabled = true` is present in `kai.toml`.
     fn is_hybrid(&self) -> bool {
-        self.kai.settings.hybrid.enabled || hanzo::model::is_hybrid_router(&self.sku)
+        hanzo::model::is_hybrid_router(&self.sku)
     }
 
     /// Routing hints for the turn: Kai's model tier and reasoning budget, when enforced,
@@ -555,6 +557,26 @@ impl Thread {
             hints.insert("kai.load".into(), format!("{load:.2}"));
             hints.insert("kai.congested".into(), "false".into());
             hints.insert("kai.skipped_classifier".into(), "false".into());
+        } else if hanzo::catalog::is_local_only(&self.sku)
+            || hanzo::catalog::find(&self.sku).is_none()
+        {
+            let probe = hanzo_config::kai::Hybrid {
+                local_url: None,
+                local_model: Some(self.sku.clone()),
+                ..self.kai.settings.hybrid.clone()
+            };
+            if let Some((local_url, local_model)) = discover_local_hybrid_target(&probe).await
+                && local_model.eq_ignore_ascii_case(
+                    self.sku
+                        .strip_prefix("ollama/")
+                        .or_else(|| self.sku.strip_prefix("lmstudio/"))
+                        .unwrap_or(&self.sku),
+                )
+            {
+                hints.insert("kai.backend".into(), "local".into());
+                hints.insert("kai.base_url".into(), local_url);
+                hints.insert("kai.model".into(), local_model);
+            }
         }
         hints
     }
@@ -1728,15 +1750,17 @@ pub mod extension {
             if let Some(Some(existing)) = homes.get(&home) {
                 return Some(Arc::clone(existing));
             }
-            if homes.contains_key(&home) && !hanzo::model::is_hybrid_router(sku) {
+            let wants_local_routing =
+                hanzo::model::is_hybrid_router(sku) || hanzo::catalog::is_local_only(sku);
+            if homes.contains_key(&home) && !wants_local_routing {
                 return None;
             }
             let built = (|| {
                 let settings = match hanzo_config::kai::Kai::load(&home) {
                     Ok(Some(settings)) => settings,
-                    Ok(None) if hanzo::model::is_hybrid_router(sku) => {
+                    Ok(None) if wants_local_routing => {
                         let mut s = hanzo_config::kai::Kai::load_or_default(&home).ok()?;
-                        s.hybrid.enabled = true;
+                        s.hybrid.enabled = hanzo::model::is_hybrid_router(sku);
                         s
                     }
                     Ok(None) => return None,

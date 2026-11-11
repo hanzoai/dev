@@ -11,7 +11,22 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
-const SKIP: &[&str] = &["node_modules", "target", "dist", "build", "__pycache__"];
+const SKIP: &[&str] = &[
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    "__pycache__",
+    "venv",
+    ".venv",
+    "env",
+    "site-packages",
+    "Library",
+    "Applications",
+    "Caches",
+    "Pods",
+    "vendor",
+];
 const LIST: usize = 20_000;
 const READ: u64 = 200 * 1024;
 const FILES: usize = 400;
@@ -103,12 +118,26 @@ impl Tree {
     pub fn open(root: &Path) -> Tree {
         let mut listed = Vec::new();
         if let Ok(real) = root.canonicalize() {
-            let mut pending = VecDeque::from([String::new()]);
+            let home_real = std::env::var_os("HOME")
+                .and_then(|h| PathBuf::from(h).canonicalize().ok());
+            let is_unbounded_root = real == Path::new("/")
+                || real == Path::new("/tmp")
+                || real == Path::new("/private/tmp")
+                || home_real.as_ref() == Some(&real);
+            let mut pending = if is_unbounded_root {
+                VecDeque::new()
+            } else {
+                VecDeque::from([String::new()])
+            };
             while let Some(dir) = pending.pop_front() {
                 if listed.len() >= LIST {
                     break;
                 }
-                let Ok(entries) = std::fs::read_dir(real.join(&dir)) else {
+                let dir_path = real.join(&dir);
+                if !dir.is_empty() && dir_path.join("pyvenv.cfg").is_file() {
+                    continue;
+                }
+                let Ok(entries) = std::fs::read_dir(dir_path) else {
                     continue;
                 };
                 let mut entries: Vec<_> = entries.flatten().collect();
