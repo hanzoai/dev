@@ -8,7 +8,7 @@
 Hanzo Dev is our coding agent. It runs in your terminal, reads and edits the
 repository you point it at, and runs commands in a sandbox. It reaches every
 model [Hanzo AI](https://hanzo.ai) serves — hundreds of them, `enso` and the
-`zen5` family included — through one metered gateway at `api.hanzo.ai`.
+`zen6` family included — through one metered gateway at `api.hanzo.ai`.
 
 It ships inside the Hanzo CLI: `npm i -g hanzo`, then `hanzo dev`. Web portal: [https://hanzo.ai](https://hanzo.ai).
 
@@ -55,7 +55,7 @@ there is no allowlist in the client.
 ```bash
 hanzo dev --model enso          # our frontier model
 hanzo dev --model enso-ultra    # the largest reasoning tier
-hanzo dev --model zen5-coder    # tuned for code
+hanzo dev --model zen6-coder    # tuned for code
 ```
 
 Browse everything available with `curl https://catalog.hanzo.ai/v1/models`.
@@ -80,7 +80,7 @@ every spelling resolves through the same launcher.
 ```
 hanzo dev [OPTIONS] [BACKEND|TASK] [TASK] [-- <PASSTHROUGH>...]
 
-  --model <MODEL>     Gateway model id, e.g. enso, enso-ultra, zen5-coder
+  --model <MODEL>     Gateway model id, e.g. enso, enso-ultra, zen6-coder
   --backend <NAME>    dev (default) | claude | codex
   --brand <BRAND>     Tenant for auth: hanzo | lux | zoo | pars | bootnode
   --ask               Ask before each action instead of auto-approving (alias: --safe)
