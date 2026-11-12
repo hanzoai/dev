@@ -2873,6 +2873,7 @@ dependencies = [
  "codex-utils-path-uri",
  "codex-utils-sandbox-summary",
  "codex-worktree",
+ "diffy",
  "hanzo",
  "owo-colors",
  "serde",
@@ -7677,7 +7678,7 @@ dependencies = [
 
 [[package]]
 name = "hanzo-dev"
-version = "0.7.16"
+version = "0.7.17"
 dependencies = [
  "anyhow",
  "chrono",
