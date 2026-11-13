@@ -292,13 +292,31 @@ fn an_existing_hanzo_profile_without_mcp_gains_hanzo_mcp() {
     std::fs::write(&path, OLD_PROVIDER).unwrap();
     upgrade_mcp(home.path());
     let config: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(
-        config["mcp_servers"]["hanzo"]["command"].as_str(),
-        Some("hanzo-mcp")
-    );
+    let defaults: toml::Value = toml::from_str(crate::DEFAULT_CONFIG).unwrap();
+    assert_eq!(config["mcp_servers"]["hanzo"], defaults["mcp_servers"]["hanzo"]);
     let after = std::fs::read_to_string(&path).unwrap();
     upgrade_mcp(home.path());
     assert_eq!(std::fs::read_to_string(&path).unwrap(), after);
+}
+
+#[test]
+fn legacy_unscoped_hanzo_mcp_upgrades_to_slim_tools_without_overwriting_custom_args() {
+    let home = tempfile::tempdir().unwrap();
+    let path = home.path().join("config.toml");
+    let legacy = format!("{OLD_PROVIDER}\n[mcp_servers.hanzo]\ncommand = \"hanzo-mcp\"\nargs = []\n");
+    std::fs::write(&path, legacy).unwrap();
+    upgrade_mcp(home.path());
+    let config: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let defaults: toml::Value = toml::from_str(crate::DEFAULT_CONFIG).unwrap();
+    assert_eq!(config["mcp_servers"]["hanzo"], defaults["mcp_servers"]["hanzo"]);
+
+    // User-customized MCP args stay untouched.
+    let custom = format!(
+        "{OLD_PROVIDER}\n[mcp_servers.hanzo]\ncommand = \"hanzo-mcp\"\nargs = [\"--tools\", \"code_search\"]\nstartup_readiness = \"ready\"\ndefault_tools_approval_mode = \"prompt\"\n\n[skills.bundled]\nenabled = false\n"
+    );
+    std::fs::write(&path, &custom).unwrap();
+    upgrade_mcp(home.path());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), custom);
 }
 
 #[test]

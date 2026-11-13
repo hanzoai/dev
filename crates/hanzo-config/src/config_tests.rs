@@ -9,7 +9,21 @@ fn new_home_loads_hanzo_provider_and_native_mcp() {
     assert_eq!(config["model_provider"].as_str(), Some("hanzo"));
     assert_eq!(config["model_providers"]["hanzo"]["base_url"].as_str(), Some(hanzo::API_BASE));
     assert_eq!(config["mcp_servers"]["hanzo"]["command"].as_str(), Some("hanzo-mcp"));
-    assert!(config["mcp_servers"]["hanzo"]["args"].as_array().unwrap().is_empty());
+    assert_eq!(
+        config["mcp_servers"]["hanzo"]["args"],
+        toml::Value::Array(vec![
+            "--tools".into(),
+            "code_search,lsp,browser,web_search,web_read".into(),
+        ])
+    );
+    assert_eq!(
+        config["mcp_servers"]["hanzo"]["startup_readiness"].as_str(),
+        Some("catalog")
+    );
+    assert_eq!(
+        config["mcp_servers"]["hanzo"]["default_tools_approval_mode"].as_str(),
+        Some("approve")
+    );
 }
 
 #[test]

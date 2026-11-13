@@ -177,8 +177,11 @@ async fn sign_in_hanzo(home: &std::path::Path) -> Result<()> {
         bail!("Hanzo sign-in did not complete ({status}).");
     }
     hanzo_config::activate_provider(home, Provider::Hanzo)?;
-    hanzo_config::clear_hanzo_api_key(home)?;
-    println!("Signed in to Hanzo.");
+    if home.join("hanzo-api-key").exists() {
+        println!("Signed in to Hanzo (saved API key in hanzo-api-key preserved; run `dev logout` to clear keys).");
+    } else {
+        println!("Signed in to Hanzo.");
+    }
     Ok(())
 }
 
@@ -225,17 +228,16 @@ pub(crate) async fn logout(overrides: CliConfigOverrides) -> Result<()> {
         if home.join("hanzo-api-key").exists() {
             hanzo_config::clear_hanzo_api_key(&home)?;
             println!("Removed the saved Hanzo API key.");
-        } else {
-            match tokio::process::Command::new("hanzo")
-                .args(["auth", "logout"])
-                .status()
-                .await
-            {
-                Ok(status) if status.success() => {}
-                // Warned, not fatal: the account credential below still has to go.
-                Ok(status) => eprintln!("`hanzo auth logout` did not complete ({status})."),
-                Err(error) => eprintln!("Could not run `hanzo auth logout`: {error}"),
-            }
+        }
+        match tokio::process::Command::new("hanzo")
+            .args(["auth", "logout"])
+            .status()
+            .await
+        {
+            Ok(status) if status.success() => {}
+            // Warned, not fatal: the account credential below still has to go.
+            Ok(status) => eprintln!("`hanzo auth logout` did not complete ({status})."),
+            Err(error) => eprintln!("Could not run `hanzo auth logout`: {error}"),
         }
     }
     if std::env::var_os("HANZO_USER_KEY").is_some() {

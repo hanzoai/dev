@@ -394,7 +394,9 @@ refresh_interval_ms = 600000
 
 [mcp_servers.hanzo]
 command = "hanzo-mcp"
-args = []
+args = ["--tools", "code_search,lsp,browser,web_search,web_read"]
+startup_readiness = "catalog"
+default_tools_approval_mode = "approve"
 
 [skills.bundled]
 enabled = false

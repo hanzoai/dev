@@ -434,12 +434,25 @@ pub(super) fn upgrade_mcp(home: &Path) {
     {
         return;
     }
+    let hanzo_mcp = config
+        .get("mcp_servers")
+        .and_then(|s| s.get("hanzo"))
+        .and_then(toml_edit::Item::as_table_like);
     let needs_mcp = config.get("mcp_servers").is_none();
+    let needs_slim_hanzo_mcp = hanzo_mcp.is_some_and(|mcp| {
+        mcp.get("command").and_then(toml_edit::Item::as_str) == Some("hanzo-mcp")
+            && (mcp
+                .get("args")
+                .and_then(toml_edit::Item::as_array)
+                .is_some_and(toml_edit::Array::is_empty)
+                || mcp.get("startup_readiness").is_none()
+                || mcp.get("default_tools_approval_mode").is_none())
+    });
     let needs_bundled_skills_off = config
         .get("skills")
         .and_then(|s| s.get("bundled"))
         .is_none();
-    if !needs_mcp && !needs_bundled_skills_off {
+    if !needs_mcp && !needs_slim_hanzo_mcp && !needs_bundled_skills_off {
         return;
     }
     let _ = edit(home, |config| {
@@ -448,6 +461,32 @@ pub(super) fn upgrade_mcp(home: &Path) {
             .expect("valid default config");
         if config.get("mcp_servers").is_none() {
             config["mcp_servers"]["hanzo"] = defaults["mcp_servers"]["hanzo"].clone();
+        } else if let Some(mcp) = config
+            .get_mut("mcp_servers")
+            .and_then(|s| s.get_mut("hanzo"))
+            .and_then(toml_edit::Item::as_table_like_mut)
+        {
+            if mcp.get("command").and_then(toml_edit::Item::as_str) == Some("hanzo-mcp") {
+                if mcp
+                    .get("args")
+                    .and_then(toml_edit::Item::as_array)
+                    .is_some_and(toml_edit::Array::is_empty)
+                {
+                    mcp.insert("args", defaults["mcp_servers"]["hanzo"]["args"].clone());
+                }
+                if mcp.get("startup_readiness").is_none() {
+                    mcp.insert(
+                        "startup_readiness",
+                        defaults["mcp_servers"]["hanzo"]["startup_readiness"].clone(),
+                    );
+                }
+                if mcp.get("default_tools_approval_mode").is_none() {
+                    mcp.insert(
+                        "default_tools_approval_mode",
+                        defaults["mcp_servers"]["hanzo"]["default_tools_approval_mode"].clone(),
+                    );
+                }
+            }
         }
         if config
             .get("skills")
