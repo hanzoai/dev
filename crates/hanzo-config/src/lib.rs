@@ -179,18 +179,14 @@ fn initialize_default_skills(home: &Path) -> std::io::Result<()> {
     for (name, content) in DEFAULT_SKILLS {
         let dir = home.join("skills").join(name);
         let skill_file = dir.join("SKILL.md");
-        if skill_file.exists() {
+        if std::fs::read_to_string(&skill_file).is_ok_and(|existing| existing == *content) {
             continue;
         }
         std::fs::create_dir_all(&dir)?;
         let mut file = tempfile::NamedTempFile::new_in(&dir)?;
         file.write_all(content.as_bytes())?;
         file.as_file().sync_all()?;
-        match file.persist_noclobber(skill_file) {
-            Ok(_) => {}
-            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error.error),
-        }
+        let _ = file.persist(skill_file);
     }
     Ok(())
 }
@@ -290,31 +286,27 @@ license: MIT
         "hanzo-mcp",
         r#"---
 name: hanzo-mcp
-description: "Hanzo MCP (HIP-0300) Unified Tooling, Progressive Disclosure, and ZAP Native Browser Bridge: 13 orthogonal action-routed tools (fs, exec, code, git, test, fetch, workspace, computer, think, memory, hanzo, plan, tasks) across local stdio (`hanzo-mcp`) and cloud (`api.hanzo.ai/v1/mcp`)."
+description: "Hanzo MCP (`hanzo-mcp`) Slim Companion Tools: `code_search`, `lsp`, `browser`, `web_search`, and `web_read` paired with built-in workspace tools (`exec_command`, `apply_patch`, `update_plan`)."
 source: hanzoai/skills
 ---
 
 # Hanzo MCP (`hanzo-mcp` · `@hanzo/mcp` · HIP-0300)
 
-Use the 13 unified HIP-0300 tools with `action` routing instead of proliferating single-purpose tools:
+Always use built-in workspace tools first so the TUI renders native `Exploring` / `Explored` and diff cells:
+- **`exec_command` / `write_stdin`**: Use for all file reading, listing, searching (`rg`, `rg --files`, `ls`, `sed -n`, `cat`, `head`, `tail`, `find`), git commands, builds, and tests.
+- **`apply_patch`**: Use `{"patch": "*** Begin Patch\n*** Update File: ..."}` for all file edits, additions, and deletions.
+- **`update_plan`**: Use for multi-step task plans.
 
-1. **`fs`** (`uri: file:///...`): `read`, `write`, `edit`, `patch`, `list`, `tree`, `find`, `stat`, `mkdir`, `rm`, `mv`, `cp`, `search_text`.
-2. **`exec`**: `exec` (run command), `ps` (processes), `kill`, `logs`.
-3. **`code`** (`uri: sym://...`): `parse`, `serialize`, `symbols`, `definition`, `references`, `diagnostics`, `transform` (rename, extract), `summarize`.
-4. **`git`** (`uri: git://...`): `status`, `diff`, `log`, `blame`, `commit`, `branch`, `checkout`, `stash`, `tag`, `merge`, `rebase`.
-5. **`test`**: `run`, `check` (typecheck/lint), `build`, `coverage`, `discover`.
-6. **`fetch`** (`uri: https://...`): `search`, `fetch`, `head`, `crawl`, `request`, `open`.
-7. **`workspace`**: `detect`, `help`, `status`, `schema`, `doctor`.
-8. **`computer`**: `screenshot`, `click`, `move`, `type`, `press`, `scroll`, `window`, `clipboard`, `browser` (routes to persistent `hanzo-browser` / ZAP bridge `$XDG_RUNTIME_DIR/zap/zapd.sock` / CDP `127.0.0.1:9222`).
-9. **`think`**: `think`, `critic`, `review`, `decompose`, `Hypothesize`, `Synth`.
-10. **`memory`**: `recall`, `store`, `update`, `delete`, `search`, `consolidate`, `kb`.
-11. **`hanzo`** (`uri: hanzo://service/resource`): `iam`, `kms`, `paas`, `cloud`, `base`, `commerce`, `storage`, `dns`, `certs`, `billing`, `ingress`, `Registry`, `team`, `doctor`, `social` (`accounts`, `sync`, `post`, `schedule`, `history`, `channels`).
-12. **`plan`**: `create`, `show`, `update`, `add_step`, `remove_step`, `estimate`, `archive`, `list`.
-13. **`tasks`**: `add`, `update`, `done`, `cancel`, `list`, `next`, `board`, `clear`.
+Use `mcp__hanzo__*` only for the 5 specialized non-overlapping companion tools:
+1. **`code_search`**: Trigram symbol and cross-repo code search (`hanzo-trigram`).
+2. **`lsp`**: Language Server Protocol navigation (`definition`, `references`, `diagnostics`, `symbols`).
+3. **`browser`**: Persistent browser automation (`hanzo-browser` / ZAP bridge `$XDG_RUNTIME_DIR/zap/zapd.sock` / CDP `127.0.0.1:9222`).
+4. **`web_search`**: Live web search.
+5. **`web_read`**: Clean web page and documentation extraction.
 
 ## Progressive Disclosure (`hanzoskills.com`)
-- **Level 0 (Index)**: `https://hanzoskills.com/mcp/index.json` (13 tools) & `https://hanzoskills.com/oss/index.json` (20 OSS repos).
-- **Level 1 (Per-Tool Schema)**: `https://hanzoskills.com/mcp/<tool>.json` or call `<tool>(action="help")`.
+- **Level 0 (Index)**: `https://hanzoskills.com/mcp/index.json` & `https://hanzoskills.com/oss/index.json` (20 OSS repos).
+- **Level 1 (Per-Tool Schema)**: `https://hanzoskills.com/mcp/<tool>.json`.
 - **Level 2 (Live Cloud Contract)**: `POST https://api.hanzo.ai/v1/mcp` (`describe`) or `hanzo <group> --help`.
 "#,
     ),
