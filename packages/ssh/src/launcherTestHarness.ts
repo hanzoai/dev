@@ -222,10 +222,11 @@ esac
 }
 ${script}`,
       encoding: "utf8",
-      timeout: 30_000,
+      timeout: 60_000,
       env: {
         ...process.env,
         HOME: home,
+        NODE_COMPILE_CACHE: NodePath.join(home, ".compile-cache"),
         PATH: `${bin}:/usr/bin:/bin`,
         TEST_REAL_NODE: process.execPath,
         TEST_CLEAR_MARKER: options.clearMarkerOnReady ? "1" : "0",

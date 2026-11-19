@@ -14,7 +14,7 @@ import * as Stream from "effect/Stream";
 import type * as CodexUsageHistory from "../../usage/CodexUsageHistory.ts";
 import type { ProviderDriver, ProviderInstance } from "@hanzodev/provider-core/server/driver";
 import { CodexDriver, type CodexDriverEnv } from "./CodexDriver.ts";
-import { codexUsageReader } from "./codexUsage.ts";
+import { hanzoUsageReader } from "./HanzoDriver.ts";
 import {
   CURATED_HANZO_MODELS,
   mergeCuratedHanzoModels,
@@ -78,7 +78,7 @@ export const HanzoGenDriver: ProviderDriver<
   },
   configSchema: HanzoGenSettings,
   defaultConfig: (): HanzoGenSettings => decodeHanzoGenSettings({}),
-  usage: codexUsageReader,
+  usage: hanzoUsageReader,
   create: Effect.fn("HanzoGenDriver.create")(function* ({
     instanceId,
     displayName,

@@ -558,14 +558,6 @@ export const codexUsageReader: ProviderUsageReader<
         : config,
     );
     const primarySessionsDir = path.resolve(layout.sharedHomePath, "sessions");
-    // @effect-diagnostics-next-line processEnvInEffect:off
-    const homeDir = process.env.HOME?.trim() || "";
-    if (!homeDir) {
-      return [{ dir: primarySessionsDir }];
-    }
-    const hanzoSessionsDir = path.resolve(homeDir, ".hanzo", "dev", "sessions");
-    return primarySessionsDir === hanzoSessionsDir
-      ? [{ dir: primarySessionsDir }]
-      : [{ dir: hanzoSessionsDir }, { dir: primarySessionsDir }];
+    return [{ dir: primarySessionsDir }];
   }),
 };

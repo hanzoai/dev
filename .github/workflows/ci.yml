@@ -312,6 +312,10 @@ jobs:
           cat "$RUNNER_TEMP/apt.log"
           exit "$(cat "$RUNNER_TEMP/apt-status")"
 
+      - name: Prebuild desktop Tauri tests
+        if: ${{ needs.changes.outputs.test_packages == '' || contains(format(' {0} ', needs.changes.outputs.test_packages), ' @hanzodev/desktop ') }}
+        run: cargo test --no-run --manifest-path apps/desktop/src-tauri/Cargo.toml
+
       # `changes` lists the affected packages, or nothing when all of them are.
       - name: Test
         env:

@@ -13,6 +13,7 @@ import * as Stream from "effect/Stream";
 
 import type * as CodexUsageHistory from "../../usage/CodexUsageHistory.ts";
 import type { ProviderDriver, ProviderInstance } from "@hanzodev/provider-core/server/driver";
+import type { ProviderUsageReader } from "@hanzodev/provider-core/server/usage";
 import { CodexDriver, type CodexDriverEnv } from "./CodexDriver.ts";
 import { codexUsageReader } from "./codexUsage.ts";
 import {
@@ -60,6 +61,21 @@ function enrichHanzoSnapshot(
   };
 }
 
+export const hanzoUsageReader: ProviderUsageReader<
+  HanzoSettings,
+  Path.Path | CodexUsageHistory.CodexUsageHistory
+> = {
+  ...(codexUsageReader as Extract<typeof codexUsageReader, { readonly kind: "transcripts" }>),
+  directories: Effect.fn("hanzoUsageReader.directories")(function* ({ config, environment }) {
+    if (config === undefined) return [];
+    const path = yield* Path.Path;
+    const home = yield* HostProcess.HomeDirectory;
+    const envHome = environment.HANZO_DEV_HOME?.trim() || environment.HANZO_HOME?.trim();
+    const resolvedHome = config.homePath.trim() || envHome || path.join(home, ".hanzo", "dev");
+    return [{ dir: path.resolve(resolvedHome, "sessions") }];
+  }),
+};
+
 export type HanzoDriverEnv = CodexDriverEnv;
 
 export const HanzoDriver: ProviderDriver<
@@ -74,7 +90,7 @@ export const HanzoDriver: ProviderDriver<
   },
   configSchema: HanzoSettings,
   defaultConfig: (): HanzoSettings => decodeHanzoSettings({}),
-  usage: codexUsageReader,
+  usage: hanzoUsageReader,
   create: Effect.fn("HanzoDriver.create")(function* ({
     instanceId,
     displayName,
