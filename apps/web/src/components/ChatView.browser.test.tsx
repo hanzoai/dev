@@ -369,7 +369,7 @@ it("a new draft does not load its reserved thread before the server lists it", a
 
   const threadRequests = fetchSpy.mock.calls
     .map(([input]) => String(input instanceof Request ? input.url : input))
-    .filter((url) => url.includes(`/api/orchestration/threads/${threadId}/`));
+    .filter((url) => url.includes(`/v1/event/threads/${threadId}/`));
   // A 404 here marks the thread deleted, and the view never loads it once the send creates it.
   expect(threadRequests).toEqual([]);
 });

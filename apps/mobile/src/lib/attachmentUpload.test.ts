@@ -191,7 +191,7 @@ describe("prepareTurnAttachments", () => {
             _tag: "Success",
             value: {
               attachmentId: MINTED_ID,
-              relativeUrl: "/api/attachments/upload/signed",
+              relativeUrl: "/v1/attachments/upload/signed",
               expiresAt: 1,
             },
           }
@@ -225,7 +225,7 @@ describe("prepareTurnAttachments", () => {
           _tag: "Success",
           value: {
             attachmentId: MINTED_ID,
-            relativeUrl: "/api/attachments/upload/signed",
+            relativeUrl: "/v1/attachments/upload/signed",
             expiresAt: 1,
           },
         };
@@ -385,7 +385,7 @@ describe("prepareTurnAttachments", () => {
 
       expect(mocks.upload).toHaveBeenCalledWith(
         fileBackedImage.fileUri,
-        "https://environment.example/api/attachments/upload/signed",
+        "https://environment.example/v1/attachments/upload/signed",
         expect.objectContaining({ headers: { "Content-Type": "image/png" } }),
       );
       expect(mocks.readBase64).not.toHaveBeenCalled();
@@ -414,7 +414,7 @@ describe("prepareTurnAttachments", () => {
 
       expect(mocks.upload).toHaveBeenCalledWith(
         "file:///documents/photo.png",
-        "https://environment.example/api/attachments/upload/signed",
+        "https://environment.example/v1/attachments/upload/signed",
         expect.objectContaining({ headers: { "Content-Type": "image/png" } }),
       );
       expect(prepared.status).toBe("ready");
@@ -479,7 +479,7 @@ describe("prepareTurnAttachments", () => {
 
       expect(mocks.upload).toHaveBeenCalledWith(
         "file:///documents/report.pdf",
-        "https://environment.example/api/attachments/upload/signed",
+        "https://environment.example/v1/attachments/upload/signed",
         expect.objectContaining({
           httpMethod: "POST",
           uploadType: 0,
@@ -516,7 +516,7 @@ describe("prepareTurnAttachments", () => {
 
       expect(mocks.upload).toHaveBeenCalledWith(
         file.fileUri,
-        "https://new-environment.example/api/attachments/upload/signed",
+        "https://new-environment.example/v1/attachments/upload/signed",
         expect.anything(),
       );
     }),
@@ -547,7 +547,7 @@ describe("prepareTurnAttachments", () => {
       expect(prepared.status).toBe("ready");
       expect(mocks.upload).toHaveBeenCalledWith(
         currentUri,
-        "https://environment.example/api/attachments/upload/signed",
+        "https://environment.example/v1/attachments/upload/signed",
         expect.anything(),
       );
     }),
@@ -660,7 +660,7 @@ describe("prepareTurnAttachments", () => {
       });
       expect(mocks.upload).toHaveBeenCalledWith(
         "file:///cache/hanzo-upload-uuid",
-        "https://environment.example/api/attachments/upload/signed",
+        "https://environment.example/v1/attachments/upload/signed",
         expect.objectContaining({ headers: { "Content-Type": "image/png" } }),
       );
       expect(mocks.deleteFile).toHaveBeenCalledExactlyOnceWith("file:///cache/hanzo-upload-uuid");

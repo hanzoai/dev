@@ -70,7 +70,7 @@ const state: DeviceServiceState = {
   ],
   onboardingCompleted: true,
   agentAccessEnabled: true,
-  hubBasePath: "/api/device-hub",
+  hubBasePath: "/v1/device-hub",
   revision: 1,
 };
 

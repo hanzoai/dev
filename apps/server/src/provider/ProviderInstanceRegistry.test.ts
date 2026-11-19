@@ -537,7 +537,9 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
           [claudeId]: {
             driver: ProviderDriverKind.make("claudeAgent"),
             enabled: true,
-            environment: [{ name: "HANZO_CLAUDE_SETTINGS_UNSUPPORTED", value: "1", sensitive: false }],
+            environment: [
+              { name: "HANZO_CLAUDE_SETTINGS_UNSUPPORTED", value: "1", sensitive: false },
+            ],
             config: makeClaudeConfig({
               enabled: true,
               binaryPath: fixtures.claudeBinaryPath,

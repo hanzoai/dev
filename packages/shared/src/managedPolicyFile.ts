@@ -95,8 +95,7 @@ export const readManagedPolicyFile = Effect.fn("readManagedPolicyFile")(function
 });
 
 /** Where a configuration profile's managed preferences land on macOS. */
-export const MACOS_MANAGED_PREFERENCES_PATH =
-  "/Library/Managed Preferences/ai.hanzo.dev.plist";
+export const MACOS_MANAGED_PREFERENCES_PATH = "/Library/Managed Preferences/ai.hanzo.dev.plist";
 const WINDOWS_POLICY_SUBKEY = "SOFTWARE\\Policies\\HanzoDev\\HanzoDev";
 /**
  * The registry key Group Policy and Intune write to on Windows. It holds either the Group Policy

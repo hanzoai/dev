@@ -14,7 +14,7 @@ it("names a fork's head repository from its owner when gh leaves nameWithOwner o
         baseRefName: "main",
         headRefName: "fix/git-action-default-without-origin",
         isCrossRepository: true,
-        headRepository: { id: "R_1", name: "hanzo" },
+        headRepository: { id: "R_1", name: "hanzodev" },
         headRepositoryOwner: { login: "binbandit" },
       },
     ]),

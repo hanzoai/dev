@@ -82,7 +82,7 @@ it.effect("preserves binary input and admission frames through the real socket p
       Effect.sync(
         () =>
           new WebSocket(
-            `${origin}/api/device-hub/vendor/serve-sim/helper/ws?device=test&wsTicket=test`,
+            `${origin}/v1/device-hub/vendor/serve-sim/helper/ws?device=test&wsTicket=test`,
           ),
       ),
       (socket) => Effect.sync(() => socket.close()),

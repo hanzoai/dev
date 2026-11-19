@@ -29,7 +29,9 @@ export const layer = Layer.effectDiscard(
         pending ? Effect.logInfo("Hanzo Connect is delivering held webhook requests") : Effect.void,
       ),
       Effect.catchCause((cause) =>
-        Effect.logWarning("Could not ask Hanzo Connect to deliver held webhook requests", { cause }),
+        Effect.logWarning("Could not ask Hanzo Connect to deliver held webhook requests", {
+          cause,
+        }),
       ),
     );
     yield* runtime.tunnelConnected.pipe(

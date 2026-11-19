@@ -81,7 +81,7 @@ import { isForegroundHandoffActive } from "./foreground-handoff";
 const NOW = 1_787_990_400_000;
 const DAY_MS = 24 * 60 * 60_000;
 const input = {
-  url: "https://chosen-environment.example/api/assets/signed-token/report.pdf",
+  url: "https://chosen-environment.example/v1/assets/signed-token/report.pdf",
   attachment: { name: "report.pdf", mimeType: "application/pdf" },
 };
 

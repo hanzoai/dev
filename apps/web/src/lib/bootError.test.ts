@@ -1,4 +1,8 @@
-import type { DesktopBridge, DesktopCliCommandState, DesktopUpdateState } from "@hanzodev/contracts";
+import type {
+  DesktopBridge,
+  DesktopCliCommandState,
+  DesktopUpdateState,
+} from "@hanzodev/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
@@ -21,7 +25,9 @@ const notOnPath = (launcherPath: string | null): DesktopCliCommandState => ({
 describe("resolveTriageCommand", () => {
   it("prefers hanzo on PATH, then the desktop launcher", async () => {
     const onPath = { ...notOnPath("/home/me/.hanzo-dev/bin/hanzo"), onPath: true };
-    await expect(resolveTriageCommand(desktopWith(async () => onPath))).resolves.toBe("hanzo triage");
+    await expect(resolveTriageCommand(desktopWith(async () => onPath))).resolves.toBe(
+      "hanzo triage",
+    );
     await expect(
       resolveTriageCommand(desktopWith(async () => notOnPath("/home/me/.hanzo-dev/bin/hanzo"))),
     ).resolves.toBe("/home/me/.hanzo-dev/bin/hanzo triage");
@@ -29,10 +35,14 @@ describe("resolveTriageCommand", () => {
 
   it("quotes launcher paths for the shell that runs them", async () => {
     await expect(
-      resolveTriageCommand(desktopWith(async () => notOnPath("/Users/O'Neil/.hanzo-dev/bin/hanzo"))),
+      resolveTriageCommand(
+        desktopWith(async () => notOnPath("/Users/O'Neil/.hanzo-dev/bin/hanzo")),
+      ),
     ).resolves.toBe(`'/Users/O'"'"'Neil/.hanzo-dev/bin/hanzo' triage`);
     await expect(
-      resolveTriageCommand(desktopWith(async () => notOnPath("C:\\Users\\Me\\.hanzo-dev\\bin\\t3.cmd"))),
+      resolveTriageCommand(
+        desktopWith(async () => notOnPath("C:\\Users\\Me\\.hanzo-dev\\bin\\t3.cmd")),
+      ),
     ).resolves.toBe("C:\\Users\\Me\\.hanzo-dev\\bin\\t3.cmd triage");
     await expect(
       resolveTriageCommand(

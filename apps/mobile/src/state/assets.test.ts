@@ -26,7 +26,7 @@ vi.mock("@effect/atom-react", () => ({
   useAtomSubscribe: () => undefined,
   useAtomValue: (atom: unknown) =>
     atom === state.assetAtom
-      ? AsyncResult.success({ relativeUrl: "/api/assets/image.png", expiresAt: 1 })
+      ? AsyncResult.success({ relativeUrl: "/v1/assets/image.png", expiresAt: 1 })
       : AsyncResult.initial(false),
 }));
 vi.mock("./session", () => ({
@@ -76,7 +76,7 @@ beforeEach(() => {
   state.assetQuery.mockReset().mockReturnValue(state.assetAtom);
   state.mint
     .mockReset()
-    .mockResolvedValue(AsyncResult.success({ relativeUrl: "/api/assets/image.png", expiresAt: 1 }));
+    .mockResolvedValue(AsyncResult.success({ relativeUrl: "/v1/assets/image.png", expiresAt: 1 }));
 });
 
 it.each(["workspace-file", "media-file"] as const)(
@@ -89,7 +89,7 @@ it.each(["workspace-file", "media-file"] as const)(
     expect(useAssetUrlState(environmentId, { ...resource, _tag })).toEqual({
       _tag: "Success",
       expiresAt: 1,
-      url: "https://host.test/api/assets/image.png",
+      url: "https://host.test/v1/assets/image.png",
     });
   },
 );
@@ -104,13 +104,13 @@ it("hides host assets with a denied grant while preserving attachments", () => {
   expect(useAssetUrlState(environmentId, { _tag: "attachment", attachmentId: "upload" })).toEqual({
     _tag: "Success",
     expiresAt: 1,
-    url: "https://host.test/api/assets/image.png",
+    url: "https://host.test/v1/assets/image.png",
   });
 });
 
 it("lets the server authorize an explicit refresh before the client grant loads", async () => {
   await expect(useRefreshAssetUrl(environmentId, resource)()).resolves.toBe(
-    "https://host.test/api/assets/image.png",
+    "https://host.test/v1/assets/image.png",
   );
   expect(state.mint).toHaveBeenCalledWith({ environmentId, input: { resource } });
 

@@ -11,6 +11,6 @@ describe("formatWorkspaceRelativePath", () => {
     expect(formatWorkspaceRelativePath("D:/data/report.csv", workspaceRoot)).toBe(
       "D:/data/report.csv",
     );
-    expect(formatWorkspaceRelativePath("src/app.ts", workspaceRoot)).toBe("hanzo/src/app.ts");
+    expect(formatWorkspaceRelativePath("src/app.ts", workspaceRoot)).toBe("hanzodev/src/app.ts");
   });
 });

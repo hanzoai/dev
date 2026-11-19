@@ -69,7 +69,12 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
         }),
       ).toBe(`sudo env "PATH=$PATH" hanzo browser setup --base-dir '/srv/hanzo home'`);
       expect(
-        yield* rootCommand({ node: "/opt/hanzo/hanzo", entry: "/opt/hanzo/hanzo", executable: true, args }),
+        yield* rootCommand({
+          node: "/opt/hanzo/hanzo",
+          entry: "/opt/hanzo/hanzo",
+          executable: true,
+          args,
+        }),
       ).toBe("sudo /opt/hanzo/hanzo browser setup --base-dir '/srv/hanzo home'");
     }),
   );
@@ -174,7 +179,10 @@ it.layer(NodeServices.layer)("host CLI commands", (it) => {
         'hanzo doctor "--base-dir" "C:\\Users\\Jane Doe\\.hanzo-dev"',
       );
       expect(
-        (yield* resolveHostCliCommand("doctor", ["--base-dir", "C:\\Hanzo\\\u201CArchive\u201D"]).pipe(
+        (yield* resolveHostCliCommand("doctor", [
+          "--base-dir",
+          "C:\\Hanzo\\\u201CArchive\u201D",
+        ]).pipe(
           Effect.provideService(HostProcess.Platform, "win32"),
           Effect.provideService(HostProcess.Environment, { PATH: "" }),
           Effect.provideService(HostProcess.ExecutablePath, "C:\\t3.exe"),

@@ -1,4 +1,8 @@
-import { ProviderInstanceId, settingsSecretLiteral, TextGenerationError } from "@hanzodev/contracts";
+import {
+  ProviderInstanceId,
+  settingsSecretLiteral,
+  TextGenerationError,
+} from "@hanzodev/contracts";
 import { OpenCodeSettings } from "../settings.ts";
 import type { OpencodeClient } from "@opencode-ai/sdk/v2";
 import * as NodeServices from "@effect/platform-node/NodeServices";

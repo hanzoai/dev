@@ -1,7 +1,11 @@
 import { errorDisplayMessage } from "@hanzodev/client-runtime/errors";
 import { useAtomMount, useAtomSubscribe } from "@effect/atom-react";
 import { executeAtomQuery } from "@hanzodev/client-runtime/state/runtime";
-import { ProjectListEntriesError, type EnvironmentId, type ProjectEntry } from "@hanzodev/contracts";
+import {
+  ProjectListEntriesError,
+  type EnvironmentId,
+  type ProjectEntry,
+} from "@hanzodev/contracts";
 import * as Cause from "effect/Cause";
 import * as Schema from "effect/Schema";
 import { useLayoutEffect, useRef, useState } from "react";

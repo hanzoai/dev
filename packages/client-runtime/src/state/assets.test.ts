@@ -39,7 +39,7 @@ describe("project favicon URL cache", () => {
     const result = Atom.make<AsyncResult.AsyncResult<AssetCreateUrlResult, unknown>>(
       AsyncResult.success({
         expiresAt: 4_000_000_000_000,
-        relativeUrl: "/api/assets/token/icon.svg",
+        relativeUrl: "/v1/assets/token/icon.svg",
       }),
     );
     const favicon = createProjectFaviconUrlAtomFamily({
@@ -49,7 +49,7 @@ describe("project favicon URL cache", () => {
     const target = { environmentId: EnvironmentId.make("remote"), cwd: "/workspace" };
     const unmount = registry.mount(favicon(target));
     try {
-      expect(registry.get(favicon(target))).toBe("https://remote.test/api/assets/token/icon.svg");
+      expect(registry.get(favicon(target))).toBe("https://remote.test/v1/assets/token/icon.svg");
       registry.set(result, AsyncResult.failure(Cause.die("disconnected")));
       expect(
         registry.get(favicon({ ...target, environmentId: EnvironmentId.make("other") })),
@@ -57,7 +57,7 @@ describe("project favicon URL cache", () => {
       expect(registry.get(favicon({ ...target, cwd: "/other" }))).toBeNull();
       expect(registry.get(favicon({ ...target, faviconPath: "brand.svg" }))).toBeNull();
       expect(registry.get(favicon({ ...target, faviconPath: null }))).toBe(
-        "https://remote.test/api/assets/token/icon.svg",
+        "https://remote.test/v1/assets/token/icon.svg",
       );
     } finally {
       unmount();
@@ -96,7 +96,7 @@ const makeAssetUrlHarness = Effect.fn("TestAssetUrl.makeHarness")(function* (
             maxInFlight.set(environmentId, Math.max(maxInFlight.get(environmentId) ?? 0, now));
             yield* Queue.offer(started, environmentId);
             yield* Queue.take(releases.get(environmentId)!);
-            return { relativeUrl: "/api/assets/token/image.png", expiresAt: 4_000_000_000_000 };
+            return { relativeUrl: "/v1/assets/token/image.png", expiresAt: 4_000_000_000_000 };
           }).pipe(
             Effect.ensuring(
               Effect.sync(() =>
@@ -250,7 +250,7 @@ describe("desktop-local media fallback", () => {
                 calls.push(environmentId);
                 return environmentId === remote
                   ? Effect.fail(new AssetWorkspaceAssetNotFoundError({ resource }))
-                  : Effect.succeed({ relativeUrl: "/api/assets/t/local.png", expiresAt: 4e12 });
+                  : Effect.succeed({ relativeUrl: "/v1/assets/t/local.png", expiresAt: 4e12 });
               }),
           },
         } as unknown as RpcSession.RpcSession;

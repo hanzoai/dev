@@ -125,7 +125,7 @@ it.effect.each([
     );
     const server = Context.get(services, HttpServer.HttpServer);
     const origin = HttpServer.formatAddress(server.address).replace(/^http/, "ws");
-    const resource = `/api/preview-stream/ws?threadId=thread&tabId=tab&wsTicket=one-use-ticket${interactive ? "" : "&interactive=false"}`;
+    const resource = `/v1/preview-stream/ws?threadId=thread&tabId=tab&wsTicket=one-use-ticket${interactive ? "" : "&interactive=false"}`;
     const received = Promise.withResolvers<void>();
     const socket = yield* Effect.acquireRelease(
       Effect.sync(() => new WebSocket(`${origin}${resource}`)),
@@ -206,7 +206,7 @@ it.effect("sends replies ahead of stale frames and only the newest frame after a
       Effect.sync(
         () =>
           new WebSocket(
-            `${origin}/api/preview-stream/ws?threadId=thread&tabId=tab&wsTicket=one-use-ticket`,
+            `${origin}/v1/preview-stream/ws?threadId=thread&tabId=tab&wsTicket=one-use-ticket`,
           ),
       ),
       (socket) => Effect.sync(() => socket.close()),
@@ -281,7 +281,7 @@ it.effect.each([
     );
     const response = yield* Effect.promise(() =>
       handler.handler(
-        new Request("http://hanzo.test/api/preview-stream/ws?threadId=thread&tabId=tab", {
+        new Request("http://hanzo.test/v1/preview-stream/ws?threadId=thread&tabId=tab", {
           headers: { upgrade: "websocket" },
         }),
       ),
@@ -327,7 +327,7 @@ it.effect("serves a tab's download only to an authorized session", () =>
         );
         return yield* Effect.promise(() => handler.handler(new Request(url)));
       });
-    const base = "http://hanzo.test/api/preview-stream/download?threadId=thread&tabId=tab";
+    const base = "http://hanzo.test/v1/preview-stream/download?threadId=thread&tabId=tab";
     const denied = yield* serve([], `${base}&id=download-1`);
     expect(denied.status).toBe(403);
     expect(requests).toEqual([]);
@@ -379,7 +379,7 @@ it.effect("passes uploaded files to the page's open picker and needs operate sco
         return yield* Effect.promise(() =>
           handler.handler(
             new Request(
-              `http://hanzo.test/api/preview-stream/upload?threadId=thread&tabId=tab&chooser=${chooser}`,
+              `http://hanzo.test/v1/preview-stream/upload?threadId=thread&tabId=tab&chooser=${chooser}`,
               { method: "POST", body },
             ),
           ),
@@ -439,7 +439,7 @@ it.effect.each([
     yield* Effect.acquireRelease(
       Effect.sync(() => {
         const socket = new WebSocket(
-          `${origin}/api/preview-stream/ws?threadId=thread&tabId=tab&wsTicket=one-use-ticket`,
+          `${origin}/v1/preview-stream/ws?threadId=thread&tabId=tab&wsTicket=one-use-ticket`,
         );
         socket.addEventListener("close", (event) =>
           closed.resolve({ code: event.code, reason: event.reason }),

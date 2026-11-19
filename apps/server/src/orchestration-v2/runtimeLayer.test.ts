@@ -3604,7 +3604,10 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       assert.instanceOf(staleWorkspaceUpdate, Orchestrator.OrchestratorDispatchError);
       const projectionAfterStaleWorkspaceUpdate = yield* orchestrator.getThreadProjection(threadId);
       assert.equal(projectionAfterStaleWorkspaceUpdate.thread.branch, "feature/v2");
-      assert.equal(projectionAfterStaleWorkspaceUpdate.thread.worktreePath, "/tmp/hanzo-v2-worktree");
+      assert.equal(
+        projectionAfterStaleWorkspaceUpdate.thread.worktreePath,
+        "/tmp/hanzo-v2-worktree",
+      );
       const pullRequestSnapshot = yield* orchestrator.getShellSnapshot();
       const pullRequest = {
         projectId,

@@ -51,8 +51,8 @@ const responses = {
     serverVersion: "0.0.0-test",
     capabilities: { repositoryIdentity: true },
   },
-  "/api/auth/websocket-ticket": { ticket: "test-ticket", expiresAt: timestamp },
-  "/api/orchestration/threads/thread-v2/bounded": {
+  "/v1/auth/websocket-ticket": { ticket: "test-ticket", expiresAt: timestamp },
+  "/v1/event/threads/thread-v2/bounded": {
     snapshotSequence: 1,
     projection: thread,
     historyCursor: null,

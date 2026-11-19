@@ -55,7 +55,13 @@ function planLabel(link: RelayHanzoChatLink): ReactNode {
 
 /** Links a Hanzo Chat account so paid subscribers get more tunnels. */
 export function HanzoChatUserProfilePage() {
-  const { linkState, pending, linkUrl, link: handleLink, unlink: handleUnlink } = useHanzoChatLink();
+  const {
+    linkState,
+    pending,
+    linkUrl,
+    link: handleLink,
+    unlink: handleUnlink,
+  } = useHanzoChatLink();
   const usage = useManagedTunnelUsage();
   const gt = useGT();
 

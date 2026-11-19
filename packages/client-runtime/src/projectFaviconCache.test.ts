@@ -13,7 +13,7 @@ import {
 } from "./projectFaviconCache.ts";
 
 const target = { environmentId: EnvironmentId.make("remote"), cwd: "/workspace" };
-const url = "https://remote.test/api/assets/token-a/vabc-icon.svg";
+const url = "https://remote.test/v1/assets/token-a/vabc-icon.svg";
 const image = "data:image/png;base64,aWNvbg==";
 const replacement = "data:image/png;base64,bmV3";
 const signal = () => new AbortController().signal;
@@ -175,7 +175,7 @@ describe("project favicon image loader", () => {
   it("downscales large bitmaps and refuses large vector icons", async () => {
     const bytes = new Uint8Array(PROJECT_FAVICON_MAX_DATA_URL_LENGTH);
     const bitmap = loader(new Response(bytes, { headers: { "content-type": "image/png" } }));
-    expect(await bitmap.load("https://remote.test/api/assets/t/v1-icon.png", signal())).toBe(
+    expect(await bitmap.load("https://remote.test/v1/assets/t/v1-icon.png", signal())).toBe(
       replacement,
     );
     expect(bitmap.downscale).toHaveBeenCalledWith(

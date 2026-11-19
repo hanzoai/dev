@@ -141,7 +141,7 @@ function layerPairingHttp(
       return gate.release.then(() => granted);
     }
 
-    if (url.endsWith("/api/auth/session")) {
+    if (url.endsWith("/v1/auth/session")) {
       return Promise.resolve(
         Response.json({
           authenticated: true,

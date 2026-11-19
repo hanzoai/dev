@@ -46,11 +46,11 @@ Every user on the machine can read the policy, so do not put credentials in it.
 
 Use one of these per machine:
 
-| OS      | Native policy                                                                                        | Policy file                                       |
-| ------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| macOS   | Configuration profile for `ai.hanzo.dev`                                                       | `/Library/Application Support/HanzoDev/policy.json` |
+| OS      | Native policy                                                                                           | Policy file                                         |
+| ------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| macOS   | Configuration profile for `ai.hanzo.dev`                                                                | `/Library/Application Support/HanzoDev/policy.json` |
 | Windows | Group Policy template, or a `Policy` JSON value (both under `HKLM\SOFTWARE\Policies\HanzoDev\HanzoDev`) | `C:\Program Files\HanzoDev\policy.json`             |
-| Linux   |                                                                                                      | `/etc/hanzo/policy.json`                         |
+| Linux   |                                                                                                         | `/etc/hanzo/policy.json`                            |
 
 Hanzo Dev does not merge sources. If a machine has both a native policy and a policy file, Hanzo Dev
 refuses to start until you remove one.

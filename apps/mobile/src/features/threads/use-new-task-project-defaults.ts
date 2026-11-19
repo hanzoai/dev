@@ -53,7 +53,9 @@ export function useNewTaskProjectDefaults(project: EnvironmentProject | null) {
   );
   const hanzoProjectFileData = hanzoProjectFileQuery.data as ProjectReadFileResult | null;
   const hanzoProjectFile =
-    hanzoProjectFileData === null || hanzoProjectFileData.exists === false || hanzoProjectFileData.truncated
+    hanzoProjectFileData === null ||
+    hanzoProjectFileData.exists === false ||
+    hanzoProjectFileData.truncated
       ? null
       : parseHanzoProjectFile(hanzoProjectFileData.contents);
   const projectSettings = resolveProjectSettings(

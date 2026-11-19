@@ -81,7 +81,10 @@ describe("ssh auth", () => {
       assert.equal(env.HANZO_SSH_AUTH_SECRET, "super-secret");
       assert.equal(env.DISPLAY, "hanzodev");
       assert.equal(yield* fs.exists(askpassPath), true);
-      assert.include(yield* fs.readFileString(askpassPath), 'printf "%s\\n" "$HANZO_SSH_AUTH_SECRET"');
+      assert.include(
+        yield* fs.readFileString(askpassPath),
+        'printf "%s\\n" "$HANZO_SSH_AUTH_SECRET"',
+      );
     }).pipe(
       Effect.provide(Layer.merge(NodeServices.layer, Layer.succeed(HostProcess.Platform, "linux"))),
     ),

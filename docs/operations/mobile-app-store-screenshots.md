@@ -63,8 +63,8 @@ multiplies the run by six; only the native build is shared.
 
 The default matrix is:
 
-| Output folder                           | Capture target                 | Upload dimensions | Store slot                                |
-| --------------------------------------- | ------------------------------ | ----------------- | ----------------------------------------- |
+| Output folder                             | Capture target                 | Upload dimensions | Store slot                                |
+| ----------------------------------------- | ------------------------------ | ----------------- | ----------------------------------------- |
 | `apple/iphone-6.9/dark/hanzo-dev/`        | disposable iPhone 17 Pro Max   | 1320×2868         | App Store Connect iPhone 6.9-inch         |
 | `apple/iphone-6.5/dark/hanzo-dev/`        | disposable iPhone 14 Plus      | 1284×2778         | App Store Connect iPhone 6.5-inch         |
 | `apple/iphone-duo-closed/dark/hanzo-dev/` | iPhone Duo, folded portrait    | 1398×2034         | App Store Connect iPhone Duo              |

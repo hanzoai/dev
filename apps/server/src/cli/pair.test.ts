@@ -167,7 +167,9 @@ describe("hanzo pair", () => {
             }),
           );
 
-          const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "hanzo-pair-ipv6-test-"));
+          const baseDir = NodeFS.mkdtempSync(
+            NodePath.join(NodeOS.tmpdir(), "hanzo-pair-ipv6-test-"),
+          );
           yield* persistServerRuntimeState({
             path: NodePath.join(baseDir, "userdata", "server-runtime.json"),
             state: yield* makePersistedServerRuntimeState({
@@ -248,7 +250,9 @@ describe("hanzo pair", () => {
               );
             });
 
-            const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "hanzo-pair-ts-held-"));
+            const baseDir = NodeFS.mkdtempSync(
+              NodePath.join(NodeOS.tmpdir(), "hanzo-pair-ts-held-"),
+            );
             yield* persistServerRuntimeState({
               path: NodePath.join(baseDir, "userdata", "server-runtime.json"),
               state: yield* makePersistedServerRuntimeState({
@@ -358,7 +362,9 @@ describe("hanzo pair", () => {
   it.effect("refuses --tailscale before turning on Serve when the policy keeps clients local", () =>
     withDescriptorServer((origin) =>
       Effect.gen(function* () {
-        const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "hanzo-pair-policy-test-"));
+        const baseDir = NodeFS.mkdtempSync(
+          NodePath.join(NodeOS.tmpdir(), "hanzo-pair-policy-test-"),
+        );
         const policyPath = NodePath.join(baseDir, "policy.json");
         NodeFS.writeFileSync(
           policyPath,
@@ -434,7 +440,9 @@ describe("hanzo pair", () => {
   it.effect("does not fall back to the shared home from a linked worktree", () =>
     withDescriptorServer((origin) =>
       Effect.gen(function* () {
-        const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "hanzo-pair-worktree-test-"));
+        const root = NodeFS.mkdtempSync(
+          NodePath.join(NodeOS.tmpdir(), "hanzo-pair-worktree-test-"),
+        );
         const worktree = NodePath.join(root, "worktree");
         NodeFS.mkdirSync(worktree);
         NodeFS.writeFileSync(
@@ -612,7 +620,10 @@ describe("hanzo pair", () => {
             if (String(input) === "http://127.0.0.2:3773/.well-known/hanzo/environment") {
               return Response.json(testDescriptor);
             }
-            assert.equal(String(input), "https://pair-test.tail.ts.net/.well-known/hanzo/environment");
+            assert.equal(
+              String(input),
+              "https://pair-test.tail.ts.net/.well-known/hanzo/environment",
+            );
             return new Response(null, { status: 503 });
           }),
           Effect.flip,
@@ -678,7 +689,10 @@ describe("hanzo pair", () => {
             if (String(input) === "http://127.0.0.1:3773/.well-known/hanzo/environment") {
               return Response.json(testDescriptor);
             }
-            assert.equal(String(input), "https://pair-test.tail.ts.net/.well-known/hanzo/environment");
+            assert.equal(
+              String(input),
+              "https://pair-test.tail.ts.net/.well-known/hanzo/environment",
+            );
             return new Response(null, { status: 503 });
           }),
           Effect.flip,
@@ -766,7 +780,9 @@ describe("auth pairing create --base-url", () => {
     "rejects %s before issuing a token",
     (baseUrl) =>
       Effect.gen(function* () {
-        const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "hanzo-cli-base-url-test-"));
+        const baseDir = NodeFS.mkdtempSync(
+          NodePath.join(NodeOS.tmpdir(), "hanzo-cli-base-url-test-"),
+        );
         const error = yield* runCli([
           "auth",
           "pairing",
@@ -798,7 +814,9 @@ describe("auth pairing create --base-url", () => {
     "prints a pair URL for %s",
     (baseUrl) =>
       Effect.gen(function* () {
-        const baseDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "hanzo-cli-base-url-test-"));
+        const baseDir = NodeFS.mkdtempSync(
+          NodePath.join(NodeOS.tmpdir(), "hanzo-cli-base-url-test-"),
+        );
         const output = yield* captureStdout(
           runCli([
             "auth",

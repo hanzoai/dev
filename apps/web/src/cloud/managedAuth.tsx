@@ -1,5 +1,5 @@
-import { useClerk } from "./hanzoWebAuth";
 import {
+  type CloudAccountSource,
   createCloudAccountService,
   ManagedRelay,
   setManagedRelaySession,
@@ -31,14 +31,19 @@ export function activateManagedRelayAuthentication(
   });
 }
 
-type ClerkInstance = ReturnType<typeof useClerk>;
+interface ManagedRelayClerkInstance extends CloudAccountSource {
+  readonly session: {
+    readonly id: string;
+    readonly getToken: (options?: { readonly template?: string }) => Promise<string | null>;
+  } | null;
+}
 
-function clerkTokenReader(clerk: ClerkInstance): () => Promise<string | null> {
+function clerkTokenReader(clerk: ManagedRelayClerkInstance): () => Promise<string | null> {
   return async () =>
     clerk.session ? await clerk.session.getToken(resolveRelayClerkTokenOptions()) : null;
 }
 
-const managedRelayAccountService = createCloudAccountService<ClerkInstance>({
+const managedRelayAccountService = createCloudAccountService<ManagedRelayClerkInstance>({
   deactivate: deactivateManagedRelayAuthentication,
   detach: deactivateManagedRelayAuthentication,
   cleanUp: async () => {
@@ -61,11 +66,14 @@ const managedRelayAccountService = createCloudAccountService<ClerkInstance>({
     activateManagedRelayAuthentication(accountId, clerkTokenReader(source)),
 });
 
-export function ManagedRelayAuthProvider({ children }: { readonly children: ReactNode }) {
-  // ClerkProvider creates the Clerk instance and owns its lifetime, so the
-  // account service observes it for as long as this provider is mounted.
-  const clerk = useClerk();
-  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- attaches the Clerk instance to the managed relay account service for the provider's lifetime
+export function ManagedRelayAuthProvider({
+  clerk,
+  children,
+}: {
+  readonly clerk: ManagedRelayClerkInstance;
+  readonly children: ReactNode;
+}) {
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- attaches the auth source to the managed relay account service for the provider's lifetime
   useEffect(() => managedRelayAccountService.attach(clerk), [clerk]);
   return children;
 }

@@ -28,14 +28,14 @@ function emit(): void {
   }
 }
 
-export function subscribeLocalAiModal(listener: () => void): () => void {
+function subscribeLocalAiModal(listener: () => void): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
   };
 }
 
-export function getLocalAiModalState(): LocalAiModalState {
+function getLocalAiModalState(): LocalAiModalState {
   return modalState;
 }
 

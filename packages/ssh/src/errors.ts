@@ -36,15 +36,6 @@ export class SshPairingError extends Schema.TaggedError<SshPairingError>()("SshP
   cause: Schema.optional(Schema.Defect()),
 }) {}
 
-export class SshHttpBridgeError extends Schema.TaggedError<SshHttpBridgeError>()(
-  "SshHttpBridgeError",
-  {
-    message: Schema.String,
-    status: Schema.optional(Schema.Number),
-    cause: Schema.optional(Schema.Defect()),
-  },
-) {}
-
 export class SshReadinessError extends Schema.TaggedError<SshReadinessError>()(
   "SshReadinessError",
   {

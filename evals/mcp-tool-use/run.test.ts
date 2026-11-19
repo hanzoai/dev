@@ -1369,70 +1369,78 @@ it.effect("saves a pasted value with no card where request_secret takes one", ()
       return;
     }
     assert.equal(result.status, "saved");
-    assert.match(result.file, /^\/home\/user\/\.hanzo-dev\/userdata\/secrets\/files\/[0-9a-f]{32}$/);
+    assert.match(
+      result.file,
+      /^\/home\/user\/\.hanzo-dev\/userdata\/secrets\/files\/[0-9a-f]{32}$/,
+    );
     assert.notInclude(JSON.stringify(result), "482916");
     assert.deepEqual(sample.secretFiles, [result.file]);
   }).pipe(Effect.provide(FetchHttpClient.layer)),
 );
 
-it.effect("fails preview calls with Hanzo's errors when browser access is off or a mock is one", () =>
-  Effect.gen(function* () {
-    const base = buildBase(template, { model: "claude-sonnet-5-5", keepUserInstructions: false });
-    const config = {
-      apiKey: "",
-      model: "claude-sonnet-5-5",
-      effort: "high",
-      maxSteps: 6,
-      shellModel: "claude-haiku-5-5",
-    } as const;
-    const answer = (id: string, tool: string) => {
-      const sample = makeSample(browserCase(id), base);
-      sample.tools.push({ name: `mcp__hanzo-dev__${tool}` });
-      return answerToolCall(sample, config, {
-        type: "tool_use",
-        id: tool,
-        name: `mcp__hanzo-dev__${tool}`,
-        input: {},
-      });
-    };
-    const off = new PreviewAutomationUnavailableError({
-      capability: "preview",
-      environmentId: EnvironmentId.make("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"),
-    }).message;
-    for (const tool of ["preview_status", "preview_open", "hanzo_preview_list"])
-      assert.deepInclude(yield* answer("br-guard-browser-access-off", tool), {
+it.effect(
+  "fails preview calls with Hanzo's errors when browser access is off or a mock is one",
+  () =>
+    Effect.gen(function* () {
+      const base = buildBase(template, { model: "claude-sonnet-5-5", keepUserInstructions: false });
+      const config = {
+        apiKey: "",
+        model: "claude-sonnet-5-5",
+        effort: "high",
+        maxSteps: 6,
+        shellModel: "claude-haiku-5-5",
+      } as const;
+      const answer = (id: string, tool: string) => {
+        const sample = makeSample(browserCase(id), base);
+        sample.tools.push({ name: `mcp__hanzo-dev__${tool}` });
+        return answerToolCall(sample, config, {
+          type: "tool_use",
+          id: tool,
+          name: `mcp__hanzo-dev__${tool}`,
+          input: {},
+        });
+      };
+      const off = new PreviewAutomationUnavailableError({
+        capability: "preview",
+        environmentId: EnvironmentId.make("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"),
+      }).message;
+      for (const tool of ["preview_status", "preview_open", "hanzo_preview_list"])
+        assert.deepInclude(yield* answer("br-guard-browser-access-off", tool), {
+          is_error: true,
+          content: off,
+        });
+      assert.notInclude(
+        hanzoSystemAppend("claude-sonnet-5-5", true, false),
+        "## Hanzo Dev browser",
+      );
+      const unsupported = "br-guard-preview-open-unsupported";
+      assert.deepInclude(yield* answer(unsupported, "preview_open"), {
         is_error: true,
-        content: off,
+        content: "Preview automation client desktop-1 does not support open.",
       });
-    assert.notInclude(hanzoSystemAppend("claude-sonnet-5-5", true, false), "## Hanzo Dev browser");
-    const unsupported = "br-guard-preview-open-unsupported";
-    assert.deepInclude(yield* answer(unsupported, "preview_open"), {
-      is_error: true,
-      content: "Preview automation client desktop-1 does not support open.",
-    });
-    const status = yield* answer(unsupported, "preview_status");
-    assert.isUndefined(status.is_error);
-    assert.include(String(status.content), '"available":false');
-    // A sequence mock answers each call with its next result, then repeats the last.
-    const flow = makeSample(browserCase("br-flow-qa-missing-cli"), base);
-    flow.tools.push({ name: "mcp__hanzo-dev__preview_snapshot" });
-    const titles: Array<string> = [];
-    for (let i = 0; i < 4; i++) {
-      const result = yield* answerToolCall(flow, config, {
-        type: "tool_use",
-        id: `snapshot-${i}`,
-        name: "mcp__hanzo-dev__preview_snapshot",
-        input: {},
-      });
-      titles.push(String(/"title":"([^"]+)"/.exec(String(result.content))?.[1]));
-    }
-    assert.deepEqual(titles, [
-      "Subscription · Acme",
-      "Top up · Acme",
-      "Acme · Stripe Checkout",
-      "Acme · Stripe Checkout",
-    ]);
-  }).pipe(Effect.provide(FetchHttpClient.layer)),
+      const status = yield* answer(unsupported, "preview_status");
+      assert.isUndefined(status.is_error);
+      assert.include(String(status.content), '"available":false');
+      // A sequence mock answers each call with its next result, then repeats the last.
+      const flow = makeSample(browserCase("br-flow-qa-missing-cli"), base);
+      flow.tools.push({ name: "mcp__hanzo-dev__preview_snapshot" });
+      const titles: Array<string> = [];
+      for (let i = 0; i < 4; i++) {
+        const result = yield* answerToolCall(flow, config, {
+          type: "tool_use",
+          id: `snapshot-${i}`,
+          name: "mcp__hanzo-dev__preview_snapshot",
+          input: {},
+        });
+        titles.push(String(/"title":"([^"]+)"/.exec(String(result.content))?.[1]));
+      }
+      assert.deepEqual(titles, [
+        "Subscription · Acme",
+        "Top up · Acme",
+        "Acme · Stripe Checkout",
+        "Acme · Stripe Checkout",
+      ]);
+    }).pipe(Effect.provide(FetchHttpClient.layer)),
 );
 
 const deviceCases = () =>
@@ -1500,7 +1508,8 @@ it.effect("seeds Hanzo's error for a prior background wait whose IDs match nothi
       assert.equal(sample.priorErrors.has(wait), isError, id);
       const blocks = buildMessages(sample).flatMap((message) => message.content);
       const waitUse = blocks.find(
-        (block) => block.type === "tool_use" && String(block.name).endsWith("hanzo_background_wait"),
+        (block) =>
+          block.type === "tool_use" && String(block.name).endsWith("hanzo_background_wait"),
       );
       const replayed = blocks.find(
         (block) => block.type === "tool_result" && block.tool_use_id === waitUse?.id,
@@ -2359,7 +2368,10 @@ it("shares failed device attempts across tools and launcher steps, resetting onl
     failed: true,
     input:
       tool === "Bash"
-        ? { command: "/home/user/.hanzo-dev/device/bin/agent-device snapshot -i --session hanzo-eval" }
+        ? {
+            command:
+              "/home/user/.hanzo-dev/device/bin/agent-device snapshot -i --session hanzo-eval",
+          }
         : {},
   });
   const calls = [
@@ -2429,7 +2441,10 @@ it("keeps the shared recovery budget when a case is decoded and graded", () => {
     step,
     tool,
     failed: true,
-    input: tool === "Bash" ? { command: "/home/user/.hanzo-dev/device/bin/agent-device snapshot -i" } : {},
+    input:
+      tool === "Bash"
+        ? { command: "/home/user/.hanzo-dev/device/bin/agent-device snapshot -i" }
+        : {},
   }));
   const run = { calls, text: "Canvas is blocked: daemon unavailable.", stopReason: "end_turn" };
   assert.isTrue(
@@ -3016,7 +3031,11 @@ it("does not credit a capture attempt on a different host", () => {
 });
 
 it.each([
-  ["Hanzo's result names the remote device", { hostId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" }, true],
+  [
+    "Hanzo's result names the remote device",
+    { hostId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" },
+    true,
+  ],
   ["Hanzo's result names a local device", { hostId: "local" }, false],
   ["failed attempt uses the matching open session", undefined, true],
 ] as const)(
@@ -3120,7 +3139,8 @@ it.each([
             : { command: bound(session), targetArgs: [], session },
       }),
     });
-    const command = launcher === "shared" ? shared : bound(launcher === "spare" ? "hanzo-b" : "hanzo-a");
+    const command =
+      launcher === "shared" ? shared : bound(launcher === "spare" ? "hanzo-b" : "hanzo-a");
     const run = {
       calls: [
         open(0, primary, "hanzo-a"),
@@ -4602,7 +4622,9 @@ it.each(["bound", "shared"])(
     const c = deviceCases().find((c) => c.id === "SESS-01")!;
     const good = fleetTrace(c.id);
     const launcher =
-      form === "bound" ? good.launchers![0]! : "/home/user/.hanzo-dev/userdata/device/bin/agent-device";
+      form === "bound"
+        ? good.launchers![0]!
+        : "/home/user/.hanzo-dev/userdata/device/bin/agent-device";
     const flags =
       form === "shared"
         ? " --platform ios --udid BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB --config /home/user/host.json --session hanzo-acme"
@@ -4873,7 +4895,9 @@ const capRun6 = [
   },
   {
     ref: "api-dec6-cand-claude-opus-5-5#36",
-    launchers: ["/home/user/.hanzo-dev/userdata/device/targets/hanzo-2b48b357cf96fdad64f0dd3f/agent-device"],
+    launchers: [
+      "/home/user/.hanzo-dev/userdata/device/targets/hanzo-2b48b357cf96fdad64f0dd3f/agent-device",
+    ],
     calls: [
       {
         step: 4,
@@ -4927,7 +4951,9 @@ it.each(["bound", "shared"])("R12 CAP-01 rejects unattributable recovery mutatio
   const c = deviceCases().find((c) => c.id === "CAP-01")!;
   const good = { ...fleetTrace(c.id), finalText: "Verified Settings." };
   const launcher =
-    form === "bound" ? good.launchers![0]! : "/home/user/.hanzo-dev/userdata/device/bin/agent-device";
+    form === "bound"
+      ? good.launchers![0]!
+      : "/home/user/.hanzo-dev/userdata/device/bin/agent-device";
   const command = `mkdir -p /tmp/proof && ${launcher} screenshot /tmp/proof/recovered.png; ls -l /tmp/proof; file /tmp/proof/recovered.png`;
   const output =
     "Screenshot saved: /tmp/proof/recovered.png\n/tmp/proof/recovered.png: PNG image data, 1080 x 2400";
@@ -4964,7 +4990,9 @@ it.each(["bound", "shared"])(
     const c = deviceCases().find((c) => c.id === "SESS-01")!;
     const good = fleetTrace(c.id);
     const launcher =
-      form === "bound" ? good.launchers![0]! : "/home/user/.hanzo-dev/userdata/device/bin/agent-device";
+      form === "bound"
+        ? good.launchers![0]!
+        : "/home/user/.hanzo-dev/userdata/device/bin/agent-device";
     const flags =
       form === "shared"
         ? " --platform ios --udid BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB --config /home/user/host.json --session hanzo-acme"

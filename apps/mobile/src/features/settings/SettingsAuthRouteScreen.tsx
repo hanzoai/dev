@@ -11,10 +11,7 @@ import * as Dialog from "../../components/ui/Dialog";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { HanzoWordmark } from "../../components/HanzoWordmark";
 import { HanzoConnectProfilePage } from "../cloud/HanzoConnectProfilePage";
-import {
-  type HanzoIamBrandId,
-  useHanzoMobileAccounts,
-} from "../cloud/hanzoMobileAuth";
+import { type HanzoIamBrandId, useHanzoMobileAccounts } from "../cloud/hanzoMobileAuth";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
 
 export function SettingsAuthRouteScreen() {
@@ -49,7 +46,8 @@ function ConfiguredSettingsAuthRouteScreen() {
     setBusy(true);
     void signInWithBrand(brandId)
       .catch((error: unknown) => {
-        const msg = error instanceof Error ? error.message : gt("Could not complete Hanzo sign-in.");
+        const msg =
+          error instanceof Error ? error.message : gt("Could not complete Hanzo sign-in.");
         if (!/cancel/i.test(msg)) {
           Dialog.alert(gt("Sign-in failed"), msg);
         }
@@ -102,7 +100,9 @@ function ConfiguredSettingsAuthRouteScreen() {
             <Text className="text-center text-sm text-foreground-muted">
               {activeAccount
                 ? `${activeAccount.id} · ${activeAccount.issuer.replace(/^https?:\/\//, "")}`
-                : gt("Sign in with Hanzo ID to control every Desktop, CLI, and Cloud sandbox across your accounts.")}
+                : gt(
+                    "Sign in with Hanzo ID to control every Desktop, CLI, and Cloud sandbox across your accounts.",
+                  )}
             </Text>
           </View>
 
@@ -199,11 +199,7 @@ function ConfiguredSettingsAuthRouteScreen() {
                 <Text className="flex-1 text-xs text-foreground-muted">
                   {gt("Closed the browser tab? Cancel or reopen sign-in.")}
                 </Text>
-                <Button
-                  label={gt("Cancel")}
-                  tone="secondary"
-                  onPress={() => setBusy(false)}
-                />
+                <Button label={gt("Cancel")} tone="secondary" onPress={() => setBusy(false)} />
               </View>
             ) : null}
             <Button

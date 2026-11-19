@@ -453,7 +453,7 @@ it.layer(TestLayer)("compact bounded snapshot transport", (it) => {
   ])("%s", (_, threadId) => {
     it.effect("HTTP: legacy, ignored and opted-in requests restore to the same snapshot", () =>
       withHttp(async (get) => {
-        const base = `/api/orchestration/threads/${encodeURIComponent(threadId)}/bounded`;
+        const base = `/v1/event/threads/${encodeURIComponent(threadId)}/bounded`;
         const legacyBody = await (await get(base)).text();
         const ignoredBody = await (await get(`${base}?compactTurnItems=yes&unknown=1`)).text();
         const compactResponse = await get(`${base}?compactTurnItems=1`);
@@ -502,7 +502,7 @@ it.layer(TestLayer)("compact bounded snapshot transport", (it) => {
 
     it.effect("HTTP: the ID table is opt-in and decodes to the same snapshot", () =>
       withHttp(async (get) => {
-        const base = `/api/orchestration/threads/${encodeURIComponent(threadId)}/bounded?compactTurnItems=1`;
+        const base = `/v1/event/threads/${encodeURIComponent(threadId)}/bounded?compactTurnItems=1`;
         const plainBody = await (await get(base)).text();
         const tableBody = await (await get(`${base}&compactIds=1`)).text();
         const wire = JSON.parse(tableBody);
@@ -518,7 +518,7 @@ it.layer(TestLayer)("compact bounded snapshot transport", (it) => {
         // Only the long thread has older history to page.
         if (threadId !== LONG) return;
         assert.isNotNull(decoded.historyCursor);
-        const history = `/api/orchestration/threads/${encodeURIComponent(threadId)}/history?cursor=${encodeURIComponent(decoded.historyCursor ?? "")}`;
+        const history = `/v1/event/threads/${encodeURIComponent(threadId)}/history?cursor=${encodeURIComponent(decoded.historyCursor ?? "")}`;
         const plainPage = await (await get(history)).text();
         const tablePage = await (await get(`${history}&compactIds=1`)).text();
         assert.isArray(JSON.parse(tablePage).ids);
@@ -581,7 +581,7 @@ it.layer(TestLayer)("compact bounded snapshot transport", (it) => {
       "HTTP: opted-in snapshots blank repeated bodies and restore to the same snapshot",
       () =>
         withHttp(async (get) => {
-          const base = `/api/orchestration/threads/${encodeURIComponent(BODIES)}/bounded`;
+          const base = `/v1/event/threads/${encodeURIComponent(BODIES)}/bounded`;
           const compactBody = await (await get(`${base}?compactTurnItems=1`)).text();
           const dedupedBody = await (await get(`${base}?compactTurnItems=1&dedupeBodies=1`)).text();
 

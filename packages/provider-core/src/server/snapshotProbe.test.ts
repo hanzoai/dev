@@ -188,7 +188,9 @@ describe("resolveProviderProbeTimeoutMs", () => {
     "retains the phase default for invalid value %s",
     (value) => {
       expect(
-        resolveProviderProbeTimeoutMs("claude", 25000, { HANZO_DEV_CLAUDE_PROBE_TIMEOUT_MS: value }),
+        resolveProviderProbeTimeoutMs("claude", 25000, {
+          HANZO_DEV_CLAUDE_PROBE_TIMEOUT_MS: value,
+        }),
       ).toBe(25000);
     },
   );

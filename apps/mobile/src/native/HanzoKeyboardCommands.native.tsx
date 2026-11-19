@@ -11,7 +11,8 @@ interface NativeKeyboardCommandsProps extends ViewProps {
   ) => void;
 }
 
-const NativeKeyboardCommands = requireNativeView<NativeKeyboardCommandsProps>("HanzoKeyboardCommands");
+const NativeKeyboardCommands =
+  requireNativeView<NativeKeyboardCommandsProps>("HanzoKeyboardCommands");
 
 export function HanzoKeyboardCommands(
   props: PropsWithChildren<{

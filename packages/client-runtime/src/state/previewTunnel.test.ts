@@ -49,7 +49,7 @@ describe("preview tunnel url", () => {
       registry.set(prepared, Option.some(PREPARED));
 
       expect(yield* Fiber.join(pending)).toBe(
-        "wss://remote.example.test/api/preview/tunnel?wsTicket=media-ticket",
+        "wss://remote.example.test/v1/preview/tunnel?wsTicket=media-ticket",
       );
     }),
   );

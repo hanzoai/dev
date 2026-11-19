@@ -27,7 +27,9 @@ it.each([1])("blocks legacy launcher protocol %i with exact recovery steps", (la
   const reason = result.status === "blocked" ? result.reason : "";
   expect(reason).toMatch(new RegExp(`\\b${launcherProtocol}\\b`));
   expect(reason).toMatch(new RegExp(`\\b${SERVICE_LAUNCHER_PROTOCOL}\\b`));
-  expect(reason).toContain("curl -fsSL https://dev.hanzo.ai/install.sh | HANZO_DEV_VERSION=9.8.7 sh");
+  expect(reason).toContain(
+    "curl -fsSL https://dev.hanzo.ai/install.sh | HANZO_DEV_VERSION=9.8.7 sh",
+  );
   expect(reason).toContain("~/.local/bin/hanzo service install");
   expect(reason).toContain("hanzo --version");
   expect(reason).toContain("which -a hanzo");

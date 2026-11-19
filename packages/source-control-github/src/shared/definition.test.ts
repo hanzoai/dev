@@ -9,7 +9,7 @@ describe("GitHub change request URLs", () => {
   it("reads a pull request on any host, lower-casing host and repository", () => {
     expect(parse("https://github.com/HanzoDev/HanzoDev/pull/123/files?w=1#diff")).toEqual({
       host: "github.com",
-      repository: "hanzoai/dev",
+      repository: "hanzodev/hanzodev",
       number: 123,
       repositoryUrl: "https://github.com/HanzoDev/HanzoDev",
     });

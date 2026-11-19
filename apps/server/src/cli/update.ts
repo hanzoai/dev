@@ -91,7 +91,8 @@ export const resolveNewestVersion = Effect.fn("cli.update.resolve_newest")(funct
       Effect.mapError(() => new CliUpdateError({ reason: "Could not list hanzo releases." })),
       Effect.timeoutOrElse({
         duration: RELEASE_INDEX_TIMEOUT,
-        orElse: () => Effect.fail(new CliUpdateError({ reason: "Timed out listing hanzo releases." })),
+        orElse: () =>
+          Effect.fail(new CliUpdateError({ reason: "Timed out listing hanzo releases." })),
       }),
     );
     const releases = yield* decodeReleaseIndex(body).pipe(
@@ -181,7 +182,8 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
       .writeFileString(shimPath, `@echo off\r\n"${input.targetEntryPath}" %*`)
       .pipe(
         Effect.mapError(
-          () => new CliUpdateError({ reason: `Could not rewrite the hanzo launcher at ${shimPath}.` }),
+          () =>
+            new CliUpdateError({ reason: `Could not rewrite the hanzo launcher at ${shimPath}.` }),
         ),
       );
     return Option.some(shimPath);
@@ -197,7 +199,10 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
   }).pipe(
     Effect.mapError(
       (cause) =>
-        new CliUpdateError({ reason: `Could not repoint the hanzo launcher at ${launcher}.`, cause }),
+        new CliUpdateError({
+          reason: `Could not repoint the hanzo launcher at ${launcher}.`,
+          cause,
+        }),
     ),
   );
   return Option.some(launcher);

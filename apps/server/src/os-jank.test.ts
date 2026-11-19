@@ -45,7 +45,9 @@ effectIt.effect("hydrates PATH when the desktop handoff is absent", () =>
     Effect.sync(() =>
       vi
         .spyOn(NodeChildProcess, "execFileSync")
-        .mockReturnValue("__HANZO_DEV_ENV_PATH_START__\n/opt/tools/bin\n__HANZO_DEV_ENV_PATH_END__\n"),
+        .mockReturnValue(
+          "__HANZO_DEV_ENV_PATH_START__\n/opt/tools/bin\n__HANZO_DEV_ENV_PATH_END__\n",
+        ),
     ),
     (probe) =>
       Effect.gen(function* () {

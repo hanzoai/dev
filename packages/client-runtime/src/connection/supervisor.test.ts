@@ -1658,14 +1658,14 @@ describe("EnvironmentSupervisor", () => {
                 scope: AuthStandardClientScopes.join(" "),
               }),
             );
-          case "/api/auth/websocket-ticket/rpc":
+          case "/v1/auth/websocket-ticket/rpc":
             return Promise.resolve(
               Response.json({
                 ticket: "ws-ticket",
                 expiresAt: "2026-09-04T01:00:00.000Z",
               }),
             );
-          case "/api/auth/session": {
+          case "/v1/auth/session": {
             const authorization = request.headers.get("authorization");
             sessionAuthorizations.push(authorization);
             return Promise.resolve(
@@ -1784,7 +1784,7 @@ describe("EnvironmentSupervisor", () => {
       expect(failure._tag).toBe("RemoteEnvironmentAuthFetchError");
       expect(yield* Ref.get(bootstrapCalls)).toBe(2);
       expect(sessionAuthorizations).toEqual(["DPoP access-token-2"]);
-      expect(httpPaths.filter((path) => path === "/api/auth/websocket-ticket/rpc")).toHaveLength(1);
+      expect(httpPaths.filter((path) => path === "/v1/auth/websocket-ticket/rpc")).toHaveLength(1);
       expect(httpPaths.filter((path) => path === "/oauth/token")).toHaveLength(1);
       expect(yield* Ref.get(harness.sessionCount)).toBe(1);
       expect(yield* Ref.get(harness.releaseCount)).toBe(0);

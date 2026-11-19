@@ -1,5 +1,8 @@
 import type { FileDiffMetadata } from "@pierre/diffs";
-import type { PullRequestReviewGuideExcerpt, PullRequestReviewGuideStop } from "@hanzodev/contracts";
+import type {
+  PullRequestReviewGuideExcerpt,
+  PullRequestReviewGuideStop,
+} from "@hanzodev/contracts";
 import { mFallback, msg } from "gt-i18n";
 import type { MFunctionType } from "gt-i18n/types";
 

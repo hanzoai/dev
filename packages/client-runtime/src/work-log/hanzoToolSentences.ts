@@ -14,7 +14,10 @@ export function hanzoToolSentence(labels: ReadonlyArray<string>): HanzoToolSente
   return HANZO_TOOL_SENTENCES.get(labels.join("\n"));
 }
 
-const HANZO_TOOL_SENTENCES: ReadonlyMap<string, HanzoToolSentence> = new Map<string, HanzoToolSentence>([
+const HANZO_TOOL_SENTENCES: ReadonlyMap<string, HanzoToolSentence> = new Map<
+  string,
+  HanzoToolSentence
+>([
   [
     "Link\nLinking\nLinked\na pull request",
     {

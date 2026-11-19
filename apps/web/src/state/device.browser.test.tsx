@@ -79,7 +79,7 @@ it("baselines the first device snapshot without reopening dismissed devices", as
     ],
     onboardingCompleted: true,
     agentAccessEnabled: true,
-    hubBasePath: "/api/device-hub",
+    hubBasePath: "/v1/device-hub",
     revision: 1,
   };
   const registry = appAtomRegistry;
@@ -154,7 +154,7 @@ it("reports a failed first device load and retries it", async () => {
             sessions: [],
             onboardingCompleted: true,
             agentAccessEnabled: false,
-            hubBasePath: "/api/device-hub",
+            hubBasePath: "/v1/device-hub",
             revision: 1,
           });
     },

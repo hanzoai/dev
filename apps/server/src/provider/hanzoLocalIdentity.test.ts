@@ -2,6 +2,7 @@ import { ProviderDriverKind, ProviderInstanceId } from "@hanzodev/contracts";
 import { DEFAULT_ENABLED_DEFAULT_INSTANCES } from "@hanzodev/contracts/settings";
 import * as HostProcess from "@hanzodev/shared/HostProcess";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { it as effectIt } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -77,8 +78,9 @@ describe("Native Hanzo Agent & Local IAM Multi-Account Identity", () => {
     expect(ordered.map((p) => p.driver)).toEqual(["hanzo", "codex", "claudeAgent"]);
   });
 
-  it("reads multiple accounts from ~/.hanzo/identities.json and resolves active Hanzo IAM auth", async () => {
-    const program = Effect.scoped(
+  effectIt.effect(
+    "reads multiple accounts from ~/.hanzo/identities.json and resolves active Hanzo IAM auth",
+    () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -112,19 +114,16 @@ describe("Native Hanzo Agent & Local IAM Multi-Account Identity", () => {
         const homeLayer = Layer.succeed(HostProcess.HomeDirectory, tmpHome);
         const snapshot = yield* readLocalHanzoIdentities().pipe(Effect.provide(homeLayer));
         const auth = yield* resolveHanzoProviderAuth().pipe(Effect.provide(homeLayer));
-        return { snapshot, auth };
-      }),
-    ).pipe(Effect.provide(NodeServices.layer));
 
-    const { snapshot, auth } = await Effect.runPromise(program);
-    expect(snapshot.activeAccountId).toBe("hanzo/z");
-    expect(snapshot.accounts.map((a) => a.id)).toEqual(["hanzo/z", "admin/z"]);
-    expect(auth).toEqual({
-      status: "authenticated",
-      type: "hanzo",
-      label: "Hanzo IAM (hanzo/z +1)",
-      email: "z@hanzo.ai",
-      workspaceId: "hanzo",
-    });
-  });
+        expect(snapshot.activeAccountId).toBe("hanzo/z");
+        expect(snapshot.accounts.map((a) => a.id)).toEqual(["hanzo/z", "admin/z"]);
+        expect(auth).toEqual({
+          status: "authenticated",
+          type: "hanzo",
+          label: "Hanzo IAM (hanzo/z +1)",
+          email: "z@hanzo.ai",
+          workspaceId: "hanzo",
+        });
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
 });

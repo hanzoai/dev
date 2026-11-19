@@ -33,7 +33,9 @@ export function BrandMark(props: { readonly compact?: boolean; readonly stageLab
       />
       <View className="gap-1">
         <View className="flex-row items-center gap-2">
-          <Text className="text-lg font-hanzo-bold tracking-[-0.4px] text-foreground">Hanzo Dev</Text>
+          <Text className="text-lg font-hanzo-bold tracking-[-0.4px] text-foreground">
+            Hanzo Dev
+          </Text>
           <View className="rounded-full bg-subtle px-2 py-1">
             <Text className="text-3xs font-hanzo-bold tracking-[1.1px] uppercase text-foreground-muted">
               {stageLabel}

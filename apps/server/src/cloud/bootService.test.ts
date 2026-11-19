@@ -66,7 +66,9 @@ it("reads the served Hanzo home and log back out of a rendered unit, plist, or t
   });
 
   expect(
-    BootService.bootServiceBaseDirOf(BootService.renderBootServiceUnit(plan("/home/theo/.hanzo-dev"))),
+    BootService.bootServiceBaseDirOf(
+      BootService.renderBootServiceUnit(plan("/home/theo/.hanzo-dev")),
+    ),
   ).toBe("/home/theo/.hanzo-dev");
   expect(
     BootService.bootServiceBaseDirOf(
@@ -242,7 +244,8 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
       commands.push(command);
       invocations.push(input);
       timeouts.set(command, input.timeout);
-      if (command === "systemctl --user reset-failed hanzodev.service") control.startLimitHit = false;
+      if (command === "systemctl --user reset-failed hanzodev.service")
+        control.startLimitHit = false;
       const refusedStart = control.startLimitHit && command.startsWith("systemctl --user restart ");
       // `--no-block` only queues the job, so systemd reports success even when it refuses it.
       const failed =
@@ -1411,9 +1414,7 @@ process.disconnect();
       const plan = yield* service.install();
 
       expect(
-        plan.unitPath.endsWith(
-          path.join("Library", "LaunchAgents", "ai.hanzo.dev.service.plist"),
-        ),
+        plan.unitPath.endsWith(path.join("Library", "LaunchAgents", "ai.hanzo.dev.service.plist")),
       ).toBe(true);
       expect(yield* fs.readFileString(plan.unitPath)).toContain(
         `    <key>PATH</key>\n    <string>${macInstallerPath}:/usr/local/bin:/usr/sbin:/sbin</string>`,

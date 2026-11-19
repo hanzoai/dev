@@ -394,7 +394,10 @@ describe("XAiAcpExtension", () => {
     });
     expect(rendered.data.rawInput).toMatchObject({ arguments: { path: "a.html" } });
     expect(
-      htmlRenderFromToolItem({ toolName: "hanzo-dev.html_render", output: rendered.data.rawOutput }),
+      htmlRenderFromToolItem({
+        toolName: "hanzo-dev.html_render",
+        output: rendered.data.rawOutput,
+      }),
     ).toEqual(page);
 
     const failed = grokCall(

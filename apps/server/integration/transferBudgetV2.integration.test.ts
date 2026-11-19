@@ -345,7 +345,7 @@ it.live("reports V2 thread HTTP and WebSocket transfer budgets", () =>
           if (!("port" in address)) return yield* Effect.die("Expected TCP server");
           const base = `http://127.0.0.1:${address.port}`;
           const threadSnapshot = yield* measureHttpGet({
-            url: `${base}/api/orchestration/threads/${THREAD_ID}`,
+            url: `${base}/v1/event/threads/${THREAD_ID}`,
             headers: { [ORCHESTRATION_PROTOCOL_HEADER]: String(ORCHESTRATION_PROTOCOL_VERSION) },
           });
           assert.equal(
@@ -361,7 +361,7 @@ it.live("reports V2 thread HTTP and WebSocket transfer budgets", () =>
           assert.equal(decodedThread.projection.turnItems.length, TRANSFER_HISTORY_TURN_COUNT * 6);
           assert.notInclude(Buffer.from(threadSnapshot.decodedBody).toString(), "digest=");
           const shellSnapshot = yield* measureHttpGet({
-            url: `${base}/api/orchestration/shell`,
+            url: `${base}/v1/event/shell`,
             headers: { [ORCHESTRATION_PROTOCOL_HEADER]: String(ORCHESTRATION_PROTOCOL_VERSION) },
           });
           assert.equal(shellSnapshot.status, 200);
@@ -445,7 +445,7 @@ it.live("reports V2 thread HTTP and WebSocket transfer budgets", () =>
             }).pipe(Effect.tap((http) => Effect.sync(() => assert.equal(http.status, 200))));
           const decoded = (http: HttpTransferMeasurement) =>
             Buffer.from(http.decodedBody).toString();
-          const longTurnPath = `/api/orchestration/threads/${LONG_TURN_THREAD_ID}`;
+          const longTurnPath = `/v1/event/threads/${LONG_TURN_THREAD_ID}`;
           const readColdOpen = (query: string) =>
             Effect.gen(function* () {
               const http = yield* get(`${longTurnPath}/bounded?${query}`);
@@ -465,7 +465,7 @@ it.live("reports V2 thread HTTP and WebSocket transfer budgets", () =>
             });
           const readShell = (query: string) =>
             Effect.gen(function* () {
-              const http = yield* get(`/api/orchestration/shell?${query}`);
+              const http = yield* get(`/v1/event/shell?${query}`);
               const { threads, snapshotSequence, projectIdentities } = yield* decodeShellSnapshot(
                 decoded(http),
               );
@@ -562,7 +562,7 @@ it.live("reports V2 thread HTTP and WebSocket transfer budgets", () =>
           assert.notInclude(fleetShellSubscribe.kinds, "snapshot");
           // A client that holds those rows asks the route whether they still resume, and keeps them.
           const fleetShellResumeHttp = yield* get(
-            `/api/orchestration/shell?${clientShellResumeQuery(fleetShell.snapshotSequence)}`,
+            `/v1/event/shell?${clientShellResumeQuery(fleetShell.snapshotSequence)}`,
           );
           yield* decodeShellResumable(decoded(fleetShellResumeHttp));
           const fleetShellResume = { http: fleetShellResumeHttp, rows: 0 };
@@ -579,7 +579,7 @@ it.live("reports V2 thread HTTP and WebSocket transfer budgets", () =>
 
           for (const events of staleTodoListThreadBatches(provider)) yield* sink.write({ events });
           const staleTodoHttp = yield* get(
-            `/api/orchestration/threads/${STALE_TODO_THREAD_ID}/bounded?${CLIENT_BOUNDED_QUERY}`,
+            `/v1/event/threads/${STALE_TODO_THREAD_ID}/bounded?${CLIENT_BOUNDED_QUERY}`,
           );
           const staleTodo = (yield* decodeBoundedSnapshot(decoded(staleTodoHttp))).projection;
           // Clients show the diff of the last finished turn from this record.

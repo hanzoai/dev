@@ -126,12 +126,143 @@ export function LocalAiSettingsSection() {
   );
 }
 
+async function streamOllamaPull(
+  modelId: string,
+  onProgress: (update: {
+    readonly status?: string | undefined;
+    readonly percent?: number | undefined;
+  }) => void,
+): Promise<
+  { readonly ok: true } | { readonly ok: false; readonly status?: number; readonly error?: string }
+> {
+  try {
+    const target = resolveOllamaPullTarget(modelId);
+    const response = await fetch(`${LOCAL_OLLAMA_BASE_URL}/api/pull`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: target, stream: true }),
+    });
+    if (!response.ok || !response.body) {
+      return { ok: false, status: response.status };
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const payload = JSON.parse(line) as {
+          readonly error?: string;
+          readonly status?: string;
+          readonly completed?: number;
+          readonly total?: number;
+        };
+        if (payload.error) {
+          return { ok: false, error: payload.error };
+        }
+        const percent =
+          typeof payload.completed === "number" &&
+          typeof payload.total === "number" &&
+          payload.total > 0
+            ? Math.min(99, Math.round((payload.completed / payload.total) * 100))
+            : undefined;
+        onProgress({ status: payload.status, percent });
+      }
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function requestEngineModelLoad(
+  trimmed: string,
+): Promise<{ readonly ok: true } | { readonly ok: false; readonly error?: string | undefined }> {
+  try {
+    const base = readCustomLocalEngineUrl() || LOCAL_HANZO_ENGINE_BASE_URL;
+    const response = await fetch(`${base}/v1/engine/load`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model_id: trimmed,
+        format: trimmed.endsWith(".gguf") ? "gguf" : "auto",
+      }),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      return { ok: false, error: text || `HTTP ${response.status}` };
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : undefined };
+  }
+}
+
+async function discoverLanInferenceNodes(): Promise<readonly DesktopDiscoveredLanEngine[]> {
+  try {
+    if (window.desktopBridge?.discoverLanEngines) {
+      return await window.desktopBridge.discoverLanEngines();
+    }
+    const local = await probeLocalAiStack();
+    const fallback: DesktopDiscoveredLanEngine[] = [];
+    if (local.engine.online) {
+      fallback.push({
+        name: "Localhost · Hanzo Engine",
+        host: "127.0.0.1",
+        port: 36900,
+        baseUrl: local.engine.baseUrl,
+        kind: "hanzo-engine",
+        models: local.engine.models.map((m) => m.id),
+        latencyMs: local.engine.latencyMs,
+      });
+    }
+    if (local.ollama.online) {
+      fallback.push({
+        name: "Localhost · Ollama",
+        host: "127.0.0.1",
+        port: 11434,
+        baseUrl: local.ollama.baseUrl,
+        kind: "ollama",
+        models: local.ollama.models.map((m) => m.id),
+        latencyMs: local.ollama.latencyMs,
+      });
+    }
+    return fallback;
+  } catch {
+    return [];
+  }
+}
+
 export function LocalAiManagerModal() {
-  const gt = useGT();
   const modal = useLocalAiModalState();
+  if (!modal.open) return null;
+  return (
+    <LocalAiManagerModalBody
+      key={modal.filterQuery ?? ""}
+      initialFilterQuery={modal.filterQuery ?? ""}
+      tab={modal.tab}
+    />
+  );
+}
+
+function LocalAiManagerModalBody({
+  initialFilterQuery,
+  tab,
+}: {
+  readonly initialFilterQuery: string;
+  readonly tab: ReturnType<typeof useLocalAiModalState>["tab"];
+}) {
+  const gt = useGT();
   const [snapshot, setSnapshot] = useState<LocalAiStackSnapshot | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialFilterQuery);
   const [selectedModel, setSelectedModel] = useState(readSelectedLocalAiModel);
 
   const [pullingId, setPullingId] = useState<string | null>(null);
@@ -150,24 +281,27 @@ export function LocalAiManagerModal() {
 
   const refreshStack = async () => {
     setRefreshing(true);
-    try {
-      const next = await probeLocalAiStack({
-        engineBaseUrl: readCustomLocalEngineUrl() || LOCAL_HANZO_ENGINE_BASE_URL,
-        hanzodBaseUrl: readCustomHanzodUrl() || LOCAL_HANZOD_RPC_BASE_URL,
-      });
+    const next = await probeLocalAiStack({
+      engineBaseUrl: readCustomLocalEngineUrl() || LOCAL_HANZO_ENGINE_BASE_URL,
+      hanzodBaseUrl: readCustomHanzodUrl() || LOCAL_HANZOD_RPC_BASE_URL,
+    }).catch(() => null);
+    if (next) {
       setSnapshot(next);
-    } finally {
-      setRefreshing(false);
     }
+    setRefreshing(false);
   };
 
-  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- probes local AI runtimes whenever the manager dialog opens and handles Escape key dismissal
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- probes local AI runtimes on dialog mount and handles Escape key dismissal
   useEffect(() => {
-    if (!modal.open) return;
-    if (modal.filterQuery) {
-      setSearch(modal.filterQuery);
-    }
-    void refreshStack();
+    let cancelled = false;
+    void probeLocalAiStack({
+      engineBaseUrl: readCustomLocalEngineUrl() || LOCAL_HANZO_ENGINE_BASE_URL,
+      hanzodBaseUrl: readCustomHanzodUrl() || LOCAL_HANZOD_RPC_BASE_URL,
+    }).then((next) => {
+      if (!cancelled) {
+        setSnapshot(next);
+      }
+    });
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -175,10 +309,11 @@ export function LocalAiManagerModal() {
       }
     };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [modal.open, modal.filterQuery]);
-
-  if (!modal.open) return null;
+    return () => {
+      cancelled = true;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, []);
 
   const installedIds = new Set((snapshot?.installedModels ?? []).map((m) => m.id));
   const normalizedQuery = search.trim().toLowerCase();
@@ -206,74 +341,35 @@ export function LocalAiManagerModal() {
     setPullPercent(2);
     setPullStatus(gt("Connecting to Ollama on 127.0.0.1:11434..."));
 
-    try {
-      const target = resolveOllamaPullTarget(modelId);
-      const response = await fetch(`${LOCAL_OLLAMA_BASE_URL}/api/pull`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: target, stream: true }),
-      });
-      if (!response.ok || !response.body) {
-        throw new Error(
-          gt("Local Ollama runtime returned HTTP {status}. Start Ollama on :11434 and retry.", {
-            status: response.status,
-          }),
-        );
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          const payload = JSON.parse(line) as {
-            readonly error?: string;
-            readonly status?: string;
-            readonly completed?: number;
-            readonly total?: number;
-          };
-          if (payload.error) throw new Error(payload.error);
-          if (payload.status) setPullStatus(payload.status);
-          if (
-            typeof payload.completed === "number" &&
-            typeof payload.total === "number" &&
-            payload.total > 0
-          ) {
-            setPullPercent(Math.min(99, Math.round((payload.completed / payload.total) * 100)));
-          }
-        }
-      }
-
+    const result = await streamOllamaPull(modelId, (update) => {
+      if (update.status) setPullStatus(update.status);
+      if (update.percent !== undefined) setPullPercent(update.percent);
+    });
+    if (result.ok) {
       setPullPercent(100);
       setPullStatus(gt("Installed {model}", { model: modelId }));
       handleSelectModel(modelId);
       await refreshStack();
-    } catch (error) {
-      setPullError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setPullingId(null);
+    } else {
+      setPullError(
+        result.status !== undefined
+          ? gt("Local Ollama runtime returned HTTP {status}. Start Ollama on :11434 and retry.", {
+              status: result.status,
+            })
+          : (result.error ?? gt("Failed to pull model.")),
+      );
     }
+    setPullingId(null);
   };
 
   const handleDeleteModel = async (modelId: string) => {
-    try {
-      const target = resolveOllamaPullTarget(modelId);
-      await fetch(`${LOCAL_OLLAMA_BASE_URL}/api/delete`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: target }),
-      });
-      await refreshStack();
-    } catch {
-      // Ignore offline delete errors.
-    }
+    const target = resolveOllamaPullTarget(modelId);
+    await fetch(`${LOCAL_OLLAMA_BASE_URL}/api/delete`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: target }),
+    }).catch(() => undefined);
+    await refreshStack();
   };
 
   const handleLoadIntoEngine = async () => {
@@ -285,69 +381,21 @@ export function LocalAiManagerModal() {
     }
     setLoadingEngineModel(true);
     setEngineLoadMessage(gt("Loading {model} on :36900...", { model: trimmed }));
-    try {
-      const base = readCustomLocalEngineUrl() || LOCAL_HANZO_ENGINE_BASE_URL;
-      const response = await fetch(`${base}/v1/engine/load`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model_id: trimmed,
-          format: trimmed.endsWith(".gguf") ? "gguf" : "auto",
-        }),
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `HTTP ${response.status}`);
-      }
+    const result = await requestEngineModelLoad(trimmed);
+    if (result.ok) {
       setEngineLoadMessage(gt("Loaded {model} on Hanzo Engine.", { model: trimmed }));
       await refreshStack();
-    } catch (error) {
-      setEngineLoadMessage(
-        error instanceof Error
-          ? error.message
-          : gt("Embedded Hanzo Engine (:36900) is not reachable."),
-      );
-    } finally {
-      setLoadingEngineModel(false);
+    } else {
+      setEngineLoadMessage(result.error ?? gt("Embedded Hanzo Engine (:36900) is not reachable."));
     }
+    setLoadingEngineModel(false);
   };
 
   const handleScanLan = async () => {
     setScanningLan(true);
-    try {
-      if (window.desktopBridge?.discoverLanEngines) {
-        const discovered = await window.desktopBridge.discoverLanEngines();
-        setLanEngines(discovered);
-      } else {
-        const local = await probeLocalAiStack();
-        const fallback: DesktopDiscoveredLanEngine[] = [];
-        if (local.engine.online) {
-          fallback.push({
-            name: "Localhost · Hanzo Engine",
-            host: "127.0.0.1",
-            port: 36900,
-            baseUrl: local.engine.baseUrl,
-            kind: "hanzo-engine",
-            models: local.engine.models.map((m) => m.id),
-            latencyMs: local.engine.latencyMs,
-          });
-        }
-        if (local.ollama.online) {
-          fallback.push({
-            name: "Localhost · Ollama",
-            host: "127.0.0.1",
-            port: 11434,
-            baseUrl: local.ollama.baseUrl,
-            kind: "ollama",
-            models: local.ollama.models.map((m) => m.id),
-            latencyMs: local.ollama.latencyMs,
-          });
-        }
-        setLanEngines(fallback);
-      }
-    } finally {
-      setScanningLan(false);
-    }
+    const discovered = await discoverLanInferenceNodes();
+    setLanEngines(discovered);
+    setScanningLan(false);
   };
 
   return (
@@ -401,37 +449,35 @@ export function LocalAiManagerModal() {
           <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-0.5">
             <span
               className={`size-2 rounded-full ${
-                snapshot?.ollama.online ? "bg-emerald-500" : "bg-muted-foreground/40"
+                snapshot?.ollama.online ? "bg-success" : "bg-muted-foreground/40"
               }`}
             />
             <span>
-              Ollama (:11434):{" "}
+              <code>Ollama (:11434)</code>:{" "}
               <strong>{snapshot?.ollama.online ? gt("online") : gt("offline")}</strong>
             </span>
           </span>
           <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-0.5">
             <span
               className={`size-2 rounded-full ${
-                snapshot?.engine.online ? "bg-emerald-500" : "bg-muted-foreground/40"
+                snapshot?.engine.online ? "bg-success" : "bg-muted-foreground/40"
               }`}
             />
             <span>
-              Engine (:36900):{" "}
+              <code>Engine (:36900)</code>:{" "}
               <strong>{snapshot?.engine.online ? gt("online") : gt("standby")}</strong>
             </span>
           </span>
           <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-0.5">
             <span
               className={`size-2 rounded-full ${
-                snapshot?.hanzod.online ? "bg-emerald-500" : "bg-muted-foreground/40"
+                snapshot?.hanzod.online ? "bg-success" : "bg-muted-foreground/40"
               }`}
             />
             <span>
-              hanzod (:9630):{" "}
+              <code>hanzod (:9630)</code>:{" "}
               <strong>
-                {snapshot?.hanzod.online
-                  ? `#${snapshot.hanzod.blockHeight ?? 0}`
-                  : gt("offline")}
+                {snapshot?.hanzod.online ? `#${snapshot.hanzod.blockHeight ?? 0}` : gt("offline")}
               </strong>
             </span>
           </span>
@@ -450,7 +496,7 @@ export function LocalAiManagerModal() {
               type="button"
               onClick={() => setLocalAiManagerTab(item.id)}
               className={`border-b-2 px-3.5 py-2.5 text-xs font-medium transition-colors ${
-                modal.tab === item.id
+                tab === item.id
                   ? "border-foreground text-foreground"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
@@ -461,7 +507,7 @@ export function LocalAiManagerModal() {
         </div>
 
         <div className="flex-1 overflow-y-auto p-5">
-          {modal.tab === "models" ? (
+          {tab === "models" ? (
             <div className="space-y-4">
               <div className="flex items-center gap-2">
                 <input
@@ -508,19 +554,19 @@ export function LocalAiManagerModal() {
                       <div className="min-w-0 flex-1 space-y-1">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <span className="text-sm font-semibold">{model.title}</span>
-                          <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+                          <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-2xs text-muted-foreground">
                             {model.ollamaTag}
                           </span>
-                          <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                          <span className="rounded bg-muted px-1.5 py-0.5 text-2xs text-muted-foreground">
                             {model.sizeLabel}
                           </span>
                           {model.recommended ? (
-                            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-500">
+                            <span className="rounded-full bg-success/15 px-2 py-0.5 text-3xs font-semibold text-success-foreground">
                               <T>Recommended</T>
                             </span>
                           ) : null}
                           {isInstalled ? (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-500">
+                            <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-3xs font-medium text-success-foreground">
                               <CheckIcon className="size-2.5" />
                               <T>Installed</T>
                             </span>
@@ -564,25 +610,23 @@ export function LocalAiManagerModal() {
                 })}
               </div>
             </div>
-          ) : modal.tab === "node" ? (
+          ) : tab === "node" ? (
             <div className="space-y-4">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="rounded-xl border border-border bg-muted/20 p-3.5">
-                  <div className="text-[11px] font-medium text-muted-foreground uppercase">
+                  <div className="text-2xs font-medium text-muted-foreground uppercase">
                     <T>Validator Status</T>
                   </div>
                   <div className="mt-1 flex items-center gap-2 text-base font-semibold">
                     <ServerIcon className="size-4" />
-                    <span>
-                      {snapshot?.hanzod.online ? gt("Online & Synced") : gt("Offline")}
-                    </span>
+                    <span>{snapshot?.hanzod.online ? gt("Online & Synced") : gt("Offline")}</span>
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    {snapshot?.hanzod.networkLabel ?? "Hanzo Mainnet (36963)"}
+                    {snapshot?.hanzod.networkLabel ?? gt("Hanzo Mainnet (36963)")}
                   </div>
                 </div>
                 <div className="rounded-xl border border-border bg-muted/20 p-3.5">
-                  <div className="text-[11px] font-medium text-muted-foreground uppercase">
+                  <div className="text-2xs font-medium text-muted-foreground uppercase">
                     <T>Block Height</T>
                   </div>
                   <div className="mt-1 font-mono text-base font-semibold">
@@ -592,14 +636,13 @@ export function LocalAiManagerModal() {
                       : "N/A"}
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    {snapshot?.hanzod.latencyMs !== null &&
-                    snapshot?.hanzod.latencyMs !== undefined
-                      ? `${snapshot.hanzod.latencyMs} ms RPC`
-                      : "RPC 127.0.0.1:9630"}
+                    {snapshot?.hanzod.latencyMs !== null && snapshot?.hanzod.latencyMs !== undefined
+                      ? gt("{latency} ms RPC", { latency: snapshot.hanzod.latencyMs })
+                      : gt("RPC 127.0.0.1:9630")}
                   </div>
                 </div>
                 <div className="rounded-xl border border-border bg-muted/20 p-3.5">
-                  <div className="text-[11px] font-medium text-muted-foreground uppercase">
+                  <div className="text-2xs font-medium text-muted-foreground uppercase">
                     <T>P2P Staking Mesh</T>
                   </div>
                   <div className="mt-1 font-mono text-base font-semibold">
@@ -641,7 +684,7 @@ export function LocalAiManagerModal() {
             <div className="space-y-4">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div className="rounded-xl border border-border bg-muted/20 p-3.5">
-                  <div className="text-[11px] font-medium text-muted-foreground uppercase">
+                  <div className="text-2xs font-medium text-muted-foreground uppercase">
                     <T>Embedded Engine</T>
                   </div>
                   <div className="mt-1 text-base font-semibold">
@@ -652,20 +695,20 @@ export function LocalAiManagerModal() {
                   </div>
                 </div>
                 <div className="rounded-xl border border-border bg-muted/20 p-3.5">
-                  <div className="text-[11px] font-medium text-muted-foreground uppercase">
+                  <div className="text-2xs font-medium text-muted-foreground uppercase">
                     <T>Accelerator</T>
                   </div>
                   <div className="mt-1 text-base font-semibold">
-                    {snapshot?.engine.device ?? "Metal / CUDA"}
+                    {snapshot?.engine.device ?? gt("Metal / CUDA")}
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
                     {snapshot?.engine.memoryUsedMb
-                      ? `${snapshot.engine.memoryUsedMb} MB VRAM`
+                      ? gt("{memory} MB VRAM", { memory: snapshot.engine.memoryUsedMb })
                       : gt("Zero-copy inference")}
                   </div>
                 </div>
                 <div className="rounded-xl border border-border bg-muted/20 p-3.5">
-                  <div className="text-[11px] font-medium text-muted-foreground uppercase">
+                  <div className="text-2xs font-medium text-muted-foreground uppercase">
                     <T>OpenAI Endpoint</T>
                   </div>
                   <div className="mt-1 truncate font-mono text-xs font-semibold">
@@ -686,7 +729,7 @@ export function LocalAiManagerModal() {
                     type="text"
                     value={hfRepoInput}
                     onChange={(event) => setHfRepoInput(event.currentTarget.value)}
-                    placeholder="Qwen/Qwen3-8B"
+                    placeholder={gt("Qwen/Qwen3-8B")}
                     aria-label={gt("HuggingFace repo or GGUF path")}
                     className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 font-mono text-xs focus:outline-hidden"
                   />
@@ -737,7 +780,9 @@ export function LocalAiManagerModal() {
                       <T>LAN Inference Discovery</T>
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      <T>Scan local network interfaces for Hanzo Engine (:36900) and Ollama (:11434).</T>
+                      <T>
+                        Scan local network interfaces for Hanzo Engine (:36900) and Ollama (:11434).
+                      </T>
                     </div>
                   </div>
                   <Button
@@ -759,7 +804,7 @@ export function LocalAiManagerModal() {
                       >
                         <div className="min-w-0 flex-1">
                           <div className="truncate font-medium">{item.name}</div>
-                          <div className="truncate font-mono text-[11px] text-muted-foreground">
+                          <div className="truncate font-mono text-2xs text-muted-foreground">
                             {item.baseUrl} · {item.models.length} models
                           </div>
                         </div>

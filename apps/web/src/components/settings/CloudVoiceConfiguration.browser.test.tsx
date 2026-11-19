@@ -89,9 +89,9 @@ it("cancelling a provider's setup keeps the current destination and writes nothi
   const writes: unknown[] = [];
   await withVoicePanel(
     (url, request, init) => {
-      if (url.pathname === "/api/voice/cloud/keys")
+      if (url.pathname === "/v1/voice/cloud/keys")
         return Promise.resolve(Response.json({ openai: false, xai: true }));
-      if (url.pathname !== "/api/voice/cloud/openai/key") return null;
+      if (url.pathname !== "/v1/voice/cloud/openai/key") return null;
       return new Request(request, init).json().then((body) => {
         writes.push(body);
         return new Response(null, { status: 204 });
@@ -117,9 +117,9 @@ it("enables the chosen provider only after a successful setup", async () => {
   let rejectNextWrite = true;
   await withVoicePanel(
     (url, request, init) => {
-      if (url.pathname === "/api/voice/cloud/keys")
+      if (url.pathname === "/v1/voice/cloud/keys")
         return Promise.resolve(Response.json({ openai: writes.length > 0, xai: true }));
-      if (url.pathname !== "/api/voice/cloud/openai/key") return null;
+      if (url.pathname !== "/v1/voice/cloud/openai/key") return null;
       if (rejectNextWrite) {
         rejectNextWrite = false;
         return Promise.resolve(new Response(null, { status: 403 }));
@@ -156,9 +156,9 @@ it("keeps the active provider's grant when editing its key", async () => {
   const writes: unknown[] = [];
   await withVoicePanel(
     (url, request, init) => {
-      if (url.pathname === "/api/voice/cloud/keys")
+      if (url.pathname === "/v1/voice/cloud/keys")
         return Promise.resolve(Response.json({ openai: true, xai: true }));
-      if (url.pathname !== "/api/voice/cloud/openai/key") return null;
+      if (url.pathname !== "/v1/voice/cloud/openai/key") return null;
       return new Request(request, init).json().then((body) => {
         writes.push(body);
         return new Response(null, { status: 204 });
@@ -180,7 +180,7 @@ it("uses a provider's saved key without writing it, and turns dictation off", as
   chooseAudioDestination({ kind: "environment", environmentId: id });
   await withVoicePanel(
     (url) =>
-      url.pathname === "/api/voice/cloud/keys"
+      url.pathname === "/v1/voice/cloud/keys"
         ? Promise.resolve(Response.json({ openai: false, xai: true }))
         : null,
     async (screen) => {
@@ -209,9 +209,9 @@ it("OpenRouter needs an exact model, and changing it writes no credential", asyn
   };
   await withVoicePanel(
     (url, request, init) => {
-      if (url.pathname === "/api/voice/cloud/keys")
+      if (url.pathname === "/v1/voice/cloud/keys")
         return Promise.resolve(Response.json({ openai: false, xai: false, openrouter: true }));
-      if (url.pathname === "/api/voice/cloud/openrouter/models")
+      if (url.pathname === "/v1/voice/cloud/openrouter/models")
         return Promise.resolve(
           Response.json({
             models: [
@@ -220,7 +220,7 @@ it("OpenRouter needs an exact model, and changing it writes no credential", asyn
             ],
           }),
         );
-      if (url.pathname === "/api/voice/cloud/openrouter/key")
+      if (url.pathname === "/v1/voice/cloud/openrouter/key")
         return new Request(request, init).json().then((body) => {
           writes.push(body);
           return new Response(null, { status: 204 });

@@ -191,26 +191,28 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       }),
     );
 
-    it.effect("drops an inherited HANZO_DEV_HOST and HANZO_DEV_LAN from a parent Hanzo server", () =>
-      Effect.gen(function* () {
-        const env = yield* createDevRunnerEnv({
-          mode: "dev",
-          baseEnv: { HANZO_DEV_PORT: "3773", HANZO_DEV_HOST: "0.0.0.0", HANZO_DEV_LAN: "true" },
-          serverOffset: 0,
-          webOffset: 0,
-          hanzoHome: undefined,
-          browser: undefined,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
-          host: undefined,
-          port: undefined,
-          devUrl: undefined,
-        });
+    it.effect(
+      "drops an inherited HANZO_DEV_HOST and HANZO_DEV_LAN from a parent Hanzo server",
+      () =>
+        Effect.gen(function* () {
+          const env = yield* createDevRunnerEnv({
+            mode: "dev",
+            baseEnv: { HANZO_DEV_PORT: "3773", HANZO_DEV_HOST: "0.0.0.0", HANZO_DEV_LAN: "true" },
+            serverOffset: 0,
+            webOffset: 0,
+            hanzoHome: undefined,
+            browser: undefined,
+            autoBootstrapProjectFromCwd: undefined,
+            logWebSocketEvents: undefined,
+            host: undefined,
+            port: undefined,
+            devUrl: undefined,
+          });
 
-        assert.equal(env.HANZO_DEV_PORT, "13773");
-        assert.equal(env.HANZO_DEV_HOST, undefined);
-        assert.equal(env.HANZO_DEV_LAN, undefined);
-      }),
+          assert.equal(env.HANZO_DEV_PORT, "13773");
+          assert.equal(env.HANZO_DEV_HOST, undefined);
+          assert.equal(env.HANZO_DEV_LAN, undefined);
+        }),
     );
   });
 
@@ -544,7 +546,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
 
         assert.equal(yield* homeFor("~/hanzo-dev"), path.join("/home/dev", "hanzo-dev"));
         assert.equal(yield* homeFor("~"), "/home/dev");
-        assert.equal(yield* homeFor("~\\t3-dev"), path.join("/home/dev", "hanzo-dev"));
+        assert.equal(yield* homeFor("~\\hanzo-dev"), path.join("/home/dev", "hanzo-dev"));
         assert.equal(yield* homeFor("  ~/hanzo-dev  "), path.join("/home/dev", "hanzo-dev"));
         assert.equal(yield* homeFor("~someone/hanzo-dev"), path.resolve("~someone/hanzo-dev"));
         assert.equal(yield* homeFor("relative/hanzo-dev"), path.resolve("relative/hanzo-dev"));
@@ -878,7 +880,10 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
 
           assert.deepStrictEqual(yield* spawnedArgs(false), []);
           const [seedArgs] = yield* spawnedArgs(undefined);
-          assert.includeMembers([...(seedArgs ?? [])], ["--base-dir", path.join(root, ".hanzo-dev")]);
+          assert.includeMembers(
+            [...(seedArgs ?? [])],
+            ["--base-dir", path.join(root, ".hanzo-dev")],
+          );
 
           // Either database means the worktree already has data.
           for (const name of ["state.sqlite", "statev2.sqlite"]) {

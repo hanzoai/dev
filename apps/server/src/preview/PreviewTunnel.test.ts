@@ -109,7 +109,7 @@ it.effect("pipes bytes both ways between the WebSocket and the loopback port", (
       });
     });
     const tunnel = yield* serveTunnel();
-    const client = yield* openTunnel(`${tunnel.origin}/api/preview/tunnel?port=${upstream.port}`);
+    const client = yield* openTunnel(`${tunnel.origin}/v1/preview/tunnel?port=${upstream.port}`);
     const clientReceived: number[] = [];
     const done = Promise.withResolvers<void>();
     client.on("error", done.reject);
@@ -143,7 +143,7 @@ it.effect.each([
     const tunnel = yield* serveTunnel();
     const port = { listed: listed.port, self: tunnel.port }[target];
     const client = yield* openTunnel(
-      `${tunnel.origin}/api/preview/tunnel?port=${port}&wsTicket=${ticket}`,
+      `${tunnel.origin}/v1/preview/tunnel?port=${port}&wsTicket=${ticket}`,
     );
     const response = yield* refusal(client);
     expect(response).toEqual({ status: 403, portRefused });
@@ -164,7 +164,7 @@ it.effect("answers a port nothing listens on with 502, marked as about the port"
         }),
     );
     const tunnel = yield* serveTunnel();
-    const client = yield* openTunnel(`${tunnel.origin}/api/preview/tunnel?port=${closed}`);
+    const client = yield* openTunnel(`${tunnel.origin}/v1/preview/tunnel?port=${closed}`);
     const response = yield* refusal(client);
     expect(response).toEqual({ status: 502, portRefused: true });
   }),
@@ -176,7 +176,7 @@ it.effect("closes an open tunnel when its session is revoked", () =>
     const upstream = yield* listen((socket) => socket.on("close", () => upstreamClosed.resolve()));
     const revoked = yield* Deferred.make<void>();
     const tunnel = yield* serveTunnel(Deferred.await(revoked));
-    const client = yield* openTunnel(`${tunnel.origin}/api/preview/tunnel?port=${upstream.port}`);
+    const client = yield* openTunnel(`${tunnel.origin}/v1/preview/tunnel?port=${upstream.port}`);
     yield* Effect.promise(() => new Promise((resolve) => client.once("open", resolve)));
     const clientClosed = new Promise((resolve) => client.once("close", resolve));
     yield* Deferred.succeed(revoked, undefined);

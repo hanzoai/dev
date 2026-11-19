@@ -5,7 +5,7 @@ import type { WebhookRequest } from "./webhookTemplate.ts";
 
 const issueComment: WebhookRequest = {
   method: "POST",
-  path: "/api/hooks/task-1",
+  path: "/v1/hooks/task-1",
   query: "",
   headers: { "content-type": "application/json", "x-github-event": "issue_comment" },
   bodyText: JSON.stringify({

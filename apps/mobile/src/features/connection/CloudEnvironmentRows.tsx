@@ -101,7 +101,9 @@ function CloudEnvironmentRowsContent(
     <View collapsable={false} className={cn("gap-3", showHeader && "mt-5")}>
       {showHeader ? (
         <View className="px-1">
-          <Text className="text-sm font-hanzo-bold uppercase text-foreground-muted">Hanzo Connect</Text>
+          <Text className="text-sm font-hanzo-bold uppercase text-foreground-muted">
+            Hanzo Connect
+          </Text>
         </View>
       ) : null}
 

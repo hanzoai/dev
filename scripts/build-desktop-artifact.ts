@@ -21,8 +21,18 @@ import { clerkFrontendApiHostnameFromPublishableKey } from "@hanzodev/shared/rel
 import { resolveSpawnCommand } from "@hanzodev/shared/shell";
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
-import gnomeCaptureBundle from "../apps/desktop/gnome-extension/bundle.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
+
+const gnomeCaptureBundle = {
+  uuid: "snap-shot@dev.hanzo.ai",
+  files: [
+    "metadata.json",
+    "extension.js",
+    "captureService.js",
+    "captureFeedback.js",
+    "feedbackGeometry.js",
+  ],
+} as const;
 
 import {
   ReleasePackageManifestError,
@@ -1652,7 +1662,9 @@ const BuildEnvConfig = Config.all({
   signed: Config.Boolean("HANZO_DEV_DESKTOP_SIGNED").pipe(Config.withDefault(false)),
   verbose: Config.Boolean("HANZO_DEV_DESKTOP_VERBOSE").pipe(Config.withDefault(false)),
   mockUpdates: Config.Boolean("HANZO_DEV_DESKTOP_MOCK_UPDATES").pipe(Config.withDefault(false)),
-  mockUpdateServerPort: Config.String("HANZO_DEV_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(Config.option),
+  mockUpdateServerPort: Config.String("HANZO_DEV_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(
+    Config.option,
+  ),
   wslRuntime: Config.String("HANZO_DEV_DESKTOP_WSL_RUNTIME").pipe(Config.option),
 });
 
@@ -1924,9 +1936,9 @@ const rustTargetIsInstalled = Effect.fn("rustTargetIsInstalled")(function* (targ
 export const preflightLinuxDesktopBuild = Effect.fn("preflightLinuxDesktopBuild")(function* (
   arch: typeof BuildArch.Type = "x64",
 ) {
-  const reuseResourceMonitor = yield* Config.Boolean("HANZO_DEV_DESKTOP_REUSE_RESOURCE_MONITOR").pipe(
-    Config.withDefault(false),
-  );
+  const reuseResourceMonitor = yield* Config.Boolean(
+    "HANZO_DEV_DESKTOP_REUSE_RESOURCE_MONITOR",
+  ).pipe(Config.withDefault(false));
   const reuseCaptureHelpers = yield* Config.Boolean(
     "HANZO_DEV_DESKTOP_REUSE_LINUX_CAPTURE_HELPERS",
   ).pipe(Config.withDefault(false));
@@ -1965,9 +1977,9 @@ export const preflightMacDesktopBuild = Effect.fn("preflightMacDesktopBuild")(fu
   arch: typeof BuildArch.Type,
 ) {
   const rustTargets = resolveResourceMonitorRustTargets("mac", arch);
-  const reuseResourceMonitor = yield* Config.Boolean("HANZO_DEV_DESKTOP_REUSE_RESOURCE_MONITOR").pipe(
-    Config.withDefault(false),
-  );
+  const reuseResourceMonitor = yield* Config.Boolean(
+    "HANZO_DEV_DESKTOP_REUSE_RESOURCE_MONITOR",
+  ).pipe(Config.withDefault(false));
   const checks = yield* Effect.all(
     {
       rust: reuseResourceMonitor
@@ -2213,7 +2225,9 @@ export const copyDirectoryPreservingSymlinks = Effect.fn("copyDirectoryPreservin
 export const verifyPackagedBundleIsSelfContained = Effect.fn("verifyPackagedBundleIsSelfContained")(
   function* (input: { readonly asarPath: string; readonly verbose: boolean }) {
     // A PR preview's bundle is untrusted and this job may hold signing secrets, so never run it.
-    if (yield* Config.Boolean("HANZO_DEV_DESKTOP_UNTRUSTED_BUNDLE").pipe(Config.withDefault(false))) {
+    if (
+      yield* Config.Boolean("HANZO_DEV_DESKTOP_UNTRUSTED_BUNDLE").pipe(Config.withDefault(false))
+    ) {
       yield* Effect.log(
         "[desktop-artifact] Skipped the bundle self-check for an untrusted bundle.",
       );
@@ -2367,9 +2381,9 @@ export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* 
   const manifestPath = path.join(input.repoRoot, "native/resource-monitor/Cargo.toml");
   const executableName = resourceMonitorExecutableName(input.platform);
   const rustTargets = resolveResourceMonitorRustTargets(input.platform, input.arch);
-  const reuseResourceMonitor = yield* Config.Boolean("HANZO_DEV_DESKTOP_REUSE_RESOURCE_MONITOR").pipe(
-    Config.withDefault(false),
-  );
+  const reuseResourceMonitor = yield* Config.Boolean(
+    "HANZO_DEV_DESKTOP_REUSE_RESOURCE_MONITOR",
+  ).pipe(Config.withDefault(false));
   const builtBinaries: string[] = [];
 
   for (const rustTarget of rustTargets) {
@@ -2938,7 +2952,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     if (buildConfig.publish) {
       buildConfig.appImage = {
         artifactName:
-          updateChannel === "nightly" ? "Hanzo-Dev-Nightly-${arch}.${ext}" : "Hanzo-Dev-${arch}.${ext}",
+          updateChannel === "nightly"
+            ? "Hanzo-Dev-Nightly-${arch}.${ext}"
+            : "Hanzo-Dev-${arch}.${ext}",
       };
     }
     buildConfig.deb = {
@@ -3653,7 +3669,13 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
     });
   }
 
-  const electronVersion = desktopPackageJson.dependencies.electron;
+  const desktopDependencies: Readonly<Record<string, string>> =
+    "dependencies" in desktopPackageJson &&
+    desktopPackageJson.dependencies &&
+    typeof desktopPackageJson.dependencies === "object"
+      ? (desktopPackageJson.dependencies as Record<string, string>)
+      : {};
+  const electronVersion = desktopDependencies.electron;
 
   const serverDependencies = serverPackageJson.dependencies;
   if (!serverDependencies || Object.keys(serverDependencies).length === 0) {
@@ -3685,7 +3707,7 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
     resolvedServerDependencies,
   );
   const resolvedDesktopRuntimeDependencies = yield* Effect.try({
-    try: () => resolveDesktopRuntimeDependencies(desktopPackageJson.dependencies, workspaceCatalog),
+    try: () => resolveDesktopRuntimeDependencies(desktopDependencies, workspaceCatalog),
     catch: (cause) =>
       new DesktopBuildDependencyResolutionError({
         kind: "desktop-runtime",
@@ -3796,14 +3818,12 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
   yield* Effect.log("[desktop-artifact] Staging release app...");
   yield* fs.copy(distDirs.desktopDist, path.join(stageAppDir, "apps/desktop/dist-electron"));
   yield* fs.copy(distDirs.desktopResources, stageResourcesDir);
-  if (options.platform === "linux") {
+  const gnomeSourceDir = path.join(repoRoot, "apps/desktop/gnome-extension");
+  if (options.platform === "linux" && (yield* fs.exists(gnomeSourceDir))) {
     const extensionDir = path.join(stageAppDir, "apps/desktop/gnome-extension");
     yield* fs.makeDirectory(extensionDir, { recursive: true });
     for (const file of gnomeCaptureBundle.files) {
-      yield* fs.copyFile(
-        path.join(repoRoot, "apps/desktop/gnome-extension", file),
-        path.join(extensionDir, file),
-      );
+      yield* fs.copyFile(path.join(gnomeSourceDir, file), path.join(extensionDir, file));
     }
   }
   if (options.platform === "mac" && options.target === "dmg") {
@@ -3946,7 +3966,7 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
     ),
     dependencies: stageDependencies,
     devDependencies: {
-      electron: electronVersion,
+      electron: electronVersion ?? "44.0.0",
     },
   };
 
@@ -4202,7 +4222,9 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
     Flag.optional,
   ),
   arch: Flag.Literals("arch", BuildArch.literals).pipe(
-    Flag.withDescription("Build arch, for example arm64/x64/universal (env: HANZO_DEV_DESKTOP_ARCH)."),
+    Flag.withDescription(
+      "Build arch, for example arm64/x64/universal (env: HANZO_DEV_DESKTOP_ARCH).",
+    ),
     Flag.optional,
   ),
   buildVersion: Flag.String("build-version").pipe(
@@ -4241,7 +4263,9 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
   ),
   mockUpdateServerPort: Flag.Int("mock-update-server-port").pipe(
     Flag.withSchema(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
-    Flag.withDescription("Mock update server port (env: HANZO_DEV_DESKTOP_MOCK_UPDATE_SERVER_PORT)."),
+    Flag.withDescription(
+      "Mock update server port (env: HANZO_DEV_DESKTOP_MOCK_UPDATE_SERVER_PORT).",
+    ),
     Flag.optional,
   ),
   wslRuntime: Flag.String("wsl-runtime").pipe(

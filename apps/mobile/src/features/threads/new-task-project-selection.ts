@@ -1,7 +1,11 @@
 import type { EnvironmentConnectionPhase } from "@hanzodev/client-runtime/connection";
 import { availableScratchWorkspaceRoot } from "@hanzodev/client-runtime/operations/projects";
 import type { EnvironmentProject } from "@hanzodev/client-runtime/state/shell";
-import { repositoryGroupingKeyOf, type EnvironmentId, type ServerConfig } from "@hanzodev/contracts";
+import {
+  repositoryGroupingKeyOf,
+  type EnvironmentId,
+  type ServerConfig,
+} from "@hanzodev/contracts";
 
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import type { HomeProjectScope } from "../home/homeThreadList";

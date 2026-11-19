@@ -426,7 +426,13 @@ let pendingDispatches: Array<{
 }> = [];
 let pendingAssetUrls: Array<Deferred.Deferred<AssetCreateUrlResult>> = [];
 let sequence = 1;
+type ServerConfigStreamSnapshot = {
+  readonly version: 1;
+  readonly type: "snapshot";
+  readonly config: ServerConfig;
+};
 let vcsStatusSubscriber: Queue.Queue<VcsStatusStreamEvent> | null = null;
+let serverConfigSubscriber: Queue.Queue<ServerConfigStreamSnapshot> | null = null;
 
 const subscribe = <A>(first: ReadonlyArray<A>, register?: (queue: Queue.Queue<A>) => () => void) =>
   Stream.unwrap(
@@ -541,9 +547,20 @@ const handlers: Record<string, (input: never) => unknown> = {
         if (vcsStatusSubscriber === queue) vcsStatusSubscriber = null;
       };
     }),
-  [WS_METHODS.subscribeServerConfig]: () =>
-    subscribe([{ version: 1 as const, type: "snapshot" as const, config: serverConfig() }]),
 };
+
+const subscribeServerConfigStream = () =>
+  subscribe<ServerConfigStreamSnapshot>(
+    [{ version: 1 as const, type: "snapshot" as const, config: serverConfig() }],
+    (queue) => {
+      serverConfigSubscriber = queue;
+      return () => {
+        if (serverConfigSubscriber === queue) serverConfigSubscriber = null;
+      };
+    },
+  );
+
+handlers[WS_METHODS.subscribeServerConfig] = subscribeServerConfigStream;
 
 // Unanswered calls stay pending, like a server that has not replied yet.
 const client = new Proxy(handlers, {
@@ -558,8 +575,7 @@ const client = new Proxy(handlers, {
 const session: EnvironmentConnectionLease["session"] = {
   client: client as unknown as WsRpcProtocolClient,
   initialConfig: Effect.sync(serverConfig),
-  subscribeServerConfig: () =>
-    subscribe([{ version: 1 as const, type: "snapshot" as const, config: serverConfig() }]),
+  subscribeServerConfig: subscribeServerConfigStream,
   ready: Effect.void,
   probe: Effect.void,
   inboundFrames: Effect.succeed(0),
@@ -613,6 +629,15 @@ export function installFakeEnvironment(
     ),
     keybindings: options?.keybindings ?? DEFAULT_RESOLVED_KEYBINDINGS,
   };
+  if (serverConfigSubscriber !== null) {
+    Effect.runSync(
+      Queue.offer(serverConfigSubscriber, {
+        version: 1,
+        type: "snapshot",
+        config: serverConfig(),
+      }),
+    );
+  }
   dispatched = [];
   acceptCommands = options?.acceptCommands === true;
   projects = [
@@ -628,7 +653,7 @@ export function installFakeEnvironment(
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
     if (url.origin !== window.location.origin) return realFetch(input, init);
     if (url.pathname === "/.well-known/hanzo/environment") return json(encodedDescriptor);
-    if (url.pathname === "/api/auth/session") {
+    if (url.pathname === "/v1/auth/session") {
       return json({
         authenticated: true,
         auth,
@@ -638,7 +663,7 @@ export function installFakeEnvironment(
       });
     }
     // Snapshot endpoints fall back to the socket, which serves the same fixtures.
-    if (/^\/(api|oauth|\.well-known)\//.test(url.pathname)) return json({}, 404);
+    if (/^\/(v1|api|oauth|\.well-known)\//.test(url.pathname)) return json({}, 404);
     return realFetch(input, init);
   };
   return {
@@ -646,6 +671,15 @@ export function installFakeEnvironment(
       globalThis.fetch = realFetch;
       threads = [];
       baseServerConfig = makeServerConfig([CODEX_PROVIDER]);
+      if (serverConfigSubscriber !== null) {
+        Effect.runSync(
+          Queue.offer(serverConfigSubscriber, {
+            version: 1,
+            type: "snapshot",
+            config: serverConfig(),
+          }),
+        );
+      }
       dispatched = [];
       acceptCommands = false;
       projects = [project];
@@ -682,7 +716,7 @@ export async function answerAssetUrls(): Promise<void> {
   pendingAssetUrls = [];
   for (const reply of replies) {
     await Effect.runPromise(
-      Deferred.succeed(reply, { relativeUrl: "/api/assets/fake", expiresAt: 4_102_444_800_000 }),
+      Deferred.succeed(reply, { relativeUrl: "/v1/assets/fake", expiresAt: 4_102_444_800_000 }),
     );
   }
 }

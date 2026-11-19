@@ -110,10 +110,13 @@ const ensureRelayClientAvailable = Effect.fn("linkEnvironment.ensureRelayClientA
         message:
           installedStatus.status === "unsupported"
             ? m(
-                msg("Hanzo Dev cannot install the relay client automatically on {platform}-{arch}.", {
-                  platform: installedStatus.platform,
-                  arch: installedStatus.arch,
-                }),
+                msg(
+                  "Hanzo Dev cannot install the relay client automatically on {platform}-{arch}.",
+                  {
+                    platform: installedStatus.platform,
+                    arch: installedStatus.arch,
+                  },
+                ),
               )
             : m(msg("The relay client is still unavailable after installation.")),
       });

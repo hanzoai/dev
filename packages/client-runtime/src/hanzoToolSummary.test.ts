@@ -54,7 +54,9 @@ describe("summarizeHanzoToolCalls", () => {
 
   it("tells opened and merged pull requests from found ones and auto-merges", () => {
     const create = (created: boolean) => completed({ title: "t" }, { number: 1, created });
-    expect(summarizeHanzoToolCalls("create-pr", [create(true)]).label).toBe("Opened 1 pull request");
+    expect(summarizeHanzoToolCalls("create-pr", [create(true)]).label).toBe(
+      "Opened 1 pull request",
+    );
     expect(summarizeHanzoToolCalls("create-pr", [create(false)]).label).toBe(
       "Found 1 open pull request",
     );
@@ -74,9 +76,9 @@ describe("summarizeHanzoToolCalls", () => {
     expect(
       summarizeHanzoToolCalls("merge-pr", [merge(true, "merged"), merge(true, "open")]).label,
     ).toBe("Merged 1 pull request, queued 1");
-    expect(summarizeHanzoToolCalls("review-pr", [completed({ verdict: "approve" }, {})]).label).toBe(
-      "Reviewed 1 pull request",
-    );
+    expect(
+      summarizeHanzoToolCalls("review-pr", [completed({ verdict: "approve" }, {})]).label,
+    ).toBe("Reviewed 1 pull request");
   });
 
   it("counts the checks a CI rerun restarted, and the ones the host refused", () => {

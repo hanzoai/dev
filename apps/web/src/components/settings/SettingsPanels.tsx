@@ -2511,7 +2511,9 @@ export function AboutSettingsPanel() {
           {...setting("privacy-policy")}
           description={
             telemetryOff === undefined
-              ? gt("How we handle your data, including the anonymous usage data Hanzo Dev collects.")
+              ? gt(
+                  "How we handle your data, including the anonymous usage data Hanzo Dev collects.",
+                )
               : gt("How we handle your data. {telemetryOff}", { telemetryOff })
           }
           control={
@@ -2526,7 +2528,9 @@ export function AboutSettingsPanel() {
         />
         <SettingsRow
           {...setting("open-source-licenses")}
-          description={gt("Notices for dependencies, assets, and optional tools used by Hanzo Dev.")}
+          description={gt(
+            "Notices for dependencies, assets, and optional tools used by Hanzo Dev.",
+          )}
           control={
             <Button
               render={<Link to="/settings/open-source-licenses" />}

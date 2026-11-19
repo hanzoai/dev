@@ -23,7 +23,7 @@ const deviceHubAccessAtom = Atom.family((environmentId: EnvironmentId) =>
         );
         return prepared === null
           ? Effect.never
-          : resolveDeviceHubAccess({ prepared, hubBasePath: "/api/device-hub" });
+          : resolveDeviceHubAccess({ prepared, hubBasePath: "/v1/device-hub" });
       })
       .pipe(Atom.withLabel(`mobile-device-hub-access:${environmentId}`)),
   ),

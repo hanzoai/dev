@@ -28,7 +28,11 @@ describe("ExecutionEnvironmentDescriptor", () => {
         }).capabilities.serverInstallation,
       ).toEqual(installation);
     }
-    const spaced = { kind: "hanzo-launcher", launcher: "/opt/bin/hanzo ", baseDir: " /data/hanzo " };
+    const spaced = {
+      kind: "hanzo-launcher",
+      launcher: "/opt/bin/hanzo ",
+      baseDir: " /data/hanzo ",
+    };
     expect(
       decodeDescriptor({
         ...descriptor,

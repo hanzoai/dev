@@ -70,9 +70,7 @@ describe("add project shared logic", () => {
     expect(normalizePastedCloneUrl("imputnet/helium")).toBe(
       "https://github.com/imputnet/helium.git",
     );
-    expect(normalizePastedCloneUrl("  hanzoai/dev  ")).toBe(
-      "https://github.com/hanzoai/dev.git",
-    );
+    expect(normalizePastedCloneUrl("  hanzoai/dev  ")).toBe("https://github.com/hanzoai/dev.git");
   });
 
   it("keeps explicit clone URLs and local paths unchanged", () => {
@@ -97,12 +95,12 @@ describe("add project shared logic", () => {
 
   it("clones the repository when given a page URL copied from the browser", () => {
     for (const [pageUrl, pageRoute, repository] of [
-      ["https://github.com/hanzoai/dev/tree/main", "/tree/", "hanzodev"],
+      ["https://github.com/hanzoai/dev/tree/main", "/tree/", "dev"],
       ["https://gitlab.com/gitlab-org/gitlab-runner/-/tree/main", "/-/", "gitlab-runner"],
-      ["https://git.cafe/hanzoai/dev/tree/main", "/tree/", "hanzodev"],
+      ["https://git.cafe/hanzoai/dev/tree/main", "/tree/", "dev"],
       ["https://gitlab.example.test/g/p/-/blob/main/src/branch/x", "/-/", "p"],
       ["https://code.company.test/g/p/-/tree/main", "/-/", "p"],
-      ["https://github.com/hanzoai/dev/tree/release.git", "/tree/", "hanzodev"],
+      ["https://github.com/hanzoai/dev/tree/release.git", "/tree/", "dev"],
     ] as const) {
       const cloneUrl = normalizePastedCloneUrl(pageUrl);
       expect(cloneUrl).not.toContain(pageRoute);

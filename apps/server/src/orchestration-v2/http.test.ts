@@ -188,7 +188,7 @@ it.effect("exports full history with size, scope, and missing-thread checks", ()
     const read = (threadId: ThreadId) =>
       Effect.promise(() =>
         handler(
-          new Request(`http://localhost/api/orchestration/threads/${threadId}/transcript`, {
+          new Request(`http://localhost/v1/event/threads/${threadId}/transcript`, {
             headers: { [ORCHESTRATION_PROTOCOL_HEADER]: ORCHESTRATION_PROTOCOL_VERSION_TEXT },
           }),
         ),
@@ -364,7 +364,7 @@ it.effect("leaves older settled threads out of the HTTP shell only when asked", 
     const shell = (query: string) =>
       Effect.promise(async () => {
         const response = await handler(
-          new Request(`http://localhost/api/orchestration/shell${query}`, {
+          new Request(`http://localhost/v1/event/shell${query}`, {
             headers: { [ORCHESTRATION_PROTOCOL_HEADER]: ORCHESTRATION_PROTOCOL_VERSION_TEXT },
           }),
         );

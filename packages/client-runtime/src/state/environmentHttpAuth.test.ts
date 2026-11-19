@@ -205,7 +205,7 @@ const LOADERS: ReadonlyArray<{
   {
     name: "PR diff",
     method: "POST",
-    path: "/api/pull-requests/diff",
+    path: "/v1/pull-requests/diff",
     response: DIFF_RESULT,
     expected: DIFF_RESULT,
     load: (input: HttpInput) =>
@@ -214,7 +214,7 @@ const LOADERS: ReadonlyArray<{
   {
     name: "session permissions",
     method: "GET",
-    path: "/api/auth/session",
+    path: "/v1/auth/session",
     response: SESSION,
     expected: SESSION,
     load: fetchEnvironmentSessionState,
@@ -222,7 +222,7 @@ const LOADERS: ReadonlyArray<{
   {
     name: "shell snapshot",
     method: "GET",
-    path: "/api/orchestration/shell",
+    path: "/v1/event/shell",
     response: SHELL,
     expected: SHELL,
     load: (input: HttpInput) =>
@@ -237,7 +237,7 @@ const LOADERS: ReadonlyArray<{
   {
     name: "thread transcript",
     method: "GET",
-    path: `/api/orchestration/threads/${TRANSCRIPT.threadId}/transcript`,
+    path: `/v1/event/threads/${TRANSCRIPT.threadId}/transcript`,
     response: encodeThreadTranscript(TRANSCRIPT),
     expected: TRANSCRIPT,
     load: (input: HttpInput) =>
@@ -246,7 +246,7 @@ const LOADERS: ReadonlyArray<{
   {
     name: "bounded thread snapshot",
     method: "GET",
-    path: `/api/orchestration/threads/${THREAD.projection.thread.id}/bounded`,
+    path: `/v1/event/threads/${THREAD.projection.thread.id}/bounded`,
     response: encodeBoundedSnapshot(BOUNDED_THREAD),
     expected: BOUNDED_THREAD,
     load: (input: HttpInput) =>
@@ -255,7 +255,7 @@ const LOADERS: ReadonlyArray<{
   {
     name: "older thread history",
     method: "GET",
-    path: `/api/orchestration/threads/${THREAD.projection.thread.id}/history`,
+    path: `/v1/event/threads/${THREAD.projection.thread.id}/history`,
     response: THREAD_HISTORY,
     expected: THREAD_HISTORY,
     load: (input: HttpInput) =>
@@ -308,7 +308,7 @@ describe("authenticated environment HTTP requests", () => {
       expect(new Headers(call.init.headers).get("authorization")).toBe("DPoP current-token");
       expect(new Headers(call.init.headers).get("dpop")).toBe("proof-1");
       expect(call.init.credentials).toBeUndefined();
-      if (loader.path.startsWith("/api/orchestration/")) {
+      if (loader.path.startsWith("/v1/event/")) {
         expect(new Headers(call.init.headers).get(ORCHESTRATION_PROTOCOL_HEADER)).toBe(
           ORCHESTRATION_PROTOCOL_VERSION_TEXT,
         );
@@ -384,8 +384,8 @@ describe("authenticated environment HTTP requests", () => {
         { expectedEnvironmentId: TARGET.environmentId, rejectedAccessToken: "current-token" },
       ]);
       expect(harness.calls.map((call) => call.url)).toEqual([
-        `${CURRENT_ORIGIN}/api/pull-requests/diff`,
-        `${RENEWED_ORIGIN}/api/pull-requests/diff`,
+        `${CURRENT_ORIGIN}/v1/pull-requests/diff`,
+        `${RENEWED_ORIGIN}/v1/pull-requests/diff`,
       ]);
       expect(
         harness.calls.map((call) => new Headers(call.init.headers).get("authorization")),
@@ -396,7 +396,7 @@ describe("authenticated environment HTTP requests", () => {
       ]);
       expect(harness.proofs[1]).toEqual({
         method: "POST",
-        url: `${RENEWED_ORIGIN}/api/pull-requests/diff`,
+        url: `${RENEWED_ORIGIN}/v1/pull-requests/diff`,
         accessToken: "renewed-token",
       });
       expect(harness.calls[1]!.init.body).toEqual(harness.calls[0]!.init.body);

@@ -143,15 +143,15 @@ describe("webhook route", () => {
         hookId: "id",
         privateKey: forged.privateKey,
       });
-      yield* send("/api/hooks/id/tok", { ...relayHeaders, "x-hanzo-relay-delivery": proof });
-      yield* send("/api/hooks/id/tok", relayHeaders);
-      yield* send("/api/hooks/id/tok", { ...relayHeaders, "x-hanzo-relay-delivery": forgedProof });
-      yield* send("/api/hooks/id/tok", {
+      yield* send("/v1/hooks/id/tok", { ...relayHeaders, "x-hanzo-relay-delivery": proof });
+      yield* send("/v1/hooks/id/tok", relayHeaders);
+      yield* send("/v1/hooks/id/tok", { ...relayHeaders, "x-hanzo-relay-delivery": forgedProof });
+      yield* send("/v1/hooks/id/tok", {
         ...relayHeaders,
         "x-hanzo-relay-delivery-id": "relay-2",
         "x-hanzo-relay-delivery": proof,
       });
-      yield* send("/api/hooks/other/tok", { ...relayHeaders, "x-hanzo-relay-delivery": proof });
+      yield* send("/v1/hooks/other/tok", { ...relayHeaders, "x-hanzo-relay-delivery": proof });
       yield* Effect.promise(() => dispose());
       expect(received.map((request) => request.relayDeliveryId)).toEqual([
         "relay-1",
@@ -176,7 +176,7 @@ describe("webhook route", () => {
       const proof = yield* relayProof({ deliveryId: "relay-1", receivedAt, hookId: "id" });
       yield* Effect.promise(() =>
         handler(
-          post("/api/hooks/id/tok", "{}", {
+          post("/v1/hooks/id/tok", "{}", {
             "x-hanzo-relay-delivery-id": "relay-1",
             "x-hanzo-relay-received-at": receivedAt,
             "x-hanzo-relay-delivery": proof,
@@ -206,7 +206,7 @@ describe("webhook route", () => {
     for (const [result, status, outcome] of cases) {
       const { handler, dispose } = handlerFor(() => Effect.succeed(result));
       try {
-        const response = await handler(post("/api/hooks/id/tok", "{}"));
+        const response = await handler(post("/v1/hooks/id/tok", "{}"));
         expect(response.status).toBe(status);
         expect(response.headers.get("x-hanzo-hook-outcome")).toBe(outcome);
         if (status === 429) expect(await response.json()).toEqual({ error: outcome });
@@ -224,10 +224,10 @@ describe("webhook route", () => {
     });
     try {
       const big = new Uint8Array(WEBHOOK_MAX_BODY_BYTES + 1);
-      expect((await handler(post("/api/hooks/id/tok", big))).status).toBe(413);
-      expect((await handler(post("/api/hooks/id", "{}"))).status).toBe(404);
-      expect((await handler(post("/api/hooks/id/tok/extra", "{}"))).status).toBe(404);
-      expect((await handler(post("/api/hooks/%E0/tok", "{}"))).status).toBe(404);
+      expect((await handler(post("/v1/hooks/id/tok", big))).status).toBe(413);
+      expect((await handler(post("/v1/hooks/id", "{}"))).status).toBe(404);
+      expect((await handler(post("/v1/hooks/id/tok/extra", "{}"))).status).toBe(404);
+      expect((await handler(post("/v1/hooks/%E0/tok", "{}"))).status).toBe(404);
       const chunked = new ReadableStream<Uint8Array>({
         start(controller) {
           for (let sent = 0; sent <= WEBHOOK_MAX_BODY_BYTES; sent += 64 * 1024) {
@@ -237,7 +237,7 @@ describe("webhook route", () => {
         },
       });
       const streamed = await handler(
-        new Request("http://env.local/api/hooks/id/tok", {
+        new Request("http://env.local/v1/hooks/id/tok", {
           method: "POST",
           body: chunked,
           // Node's fetch needs duplex for streamed bodies.
@@ -263,13 +263,13 @@ describe("webhook route", () => {
     });
     try {
       const response = await handler(
-        new Request("http://env.local/api/hooks/id/tok", { method: "HEAD" }),
+        new Request("http://env.local/v1/hooks/id/tok", { method: "HEAD" }),
       );
       expect(response.status).toBe(405);
       expect(response.headers.get("allow")).toBe("GET, POST, PUT, PATCH");
       expect(response.headers.get("x-hanzo-hook-outcome")).toBe("method_not_allowed");
       expect(calls).toBe(0);
-      const get = await handler(new Request("http://env.local/api/hooks/id/tok"));
+      const get = await handler(new Request("http://env.local/v1/hooks/id/tok"));
       expect(get.status).toBe(202);
       expect(calls).toBe(1);
     } finally {
@@ -285,7 +285,7 @@ describe("webhook route", () => {
     for (const failure of failures) {
       const { handler, dispose } = handlerFor(() => failure);
       try {
-        const response = await handler(post("/api/hooks/id/tok", "{}"));
+        const response = await handler(post("/v1/hooks/id/tok", "{}"));
         expect(response.status).toBe(500);
         expect(await response.json()).toEqual({ error: "internal_error" });
       } finally {

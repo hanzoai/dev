@@ -21,7 +21,7 @@ describe("promptLinkSearchFromParams", () => {
       value: {
         kind: "new",
         prompt: { text: "Fix the bug & add tests = done?", hiddenCharacters: 0 },
-        repository: { owner: "hanzoai", name: "hanzo" },
+        repository: { owner: "hanzoai", name: "dev" },
         provider: "codex",
         model: null,
       },

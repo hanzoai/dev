@@ -81,7 +81,10 @@ const usersThread = ThreadId.make("thread:box-users-own");
 const boxThreads = (seen: Ref.Ref<Seen>, linkSession: Ref.Ref<string>) => {
   const base = { ...liveThreadShell(boxThread, { runtimeMode: "auto" }), projectId: boxProject };
   const linked = Ref.get(linkSession).pipe(
-    Effect.map((sessionId) => ({ ...base, linkOrigin: { sessionId, label: "Hanzo Dev · Laptop" } })),
+    Effect.map((sessionId) => ({
+      ...base,
+      linkOrigin: { sessionId, label: "Hanzo Dev · Laptop" },
+    })),
   );
   const users = { ...liveThreadShell(usersThread, { runtimeMode: "auto" }), projectId: boxProject };
   const run = (status: OrchestrationV2Run["status"]) =>

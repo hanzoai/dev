@@ -565,7 +565,9 @@ it("keeps backslashes that CommonMark would read as escapes in prose Windows pat
   const render = (markdown: string) => text(processor.runSync(processor.parse(markdown)) as Node);
 
   expect(
-    render(String.raw`Saved to C:\Users\me\.hanzo-dev\_build and (C:\.scratch) and C:/work\.config.`),
+    render(
+      String.raw`Saved to C:\Users\me\.hanzo-dev\_build and (C:\.scratch) and C:/work\.config.`,
+    ),
   ).toBe(String.raw`Saved to C:\Users\me\.hanzo-dev\_build and (C:\.scratch) and C:/work\.config.`);
   expect(render(String.raw`Escaped C:\\Users\\me`)).toBe(String.raw`Escaped C:\\Users\\me`);
   expect(render(String.raw`See C:\x and \*this\* and Note:\*that\*.`)).toBe(

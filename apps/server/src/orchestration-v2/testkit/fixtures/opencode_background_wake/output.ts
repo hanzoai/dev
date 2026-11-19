@@ -1,5 +1,8 @@
 import { assert } from "@effect/vitest";
-import type { OrchestrationV2ThreadProjection, ProviderReplayTranscript } from "@hanzodev/contracts";
+import type {
+  OrchestrationV2ThreadProjection,
+  ProviderReplayTranscript,
+} from "@hanzodev/contracts";
 
 import type { OrchestratorV2ScenarioResult } from "../../OrchestratorScenario.ts";
 import {

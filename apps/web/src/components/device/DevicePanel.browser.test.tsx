@@ -58,7 +58,7 @@ const deviceState: DeviceServiceState = {
   ],
   onboardingCompleted: true,
   agentAccessEnabled: true,
-  hubBasePath: "/api/device-hub",
+  hubBasePath: "/v1/device-hub",
   revision: 1,
 };
 let currentState = deviceState;

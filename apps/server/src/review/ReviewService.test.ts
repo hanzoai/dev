@@ -99,7 +99,9 @@ describe("ReviewService", () => {
   it.effect("rejects diff preview cwd outside the configured workspace roots", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-review-workspace-" });
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "hanzo-review-workspace-",
+      });
       const outsideRoot = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-review-outside-" });
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-review-base-" });
       const detectCalls: Array<{ readonly cwd: string }> = [];
@@ -122,7 +124,9 @@ describe("ReviewService", () => {
   it.effect("allows previous custom worktree locations but never a filesystem root", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-review-workspace-" });
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "hanzo-review-workspace-",
+      });
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-review-base-" });
       const previous = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-review-old-worktrees-" });
       const outsideRoot = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-review-outside-" });
@@ -157,7 +161,9 @@ describe("ReviewService", () => {
   it.effect("allows registered project roots outside the server cwd", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-review-workspace-" });
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "hanzo-review-workspace-",
+      });
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-review-base-" });
       const projectRoot = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-review-project-" });
       const projectChild = `${projectRoot}/packages/app`;
@@ -191,7 +197,9 @@ describe("ReviewService", () => {
   it.effect("allows the worktree a thread is bound to, and nothing else outside the project", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-review-workspace-" });
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "hanzo-review-workspace-",
+      });
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-review-base-" });
       const project = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-review-project-" });
       const bound = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-review-bound-" });
@@ -235,7 +243,9 @@ describe("ReviewService", () => {
   it.effect("allows a thread's worktree linked from a managed folder to a checkout elsewhere", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-review-workspace-" });
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "hanzo-review-workspace-",
+      });
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-review-base-" });
       const managed = yield* fs.realPath(
         yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-review-worktrees-" }),

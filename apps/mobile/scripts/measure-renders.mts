@@ -87,7 +87,9 @@ const connectInspector = Effect.fn("measure.connectInspector")(function* (metro:
     .pipe(Effect.flatMap(HttpClientResponse.schemaBodyJson(InspectorTargets)));
   const target = targets.find((entry) => entry.appId.startsWith("ai.hanzo.dev"));
   if (!target)
-    return yield* new MeasureError({ message: `No Hanzo Dev app is attached to Metro at ${metro}.` });
+    return yield* new MeasureError({
+      message: `No Hanzo Dev app is attached to Metro at ${metro}.`,
+    });
   // Expo closes inspector sockets unless Origin matches Metro's advertised URL; pass that URL as --metro.
   const socket = yield* Socket.makeWebSocket(target.webSocketDebuggerUrl, {
     headers: { origin: new URL(metro).origin },
@@ -133,7 +135,7 @@ const connectServer = Effect.fn("measure.connectServer")(function* (options: Opt
     .get(`${options.server}/.well-known/hanzo/environment`)
     .pipe(Effect.flatMap(HttpClientResponse.schemaBodyJson(ExecutionEnvironmentDescriptor)));
   const shell = yield* http
-    .get(`${options.server}/api/orchestration/shell`)
+    .get(`${options.server}/v1/event/shell`)
     .pipe(Effect.flatMap(HttpClientResponse.schemaBodyJson(OrchestrationV2ShellSnapshot)));
   let projectId = shell.projects.find(
     (project) => project.workspaceRoot === options.projectRoot,
@@ -143,7 +145,7 @@ const connectServer = Effect.fn("measure.connectServer")(function* (options: Opt
   if (!projectId) {
     projectId = ProjectId.make(yield* uuid);
     yield* http.execute(
-      HttpClientRequest.post(`${options.server}/api/projects/mutate`).pipe(
+      HttpClientRequest.post(`${options.server}/v1/projects/mutate`).pipe(
         HttpClientRequest.bodyJsonUnsafe({
           type: "project.create",
           commandId: yield* uuid,
@@ -155,7 +157,7 @@ const connectServer = Effect.fn("measure.connectServer")(function* (options: Opt
     );
   }
   const ticket = yield* http
-    .execute(HttpClientRequest.post(`${options.server}/api/auth/websocket-ticket`))
+    .execute(HttpClientRequest.post(`${options.server}/v1/auth/websocket-ticket`))
     .pipe(
       Effect.flatMap(HttpClientResponse.schemaBodyJson(Schema.Struct({ ticket: Schema.String }))),
     );

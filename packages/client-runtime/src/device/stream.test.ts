@@ -90,8 +90,8 @@ describe("native device stream transport", () => {
         deviceId: "test device",
         preferMjpeg: platform === "ios",
         access: {
-          httpBase: "https://environment.test/api/device-hub",
-          wsBase: "wss://environment.test/api/device-hub",
+          httpBase: "https://environment.test/v1/device-hub",
+          wsBase: "wss://environment.test/v1/device-hub",
           credentials: false,
           query: { wsTicket: "stream-ticket", hostId: "ssh-host" },
         },
@@ -373,8 +373,8 @@ function recoveryFixture(
       serveSimOnly,
       deviceId: "test-device",
       access: {
-        httpBase: "https://test/api/device-hub",
-        wsBase: "wss://test/api/device-hub",
+        httpBase: "https://test/v1/device-hub",
+        wsBase: "wss://test/v1/device-hub",
         credentials: true,
         query: {},
       },
@@ -431,10 +431,10 @@ describe("shared device stream readiness and recovery", () => {
     await vi.advanceTimersByTimeAsync(0);
     // No MJPEG priming: Simlock serves only the AVCC stream and the input socket.
     expect(fetch.mock.calls.map(([url]) => url)).toEqual([
-      "https://test/api/device-hub/vendor/serve-sim/helper/test-device/stream.avcc",
+      "https://test/v1/device-hub/vendor/serve-sim/helper/test-device/stream.avcc",
     ]);
     expect(sockets.map((socket) => socket.url)).toEqual([
-      "wss://test/api/device-hub/vendor/serve-sim/helper/ws?device=test-device",
+      "wss://test/v1/device-hub/vendor/serve-sim/helper/ws?device=test-device",
     ]);
     // Simlock adds meta (5), keep-alive (6), and lease-end (7) frames to serve-sim's envelopes.
     videoBodies[0]!.enqueue(
@@ -657,8 +657,8 @@ describe("Android WebRTC device streams", () => {
         platform: "android",
         deviceId: "session-1",
         access: {
-          httpBase: "https://test/api/device-hub",
-          wsBase: "wss://test/api/device-hub",
+          httpBase: "https://test/v1/device-hub",
+          wsBase: "wss://test/v1/device-hub",
           credentials: true,
           query: { hostId: "eas" },
         },
@@ -674,8 +674,8 @@ describe("Android WebRTC device streams", () => {
     client.start();
     await vi.advanceTimersByTimeAsync(0);
     expect(fetch.mock.calls.map(([url]) => url)).toEqual([
-      "https://test/api/device-hub/vendor/serve-emu/api?device=session-1&hostId=eas",
-      "https://test/api/device-hub/vendor/serve-emu/webrtc/offer?device=session-1&hostId=eas",
+      "https://test/v1/device-hub/vendor/serve-emu/api?device=session-1&hostId=eas",
+      "https://test/v1/device-hub/vendor/serve-emu/webrtc/offer?device=session-1&hostId=eas",
     ]);
     expect(peers[0]?.setRemoteDescription).toHaveBeenCalledWith({
       type: "answer",
@@ -687,7 +687,7 @@ describe("Android WebRTC device streams", () => {
     expect(events.onStatus).toHaveBeenLastCalledWith("streaming", undefined);
 
     expect(sockets.map((socket) => socket.url)).toEqual([
-      "wss://test/api/device-hub/vendor/serve-emu/ws?device=session-1&video=0&hostId=eas",
+      "wss://test/v1/device-hub/vendor/serve-emu/ws?device=session-1&video=0&hostId=eas",
     ]);
     sockets[0]!.onopen?.();
     client.pressButton("back");

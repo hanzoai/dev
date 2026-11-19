@@ -248,7 +248,9 @@ describe("upgradeLegacyContextMessage", () => {
       "</element_context>",
     ].join("\n");
     const upgraded = upgradeLegacyContextMessage(text);
-    expect(upgraded.text).toBe("fix this\n\n[<Button>](hanzo-context://v1/element/legacy_element_1)");
+    expect(upgraded.text).toBe(
+      "fix this\n\n[<Button>](hanzo-context://v1/element/legacy_element_1)",
+    );
     expect(upgraded.records).toEqual([
       {
         version: 1,

@@ -19,7 +19,11 @@ import {
   threadSearchMatchKey,
   threadSearchSubject,
 } from "@hanzodev/client-runtime/state/thread-search";
-import { foldSearchQuery, rankSearchItems, scoreThreadSearch } from "@hanzodev/shared/paletteSearch";
+import {
+  foldSearchQuery,
+  rankSearchItems,
+  scoreThreadSearch,
+} from "@hanzodev/shared/paletteSearch";
 import {
   createInboxReturnTracker,
   isThreadWorking,

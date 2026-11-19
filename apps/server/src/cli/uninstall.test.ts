@@ -233,7 +233,10 @@ it.layer(NodeServices.layer)("hanzo uninstall launcher", (it) => {
       const cmd = path.join(root, "bin/hanzo.cmd");
       const edited = path.join(root, "bin/edited.cmd");
       yield* fs.writeFileString(cmd, `@echo off\r\n"${exe}" %*`);
-      yield* fs.writeFileString(edited, `@echo off\r\nset "HANZO_DEV_HOME=D:\\other"\r\n"${exe}" %*`);
+      yield* fs.writeFileString(
+        edited,
+        `@echo off\r\nset "HANZO_DEV_HOME=D:\\other"\r\n"${exe}" %*`,
+      );
       yield* fs.writeFileString(path.join(root, "runtime/launchers"), `${cmd}\r\n${edited}\r\n`);
       assert.deepStrictEqual(
         yield* findRecordedLaunchers(versionsDir).pipe(

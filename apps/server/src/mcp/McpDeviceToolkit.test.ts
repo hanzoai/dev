@@ -75,7 +75,7 @@ const state = {
   sessions: [],
   onboardingCompleted: true,
   agentAccessEnabled: true,
-  hubBasePath: "/api/device-hub",
+  hubBasePath: "/v1/device-hub",
   revision: 1,
 };
 const png = new Uint8Array(24);
@@ -151,7 +151,9 @@ const layerTest = McpHttpServer.layerDeviceToolkit.pipe(
   Layer.provideMerge(McpToolAccessTestkit.liveThreadsLayer),
   Layer.provideMerge(layerDeviceServiceMock),
   Layer.provide(layerProjectsMock),
-  Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-mcp-device-toolkit-test-" })),
+  Layer.provide(
+    ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-mcp-device-toolkit-test-" }),
+  ),
   Layer.provide(NodeServices.layer),
 );
 

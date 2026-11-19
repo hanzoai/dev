@@ -15,7 +15,7 @@ export function shouldHandleAppLink(url: string, cloudConfigured: boolean): bool
     !route.includes("/oauth/callback") &&
     !route.includes("://oauth/callback") &&
     !route.includes("://auth/callback") &&
-    !/^(?:hanzo|hanzodev(?:-dev|-preview)?):\/*$/.test(url) &&
+    !/^(?:hanzo|hanzodev)(?:-dev|-preview)?:\/*$/.test(url) &&
     (cloudConfigured || !CLOUD_ONLY_LINK_PATH.test(route))
   );
 }

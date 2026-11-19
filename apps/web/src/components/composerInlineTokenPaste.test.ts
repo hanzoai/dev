@@ -1,5 +1,9 @@
 import { threadChipCopyTarget } from "@hanzodev/client-runtime/thread-reference";
-import { type ComposerContextClipboardFragment, EnvironmentId, ThreadId } from "@hanzodev/contracts";
+import {
+  type ComposerContextClipboardFragment,
+  EnvironmentId,
+  ThreadId,
+} from "@hanzodev/contracts";
 import {
   COMPOSER_CONTEXT_CLIPBOARD_MIME,
   encodeComposerContextFragment,

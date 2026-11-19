@@ -495,10 +495,6 @@
       "types": "./src/providerAuthReturnUrl.ts",
       "import": "./src/providerAuthReturnUrl.ts"
     },
-    "./codexAuthCallback": {
-      "types": "./src/codexAuthCallback.ts",
-      "import": "./src/codexAuthCallback.ts"
-    },
     "./codexAuthHandoff": {
       "types": "./src/codexAuthHandoff.ts",
       "import": "./src/codexAuthHandoff.ts"
@@ -653,9 +649,9 @@
     "test": "vp test run --config ../../vite.config.ts --dir ."
   },
   "dependencies": {
+    "@hanzodev/contracts": "workspace:*",
     "@noble/curves": "catalog:",
     "@noble/hashes": "catalog:",
-    "@hanzodev/contracts": "workspace:*",
     "effect": "catalog:",
     "ffi-rs": "1.3.2",
     "get-east-asian-width": "^1.6.0",

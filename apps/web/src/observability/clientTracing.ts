@@ -5,7 +5,10 @@ import * as Scope from "effect/Scope";
 import { HttpClient } from "effect/http";
 import { OtlpExporter, OtlpSerialization, OtlpTracer } from "effect/observability";
 
-import { settleAsyncResult, squashAtomCommandFailure } from "@hanzodev/client-runtime/state/runtime";
+import {
+  settleAsyncResult,
+  squashAtomCommandFailure,
+} from "@hanzodev/client-runtime/state/runtime";
 import { safeErrorLogAttributes } from "@hanzodev/client-runtime/errors";
 import { resolvePrimaryEnvironmentHttpUrl } from "../environments/primary";
 import { releaseChannelOf, releaseResourceAttributes } from "@hanzodev/shared/releaseResource";

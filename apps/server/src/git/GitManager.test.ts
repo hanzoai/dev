@@ -2653,9 +2653,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           updatedAt: "2026-03-01T10:00:00.000Z",
         });
         expect(listedSelectors(providerCalls).includes("upstream/effect-atom")).toBe(false);
-        expect(listedSelectors(providerCalls).includes("hanzoai:upstream/effect-atom")).toBe(
-          false,
-        );
+        expect(listedSelectors(providerCalls).includes("hanzoai:upstream/effect-atom")).toBe(false);
         expect(
           listedSelectors(providerCalls).includes("my-org/upstream:upstream/effect-atom"),
         ).toBe(false);
@@ -2882,7 +2880,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         yield* runGit(repoDir, ["fetch", "origin"]);
         yield* runGit(repoDir, ["remote", "set-head", "origin", "main"]);
         yield* runGit(repoDir, ["checkout", "-b", "feature/from-dev", "origin/dev"]);
-        yield* runGit(repoDir, ["config", "branch.feature/from-dev.hanzo-merge-base", "dev"]);
+        yield* runGit(repoDir, ["config", "branch.feature/from-dev.hanzo-dev-merge-base", "dev"]);
 
         const { manager, providerCalls } = yield* makeManager({
           providerScenario: {
@@ -4616,7 +4614,10 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         yield* runGit(repoDir, ["push", "origin", "refs/heads/upstream/release"]);
 
         const driver = yield* GitVcsDriver.GitVcsDriver;
-        const worktreePath = NodePath.join(yield* makeTempDir("hanzodev-git-worktrees-"), "feature");
+        const worktreePath = NodePath.join(
+          yield* makeTempDir("hanzodev-git-worktrees-"),
+          "feature",
+        );
         yield* driver.createWorktree({
           cwd: repoDir,
           path: worktreePath,
@@ -4692,7 +4693,10 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         ]);
 
         const driver = yield* GitVcsDriver.GitVcsDriver;
-        const worktreePath = NodePath.join(yield* makeTempDir("hanzodev-git-worktrees-"), "feature");
+        const worktreePath = NodePath.join(
+          yield* makeTempDir("hanzodev-git-worktrees-"),
+          "feature",
+        );
         yield* driver.createWorktree({
           cwd: repoDir,
           path: worktreePath,

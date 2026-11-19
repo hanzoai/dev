@@ -66,7 +66,7 @@ const deviceState = (input: {
     sessions: input.sessions ?? [],
     onboardingCompleted: true,
     agentAccessEnabled: true,
-    hubBasePath: "/api/device-hub",
+    hubBasePath: "/v1/device-hub",
     revision: 0,
   }) as unknown as DeviceServiceState;
 

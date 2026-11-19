@@ -1137,7 +1137,9 @@ function ResourceTelemetryDiagnosticsBody({
               value={allHanzo ? formatBytes(allHanzo.currentRssBytes) : "..."}
               detail={
                 allHanzo
-                  ? gt("{bytes} combined process peaks", { bytes: formatBytes(allHanzo.peakRssBytes) })
+                  ? gt("{bytes} combined process peaks", {
+                      bytes: formatBytes(allHanzo.peakRssBytes),
+                    })
                   : undefined
               }
             />

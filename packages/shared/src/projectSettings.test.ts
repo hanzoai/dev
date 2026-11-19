@@ -156,7 +156,7 @@ describe("resolveProjectSettings", () => {
     };
     expect(
       resolveProjectSettings(settings, projectId).settings.textGenerationModelSelection.instanceId,
-    ).toBe(ProviderInstanceId.make("claudeAgent"));
+    ).toBe(ProviderInstanceId.make("hanzo"));
     expect(
       resolveProjectSettings(settings, otherProjectId).settings.textGenerationModelSelection,
     ).toEqual(settings.textGenerationModelSelection);
@@ -172,6 +172,8 @@ describe("resolveProjectSettings", () => {
       projectSettingsOverrides: {
         [projectId]: {
           providerInstances: {
+            [ProviderInstanceId.make("hanzo")]: { enabled: false },
+            [ProviderInstanceId.make("hanzoGen")]: { enabled: false },
             [codex]: { enabled: false },
             [ProviderInstanceId.make("claudeAgent")]: { enabled: false },
           },

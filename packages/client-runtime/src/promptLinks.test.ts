@@ -29,11 +29,11 @@ describe("findPromptLinkProjects", () => {
     const projects = [
       {
         id: "fork",
-        repositoryIdentity: identity("github.com/hanzoai/dev", "github.com/me/hanzodev"),
+        repositoryIdentity: identity("github.com/hanzoai/hanzodev", "github.com/me/hanzodev"),
       },
       { id: "none", repositoryIdentity: null },
       { id: "recent", repositoryIdentity: identity("github.com/HanzoAI/HanzoDev") },
-      { id: "older", repositoryIdentity: identity("github.com/hanzoai/dev") },
+      { id: "older", repositoryIdentity: identity("github.com/hanzoai/hanzodev") },
     ];
     const ids = (owner: string, name: string) =>
       findPromptLinkProjects(projects, { owner, name }).map((project) => project.id);
@@ -49,7 +49,7 @@ describe("findPromptLinkProjects", () => {
       { id: "gitlab", repositoryIdentity: identity("gitlab.com/hanzoai/dev") },
     ];
     expect(
-      findPromptLinkProjects(projects, { owner: "hanzoai", name: "hanzo" }).map(
+      findPromptLinkProjects(projects, { owner: "hanzoai", name: "dev" }).map(
         (project) => project.id,
       ),
     ).toEqual(["gitcafe", "staging"]);

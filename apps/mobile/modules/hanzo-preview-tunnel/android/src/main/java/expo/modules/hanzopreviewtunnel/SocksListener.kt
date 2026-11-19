@@ -37,7 +37,7 @@ private fun isLoopbackName(name: String): Boolean {
 
 /**
  * A SOCKS listener on 127.0.0.1 that carries each loopback CONNECT over one WebSocket to the
- * environment's /api/preview/tunnel. It never connects anywhere on this device, so a tunnel that
+ * environment's /v1/preview/tunnel. It never connects anywhere on this device, so a tunnel that
  * fails is a connection error, never one of this device's own servers. SOCKS4 is accepted too,
  * because WebView's `socks://` proxy scheme speaks it.
  */

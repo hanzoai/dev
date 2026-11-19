@@ -83,7 +83,7 @@ vi.mock(import("~/state/assets"), async (original) => {
   const createUrl = Atom.family((_key: string) =>
     Atom.make(
       Effect.sync(() => ({
-        relativeUrl: `/api/assets/mint-${++state.browserAssetMints}/page.html`,
+        relativeUrl: `/v1/assets/mint-${++state.browserAssetMints}/page.html`,
         expiresAt: Number.MAX_SAFE_INTEGER,
       })),
     ).pipe(Atom.keepAlive),

@@ -328,7 +328,7 @@ describe("RemoteEnvironmentAuthorization", () => {
       });
       expect(harness.fetch.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
         "/.well-known/hanzo/environment",
-        "/api/auth/websocket-ticket/rpc",
+        "/v1/auth/websocket-ticket/rpc",
       ]);
     }),
   );
@@ -383,7 +383,7 @@ describe("RemoteEnvironmentAuthorization", () => {
       });
       expect((yield* Ref.get(harness.proofInputs)).map((proof) => proof.url)).toEqual([
         `${ENDPOINT.httpBaseUrl}/oauth/token`,
-        `${ENDPOINT.httpBaseUrl}/api/auth/websocket-ticket/rpc`,
+        `${ENDPOINT.httpBaseUrl}/v1/auth/websocket-ticket/rpc`,
         `${ENDPOINT.httpBaseUrl}/ws`,
       ]);
     }),
@@ -492,14 +492,14 @@ describe("RemoteEnvironmentAuthorization", () => {
       }).pipe(Effect.provide(harness.layer));
 
       expect(harness.fetch.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
-        "/api/auth/websocket-ticket/rpc",
+        "/v1/auth/websocket-ticket/rpc",
         ...Array.from({ length: 4 }, () => [
           "/.well-known/hanzo/environment",
-          "/api/auth/websocket-ticket/rpc",
+          "/v1/auth/websocket-ticket/rpc",
         ]).flat(),
-        "/api/auth/websocket-ticket/rpc",
+        "/v1/auth/websocket-ticket/rpc",
         "/.well-known/hanzo/environment",
-        "/api/auth/websocket-ticket/rpc",
+        "/v1/auth/websocket-ticket/rpc",
       ]);
     }),
   );
@@ -530,7 +530,7 @@ describe("RemoteEnvironmentAuthorization", () => {
       });
       expect(
         harness.fetch.calls.filter(([url]) =>
-          String(url).endsWith("/api/auth/websocket-ticket/rpc"),
+          String(url).endsWith("/v1/auth/websocket-ticket/rpc"),
         ),
       ).toHaveLength(1);
     }),
@@ -562,11 +562,13 @@ describe("RemoteEnvironmentAuthorization", () => {
       expect(first.socketUrl).toContain("wsTicket=first-ticket");
       expect(second.socketUrl).toContain("wsTicket=second-ticket");
       expect(
-        harness.fetch.calls.filter(([url]) => String(url).endsWith("/.well-known/hanzo/environment")),
+        harness.fetch.calls.filter(([url]) =>
+          String(url).endsWith("/.well-known/hanzo/environment"),
+        ),
       ).toHaveLength(2);
       expect(
         harness.fetch.calls.filter(([url]) =>
-          String(url).endsWith("/api/auth/websocket-ticket/rpc"),
+          String(url).endsWith("/v1/auth/websocket-ticket/rpc"),
         ),
       ).toHaveLength(2);
     }),
@@ -641,7 +643,7 @@ describe("RemoteEnvironmentAuthorization", () => {
       expect(authorized.descriptor).toMatchObject({ environmentId: ENVIRONMENT_ID });
       expect(harness.fetch.calls.map(([url]) => String(url)).toSorted()).toEqual([
         "https://environment.example.test/.well-known/hanzo/environment",
-        "https://environment.example.test/api/auth/websocket-ticket/rpc",
+        "https://environment.example.test/v1/auth/websocket-ticket/rpc",
       ]);
     }),
   );
@@ -678,7 +680,7 @@ describe("RemoteEnvironmentAuthorization", () => {
       expect(yield* Ref.get(harness.bootstrapCalls)).toBe(0);
       expect(harness.fetch.calls.map(([url]) => String(url))).toEqual([
         "http://192.168.1.10:3773/.well-known/hanzo/environment",
-        "http://192.168.1.10:3773/api/auth/websocket-ticket/rpc",
+        "http://192.168.1.10:3773/v1/auth/websocket-ticket/rpc",
       ]);
     }),
   );
@@ -963,7 +965,7 @@ describe("RemoteEnvironmentAuthorization", () => {
           accessToken: "replacement-access-token",
         }),
       );
-      expect(requestsTo(harness, "/api/auth/websocket-ticket/rpc")).toBe(2);
+      expect(requestsTo(harness, "/v1/auth/websocket-ticket/rpc")).toBe(2);
       expect(requestsTo(harness, "/oauth/token")).toBe(1);
     }),
   );
@@ -1003,7 +1005,7 @@ describe("RemoteEnvironmentAuthorization", () => {
           accessToken: "replacement-access-token",
         }),
       );
-      expect(requestsTo(harness, "/api/auth/websocket-ticket/rpc")).toBe(2);
+      expect(requestsTo(harness, "/v1/auth/websocket-ticket/rpc")).toBe(2);
       expect(requestsTo(harness, "/oauth/token")).toBe(1);
     }),
   );

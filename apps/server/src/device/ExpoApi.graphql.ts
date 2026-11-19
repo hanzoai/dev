@@ -96,11 +96,11 @@ export const CreateDeviceRunSessionDeviceRunSession = Schema.Struct({
 })
 export interface CreateDeviceRunSessionDeviceRunSession extends Schema.Struct.Type<typeof CreateDeviceRunSessionDeviceRunSession.fields> {}
 
-export const T3CreateEasSimulatorSessionDeviceRunSessionDeviceRunSessionMutation = Schema.Struct({
+export const HanzoCreateEasSimulatorSessionDeviceRunSessionDeviceRunSessionMutation = Schema.Struct({
   /** Create a device run session */
   createDeviceRunSession: CreateDeviceRunSessionDeviceRunSession
 })
-export interface T3CreateEasSimulatorSessionDeviceRunSessionDeviceRunSessionMutation extends Schema.Struct.Type<typeof T3CreateEasSimulatorSessionDeviceRunSessionDeviceRunSessionMutation.fields> {}
+export interface HanzoCreateEasSimulatorSessionDeviceRunSessionDeviceRunSessionMutation extends Schema.Struct.Type<typeof HanzoCreateEasSimulatorSessionDeviceRunSessionDeviceRunSessionMutation.fields> {}
 
 /** `mutation HanzoCreateEasSimulatorSession` */
 export const HanzoCreateEasSimulatorSession = GraphQL.mutation("HanzoCreateEasSimulatorSession", {
@@ -118,7 +118,7 @@ export const HanzoCreateEasSimulatorSession = GraphQL.mutation("HanzoCreateEasSi
   },
   result: Schema.Struct({
     /** Mutations that create, stop, update, and delete device run sessions */
-    deviceRunSession: T3CreateEasSimulatorSessionDeviceRunSessionDeviceRunSessionMutation
+    deviceRunSession: HanzoCreateEasSimulatorSessionDeviceRunSessionDeviceRunSessionMutation
   })
 })
 export declare namespace HanzoCreateEasSimulatorSession {
@@ -244,7 +244,7 @@ export const EnsureDeviceRunSessionStoppedDeviceRunSession = Schema.Struct({
 })
 export interface EnsureDeviceRunSessionStoppedDeviceRunSession extends Schema.Struct.Type<typeof EnsureDeviceRunSessionStoppedDeviceRunSession.fields> {}
 
-export const T3StopEasSimulatorSessionDeviceRunSessionDeviceRunSessionMutation = Schema.Struct({
+export const HanzoStopEasSimulatorSessionDeviceRunSessionDeviceRunSessionMutation = Schema.Struct({
   /**
    * Ensure a device run session is stopped. Idempotent: if the session has already
    * finished, the existing session is returned unchanged (an ERRORED session stays
@@ -252,7 +252,7 @@ export const T3StopEasSimulatorSessionDeviceRunSessionDeviceRunSessionMutation =
    */
   ensureDeviceRunSessionStopped: EnsureDeviceRunSessionStoppedDeviceRunSession
 })
-export interface T3StopEasSimulatorSessionDeviceRunSessionDeviceRunSessionMutation extends Schema.Struct.Type<typeof T3StopEasSimulatorSessionDeviceRunSessionDeviceRunSessionMutation.fields> {}
+export interface HanzoStopEasSimulatorSessionDeviceRunSessionDeviceRunSessionMutation extends Schema.Struct.Type<typeof HanzoStopEasSimulatorSessionDeviceRunSessionDeviceRunSessionMutation.fields> {}
 
 /** `mutation HanzoStopEasSimulatorSession` */
 export const HanzoStopEasSimulatorSession = GraphQL.mutation("HanzoStopEasSimulatorSession", {
@@ -270,7 +270,7 @@ export const HanzoStopEasSimulatorSession = GraphQL.mutation("HanzoStopEasSimula
   },
   result: Schema.Struct({
     /** Mutations that create, stop, update, and delete device run sessions */
-    deviceRunSession: T3StopEasSimulatorSessionDeviceRunSessionDeviceRunSessionMutation
+    deviceRunSession: HanzoStopEasSimulatorSessionDeviceRunSessionDeviceRunSessionMutation
   })
 })
 export declare namespace HanzoStopEasSimulatorSession {

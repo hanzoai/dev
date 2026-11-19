@@ -33,8 +33,7 @@ describe("connectCliAuth", () => {
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", TEST_PUBLISHABLE_KEY);
     vi.stubEnv("VITE_CLERK_CLI_OAUTH_CLIENT_ID", "oauthapp_123");
 
-    const connectUrl =
-      "https://hanzo.bot/connect#state=state-1&challenge=challenge-1&port=34338";
+    const connectUrl = "https://hanzo.bot/connect#state=state-1&challenge=challenge-1&port=34338";
     const redirectUrl = connectCliSignInRedirectUrl(
       { state: "state-1", challenge: "challenge-1", loopbackPort: 34338 },
       connectUrl,

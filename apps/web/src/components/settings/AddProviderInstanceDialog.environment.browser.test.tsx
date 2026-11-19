@@ -1,4 +1,8 @@
-import { EnvironmentId, ProviderDriverKind, type AcpRegistrySearchAgent } from "@hanzodev/contracts";
+import {
+  EnvironmentId,
+  ProviderDriverKind,
+  type AcpRegistrySearchAgent,
+} from "@hanzodev/contracts";
 import { userEvent } from "vite-plus/test/browser";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -132,6 +136,7 @@ const signInStep = () => document.querySelector('[aria-label="Sign-in step"]');
 async function prepareCodexInstance() {
   await using stack = new AsyncDisposableStack();
   const screen = stack.use(await render(dialog()));
+  await act(async () => radio("Codex")!.click());
   await click("Configure manually");
   await type("#add-provider-label", "Work");
   await click("Next");
@@ -155,6 +160,7 @@ describe("AddProviderInstanceDialog environment routing", () => {
       providerInstances: { codex_2: { driver: "codex", enabled: false } },
     });
     await using _screen = await render(dialog());
+    await act(async () => radio("Codex")!.click());
     await click("Configure manually");
     await click("Next");
     await click("Add instance");

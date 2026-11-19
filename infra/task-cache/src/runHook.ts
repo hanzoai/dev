@@ -36,6 +36,7 @@ export default function start({ root }: { readonly root: string }) {
     child.unref();
   };
   return Object.assign(finish, {
-    remoteCache: process.env.VP_REMOTE_CACHE || process.env.VP_HANZO_TASK_CACHE_MODE || "read-write",
+    remoteCache:
+      process.env.VP_REMOTE_CACHE || process.env.VP_HANZO_TASK_CACHE_MODE || "read-write",
   });
 }

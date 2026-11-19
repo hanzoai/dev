@@ -559,7 +559,9 @@ function disabledManagedRelayClient(relayUrl: string): ManagedRelayClient["Servi
     linkEnvironment: unavailable("clientRuntime.managedRelay.linkEnvironment"),
     unlinkEnvironment: unavailable("clientRuntime.managedRelay.unlinkEnvironment"),
     getHanzoChatLink: unavailable("clientRuntime.managedRelay.getHanzoChatLink"),
-    createHanzoChatLinkRequest: unavailable("clientRuntime.managedRelay.createHanzoChatLinkRequest"),
+    createHanzoChatLinkRequest: unavailable(
+      "clientRuntime.managedRelay.createHanzoChatLinkRequest",
+    ),
     unlinkHanzoChat: unavailable("clientRuntime.managedRelay.unlinkHanzoChat"),
     getEnvironmentStatus: unavailable("clientRuntime.managedRelay.getEnvironmentStatus"),
     connectEnvironment: unavailable("clientRuntime.managedRelay.connectEnvironment"),

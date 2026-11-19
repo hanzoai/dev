@@ -123,7 +123,7 @@ beforeEach(() => {
   state.sessions.set(environmentId, denied);
   state.mint
     .mockReset()
-    .mockResolvedValue(AsyncResult.success({ relativeUrl: "/api/assets/image.png", expiresAt: 1 }));
+    .mockResolvedValue(AsyncResult.success({ relativeUrl: "/v1/assets/image.png", expiresAt: 1 }));
   state.download.mockReset().mockResolvedValue(undefined);
   state.png.mockReset().mockResolvedValue(new Blob(["png"], { type: "image/png" }));
   state.showMenu.mockReset().mockResolvedValue(null);

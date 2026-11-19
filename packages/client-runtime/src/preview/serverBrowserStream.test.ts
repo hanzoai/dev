@@ -30,8 +30,8 @@ class FakeSocket extends EventTarget {
 
 const target = {
   access: {
-    httpBase: "http://preview.test/api/preview-stream",
-    wsBase: "ws://preview.test/api/preview-stream",
+    httpBase: "http://preview.test/v1/preview-stream",
+    wsBase: "ws://preview.test/v1/preview-stream",
     query: {},
     credentials: true,
   },
@@ -159,7 +159,7 @@ describe("preview stream downloads", () => {
     expect(onDownload).toHaveBeenCalledExactlyOnceWith({
       fileName: "a b.csv",
       sizeBytes: 3,
-      url: "http://preview.test/api/preview-stream/download?threadId=thread&tabId=tab&id=d1&wsTicket=ticket",
+      url: "http://preview.test/v1/preview-stream/download?threadId=thread&tabId=tab&id=d1&wsTicket=ticket",
     });
   });
 });

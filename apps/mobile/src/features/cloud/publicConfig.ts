@@ -3,7 +3,7 @@ import {
   DEFAULT_HANZO_IAM_CLIENT_ID,
   DEFAULT_HANZO_IAM_ISSUER,
   DEFAULT_HANZO_RELAY_URL,
-  normalizeIamIssuer,
+  normalizeHanzoIssuer,
 } from "@hanzodev/shared/hanzoIamAuth";
 import { relayClerkTokenOptions } from "@hanzodev/shared/relayAuth";
 import { normalizeSecureRelayUrl } from "@hanzodev/shared/relayUrl";
@@ -70,7 +70,7 @@ export function resolveCloudPublicConfig(extra: ExpoExtra = Constants.expoConfig
   const relayInput = trimNonEmpty(extra?.relay?.url) ?? DEFAULT_HANZO_RELAY_URL;
   return {
     iam: {
-      issuer: normalizeIamIssuer(trimNonEmpty(extra?.iam?.issuer) ?? DEFAULT_HANZO_IAM_ISSUER),
+      issuer: normalizeHanzoIssuer(trimNonEmpty(extra?.iam?.issuer) ?? DEFAULT_HANZO_IAM_ISSUER),
       clientId: trimNonEmpty(extra?.iam?.clientId) ?? DEFAULT_HANZO_IAM_CLIENT_ID,
     },
     clerk: {
@@ -106,8 +106,8 @@ export function hasTracingPublicConfig(
 ): config is TracingPublicConfig {
   return Boolean(
     config.observability.tracesUrl &&
-      config.observability.tracesDataset &&
-      config.observability.tracesToken,
+    config.observability.tracesDataset &&
+    config.observability.tracesToken,
   );
 }
 

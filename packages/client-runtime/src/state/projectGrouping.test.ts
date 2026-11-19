@@ -79,16 +79,16 @@ describe("load balancing shared project machines", () => {
   });
 });
 const repositoryIdentity = {
-  canonicalKey: "github.com/hanzoai/dev",
+  canonicalKey: "github.com/hanzoai/hanzodev",
   locator: {
     source: "git-remote" as const,
     remoteName: "upstream",
-    remoteUrl: "https://github.com/hanzoai/dev.git",
+    remoteUrl: "https://github.com/hanzoai/hanzodev.git",
   },
   provider: SourceControlProviderKind.make("github"),
-  owner: "hanzodev",
-  name: "hanzo",
-  displayName: "Hanzo Dev",
+  owner: "hanzoai",
+  name: "hanzodev",
+  displayName: "hanzoai/hanzodev",
 };
 
 function makeProject(
@@ -282,7 +282,7 @@ describe("buildProjectGroups", () => {
 
     const groups = buildProjectGroups({ projects, settings: settings("repository") });
     expect(groups.map((group) => group.key)).toEqual([
-      "github.com/hanzoai/dev",
+      "github.com/hanzoai/hanzodev",
       "github.com/julius/hanzodev-fork",
     ]);
     expect(groups[1]?.members.map((member) => member.project.id)).toEqual(["fork", "fork-2"]);
@@ -299,7 +299,7 @@ describe("buildProjectGroups", () => {
 
     const label = (projects: ReadonlyArray<EnvironmentProject>) =>
       buildProjectGroups({ projects, settings: settings("repository") })[0]?.label;
-    expect(label(folderTitles)).toBe("Hanzo Dev");
+    expect(label(folderTitles)).toBe("hanzoai/hanzodev");
     expect(label(renamed)).toBe("hanzodev");
   });
 
@@ -310,7 +310,11 @@ describe("buildProjectGroups", () => {
     const root = makeProject("NewCo", "/work/NewCo");
     const lowercasedClone = makeProject("NewCo", "/remote/NewCo", {
       environmentId: EnvironmentId.make("remote"),
-      repositoryIdentity: { ...repositoryIdentity, name: "HANZO_DEV", displayName: "Hanzo Dev" },
+      repositoryIdentity: {
+        ...repositoryIdentity,
+        name: "HANZODEV",
+        displayName: "hanzoai/HANZODEV",
+      },
     });
 
     const groups = buildProjectGroups({
@@ -319,24 +323,24 @@ describe("buildProjectGroups", () => {
       preferredEnvironmentId: environmentId,
     });
     expect(groups).toHaveLength(1);
-    expect(groups[0]?.label).toBe("Hanzo Dev");
+    expect(groups[0]?.label).toBe("hanzoai/hanzodev");
 
     // A subfolder group in repository_path mode keeps its own title.
     const localIdentity = { ...repositoryIdentity, rootPath: "/work/hanzodev" };
     const pathGroups = buildProjectGroups({
       projects: [
-        makeProject("design", "/work/hanzo/design", {
+        makeProject("design", "/work/hanzodev/design", {
           title: "Design docs",
           hasCustomTitle: true,
           repositoryIdentity: localIdentity,
         }),
-        makeProject("design", "/remote/hanzo/design", {
+        makeProject("design", "/remote/hanzodev/design", {
           environmentId: EnvironmentId.make("remote"),
           repositoryIdentity: {
             ...repositoryIdentity,
             rootPath: "/remote/hanzodev",
-            name: "HANZO_DEV",
-            displayName: "Hanzo Dev",
+            name: "HANZODEV",
+            displayName: "hanzoai/HANZODEV",
           },
         }),
         makeProject("hanzodev", "/work/hanzodev", { repositoryIdentity: localIdentity }),
@@ -371,7 +375,7 @@ describe("buildProjectGroups", () => {
       repositoryIdentity: null,
       updatedAt: "2026-07-01T00:00:00.000Z",
     });
-    const fresh = makeProject("fresh", "/work/hanzo/", {
+    const fresh = makeProject("fresh", "/work/hanzodev/", {
       updatedAt: "2026-07-02T00:00:00.000Z",
     });
 
@@ -396,7 +400,7 @@ describe("buildProjectGroups", () => {
       repositoryIdentity: staleIdentity,
       updatedAt: "2026-07-01T00:00:00.000Z",
     });
-    const fresh = makeProject("fresh", "/work/hanzo/", {
+    const fresh = makeProject("fresh", "/work/hanzodev/", {
       updatedAt: "2026-07-02T00:00:00.000Z",
     });
     const sibling = makeProject("sibling", "/work/hanzodev-2");
@@ -420,7 +424,7 @@ describe("buildProjectGroups", () => {
       repositoryIdentity: staleIdentity,
       updatedAt: "2026-07-01T00:00:00.000Z",
     });
-    const freshIdentified = makeProject("fresh-identified", "/work/hanzo/", {
+    const freshIdentified = makeProject("fresh-identified", "/work/hanzodev/", {
       updatedAt: "2026-07-02T00:00:00.000Z",
     });
     const winner = makeProject("winner", "/work/hanzodev", {

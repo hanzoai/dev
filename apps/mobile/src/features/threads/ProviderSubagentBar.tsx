@@ -2,7 +2,11 @@ import {
   formatProviderSubagentStatus,
   type ProviderSubagentStatus,
 } from "@hanzodev/client-runtime/state/thread-execution";
-import { isOrchestrationV2WorkActive, type EnvironmentId, type ThreadId } from "@hanzodev/contracts";
+import {
+  isOrchestrationV2WorkActive,
+  type EnvironmentId,
+  type ThreadId,
+} from "@hanzodev/contracts";
 import { T, useGT, useMessages, Var } from "gt-react-native";
 import { useState } from "react";
 import { View } from "react-native";
@@ -50,7 +54,10 @@ export function ProviderSubagentBar(props: {
               size={16}
             />
           ) : null}
-          <Text numberOfLines={1} className="min-w-0 shrink font-hanzo-bold text-sm text-foreground">
+          <Text
+            numberOfLines={1}
+            className="min-w-0 shrink font-hanzo-bold text-sm text-foreground"
+          >
             {props.modelLabel}
           </Text>
           {props.effortLabel === null ? null : (

@@ -18,8 +18,7 @@ import {
 } from "./hanzoIamAuth.ts";
 
 function makeJwt(payload: Record<string, unknown>): string {
-  const encode = (obj: unknown) =>
-    Buffer.from(JSON.stringify(obj), "utf8").toString("base64url");
+  const encode = (obj: unknown) => Buffer.from(JSON.stringify(obj), "utf8").toString("base64url");
   return `${encode({ alg: "RS256", typ: "JWT" })}.${encode(payload)}.sig`;
 }
 
@@ -69,9 +68,7 @@ describe("hanzoIamAuth", () => {
       errorDescription: null,
       brand: "hanzo",
     });
-    expect(
-      parseHanzoIamCallbackUrl("hanzodev://oauth/lux?code=lux_code&state=s2"),
-    ).toEqual({
+    expect(parseHanzoIamCallbackUrl("hanzodev://oauth/lux?code=lux_code&state=s2")).toEqual({
       code: "lux_code",
       state: "s2",
       error: null,
@@ -139,7 +136,10 @@ describe("hanzoIamAuth", () => {
     vault = switchHanzoIamVaultOrg(vault, "zoo-labs");
     expect(resolveActiveHanzoOrgId(vault)).toBe("zoo-labs");
     expect(
-      buildHanzoApiHeaders({ accessToken: acctA.accessToken, orgId: resolveActiveHanzoOrgId(vault) }),
+      buildHanzoApiHeaders({
+        accessToken: acctA.accessToken,
+        orgId: resolveActiveHanzoOrgId(vault),
+      }),
     ).toEqual({
       Accept: "application/json",
       Authorization: `Bearer ${acctA.accessToken}`,
@@ -165,7 +165,7 @@ describe("hanzoIamAuth", () => {
     ]);
 
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      expect((init?.headers as Record<string, string>)["X-Org-Id"]).toBe("hanzo");
+      expect((init?.headers as Record<string, string> | undefined)?.["X-Org-Id"]).toBe("hanzo");
       return new Response(
         JSON.stringify({
           plan: "ultra",

@@ -287,9 +287,9 @@ function FullDiskAccessStep({
         </DialogTitle>
         <DialogDescription>
           <T>
-            To import cookies from <Var>{source.name}</Var>, Hanzo Dev needs Full Disk Access. Turn it
-            on in System Settings, then come back to finish the import. You can revoke it again once
-            the import is done.
+            To import cookies from <Var>{source.name}</Var>, Hanzo Dev needs Full Disk Access. Turn
+            it on in System Settings, then come back to finish the import. You can revoke it again
+            once the import is done.
           </T>
         </DialogDescription>
       </DialogHeader>

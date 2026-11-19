@@ -148,7 +148,7 @@ describe("home project scopes", () => {
         environmentId: remoteEnvironmentId,
         id: ProjectId.make("project-remote-fresh"),
         title: "hanzodev",
-        workspaceRoot: "/remote/hanzo/",
+        workspaceRoot: "/remote/hanzodev/",
         updatedAt: "2026-06-02T00:00:00.000Z",
       }),
     ];

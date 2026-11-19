@@ -1419,8 +1419,7 @@ describe("signed APNs registration metadata", () => {
               ...target,
               push_token: "unchanged-token",
               activity_push_token: "unchanged-token",
-              bundle_id:
-                changed === "bundle" ? "ai.hanzo.dev.preview" : "ai.hanzo.dev.dev",
+              bundle_id: changed === "bundle" ? "ai.hanzo.dev.preview" : "ai.hanzo.dev.dev",
               aps_environment: changed === "environment" ? "production" : "sandbox",
             },
           ],

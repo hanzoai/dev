@@ -110,7 +110,9 @@ describe("HanzoChatAccounts", () => {
   );
 
   it.effect("asks Hanzo Chat for the link with the shared secret", () => {
-    const hanzoChat = fakeHanzoChat({ link: { email: "theo@hanzo.chat", plan: "premier", linkedAt: 1 } });
+    const hanzoChat = fakeHanzoChat({
+      link: { email: "theo@hanzo.chat", plan: "premier", linkedAt: 1 },
+    });
     return Effect.gen(function* () {
       const accounts = yield* HanzoChatAccounts.HanzoChatAccounts;
       const link = yield* accounts.getLink({ userId: "user_1" });

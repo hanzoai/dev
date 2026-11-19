@@ -103,7 +103,11 @@ const EXPORT_LONGEST_SIDE = 3072;
 
 /** Named by content, so a theme change never shows a stale image cached under the same URI. */
 async function writeDiagramImage(xml: string, base64: string): Promise<string> {
-  const file = new File(Paths.cache, "hanzo-diagrams", `${(Hash.string(xml) >>> 0).toString(36)}.png`);
+  const file = new File(
+    Paths.cache,
+    "hanzo-diagrams",
+    `${(Hash.string(xml) >>> 0).toString(36)}.png`,
+  );
   file.create({ intermediates: true, overwrite: true });
   await file.write(base64, { encoding: "base64" });
   return file.uri;

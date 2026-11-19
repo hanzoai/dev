@@ -99,7 +99,9 @@ const layerTest = McpHttpServer.layerPreviewToolkit.pipe(
   Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
   Layer.provideMerge(McpToolAccessTestkit.liveThreadsLayer),
   Layer.provideMerge(PreviewAutomationBroker.layer),
-  Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-mcp-http-server-test-" })),
+  Layer.provideMerge(
+    ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-mcp-http-server-test-" }),
+  ),
   Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
 );
 const layerPullRequestsTest = McpHttpServer.layerPullRequestsToolkit.pipe(
@@ -273,7 +275,9 @@ it.effect.each([
             }),
           ),
           Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
-          Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-device-mcp-test-" })),
+          Layer.provide(
+            ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-device-mcp-test-" }),
+          ),
           Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
         ),
       ),
@@ -762,7 +766,12 @@ it.effect(
         runLimit: 50,
         maxCharsPerItem: 20_000,
       });
-      yield* callTool("hanzo_thread_read", { ...thread, limit: 7, runLimit: 1, maxCharsPerItem: 1 });
+      yield* callTool("hanzo_thread_read", {
+        ...thread,
+        limit: 7,
+        runLimit: 1,
+        maxCharsPerItem: 1,
+      });
 
       expect(calls).toEqual([
         { ...thread, limit: 100, runLimit: 50, maxCharsPerItem: 20_000 },
@@ -1569,7 +1578,9 @@ it.effect("gives outside clients an upload URL on the origin their request reach
         Layer.provide(
           AssetSigner.layer.pipe(
             Layer.provideMerge(ServerSecretStore.layer),
-            Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-mcp-upload-" })),
+            Layer.provideMerge(
+              ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-mcp-upload-" }),
+            ),
             Layer.provideMerge(DocumentText.layer),
             Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
           ),

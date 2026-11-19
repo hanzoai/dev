@@ -171,10 +171,16 @@ describe("ThemeEditorPanel", () => {
     const hex = page.getByRole("textbox", { name: "Accent hex value" });
     const original = (hex.element() as HTMLInputElement).value;
     await userEvent.click(page.getByRole("button", { name: "Choose Accent color" }));
+    const plane = page.getByRole("group", { name: "Accent saturation and brightness" });
     const hue = page.getByRole("slider", { name: "Accent hue" });
     await expect.element(hue).toBeInTheDocument();
+    const svPlane = plane.element() as HTMLElement;
     const hueSlider = hue.element() as HTMLElement;
 
+    await act(async () => {
+      pointerAt(svPlane, "pointerdown", 0.5);
+      pointerAt(svPlane, "pointerup", 0.5);
+    });
     await act(async () => {
       pointerAt(hueSlider, "pointerdown", 0.5);
       pointerAt(hueSlider, "pointerup", 0.5);

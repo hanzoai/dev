@@ -12,7 +12,10 @@ import type {
 } from "@hanzodev/contracts";
 import { subagentHoldsCompletion } from "@hanzodev/provider-core/server/subagentProjection";
 import { backgroundWorkHoldsCompletion } from "@hanzodev/shared/orchestrationV2PendingBackgroundWork";
-import { latestRootProviderFailure, runRanAfter } from "@hanzodev/shared/orchestrationV2ThreadError";
+import {
+  latestRootProviderFailure,
+  runRanAfter,
+} from "@hanzodev/shared/orchestrationV2ThreadError";
 
 type Work = OrchestrationV2RestartCancelledBackgroundWork;
 type Attempt = Pick<OrchestrationV2RunAttempt, "id" | "runId">;

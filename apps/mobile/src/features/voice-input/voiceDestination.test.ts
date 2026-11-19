@@ -166,8 +166,8 @@ it("keeps local as the default and never reuses consent for an offline or resele
     const recording = await current!.prepare(options);
     await expect(recording.transcribe("file:///voice.m4a", options)).resolves.toBe("hello");
     expect(mocks.fetch.mock.calls.map(([url, init]) => [String(url), init?.redirect])).toEqual([
-      ["https://my-server.test/api/voice/status", "error"],
-      ["https://my-server.test/api/voice/transcribe", "error"],
+      ["https://my-server.test/v1/voice/status", "error"],
+      ["https://my-server.test/v1/voice/transcribe", "error"],
     ]);
     chooseVoiceDestination(host, "openai");
     const cloud = appAtomRegistry.get(voiceRouteAtom)!.transcriber!;
@@ -203,11 +203,11 @@ it("keeps local as the default and never reuses consent for an offline or resele
       message: expect.stringContaining("rejected this API key"),
     });
     expect(mocks.fetch.mock.calls.slice(2).map(([url]) => new URL(String(url)).pathname)).toEqual([
-      "/api/voice/cloud/keys",
-      "/api/voice/cloud/keys",
-      "/api/voice/cloud/keys",
-      "/api/voice/cloud/xai/transcribe",
-      "/api/voice/cloud/xai/transcribe",
+      "/v1/voice/cloud/keys",
+      "/v1/voice/cloud/keys",
+      "/v1/voice/cloud/keys",
+      "/v1/voice/cloud/xai/transcribe",
+      "/v1/voice/cloud/xai/transcribe",
     ]);
     // OpenRouter without a model is no destination; with one, the exact id travels with the audio.
     chooseVoiceDestination(host, "openrouter");
@@ -219,7 +219,7 @@ it("keeps local as the default and never reuses consent for an offline or resele
     const routed = await appAtomRegistry.get(voiceRouteAtom)!.transcriber!.prepare(options);
     await expect(routed.transcribe("file:///voice.m4a", options)).resolves.toBe("routed");
     const upload = new URL(String(mocks.fetch.mock.lastCall![0]));
-    expect(upload.pathname).toBe("/api/voice/cloud/openrouter/transcribe");
+    expect(upload.pathname).toBe("/v1/voice/cloud/openrouter/transcribe");
     expect(upload.searchParams.get("model")).toBe("acme/transcribe-1");
     const failWrite = () => {
       throw new Error("Device storage is unavailable");

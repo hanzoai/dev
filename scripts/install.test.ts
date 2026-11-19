@@ -336,88 +336,91 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("install.sh han
   });
 });
 
-describe.skipIf(HostProcess.Platform.defaultValue() !== "win32")("install.ps1 hanzo command", () => {
-  it("replaces only its own hanzo.cmd, also in non-ASCII and bracketed paths", async () => {
-    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "hanzo-install-ps1-"));
-    try {
-      // Windows PowerShell 5.1 reads files as ANSI by default and expands wildcards in paths.
-      const home = NodePath.join(root, "José", ".hanzo-dev");
-      const binDir = NodePath.join(root, "bin[hanzo]");
-      const shim = NodePath.join(binDir, "hanzo.cmd");
-      await NodeFSP.mkdir(binDir, { recursive: true });
+describe.skipIf(HostProcess.Platform.defaultValue() !== "win32")(
+  "install.ps1 hanzo command",
+  () => {
+    it("replaces only its own hanzo.cmd, also in non-ASCII and bracketed paths", async () => {
+      const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "hanzo-install-ps1-"));
+      try {
+        // Windows PowerShell 5.1 reads files as ANSI by default and expands wildcards in paths.
+        const home = NodePath.join(root, "José", ".hanzo-dev");
+        const binDir = NodePath.join(root, "bin[hanzo]");
+        const shim = NodePath.join(binDir, "hanzo.cmd");
+        await NodeFSP.mkdir(binDir, { recursive: true });
 
-      const desktopShim = '@echo off\r\n"C:\\Program Files\\Hanzo Dev\\Hanzo Dev.exe" "x" %*\r\n';
-      await NodeFSP.writeFile(shim, desktopShim);
-      const foreign = await installOver({ script: "install.ps1", home, binDir });
-      expect(foreign.code).not.toBe(0);
-      expect(foreign.output).toContain("another hanzo is already at");
-      expect(await NodeFSP.readFile(shim, "utf8")).toBe(desktopShim);
+        const desktopShim = '@echo off\r\n"C:\\Program Files\\Hanzo Dev\\Hanzo Dev.exe" "x" %*\r\n';
+        await NodeFSP.writeFile(shim, desktopShim);
+        const foreign = await installOver({ script: "install.ps1", home, binDir });
+        expect(foreign.code).not.toBe(0);
+        expect(foreign.output).toContain("another hanzo is already at");
+        expect(await NodeFSP.readFile(shim, "utf8")).toBe(desktopShim);
 
-      // A hand-edited wrapper may set its own environment; replacing it would drop that.
-      const edited = `@echo off\r\nset "HANZO_DEV_HOME=D:\\other"\r\n"${NodePath.join(home, "runtime", "versions", "1.0.0", "hanzo.exe")}" %*`;
-      await NodeFSP.writeFile(shim, edited, "utf8");
-      const wrapper = await installOver({ script: "install.ps1", home, binDir });
-      expect(wrapper.code).not.toBe(0);
-      expect(await NodeFSP.readFile(shim, "utf8")).toBe(edited);
+        // A hand-edited wrapper may set its own environment; replacing it would drop that.
+        const edited = `@echo off\r\nset "HANZO_DEV_HOME=D:\\other"\r\n"${NodePath.join(home, "runtime", "versions", "1.0.0", "hanzo.exe")}" %*`;
+        await NodeFSP.writeFile(shim, edited, "utf8");
+        const wrapper = await installOver({ script: "install.ps1", home, binDir });
+        expect(wrapper.code).not.toBe(0);
+        expect(await NodeFSP.readFile(shim, "utf8")).toBe(edited);
 
-      const climbing = `@echo off\r\n"${NodePath.join(home, "runtime", "versions")}\\..\\other\\t3.exe" %*`;
-      await NodeFSP.writeFile(shim, climbing, "utf8");
-      const outside = await installOver({ script: "install.ps1", home, binDir });
-      expect(outside.code).not.toBe(0);
-      expect(await NodeFSP.readFile(shim, "utf8")).toBe(climbing);
+        const climbing = `@echo off\r\n"${NodePath.join(home, "runtime", "versions")}\\..\\other\\t3.exe" %*`;
+        await NodeFSP.writeFile(shim, climbing, "utf8");
+        const outside = await installOver({ script: "install.ps1", home, binDir });
+        expect(outside.code).not.toBe(0);
+        expect(await NodeFSP.readFile(shim, "utf8")).toBe(climbing);
 
-      const older = NodePath.join(home, "runtime", "versions", "1.0.0", "hanzo.exe");
-      await NodeFSP.writeFile(shim, `@echo off\r\n"${older}" %*`, "utf8");
-      const upgrade = await installOver({ script: "install.ps1", home, binDir });
-      expect(upgrade.code, upgrade.output).toBe(0);
-      expect(await NodeFSP.readFile(shim, "utf8")).toContain(
-        NodePath.join(upgrade.target, "hanzo.exe"),
-      );
+        const older = NodePath.join(home, "runtime", "versions", "1.0.0", "hanzo.exe");
+        await NodeFSP.writeFile(shim, `@echo off\r\n"${older}" %*`, "utf8");
+        const upgrade = await installOver({ script: "install.ps1", home, binDir });
+        expect(upgrade.code, upgrade.output).toBe(0);
+        expect(await NodeFSP.readFile(shim, "utf8")).toContain(
+          NodePath.join(upgrade.target, "hanzo.exe"),
+        );
 
-      const again = await installOver({ script: "install.ps1", home, binDir });
-      expect(again.code, again.output).toBe(0);
+        const again = await installOver({ script: "install.ps1", home, binDir });
+        expect(again.code, again.output).toBe(0);
 
-      // Another hanzo first on PATH still runs, so the installer names this one in full.
-      const otherBin = NodePath.join(root, "other");
-      await NodeFSP.mkdir(otherBin);
-      await NodeFSP.writeFile(NodePath.join(otherBin, "hanzo.cmd"), "@echo off\r\n");
-      // Windows spells it Path; a second PATH key would be ambiguous.
-      const pathKey =
-        Object.keys(process.env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
-      const shadowed = await installOver({
-        script: "install.ps1",
-        home,
-        binDir,
-        env: { [pathKey]: `${otherBin};${process.env[pathKey] ?? ""}` },
-      });
-      expect(shadowed.code, shadowed.output).toBe(0);
-      expect(shadowed.output).toContain(
-        `Another hanzo at ${NodePath.join(otherBin, "hanzo.cmd")} runs first`,
-      );
+        // Another hanzo first on PATH still runs, so the installer names this one in full.
+        const otherBin = NodePath.join(root, "other");
+        await NodeFSP.mkdir(otherBin);
+        await NodeFSP.writeFile(NodePath.join(otherBin, "hanzo.cmd"), "@echo off\r\n");
+        // Windows spells it Path; a second PATH key would be ambiguous.
+        const pathKey =
+          Object.keys(process.env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
+        const shadowed = await installOver({
+          script: "install.ps1",
+          home,
+          binDir,
+          env: { [pathKey]: `${otherBin};${process.env[pathKey] ?? ""}` },
+        });
+        expect(shadowed.code, shadowed.output).toBe(0);
+        expect(shadowed.output).toContain(
+          `Another hanzo at ${NodePath.join(otherBin, "hanzo.cmd")} runs first`,
+        );
 
-      // Its own folder on PATH with a trailing separator is already on PATH.
-      const slashed = await installOver({
-        script: "install.ps1",
-        home,
-        binDir,
-        env: { [pathKey]: `${binDir}\\;${process.env[pathKey] ?? ""}` },
-      });
-      expect(slashed.code, slashed.output).toBe(0);
-      expect(slashed.output).toContain("to use Hanzo Dev here");
-      // The same when the install folder itself is given with a trailing separator.
-      const bothSlashed = await installOver({
-        script: "install.ps1",
-        home,
-        binDir: `${binDir}\\`,
-        env: { [pathKey]: `${binDir}\\;${process.env[pathKey] ?? ""}` },
-      });
-      expect(bothSlashed.code, bothSlashed.output).toBe(0);
-      expect(bothSlashed.output).toContain("to use Hanzo Dev here");
-    } finally {
-      await NodeFSP.rm(root, { recursive: true, force: true });
-    }
-  });
-});
+        // Its own folder on PATH with a trailing separator is already on PATH.
+        const slashed = await installOver({
+          script: "install.ps1",
+          home,
+          binDir,
+          env: { [pathKey]: `${binDir}\\;${process.env[pathKey] ?? ""}` },
+        });
+        expect(slashed.code, slashed.output).toBe(0);
+        expect(slashed.output).toContain("to use Hanzo Dev here");
+        // The same when the install folder itself is given with a trailing separator.
+        const bothSlashed = await installOver({
+          script: "install.ps1",
+          home,
+          binDir: `${binDir}\\`,
+          env: { [pathKey]: `${binDir}\\;${process.env[pathKey] ?? ""}` },
+        });
+        expect(bothSlashed.code, bothSlashed.output).toBe(0);
+        expect(bothSlashed.output).toContain("to use Hanzo Dev here");
+      } finally {
+        await NodeFSP.rm(root, { recursive: true, force: true });
+      }
+    });
+  },
+);
 
 describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer checksum", () => {
   it.each(
@@ -433,7 +436,9 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("installer chec
       );
       expect(availableTools.length).toBeGreaterThan(0);
       for (const checksumTool of availableTools) {
-        const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "hanzo-install-checksum-"));
+        const root = await NodeFSP.mkdtemp(
+          NodePath.join(NodeOS.tmpdir(), "hanzo-install-checksum-"),
+        );
         const home = NodePath.join(root, homeName);
         const version = "1.2.3";
         const stem = `hanzo-${version}-linux-${HostProcess.Architecture.defaultValue()}`;
@@ -551,9 +556,13 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("concurrent ins
       const tools = NodePath.join(root, "tools");
       await NodeFSP.mkdir(tools);
       await NodeFSP.mkdir(NodePath.join(root, stem));
-      await NodeFSP.writeFile(NodePath.join(root, stem, "hanzo"), "#!/bin/sh\necho 'hanzo v1.2.3'\n", {
-        mode: 0o755,
-      });
+      await NodeFSP.writeFile(
+        NodePath.join(root, stem, "hanzo"),
+        "#!/bin/sh\necho 'hanzo v1.2.3'\n",
+        {
+          mode: 0o755,
+        },
+      );
       const archivePath = NodePath.join(root, archiveName);
       NodeChildProcess.execFileSync("tar", ["-czf", archivePath, "-C", root, stem]);
       const archive = await NodeFSP.readFile(archivePath);

@@ -87,7 +87,9 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
           order.push("extract");
           const stagingDir = input.args[input.args.indexOf("-C") + 1];
           if (stagingDir === undefined) return yield* Effect.die("missing tar target");
-          yield* fs.writeFileString(path.join(stagingDir, "hanzo"), "#!/bin/sh\n").pipe(Effect.orDie);
+          yield* fs
+            .writeFileString(path.join(stagingDir, "hanzo"), "#!/bin/sh\n")
+            .pipe(Effect.orDie);
           return {
             stdout: "",
             stderr: "",
@@ -309,7 +311,7 @@ it.layer(NodeServices.layer)("server self update", (it) => {
       // The release comes from the policy's mirror, not GitHub.
       expect(urls.length).toBeGreaterThan(0);
       for (const url of urls)
-        expect(url).toMatch(/^https:\/\/updates\.example\.com\/hanzodev\/v1\.[12]\.0\//);
+        expect(url).toMatch(/^https:\/\/updates\.example\.com\/hanzo\/v1\.[12]\.0\//);
     }),
   );
 
@@ -479,7 +481,13 @@ it.layer(NodeServices.layer)("pruning runtimes on start", (it) => {
         ? path.join(tempDir, "alias-home")
         : baseDir;
       if (input.servicePlistThroughLink) yield* fs.symlink(realHome, programHome);
-      const program = path.join(programHome, "runtime", "versions", input.servicePlistStarts, "hanzo");
+      const program = path.join(
+        programHome,
+        "runtime",
+        "versions",
+        input.servicePlistStarts,
+        "hanzo",
+      );
       yield* fs.writeFileString(
         path.join(agentsDir, "ai.hanzo.dev.service.plist"),
         `<plist><dict>\n<key>ProgramArguments</key>\n<array>\n<string>${program}</string>\n<string>__service-launcher</string>\n</array>\n</dict></plist>\n`,

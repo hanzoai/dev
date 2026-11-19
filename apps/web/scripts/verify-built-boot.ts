@@ -33,8 +33,8 @@ try {
     const isAsset =
       file.startsWith(distDir) && NodeFS.statSync(file, { throwIfNoEntry: false })?.isFile();
     if (isAsset) return route.fulfill({ path: file });
-    if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/.well-known/")) {
-      return route.fulfill({ status: 503 });
+    if (url.pathname.startsWith("/v1/") || url.pathname.startsWith("/.well-known/")) {
+      return route.fulfill({ status: 500 });
     }
     return route.fulfill({ path: NodePath.join(distDir, "index.html") });
   });

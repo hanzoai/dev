@@ -16,16 +16,16 @@ describe("previewPdfAssetUrl", () => {
   ])("loads PDF bytes through the client's connection at %s", (base) => {
     expect(
       previewPdfAssetUrl(
-        "http://127.0.0.1:14537/api/assets/signed-token/Study%20guide.PDF?revision=2#page=8",
+        "http://127.0.0.1:14537/v1/assets/signed-token/Study%20guide.PDF?revision=2#page=8",
         base,
       ),
-    ).toBe(`${base}/api/assets/signed-token/Study%20guide.PDF?revision=2#page=8`);
+    ).toBe(`${base}/v1/assets/signed-token/Study%20guide.PDF?revision=2#page=8`);
   });
 
   it.each([
-    "http://localhost:6497/api/assets/token/index.html",
+    "http://localhost:6497/v1/assets/token/index.html",
     "https://example.com/paper.pdf",
-    "file:///api/assets/token/paper.pdf",
+    "file:///v1/assets/token/paper.pdf",
     "invalid",
   ])("leaves non-asset documents on their browser session: %s", (url) => {
     expect(previewPdfAssetUrl(url, "https://environment.test")).toBeNull();
@@ -34,13 +34,13 @@ describe("previewPdfAssetUrl", () => {
   it.each(["another-environment.test", "127.0.0.2.example.com", "128.0.0.1"])(
     "preserves matching PDF URLs on unrelated host %s",
     (host) => {
-      const source = `https://${host}/api/assets/token/guide.pdf?revision=2#page=3`;
+      const source = `https://${host}/v1/assets/token/guide.pdf?revision=2#page=3`;
       expect(previewPdfAssetUrl(source, "https://environment.test")).toBe(source);
     },
   );
 
   it("keeps URLs from the connected environment", () => {
-    const source = "https://environment.test/api/assets/token/guide.pdf#page=2";
+    const source = "https://environment.test/v1/assets/token/guide.pdf#page=2";
     expect(previewPdfAssetUrl(source, "https://environment.test")).toBe(source);
   });
 
@@ -49,10 +49,10 @@ describe("previewPdfAssetUrl", () => {
     (host) => {
       expect(
         previewPdfAssetUrl(
-          `http://${host}:14537/api/assets/token/guide.pdf?revision=2#page=3`,
+          `http://${host}:14537/v1/assets/token/guide.pdf?revision=2#page=3`,
           "https://remote.test",
         ),
-      ).toBe("https://remote.test/api/assets/token/guide.pdf?revision=2#page=3");
+      ).toBe("https://remote.test/v1/assets/token/guide.pdf?revision=2#page=3");
     },
   );
 });

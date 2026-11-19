@@ -46,7 +46,10 @@ export function ListRowLabel(props: {
       {color ? (
         <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: color }} />
       ) : null}
-      <Text className={cn("shrink text-2xs font-hanzo-medium", props.textClassName)} numberOfLines={1}>
+      <Text
+        className={cn("shrink text-2xs font-hanzo-medium", props.textClassName)}
+        numberOfLines={1}
+      >
         {props.label.name}
       </Text>
     </View>

@@ -229,7 +229,10 @@ describe("buildThreadActionItems", () => {
       icon: null,
       run: async () => undefined,
     });
-    const projects = [action("new-thread-in:hanzodev", "hanzodev"), action("new-thread-in:web", "web")];
+    const projects = [
+      action("new-thread-in:hanzodev", "hanzodev"),
+      action("new-thread-in:web", "web"),
+    ];
     const newThreadIn = {
       kind: "submenu" as const,
       value: "action:new-thread-in",
@@ -824,46 +827,44 @@ describe("filterPinnedBrowseEntries", () => {
   });
 });
 
-it.each([
-  "#10839",
-  "10839",
-  "hanzoai/dev#10839",
-  "https://github.com/hanzoai/dev/pull/10839",
-])("finds linked threads from PR query %s", (query) => {
-  const items = buildThreadActionItems({
-    threads: [
-      makeThread({
-        title: "Implementation",
-        pullRequests: [
-          {
-            host: "github.com",
-            repository: "hanzoai/dev",
-            number: 10839,
-            url: "https://github.com/hanzoai/dev/pull/10839",
-            source: "manual",
-            linkedAt: "2026-09-08T00:00:00Z",
-            snapshot: null,
-            stack: null,
-          },
-        ],
-      }),
-      makeThread({ id: ThreadId.make("unrelated"), title: "Other work" }),
-    ],
-    projectByKey: new Map(),
-    icon: null,
-    runThread: async () => undefined,
-  });
-  const groups = filterCommandPaletteGroups({
-    activeGroups: [],
-    query,
-    isInSubmenu: false,
-    projectSearchItems: [],
-    threadSearchItems: items,
-  });
-  expect(groups.flatMap((group) => group.items.map((item) => item.title))).toEqual([
-    "Implementation",
-  ]);
-});
+it.each(["#10839", "10839", "hanzoai/dev#10839", "https://github.com/hanzoai/dev/pull/10839"])(
+  "finds linked threads from PR query %s",
+  (query) => {
+    const items = buildThreadActionItems({
+      threads: [
+        makeThread({
+          title: "Implementation",
+          pullRequests: [
+            {
+              host: "github.com",
+              repository: "hanzoai/dev",
+              number: 10839,
+              url: "https://github.com/hanzoai/dev/pull/10839",
+              source: "manual",
+              linkedAt: "2026-09-08T00:00:00Z",
+              snapshot: null,
+              stack: null,
+            },
+          ],
+        }),
+        makeThread({ id: ThreadId.make("unrelated"), title: "Other work" }),
+      ],
+      projectByKey: new Map(),
+      icon: null,
+      runThread: async () => undefined,
+    });
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [],
+      query,
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: items,
+    });
+    expect(groups.flatMap((group) => group.items.map((item) => item.title))).toEqual([
+      "Implementation",
+    ]);
+  },
+);
 
 describe("command palette search return", () => {
   const picker = { addonIcon: null, groups: [] };

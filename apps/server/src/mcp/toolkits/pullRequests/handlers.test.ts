@@ -70,12 +70,12 @@ function makeProject(
     locator: {
       source: "git-remote",
       remoteName: "origin",
-      remoteUrl: "git@github.com:HanzoDev/HanzoDev.git",
+      remoteUrl: "git@github.com:HanzoAI/Dev.git",
     },
     provider: SourceControlProviderKind.make("github"),
-    displayName: "HanzoDev/HanzoDev",
-    owner: "HanzoDev",
-    name: "HanzoDev",
+    displayName: "HanzoAI/Dev",
+    owner: "HanzoAI",
+    name: "Dev",
   },
 ): OrchestrationProjectShell {
   return {
@@ -273,13 +273,13 @@ describe("pull request toolkit handlers", () => {
     Effect.gen(function* () {
       const harness = yield* makeHarness();
       const result = yield* harness.call("link_pull_request", {
-        url: "https://github.com/HanzoDev/HanzoDev/pull/123/files",
+        url: "https://github.com/HanzoAI/Dev/pull/123/files",
       });
       expect(result).toEqual({
         host: "github.com",
         repository: "hanzoai/dev",
         number: 123,
-        url: "https://github.com/HanzoDev/HanzoDev/pull/123/files",
+        url: "https://github.com/HanzoAI/Dev/pull/123/files",
         alreadyLinked: false,
       });
       expect(yield* Ref.get(harness.commands)).toMatchObject([
@@ -319,9 +319,9 @@ describe("pull request toolkit handlers", () => {
       for (const host of ["git.cafe", "staging.git.cafe"]) {
         for (const project of [makeProject(), makeProject(null)]) {
           for (const target of [
-            { host, repository: "HanzoAI/HanzoDev", number: 21353 },
-            { url: `https://${host}/HanzoAI/HanzoDev/pull/21353` },
-            { url: `https://${host}/HanzoAI/HanzoDev/pulls/21353` },
+            { host, repository: "HanzoAI/Dev", number: 21353 },
+            { url: `https://${host}/HanzoAI/Dev/pull/21353` },
+            { url: `https://${host}/HanzoAI/Dev/pulls/21353` },
           ]) {
             const harness = yield* makeHarness({ project });
             const result = yield* harness.call("link_pull_request", target);

@@ -400,7 +400,11 @@ effectIt.effect("restores into a leftover worktree folder that cannot itself be 
 });
 
 it.each([
-  { label: "directly in the scratch root", folder: "/tmp/hanzo-home/scratch/notes", recreated: true },
+  {
+    label: "directly in the scratch root",
+    folder: "/tmp/hanzo-home/scratch/notes",
+    recreated: true,
+  },
   { label: "below another folder", folder: "/tmp/hanzo-home/scratch/notes/deep", recreated: false },
   {
     label: "in another project",
@@ -2034,7 +2038,7 @@ effectIt.effect(
                 yield* git(worktreePath, ["rev-parse", "--symbolic-full-name", "@{upstream}"]),
               ).toBe(expected.upstream);
             }
-            expect(yield* branchConfig("hanzo-merge-base")).toBe(expected.base);
+            expect(yield* branchConfig("hanzo-dev-merge-base")).toBe(expected.base);
             return yield* open();
           }).pipe(Effect.orDie),
         );

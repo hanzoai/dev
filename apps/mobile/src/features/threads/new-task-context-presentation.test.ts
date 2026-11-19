@@ -82,7 +82,11 @@ describe("resolveNewTaskLocalWorkspaceSelection", () => {
     expect(
       resolveNewTaskLocalWorkspaceSelection({
         branches: [
-          { name: "feature/split", current: true, worktreePath: "/repo/.hanzo-dev/worktrees/split" },
+          {
+            name: "feature/split",
+            current: true,
+            worktreePath: "/repo/.hanzo-dev/worktrees/split",
+          },
           { name: "main", current: false, worktreePath: "/repo" },
         ],
         projectCwd: "/repo",

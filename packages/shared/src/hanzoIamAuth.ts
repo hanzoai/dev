@@ -50,19 +50,14 @@ export const EMPTY_HANZO_IAM_VAULT: HanzoIamVaultState = {
   orgByAccountId: {},
 };
 
-export const DEFAULT_HANZO_IAM_BRAND: HanzoIamBrandConfig = HANZO_IAM_BRANDS[0]!;
+const DEFAULT_HANZO_IAM_BRAND: HanzoIamBrandConfig = HANZO_IAM_BRANDS[0]!;
 export const DEFAULT_HANZO_IAM_ISSUER = DEFAULT_HANZO_IAM_BRAND.issuer;
 export const DEFAULT_HANZO_IAM_CLIENT_ID = DEFAULT_HANZO_IAM_BRAND.clientId;
 export const DEFAULT_HANZO_RELAY_URL = "https://relay.dev.hanzo.ai";
-export const DEFAULT_HANZO_API_BASE_URL = "https://api.hanzo.ai";
+const DEFAULT_HANZO_API_BASE_URL = "https://api.hanzo.ai";
 export const HANZO_BILLING_PORTAL_URL = "https://billing.hanzo.ai";
-export const HANZO_IAM_OAUTH_SCOPES = ["openid", "profile", "email", "offline_access"] as const;
-export const HANZO_IAM_CALLBACK_SCHEMES = [
-  "hanzo",
-  "hanzodev",
-  "hanzo-dev",
-  "hanzo-preview",
-] as const;
+const HANZO_IAM_OAUTH_SCOPES = ["openid", "profile", "email", "offline_access"] as const;
+const HANZO_IAM_CALLBACK_SCHEMES = ["hanzo", "hanzodev", "hanzo-dev", "hanzo-preview"] as const;
 
 export interface HanzoIamOrganization {
   readonly id: string;
@@ -213,7 +208,7 @@ export function getHanzoIamBrand(brandId: string | null | undefined): HanzoIamBr
   return HANZO_IAM_BRANDS.find((entry) => entry.id === normalized) ?? DEFAULT_HANZO_IAM_BRAND;
 }
 
-export function normalizeIamIssuer(raw: string | null | undefined): string {
+function normalizeIamIssuer(raw: string | null | undefined): string {
   const trimmed = raw?.trim() ?? "";
   if (!trimmed) return DEFAULT_HANZO_IAM_ISSUER;
   try {
@@ -234,9 +229,8 @@ export function parseHanzoIamVaultJson(raw: string | null | undefined): HanzoIam
   try {
     const parsed = JSON.parse(raw) as Partial<HanzoIamVaultState>;
     const accounts = Array.isArray(parsed.accounts)
-      ? parsed.accounts.filter(
-          (entry): entry is HanzoIamAccount =>
-            Boolean(entry && typeof entry.id === "string" && typeof entry.accessToken === "string"),
+      ? parsed.accounts.filter((entry): entry is HanzoIamAccount =>
+          Boolean(entry && typeof entry.id === "string" && typeof entry.accessToken === "string"),
         )
       : [];
     const activeAccount =
@@ -247,9 +241,9 @@ export function parseHanzoIamVaultJson(raw: string | null | undefined): HanzoIam
         : {};
     const activeOrgId = activeAccount
       ? (orgByAccountId[activeAccount.id] ??
-          (typeof parsed.activeOrgId === "string" && parsed.activeOrgId.trim()
-            ? parsed.activeOrgId.trim()
-            : activeAccount.owner))
+        (typeof parsed.activeOrgId === "string" && parsed.activeOrgId.trim()
+          ? parsed.activeOrgId.trim()
+          : activeAccount.owner))
       : null;
     return {
       activeAccountId: activeAccount?.id ?? null,
@@ -283,6 +277,15 @@ export function parseHanzoIamCallbackUrl(rawUrl: string): ParsedHanzoIamCallback
     return null;
   }
 
+  // Clerk's Electron bridge owns `<scheme>://app/auth/callback`.
+  if (
+    isCustomScheme &&
+    parsed.host.toLowerCase() === "app" &&
+    parsed.pathname.toLowerCase() === "/auth/callback"
+  ) {
+    return null;
+  }
+
   // Custom schemes parse `hanzo://oauth/callback` as host="oauth", pathname="/callback",
   // and `hanzo:///oauth/callback` or Expo `hanzo-dev://--/oauth/callback` in pathname.
   const combinedPath = isCustomScheme
@@ -303,8 +306,7 @@ export function parseHanzoIamCallbackUrl(rawUrl: string): ParsedHanzoIamCallback
   };
 
   const brandParam = (oauthMatch[1] ?? trimParam("brand"))?.toLowerCase();
-  const matchedBrand =
-    HANZO_IAM_BRANDS.find((entry) => entry.id === brandParam)?.id ?? null;
+  const matchedBrand = HANZO_IAM_BRANDS.find((entry) => entry.id === brandParam)?.id ?? null;
 
   const code = trimParam("code");
   const state = trimParam("state");
@@ -328,11 +330,7 @@ function toBase64Url(bytes: Uint8Array): string {
   for (let i = 0; i < bytes.length; i++) {
     binary += String.fromCharCode(bytes[i]!);
   }
-  return globalThis
-    .btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
+  return globalThis.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 function fromBase64UrlToUtf8(segment: string): string | null {
@@ -486,10 +484,7 @@ export function decodeHanzoJwtClaims(token: string): DecodedIamClaims {
     const name = str("name") ?? str("preferred_username");
     const subject = str("sub") ?? name;
     const avatarUrl = str("avatar") ?? str("picture");
-    const organizations = normalizeOrganizationEntries(
-      raw.organizations ?? raw.orgs,
-      owner,
-    );
+    const organizations = normalizeOrganizationEntries(raw.organizations ?? raw.orgs, owner);
     return {
       subject,
       owner,
@@ -539,11 +534,7 @@ export function buildHanzoIamAccountFromTokens(input: {
     input.brand ??
     HANZO_IAM_BRANDS.find((entry) => normalizeIamIssuer(input.issuer) === entry.issuer)?.id ??
     "hanzo";
-  const owner =
-    input.userinfo?.owner?.trim() ||
-    accessClaims.owner ||
-    idClaims?.owner ||
-    brand;
+  const owner = input.userinfo?.owner?.trim() || accessClaims.owner || idClaims?.owner || brand;
   const subject =
     input.userinfo?.sub?.trim() ||
     input.userinfo?.name?.trim() ||
@@ -561,10 +552,7 @@ export function buildHanzoIamAccountFromTokens(input: {
     email ||
     `${owner}/${subject}`;
   const avatarUrl =
-    input.userinfo?.avatarUrl?.trim() ||
-    accessClaims.avatarUrl ||
-    idClaims?.avatarUrl ||
-    null;
+    input.userinfo?.avatarUrl?.trim() || accessClaims.avatarUrl || idClaims?.avatarUrl || null;
   const expiresAt =
     typeof input.expiresInSeconds === "number" && input.expiresInSeconds > 0
       ? Date.now() + input.expiresInSeconds * 1000
@@ -632,10 +620,7 @@ export async function fetchHanzoIamUserinfo(
         displayName: str("displayName") ?? str("display_name") ?? str("name"),
         email: str("email"),
         avatarUrl: str("avatar") ?? str("picture"),
-        organizations: normalizeOrganizationEntries(
-          body.organizations ?? body.orgs,
-          owner,
-        ),
+        organizations: normalizeOrganizationEntries(body.organizations ?? body.orgs, owner),
       };
     } catch {
       // Fall through to next candidate userinfo path or token claims.
@@ -694,7 +679,7 @@ export async function fetchHanzoIamOrganizations(input: {
         ? payload
         : payload && typeof payload === "object"
           ? ((payload as Record<string, unknown>).data ??
-              (payload as Record<string, unknown>).organizations)
+            (payload as Record<string, unknown>).organizations)
           : null;
       const normalized = normalizeOrganizationEntries(rawList, input.fallbackOwner ?? null);
       if (normalized.length > 0) return normalized;
@@ -706,9 +691,7 @@ export async function fetchHanzoIamOrganizations(input: {
   return normalizeOrganizationEntries([], input.fallbackOwner ?? null);
 }
 
-export function defaultHanzoBillingSummary(
-  planId: HanzoSubscriptionPlanId = "pro",
-): HanzoBillingSummary {
+function defaultHanzoBillingSummary(planId: HanzoSubscriptionPlanId = "pro"): HanzoBillingSummary {
   const plan =
     HANZO_SUBSCRIPTION_PLANS.find((entry) => entry.id === planId) ?? HANZO_SUBSCRIPTION_PLANS[2]!;
   return {
@@ -753,10 +736,7 @@ export async function fetchHanzoBillingSummary(input: {
         priceLabel: matchedPlan.priceLabel,
         creditBalanceCents: num("credit_balance_cents", num("balance_cents", 0)),
         monthlyUsedCents: num("monthly_used_cents", num("used_cents", 0)),
-        monthlyLimitCents: num(
-          "monthly_limit_cents",
-          matchedPlan.monthlyAllowanceCents,
-        ),
+        monthlyLimitCents: num("monthly_limit_cents", matchedPlan.monthlyAllowanceCents),
         billingPortalUrl:
           typeof body.portal_url === "string" && body.portal_url.startsWith("https://")
             ? body.portal_url

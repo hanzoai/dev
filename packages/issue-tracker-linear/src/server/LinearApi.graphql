@@ -108,7 +108,12 @@ query HanzoViewer {
   }
 }
 
-query HanzoIssues($first: Int!, $after: String, $filter: IssueFilter!, $orderBy: PaginationOrderBy!) {
+query HanzoIssues(
+  $first: Int!
+  $after: String
+  $filter: IssueFilter!
+  $orderBy: PaginationOrderBy!
+) {
   issues(first: $first, after: $after, filter: $filter, orderBy: $orderBy) {
     nodes {
       ...LinearIssue

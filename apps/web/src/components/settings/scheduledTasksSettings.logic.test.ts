@@ -80,7 +80,10 @@ function group(
 }
 
 const sameIdElsewhere = member("first", serverId);
-const groups = [group("hanzodev", [first, second, third]), group("other", [other, sameIdElsewhere])];
+const groups = [
+  group("hanzodev", [first, second, third]),
+  group("other", [other, sameIdElsewhere]),
+];
 const tasks = [first, second, third, other, sameIdElsewhere].map((project, index) => ({
   id: `task-${index}`,
   environmentId: project.environmentId,
@@ -249,7 +252,7 @@ describe("webhook scheduled tasks", () => {
   const webhookTask: ScheduledTask = {
     ...legacyTask,
     schedule: { type: "webhook", signature },
-    webhook: { path: "/api/hooks/legacy-task/token", url: null, hasSecret: true },
+    webhook: { path: "/v1/hooks/legacy-task/token", url: null, hasSecret: true },
   };
 
   it("round-trips dedupe settings, clears them, and rejects invalid windows", () => {

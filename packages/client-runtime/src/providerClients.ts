@@ -18,7 +18,7 @@ import { museClient } from "@hanzodev/provider-muse/client";
 import { openCodeClient } from "@hanzodev/provider-opencode/client";
 import { piClient } from "@hanzodev/provider-pi/client";
 
-export const hanzoIcon: ProviderIcon = {
+const hanzoIcon: ProviderIcon = {
   viewBox: "0 0 67 67",
   fill: { light: "#09090B", dark: "#FAFAFA" },
   paths: [
@@ -30,7 +30,7 @@ export const hanzoIcon: ProviderIcon = {
   ],
 };
 
-export const hanzoGenIcon: ProviderIcon = {
+const hanzoGenIcon: ProviderIcon = {
   viewBox: "0 0 67 67",
   fill: { light: "#09090B", dark: "#FAFAFA" },
   paths: [

@@ -353,8 +353,8 @@ export function CaptureShortcutConfig({
           </Button>
           <p>
             <T>
-              Turn capture off in Hanzo Dev to stop it. Remove the shortcut from <Var>{desktop}</Var>{" "}
-              to free up the keys.
+              Turn capture off in Hanzo Dev to stop it. Remove the shortcut from{" "}
+              <Var>{desktop}</Var> to free up the keys.
             </T>
           </p>
           {state.shortcutActionRegistered === false ? (

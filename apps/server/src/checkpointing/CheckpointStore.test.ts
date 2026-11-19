@@ -21,7 +21,9 @@ import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as ServerConfig from "../config.ts";
 
 function checkpointRefForThreadTurn(threadId: ThreadId, turnCount: number): CheckpointRef {
-  return CheckpointRef.make(`refs/hanzo/checkpoints/${Base64Url.encode(threadId)}/turn/${turnCount}`);
+  return CheckpointRef.make(
+    `refs/hanzo/checkpoints/${Base64Url.encode(threadId)}/turn/${turnCount}`,
+  );
 }
 
 const layerServerConfig = ServerConfig.ServerConfig.layerTest(process.cwd(), {

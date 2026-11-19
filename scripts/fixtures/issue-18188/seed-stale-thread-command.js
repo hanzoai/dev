@@ -4,7 +4,7 @@
  * Await completion, then reload before exercising Stop.
  */
 globalThis.seedStaleThreadCommand = async function ({ environmentId, threadId, itemId }) {
-  const response = await fetch(`/api/orchestration/threads/${threadId}`, {
+  const response = await fetch(`/v1/event/threads/${threadId}`, {
     headers: { "x-hanzo-orchestration-protocol": "2" },
   });
   if (!response.ok) throw new Error(`Thread fetch failed: ${response.status}`);

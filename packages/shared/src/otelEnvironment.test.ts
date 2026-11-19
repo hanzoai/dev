@@ -26,7 +26,12 @@ describe("OtelEnvironment", () => {
       disabled: false,
       warnings: [specIgnored("1")],
     },
-    { name: "hanzo 1", env: { HANZO_DEV_OTEL_SDK_DISABLED: "1" }, disabled: true, warnings: [HANZO_OFF] },
+    {
+      name: "hanzo 1",
+      env: { HANZO_DEV_OTEL_SDK_DISABLED: "1" },
+      disabled: true,
+      warnings: [HANZO_OFF],
+    },
     {
       name: "hanzo false overrides spec true",
       env: { HANZO_DEV_OTEL_SDK_DISABLED: "false", OTEL_SDK_DISABLED: "true" },
@@ -37,7 +42,10 @@ describe("OtelEnvironment", () => {
       name: "unreadable hanzo warns and falls through",
       env: { HANZO_DEV_OTEL_SDK_DISABLED: "maybe", OTEL_SDK_DISABLED: "true" },
       disabled: true,
-      warnings: ["HANZO_DEV_OTEL_SDK_DISABLED=maybe is not a yes or a no and was ignored", SPEC_OFF],
+      warnings: [
+        "HANZO_DEV_OTEL_SDK_DISABLED=maybe is not a yes or a no and was ignored",
+        SPEC_OFF,
+      ],
     },
   ])("$name", ({ env, disabled, warnings }) =>
     Effect.gen(function* () {

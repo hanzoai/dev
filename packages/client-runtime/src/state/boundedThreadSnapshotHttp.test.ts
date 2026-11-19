@@ -168,7 +168,7 @@ describe("boundedThreadSnapshotLoader", () => {
   it.effect("treats structured EnvironmentResourceNotFoundError from bounded as missing", () => {
     const fetchFn = ((input: RequestInfo | URL) => {
       const url = String(input);
-      expect(url).toContain(`/api/orchestration/threads/${THREAD_ID}/bounded`);
+      expect(url).toContain(`/v1/event/threads/${THREAD_ID}/bounded`);
       return Promise.resolve(
         Response.json(
           {

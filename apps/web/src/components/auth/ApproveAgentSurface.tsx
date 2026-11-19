@@ -128,7 +128,9 @@ export function ApproveAgentSurface() {
     return (
       <Message
         title={gt("Could not load sign-in")}
-        description={gt("Hanzo Connect sign-in did not load. Check your connection, then try again.")}
+        description={gt(
+          "Hanzo Connect sign-in did not load. Check your connection, then try again.",
+        )}
       >
         <div className="mt-6">
           <Button type="button" onClick={retryClerkLoad}>

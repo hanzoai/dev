@@ -4,7 +4,6 @@ import type { Plugin, ViteDevServer } from "vite-plus";
 // layout and its landing routes, and the sidebar's project icons.
 const STARTUP_LAZY_ENTRIES = [
   "src/main.tsx",
-  "src/components/clerk/BrowserManagedAuthShell.tsx",
   "src/routes/_chat.tsx",
   "src/routes/_chat.index.tsx",
   "src/routes/_chat.$environmentId.$threadId.tsx",

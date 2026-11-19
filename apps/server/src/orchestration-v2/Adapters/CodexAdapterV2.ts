@@ -1542,7 +1542,10 @@ function codexThreadRuntimeParams(input: {
         ? {}
         : {
             // Override only Hanzo's servers so launch-argument MCP servers survive.
-            "mcp_servers.hanzo-dev": { ...hanzoServer, disabled_tools: CODEX_DIRECT_ONLY_HANZO_TOOLS },
+            "mcp_servers.hanzo-dev": {
+              ...hanzoServer,
+              disabled_tools: CODEX_DIRECT_ONLY_HANZO_TOOLS,
+            },
             // Code Mode runs a blocking wait or delegate wait as a nested call, and the model
             // keeps polling it. A second, direct-only registration makes it a plain tool call.
             [`mcp_servers.${CODEX_HANZO_DIRECT_MCP_SERVER}`]: {

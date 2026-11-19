@@ -580,7 +580,9 @@ describe("CloudManagedEndpointRuntime", () => {
       Effect.gen(function* () {
         const context = yield* Layer.build(
           ServerSecretStore.layer.pipe(
-            Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-transport-test-" })),
+            Layer.provide(
+              ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-transport-test-" }),
+            ),
             Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
           ),
         );

@@ -257,7 +257,7 @@ describe("EnvironmentConnector", () => {
         environmentId: "env-connector-test",
       });
 
-      expect(seenUrls).toEqual(["https://env.example.test/api/hanzo-connect/health"]);
+      expect(seenUrls).toEqual(["https://env.example.test/v1/hanzo-connect/health"]);
       expect(seenProofs[0]).toMatchObject({
         iss: "https://relay.example.test",
         aud: "hanzo-env:env-connector-test",
@@ -624,7 +624,7 @@ describe("EnvironmentConnector", () => {
         deviceId: "device-123",
       });
 
-      expect(seenUrls).toEqual(["https://env.example.test/api/hanzo-connect/mint-credential"]);
+      expect(seenUrls).toEqual(["https://env.example.test/v1/hanzo-connect/mint-credential"]);
       expect(seenProofs[0]).toMatchObject({
         iss: "https://relay.example.test",
         aud: "hanzo-env:env-connector-test",

@@ -17,7 +17,11 @@ import {
 import { relayFailureReason } from "../../cloud/relayFailureReason";
 import { relayEnvironmentDiscovery } from "../../state/relay";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { HANZOCHAT_SUBSCRIPTION_URL, TunnelUsageMeter, tunnelUpgradeCopy } from "../cloud/TunnelUsage";
+import {
+  HANZOCHAT_SUBSCRIPTION_URL,
+  TunnelUsageMeter,
+  tunnelUpgradeCopy,
+} from "../cloud/TunnelUsage";
 import { Button, InlineButton } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
@@ -99,8 +103,9 @@ function HanzoConnectEnvironmentRow(props: {
               </p>
               <p className="mt-4 max-w-xl text-xs leading-4.5 text-muted-foreground">
                 <T>
-                  Hanzo Connect access will be revoked, any managed tunnel will be removed, and a host
-                  space will become available. Local connections on your devices are not changed.
+                  Hanzo Connect access will be revoked, any managed tunnel will be removed, and a
+                  host space will become available. Local connections on your devices are not
+                  changed.
                 </T>
               </p>
               <div className="mt-4 flex justify-end gap-2">
@@ -157,7 +162,10 @@ function HanzoConnectTunnelUsage() {
             <>
               {tunnelUpgradeCopy(usage.upgrade, m)}{" "}
               {usage.upgrade === "link" ? (
-                <InlineButton disabled={hanzoChat.pending !== null} onClick={() => void hanzoChat.link()}>
+                <InlineButton
+                  disabled={hanzoChat.pending !== null}
+                  onClick={() => void hanzoChat.link()}
+                >
                   {hanzoChat.pending === "link" ? gt("Opening…") : gt("Link Hanzo Chat")}
                 </InlineButton>
               ) : (

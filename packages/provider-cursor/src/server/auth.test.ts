@@ -3,7 +3,11 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Layer from "effect/Layer";
 import { expect, it } from "@effect/vitest";
-import { ProviderInstanceId, ProviderSetupError, type ProviderAuthState } from "@hanzodev/contracts";
+import {
+  ProviderInstanceId,
+  ProviderSetupError,
+  type ProviderAuthState,
+} from "@hanzodev/contracts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";

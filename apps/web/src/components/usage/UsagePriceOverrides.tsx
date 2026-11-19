@@ -1,5 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
-import { AuthSettingsWriteScope, type EnvironmentId, sessionGrantsScope } from "@hanzodev/contracts";
+import {
+  AuthSettingsWriteScope,
+  type EnvironmentId,
+  sessionGrantsScope,
+} from "@hanzodev/contracts";
 import { ChevronDownIcon, PlusIcon, RotateCcwIcon, XIcon } from "lucide-react";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { msg, T, useGT, useMessages, Var } from "gt-react";

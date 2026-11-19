@@ -61,7 +61,8 @@ export function resolveProviderCompatibility(
   hanzoCodeVersion = packageJson.version,
 ): ServerProviderCompatibilityAdvisory | undefined {
   const policy = policies?.find(
-    (entry) => entry.driver === driver && satisfiesSemverRange(hanzoCodeVersion, entry.hanzoCodeRange),
+    (entry) =>
+      entry.driver === driver && satisfiesSemverRange(hanzoCodeVersion, entry.hanzoCodeRange),
   );
   if (!policy) return undefined;
   const unprefixed = version?.replace(/^v/, "");

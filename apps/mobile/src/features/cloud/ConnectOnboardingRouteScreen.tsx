@@ -94,7 +94,9 @@ function ConfiguredConnectOnboardingRouteScreen() {
         ) : (
           <View collapsable={false} className="rounded-[24px] bg-grouped-card p-5">
             <Text className="text-sm leading-normal text-foreground-muted">
-              {gt("Sign in to your Hanzo account to set up {product}.", { product: "Hanzo Connect" })}
+              {gt("Sign in to your Hanzo account to set up {product}.", {
+                product: "Hanzo Connect",
+              })}
             </Text>
           </View>
         )}

@@ -116,7 +116,10 @@ import {
   renderCodexInlineDirectivesAsMarkdown,
   splitCodexArtifactTemplateMarkdown,
 } from "@hanzodev/shared/codexMarkdownDirectives";
-import { CHAT_LIST_ANCHOR_OFFSET, resolveChatListAnchoredEndSpace } from "@hanzodev/shared/chatList";
+import {
+  CHAT_LIST_ANCHOR_OFFSET,
+  resolveChatListAnchoredEndSpace,
+} from "@hanzodev/shared/chatList";
 import { imageMimeType } from "@hanzodev/shared/image";
 import { videoMimeType } from "@hanzodev/shared/video";
 import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";

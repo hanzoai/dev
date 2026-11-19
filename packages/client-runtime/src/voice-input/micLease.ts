@@ -31,8 +31,7 @@ export function createMicLeaseArbitrator(options: MicLeaseOptions): MicLeaseArbi
   let holding = false;
   let sequence = 0;
 
-  const bc =
-    typeof BroadcastChannel !== "undefined" ? new BroadcastChannel(channelName) : null;
+  const bc = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel(channelName) : null;
 
   const handleIncoming = (msg: unknown) => {
     if (!msg || typeof msg !== "object") return;

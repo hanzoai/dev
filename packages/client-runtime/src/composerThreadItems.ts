@@ -5,7 +5,11 @@ import {
   type ScopedThreadRef,
   type ThreadId,
 } from "@hanzodev/contracts";
-import { foldSearchQuery, rankSearchItems, scoreThreadSearch } from "@hanzodev/shared/paletteSearch";
+import {
+  foldSearchQuery,
+  rankSearchItems,
+  scoreThreadSearch,
+} from "@hanzodev/shared/paletteSearch";
 
 import type { EnvironmentThreadShell } from "./state/models.ts";
 import { threadSearchSubject, type ThreadSearchShell } from "./state/threadSearch.ts";

@@ -48,7 +48,7 @@ describe("parseNewThreadLink", () => {
       value: {
         kind: "new",
         prompt: { text: "Rate me", hiddenCharacters: 0 },
-        repository: { owner: "hanzoai", name: "hanzo" },
+        repository: { owner: "hanzoai", name: "dev" },
         provider: "codex",
         model: "gpt-5",
       },
@@ -65,7 +65,7 @@ describe("parseNewThreadLink", () => {
         ok: true,
         value: {
           kind: "pull-request",
-          pullRequest: { owner: "hanzoai", name: "hanzo", number: 42 },
+          pullRequest: { owner: "hanzoai", name: "dev", number: 42 },
           prompt: null,
         },
       });
@@ -126,9 +126,7 @@ describe("link round trips", () => {
     expect(promptLinkAppPath("https://hanzo.bot/env-1/thread-1?prompt=go")).toBe(
       "/env-1/thread-1?prompt=go",
     );
-    expect(promptLinkAppPath("https://hanzo.bot/threads/env-1/thread-1")).toBe(
-      "/env-1/thread-1",
-    );
+    expect(promptLinkAppPath("https://hanzo.bot/threads/env-1/thread-1")).toBe("/env-1/thread-1");
     expect(promptLinkAppPath("https://hanzo.bot/threads/env-1/thread-1?prompt=go")).toBe(
       "/env-1/thread-1?prompt=go",
     );

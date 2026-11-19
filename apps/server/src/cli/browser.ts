@@ -119,7 +119,9 @@ const browserSetupCommand = Command.make("setup", { baseDir: baseDirFlag }).pipe
       // sudo resets the environment, so a chosen home has to be on the command line.
       const setupCommand = yield* resolveRootCliCommand(
         PreviewBrowserHost.SETUP_SUBCOMMAND,
-        Option.isSome(baseDir) || env.HANZO_DEV_HOME !== undefined ? ["--base-dir", baseDirPath] : [],
+        Option.isSome(baseDir) || env.HANZO_DEV_HOME !== undefined
+          ? ["--base-dir", baseDirPath]
+          : [],
       );
       // Root, unless sudo came from another user, is likely the server's own account.
       const rootWarning =
@@ -159,7 +161,9 @@ const browserSetupCommand = Command.make("setup", { baseDir: baseDirFlag }).pipe
           );
         }
         if (missing.length > 0) {
-          yield* Console.log(`Hanzo's browser is missing ${missing.join(", ")}; setup installs them.`);
+          yield* Console.log(
+            `Hanzo's browser is missing ${missing.join(", ")}; setup installs them.`,
+          );
         }
         if (needsFonts) {
           yield* Console.log(

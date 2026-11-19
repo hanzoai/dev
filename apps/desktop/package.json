@@ -8,29 +8,11 @@
     "dev:tauri": "node scripts/dev-tauri.mjs",
     "build:tauri": "cargo build --release --features custom-protocol --manifest-path src-tauri/Cargo.toml",
     "test:tauri": "cargo test --manifest-path src-tauri/Cargo.toml",
-    "test": "cargo test --manifest-path src-tauri/Cargo.toml",
-    "i18n:generate": "node scripts/i18n-generate.mjs"
-  },
-  "dependencies": {
-    "@effect/platform-node": "catalog:",
-    "@hanzodev/client-runtime": "workspace:*",
-    "@hanzodev/contracts": "workspace:*",
-    "@hanzodev/shared": "workspace:*",
-    "@hanzodev/ssh": "workspace:*",
-    "@hanzodev/tailscale": "workspace:*",
-    "effect": "catalog:",
-    "gt-i18n": "1.0.40",
-    "tldts": "catalog:"
+    "test": "cargo test --manifest-path src-tauri/Cargo.toml"
   },
   "devDependencies": {
-    "@effect/vitest": "catalog:",
     "@tauri-apps/cli": "^2.11.0",
     "@types/node": "catalog:",
-    "acorn": "8.16.0",
-    "cross-env": "^10.1.0",
-    "gt": "2.27.0",
-    "jsdom": "^30.0.1",
-    "tailwindcss": "^4.0.0",
     "vite-plus": "catalog:"
   },
   "productName": "Hanzo Dev"

@@ -247,7 +247,7 @@ describe("scoreThreadSearch", () => {
       [],
     );
     // Words with digits still forgive one.
-    expect(rankTitles("hanzocoed", [thread("hanzodev perf audit"), thread("Other")])).toEqual([
+    expect(rankTitles("hanzodve", [thread("hanzodev perf audit"), thread("Other")])).toEqual([
       "hanzodev perf audit",
     ]);
     expect(rankTitles("oath2", [thread("Fix oauth2 redirect")])).toEqual(["Fix oauth2 redirect"]);
@@ -371,7 +371,9 @@ describe("scoreThreadSearch beyond Latin text and titles", () => {
     // Short words before a mere prefix are a coincidence.
     expect(rankTitles("inth", [thread("Show skill names in thread overview")])).toEqual([]);
     expect(rankTitles("tos", [thread("Move Client State to Server")])).toEqual([]);
-    expect(rankTitles("hanzoco", [thread("Hanzo Dev vs Gemini")])).toEqual(["Hanzo Dev vs Gemini"]);
+    expect(rankTitles("hanzodev", [thread("Hanzo Dev vs Gemini")])).toEqual([
+      "Hanzo Dev vs Gemini",
+    ]);
     expect(rankTitles('"sidebar lag"', [thread("Fix sidebar lag")])).toEqual(["Fix sidebar lag"]);
     // A pasted query with a separate accent mark matches the composed title.
     expect(rankTitles("cafe\u0301", [thread("Café menu")])).toEqual(["Café menu"]);
@@ -460,14 +462,14 @@ describe("scoreThreadSearch with heavy use and loose input", () => {
       pullRequests: [
         {
           number: 22889,
-          references: ["hanzoai/dev#22889", "https://github.com/hanzoai/dev/pull/22889"],
+          references: ["hanzoai/hanzodev#22889", "https://github.com/hanzoai/hanzodev/pull/22889"],
         },
       ],
     });
     for (const query of [
       "hanzodev#22889",
-      "github.com/hanzoai/dev/pull/22889",
-      "https://github.com/hanzoai/dev/pull/22889/files",
+      "github.com/hanzoai/hanzodev/pull/22889",
+      "https://github.com/hanzoai/hanzodev/pull/22889/files",
       "5fe6f59c",
       "beebox",
     ]) {
@@ -475,7 +477,7 @@ describe("scoreThreadSearch with heavy use and loose input", () => {
     }
     expect(scoreThreadSearch("github.com", subject, NOW)).toBeNull();
     // A number is never cut short.
-    for (const query of ["github.com/hanzoai/dev/pull/2288", "hanzodev#2288"]) {
+    for (const query of ["github.com/hanzoai/hanzodev/pull/2288", "hanzodev#2288"]) {
       expect(scoreThreadSearch(foldSearchQuery(query), subject, NOW), query).toBeNull();
     }
   });

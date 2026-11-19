@@ -1,13 +1,15 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import * as NodeDns from "node:dns";
 import * as NodeOS from "node:os";
 import * as NodeSea from "node:sea";
 
-export const Platform = Context.Reference<NodeJS.Platform>("@hanzodev/shared/HostProcess/Platform", {
-  defaultValue: () => process.platform,
-});
+export const Platform = Context.Reference<NodeJS.Platform>(
+  "@hanzodev/shared/HostProcess/Platform",
+  {
+    defaultValue: () => process.platform,
+  },
+);
 
 export const Architecture = Context.Reference<NodeJS.Architecture>(
   "@hanzodev/shared/HostProcess/Architecture",
@@ -93,9 +95,12 @@ export const InvokedAs = Context.Reference<string>("@hanzodev/shared/HostProcess
   defaultValue: () => process.argv0,
 });
 
-export const IsExecutable = Context.Reference<boolean>("@hanzodev/shared/HostProcess/IsExecutable", {
-  defaultValue: () => NodeSea.isSea(),
-});
+export const IsExecutable = Context.Reference<boolean>(
+  "@hanzodev/shared/HostProcess/IsExecutable",
+  {
+    defaultValue: () => NodeSea.isSea(),
+  },
+);
 
 export class HostnameLookupError extends Schema.TaggedError<HostnameLookupError>()(
   "HostnameLookupError",
@@ -105,28 +110,6 @@ export class HostnameLookupError extends Schema.TaggedError<HostnameLookupError>
     return `Could not resolve ${this.hostname}.`;
   }
 }
-
-/** Includes hostname-resolved addresses absent from interfaces, such as Debian's 127.0.1.1 used by Firefox locks. */
-export const Addresses = Context.Reference<Effect.Effect<ReadonlySet<string>>>(
-  "@hanzodev/shared/HostProcess/Addresses",
-  {
-    // The enclosing operation owns the span for this inline handler.
-    defaultValue: Effect.fnUntraced(function* () {
-      const interfaces = Object.values(NodeOS.networkInterfaces())
-        .flat()
-        .flatMap((entry) => (entry ? [entry.address] : []));
-      const hostname = NodeOS.hostname();
-      const resolved = yield* Effect.tryPromise({
-        try: () => NodeDns.promises.lookup(hostname, { all: true }),
-        catch: (cause) => new HostnameLookupError({ hostname, cause }),
-      }).pipe(
-        Effect.map((entries) => entries.map((entry) => entry.address)),
-        Effect.orElseSucceed(() => [] as ReadonlyArray<string>),
-      );
-      return new Set([...interfaces, ...resolved]);
-    }),
-  },
-);
 
 export const UserId = Context.Reference<number | undefined>("@hanzodev/shared/HostProcess/UserId", {
   defaultValue: () => process.getuid?.(),

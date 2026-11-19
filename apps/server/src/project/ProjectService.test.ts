@@ -265,7 +265,10 @@ it.layer(layerTest)("ProjectService", (it) => {
         projectId,
         (project) => project.repositoryIdentity !== null && project.faviconPath !== null,
       );
-      assert.equal(hydratedCreated?.repositoryIdentity?.canonicalKey, "github.com/hanzodev/project");
+      assert.equal(
+        hydratedCreated?.repositoryIdentity?.canonicalKey,
+        "github.com/hanzodev/project",
+      );
       assert.equal(hydratedCreated?.faviconPath, "/work/project/favicon.svg");
 
       const updated = yield* service.update({

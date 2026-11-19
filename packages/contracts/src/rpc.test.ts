@@ -13,14 +13,12 @@ describe("WebSocket RPC contracts", () => {
     const expiresAt = 10_000;
 
     expect(
-      Exit.isSuccess(
-        decodeAsset({ relativeUrl: "/api/assets/token.sig/my%20file.png", expiresAt }),
-      ),
+      Exit.isSuccess(decodeAsset({ relativeUrl: "/v1/assets/token.sig/my%20file.png", expiresAt })),
     ).toBe(true);
     expect(
       Exit.isSuccess(
         decodeUpload({
-          relativeUrl: "/api/attachments/upload/token.sig",
+          relativeUrl: "/v1/attachments/upload/token.sig",
           expiresAt,
           attachmentId: "attachment",
         }),
@@ -32,7 +30,7 @@ describe("WebSocket RPC contracts", () => {
       "file:///tmp/document",
       "https://other.example/document",
       "//other.example/document",
-      "/api/assets/token/../../../other",
+      "/v1/assets/token/../../../other",
     ]) {
       expect(Exit.isFailure(decodeAsset({ relativeUrl, expiresAt }))).toBe(true);
       expect(

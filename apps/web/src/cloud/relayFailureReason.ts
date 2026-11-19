@@ -12,7 +12,8 @@ export function relayFailureReason(cause: unknown): string | null {
   for (let current = cause, depth = 0; current instanceof Error && depth < 4; depth += 1) {
     if (isRequestTimeout(current)) return m(msg("Hanzo Connect timed out. Try again."));
     if (isRequestFailed(current)) {
-      if (current.transportFailed) return m(msg("Could not reach Hanzo Connect. Check your network."));
+      if (current.transportFailed)
+        return m(msg("Could not reach Hanzo Connect. Check your network."));
       if (current.relayError) {
         return current.relayError._tag === "RelayInternalError"
           ? m(msg("Hanzo Connect is unavailable. Try again."))

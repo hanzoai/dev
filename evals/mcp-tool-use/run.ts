@@ -426,7 +426,8 @@ const toolResult = (id: string, content: unknown): Block => ({
 });
 const texts = (content: typeof Content.Type) =>
   typeof content === "string" ? [content] : content.flatMap((block) => block.text ?? []);
-const isHanzoName = (name: string) => name.startsWith(HANZO_PREFIX) || name.startsWith("mcp__hanzo_dev__");
+const isHanzoName = (name: string) =>
+  name.startsWith(HANZO_PREFIX) || name.startsWith("mcp__hanzo_dev__");
 const hasTool = (tools: ReadonlyArray<ApiTool>, name: string) =>
   tools.some((tool) => tool.name === name);
 
@@ -611,7 +612,10 @@ export const hanzoSubagentContext = async (model: Model, device = true, browser 
  */
 const hanzoContextReport = (model: Model) => {
   const size = (chars: number) => `${chars} chars (~${Math.round(chars / 4)} tokens)`;
-  const descriptions = hanzoTools.reduce((sum, tool) => sum + valueText(tool.description).length, 0);
+  const descriptions = hanzoTools.reduce(
+    (sum, tool) => sum + valueText(tool.description).length,
+    0,
+  );
   const schemas = JSON.stringify(hanzoTools).length;
   return [
     `- Hanzo context: system text ${size((isCodex(model) ? JSON.stringify(buildCodexAdditionalContext({ model }, { browser: true, device: true })) : hanzoSystemAppend(model)).length)}`,
@@ -676,7 +680,7 @@ export const buildBase = (
   const nativeDeferred = deferredList.split("\n").filter((name) => name && !isHanzoName(name));
   const names = [
     ...nativeDeferred,
-    ...hanzo-dev.filter((tool) => !alwaysLoaded.has(tool.name)).map((tool) => tool.name),
+    ...hanzo.filter((tool) => !alwaysLoaded.has(tool.name)).map((tool) => tool.name),
   ]
     .toSorted()
     .join("\n");
@@ -725,11 +729,11 @@ export const buildBase = (
     },
     nativeTools: [
       ...template.tools.filter((tool) => !isHanzoName(tool.name)),
-      ...hanzo-dev.filter((tool) => alwaysLoaded.has(tool.name)),
+      ...hanzo.filter((tool) => alwaysLoaded.has(tool.name)),
     ],
     /** Tools ToolSearch loads: Hanzo tools from source, and native tools the template only names. */
     hanzo,
-    deferred: [...hanzo-dev, ...nativeDeferred.map((name) => ({ name, ...nativeSchema(name) }))],
+    deferred: [...hanzo, ...nativeDeferred.map((name) => ({ name, ...nativeSchema(name) }))],
   };
 };
 
@@ -816,7 +820,7 @@ const buildCodexBase = (
     },
     nativeTools,
     hanzo,
-    deferred: [...hanzo-dev],
+    deferred: [...hanzo],
     codex: { ...template, input, reasoning: { ...template.reasoning, effort } },
   };
 };
@@ -2060,7 +2064,12 @@ export const answerToolCall = Effect.fn("evaluateMcpToolUse.answerToolCall")(fun
     const result = yield* sample.devices.call(name, input, failure);
     return result.isError ? failed(result.text) : toolResult(call.id, result.text);
   }
-  if (sample.backgroundWait && isHanzoName(call.name) && name === "hanzo_background_wait" && fromWorld) {
+  if (
+    sample.backgroundWait &&
+    isHanzoName(call.name) &&
+    name === "hanzo_background_wait" &&
+    fromWorld
+  ) {
     const result = yield* sample.backgroundWait(input);
     return result.isError ? failed(result.text) : toolResult(call.id, result.text);
   }

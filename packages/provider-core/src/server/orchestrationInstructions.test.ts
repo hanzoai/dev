@@ -80,6 +80,9 @@ describe("Hanzo device instructions", () => {
       hanzoAcpPromptWithInstructions({ prompt: "Again.", state, previousState: state }),
       "Again.",
     );
-    assert.notInclude(hanzoAcpPromptWithInstructions({ prompt: "Hi.", state }), "## Hanzo Dev devices");
+    assert.notInclude(
+      hanzoAcpPromptWithInstructions({ prompt: "Hi.", state }),
+      "## Hanzo Dev devices",
+    );
   });
 });

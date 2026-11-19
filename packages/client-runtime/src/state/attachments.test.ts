@@ -37,7 +37,7 @@ function makeCreateUploadUrl(attachmentId: string): CreateUploadUrlCommand {
     run: async () =>
       AsyncResult.success<AttachmentCreateUploadUrlResult, never>({
         attachmentId,
-        relativeUrl: `/api/attachments/upload/${attachmentId}`,
+        relativeUrl: `/v1/attachments/upload/${attachmentId}`,
         expiresAt: 1,
       }),
   };
@@ -123,7 +123,7 @@ describe("verifyPersistedAttachmentUpload", () => {
             lookups += 1;
             return lookups === 1
               ? Effect.fail({ _tag: "TransportError" } as const)
-              : Effect.succeed({ url: "/api/assets/pending-1" });
+              : Effect.succeed({ url: "/v1/assets/pending-1" });
           }),
         ),
       ).pipe(Atom.swr({ staleTime: 60_000 }), Atom.keepAlive);

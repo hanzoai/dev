@@ -76,7 +76,8 @@ export function useCloudLinkController(environmentId: EnvironmentId | null) {
   const [tunnelLimit, setTunnelLimit] = useState<number | null>(null);
 
   const reportUpdateFailure = (cause: unknown, reason?: string) => {
-    const message = thrownErrorMessage(cause, m) ?? m(msg("Could not update Hanzo Connect access."));
+    const message =
+      thrownErrorMessage(cause, m) ?? m(msg("Could not update Hanzo Connect access."));
     const traceId = findErrorTraceId(cause);
     console.error("[hanzo-connect] Could not update Hanzo Connect", { message, traceId, cause });
     setOperationError(

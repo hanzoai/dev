@@ -58,7 +58,7 @@ describe("relay request tracing boundary", () => {
           },
         });
       const request = HttpServerRequest.fromWeb(
-        new Request("https://environment.example.test/api/orchestration/threads/thread-1"),
+        new Request("https://environment.example.test/v1/event/threads/thread-1"),
       );
 
       const handler = Effect.fn("environment.orchestration.threadSnapshot")(function* () {

@@ -103,7 +103,10 @@ describe("Enriched link presentation", () => {
   });
 
   it("presents thread links as thread chips and leaves other links alone", () => {
-    for (const href of ["hanzo-thread://v1/thread%3Aproject%3A1", "hanzo-thread://v2/env/thread_1"]) {
+    for (const href of [
+      "hanzo-thread://v1/thread%3Aproject%3A1",
+      "hanzo-thread://v2/env/thread_1",
+    ]) {
       expect(enrichedThreadLinkPresentation(href), href).toEqual({
         accent: "#009c96",
         icon: { kind: "chip", name: "messages-square" },

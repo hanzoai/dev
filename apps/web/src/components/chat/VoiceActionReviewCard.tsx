@@ -1,9 +1,10 @@
-import { T, useGT } from "gt-react";
-import { ArrowUpRightIcon, CheckCircle2Icon, PencilIcon, SparklesIcon, XIcon } from "lucide-react";
+import { msg, T, useGT } from "gt-react";
+import { ArrowUpRightIcon, CheckCircle2Icon, MicIcon, PencilIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 
 import { trackHanzoEvent } from "../../analytics/hanzoWebAnalytics";
 import { getHanzoWebAuthController } from "../../cloud/hanzoWebAuth";
+import { m } from "../../i18n/messages";
 import { Button } from "../ui/button";
 
 export interface ProposedVoiceAction {
@@ -40,7 +41,7 @@ export function parseProposedVoiceAction(rawPrompt: string): ProposedVoiceAction
       kind: "assign",
       target,
       owner,
-      summary: `Assign "${target}" -> ${owner}`,
+      summary: m(msg('Assign "{target}" -> {owner}', { target, owner })),
       rawText: trimmed,
     };
   }
@@ -52,8 +53,8 @@ export function parseProposedVoiceAction(rawPrompt: string): ProposedVoiceAction
     return {
       kind: "status",
       target,
-      owner: "Current user",
-      summary: `Update "${target}" status -> ${status}`,
+      owner: m(msg("Current user")),
+      summary: m(msg('Update "{target}" status -> {status}', { target, status })),
       rawText: trimmed,
     };
   }
@@ -63,9 +64,9 @@ export function parseProposedVoiceAction(rawPrompt: string): ProposedVoiceAction
     const org = orgMatch.groups.org.trim().toLowerCase();
     return {
       kind: "switch_org",
-      target: `Organization (${org})`,
+      target: m(msg("Organization ({org})", { org })),
       owner: org,
-      summary: `Switch active X-Org-Id -> ${org}`,
+      summary: m(msg("Switch active X-Org-Id -> {org}", { org })),
       rawText: trimmed,
     };
   }
@@ -90,10 +91,10 @@ export function VoiceActionReviewCard(props: {
     return (
       <div
         data-testid="voice-action-applied-banner"
-        className="mx-3 mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2 text-xs"
+        className="mx-3 mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-success/30 bg-success/10 px-3.5 py-2 text-xs"
       >
         <div className="flex items-center gap-2">
-          <CheckCircle2Icon className="size-4 shrink-0 text-emerald-500" />
+          <CheckCircle2Icon className="size-4 shrink-0 text-success" />
           <span>
             <strong>{applied.summary}</strong> ({applied.owner})
           </span>
@@ -163,11 +164,11 @@ export function VoiceActionReviewCard(props: {
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <SparklesIcon className="size-3.5 shrink-0 text-foreground" />
+          <MicIcon className="size-3.5 shrink-0 text-foreground" />
           <span className="font-semibold">
             <T>Voice Action Review</T>
           </span>
-          <span className="rounded bg-background px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
+          <span className="rounded bg-background px-2 py-0.5 font-mono text-2xs text-muted-foreground">
             {effectiveSummary}
           </span>
         </div>
@@ -190,7 +191,7 @@ export function VoiceActionReviewCard(props: {
         </div>
       </div>
 
-      <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+      <div className="mt-1.5 flex flex-wrap items-center gap-3 text-2xs text-muted-foreground">
         <span>
           <T>Matched target:</T> <strong className="text-foreground">{effectiveTarget}</strong>
         </span>

@@ -104,7 +104,10 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
 
   const openBootstrapFd = Effect.fn(function* (payload: DesktopBackendBootstrapValue) {
     const fs = yield* FileSystem.FileSystem;
-    const filePath = yield* fs.makeTempFileScoped({ prefix: "hanzo-bootstrap-", suffix: ".ndjson" });
+    const filePath = yield* fs.makeTempFileScoped({
+      prefix: "hanzo-bootstrap-",
+      suffix: ".ndjson",
+    });
     const encoded = yield* encodeDesktopBootstrap(payload);
     yield* fs.writeFileString(filePath, `${encoded}\n`);
     return yield* Effect.acquireRelease(
@@ -315,7 +318,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     Effect.gen(function* () {
       const secret = "short-secret";
       const baseDir = yield* FileSystem.FileSystem.pipe(
-        Effect.flatMap((fs) => fs.makeTempDirectoryScoped({ prefix: "hanzo-cli-dev-auth-invalid-" })),
+        Effect.flatMap((fs) =>
+          fs.makeTempDirectoryScoped({ prefix: "hanzo-cli-dev-auth-invalid-" }),
+        ),
       );
       const flags = {
         mode: Option.some("web" as const),
@@ -547,7 +552,9 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-cli-config-otlp-settings-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "hanzo-cli-config-otlp-settings-",
+      });
       const derivedPaths = yield* deriveExplicitServerPaths(baseDir, undefined);
       yield* fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true });
       yield* fs.writeFileString(
@@ -630,55 +637,57 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     }),
   );
 
-  it.effect("lets HANZO_DEV_OTEL_SDK_DISABLED=false override an ambient OTEL_SDK_DISABLED=true", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-cli-config-otel-on-" });
-      const derivedPaths = yield* deriveExplicitServerPaths(baseDir, undefined);
-      yield* fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true });
-      yield* fs.writeFileString(
-        derivedPaths.settingsPath,
-        `${JSON.stringify({
-          observability: {
-            otlpTracesUrl: "http://localhost:4318/v1/traces",
+  it.effect(
+    "lets HANZO_DEV_OTEL_SDK_DISABLED=false override an ambient OTEL_SDK_DISABLED=true",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-cli-config-otel-on-" });
+        const derivedPaths = yield* deriveExplicitServerPaths(baseDir, undefined);
+        yield* fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true });
+        yield* fs.writeFileString(
+          derivedPaths.settingsPath,
+          `${JSON.stringify({
+            observability: {
+              otlpTracesUrl: "http://localhost:4318/v1/traces",
+            },
+          })}\n`,
+        );
+
+        const resolved = yield* resolveServerConfig(
+          {
+            mode: Option.some("desktop"),
+            port: Option.some(4888),
+            host: Option.none(),
+            baseDir: Option.some(baseDir),
+            cwd: Option.none(),
+            devUrl: Option.none(),
+            noBrowser: Option.none(),
+            bootstrapFd: Option.none(),
+            autoBootstrapProjectFromCwd: Option.none(),
+            logWebSocketEvents: Option.none(),
+            tailscaleServeEnabled: Option.none(),
+            tailscaleServePort: Option.none(),
+            lan: Option.none(),
           },
-        })}\n`,
-      );
-
-      const resolved = yield* resolveServerConfig(
-        {
-          mode: Option.some("desktop"),
-          port: Option.some(4888),
-          host: Option.none(),
-          baseDir: Option.some(baseDir),
-          cwd: Option.none(),
-          devUrl: Option.none(),
-          noBrowser: Option.none(),
-          bootstrapFd: Option.none(),
-          autoBootstrapProjectFromCwd: Option.none(),
-          logWebSocketEvents: Option.none(),
-          tailscaleServeEnabled: Option.none(),
-          tailscaleServePort: Option.none(),
-          lan: Option.none(),
-        },
-        Option.none(),
-      ).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            ConfigProvider.layer(
-              ConfigProvider.fromEnv({
-                env: { HANZO_DEV_OTEL_SDK_DISABLED: "false", OTEL_SDK_DISABLED: "true" },
-              }),
+          Option.none(),
+        ).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              ConfigProvider.layer(
+                ConfigProvider.fromEnv({
+                  env: { HANZO_DEV_OTEL_SDK_DISABLED: "false", OTEL_SDK_DISABLED: "true" },
+                }),
+              ),
+              NetService.layer,
             ),
-            NetService.layer,
           ),
-        ),
-      );
+        );
 
-      expect(resolved.otelEnvironment.disabled).toBe(false);
-      expect(resolved.otlpTracesUrl).toBe("http://localhost:4318/v1/traces");
-    }),
+        expect(resolved.otelEnvironment.disabled).toBe(false);
+        expect(resolved.otlpTracesUrl).toBe("http://localhost:4318/v1/traces");
+      }),
   );
 
   it.effect("forces noBrowser and disables auto-bootstrap for headless startup presentation", () =>
@@ -999,10 +1008,12 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         privateNetworkOnly: true,
       });
       // `service.env` reaches the server as its environment.
-      expect(yield* resolveHost({ connected: true, env: { HANZO_DEV_HOST: "127.0.0.1" } })).toEqual({
-        host: "127.0.0.1",
-        privateNetworkOnly: undefined,
-      });
+      expect(yield* resolveHost({ connected: true, env: { HANZO_DEV_HOST: "127.0.0.1" } })).toEqual(
+        {
+          host: "127.0.0.1",
+          privateNetworkOnly: undefined,
+        },
+      );
       expect(yield* resolveHost({ connected: true, env: { HANZO_DEV_LAN: "false" } })).toEqual({
         host: undefined,
         privateNetworkOnly: undefined,

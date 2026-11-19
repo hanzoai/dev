@@ -108,8 +108,10 @@ describe("filesystem browse model", () => {
     });
     expect(getFilesystemBrowseTabCompletion([], "x")).toBeNull();
     // The list also shows substring and fuzzy matches; Tab completes only the typed name.
-    expect(getFilesystemBrowseTabCompletion([entry("hanzodev"), entry("my-hanzodev")], "hanzo")).toEqual({
-      name: "hanzo",
+    expect(
+      getFilesystemBrowseTabCompletion([entry("hanzodev"), entry("my-hanzodev")], "hanzo"),
+    ).toEqual({
+      name: "hanzodev",
       isComplete: true,
     });
     expect(
@@ -170,10 +172,12 @@ describe("browse navigation", () => {
 });
 
 describe("browse entry filtering", () => {
-  const entries = ["my-hanzodev", "hanzodev", "cotton", "HanzoDev-old", ".hanzo-dev", "docs"].map((name) => ({
-    name,
-    fullPath: `~/code/${name}`,
-  }));
+  const entries = ["my-hanzodev", "hanzodev", "cotton", "HanzoDev-old", ".hanzo-dev", "docs"].map(
+    (name) => ({
+      name,
+      fullPath: `~/code/${name}`,
+    }),
+  );
   const names = (query: string) =>
     filterFilesystemBrowseEntries(entries, query).visibleEntries.map((entry) => entry.name);
 
@@ -182,9 +186,9 @@ describe("browse entry filtering", () => {
   });
 
   it("matches substrings and subsequences, best match first", () => {
-    expect(names("code")).toEqual(["hanzodev", "HanzoDev-old", "my-hanzodev"]);
-    expect(names("hanzoc")).toEqual(["hanzodev", "HanzoDev-old", "my-hanzodev"]);
-    expect(names("tcd")).toEqual(["hanzodev", "HanzoDev-old", "my-hanzodev"]);
+    expect(names("dev")).toEqual(["hanzodev", "HanzoDev-old", "my-hanzodev"]);
+    expect(names("hanzod")).toEqual(["hanzodev", "HanzoDev-old", "my-hanzodev"]);
+    expect(names("hzd")).toEqual(["hanzodev", "HanzoDev-old", "my-hanzodev"]);
     expect(names("xyz")).toEqual([]);
   });
 

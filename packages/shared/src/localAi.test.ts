@@ -59,16 +59,17 @@ describe("localAi Zen / Qwen3+ catalog and runtime probes", () => {
   });
 
   it("probes Ollama (:11434) and strips any installed qwen2 tags while mapping Zen 6 aliases", async () => {
-    const fetchMock = vi.fn(async () =>
-      new Response(
-        JSON.stringify({
-          models: [
-            { name: "qwen2.5:7b", size: 4_000_000_000 },
-            { name: "qwen3:4b", size: 2_500_000_000 },
-          ],
-        }),
-        { status: 200 },
-      ),
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            models: [
+              { name: "qwen2.5:7b", size: 4_000_000_000 },
+              { name: "qwen3:4b", size: 2_500_000_000 },
+            ],
+          }),
+          { status: 200 },
+        ),
     );
     const status = await probeOllamaStatus({
       fetchImpl: fetchMock as unknown as typeof globalThis.fetch,
@@ -108,7 +109,9 @@ describe("localAi Zen / Qwen3+ catalog and runtime probes", () => {
         return new Response(JSON.stringify({ healthy: true }), { status: 200 });
       }
       if (href.endsWith("/ext/bc/C/rpc")) {
-        const init = (fetchMock.mock.calls.at(-1) as unknown as [unknown, RequestInit | undefined])?.[1];
+        const init = (
+          fetchMock.mock.calls.at(-1) as unknown as [unknown, RequestInit | undefined]
+        )?.[1];
         const body = JSON.parse(String(init?.body ?? "{}")) as { method?: string };
         if (body.method === "eth_blockNumber") {
           return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x10858c" }), {

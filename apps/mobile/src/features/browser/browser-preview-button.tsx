@@ -45,7 +45,9 @@ export function BrowserPreviewButton(props: {
         </AppText>
       ) : props.count > 1 ? (
         <View className="absolute right-1.5 top-1.5 min-w-4 items-center rounded-full bg-primary px-1">
-          <AppText className="text-2xs font-hanzo-bold text-primary-foreground">{props.count}</AppText>
+          <AppText className="text-2xs font-hanzo-bold text-primary-foreground">
+            {props.count}
+          </AppText>
         </View>
       ) : null}
     </Pressable>

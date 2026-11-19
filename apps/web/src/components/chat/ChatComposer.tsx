@@ -147,7 +147,6 @@ import { useDictationSubmissionShortcut } from "../../speech/useDictationSubmiss
 import { useEnvironmentSpeechInput } from "../../speech/useEnvironmentSpeechInput";
 import { ComposerSpeechButton, ComposerSpeechRecordingPill } from "./ComposerSpeechButton";
 import { VoiceActionReviewCard } from "./VoiceActionReviewCard";
-import { trackHanzoEvent } from "../../analytics/hanzoWebAnalytics";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
 import { shortcutLabelForCommand, type ShortcutMatchContext } from "../../keybindings";
 import {

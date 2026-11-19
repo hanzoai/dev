@@ -58,7 +58,9 @@ describe("incremental Markdown parsing", () => {
     const next = source + " more";
     expect(render(next, incremental, parsedSources)).toEqual(render(next));
     expect(parsedSources).not.toContain(next);
-    expect(parsedSources.some((text) => text.startsWith("hanzo-markdown-inline-prefix:"))).toBe(true);
+    expect(parsedSources.some((text) => text.startsWith("hanzo-markdown-inline-prefix:"))).toBe(
+      true,
+    );
   });
 
   it.each([

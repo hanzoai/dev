@@ -34,20 +34,16 @@ class HanzoReviewDiffModule : Module() {
       Prop("selectedRowIdsJson") { view: HanzoReviewDiffView, selectedRowIdsJson: String ->
         view.setSelectedRowIdsJson(selectedRowIdsJson)
       }
-      Prop("collapsedCommentIdsJson") { view: HanzoReviewDiffView, collapsedCommentIdsJson: String ->
-        view.setCollapsedCommentIdsJson(collapsedCommentIdsJson)
+      Prop("collapsedCommentIdsJson") { view: HanzoReviewDiffView, value: String ->
+        view.setCollapsedCommentIdsJson(value)
       }
-      Prop("appearanceScheme") { view: HanzoReviewDiffView, appearanceScheme: String ->
-        view.setAppearanceScheme(appearanceScheme)
+      Prop("appearanceScheme") { view: HanzoReviewDiffView, value: String ->
+        view.setAppearanceScheme(value)
       }
-      Prop("themeJson") { view: HanzoReviewDiffView, themeJson: String ->
-        view.setThemeJson(themeJson)
-      }
-      Prop("styleJson") { view: HanzoReviewDiffView, styleJson: String ->
-        view.setStyleJson(styleJson)
-      }
-      Prop("rowHeight") { view: HanzoReviewDiffView, rowHeight: Double ->
-        view.setRowHeight(rowHeight.toFloat())
+      Prop("themeJson") { view: HanzoReviewDiffView, value: String -> view.setThemeJson(value) }
+      Prop("styleJson") { view: HanzoReviewDiffView, value: String -> view.setStyleJson(value) }
+      Prop("rowHeight") { view: HanzoReviewDiffView, value: Double ->
+        view.setRowHeight(value.toFloat())
       }
       // Accept the shared prop while deriving Android's scroll range from the drawn text.
       Prop("contentWidth") { _: HanzoReviewDiffView, _: Double -> }
@@ -66,13 +62,21 @@ class HanzoReviewDiffModule : Module() {
 
       Events(REVIEW_DIFF_EVENTS)
 
-      AsyncFunction("scrollToFile") { view: HanzoReviewDiffView, fileId: String, animated: Boolean ->
+      AsyncFunction("scrollToFile") {
+          view: HanzoReviewDiffView,
+          fileId: String,
+          animated: Boolean
+        ->
         view.scrollToFile(fileId, animated)
       }
       AsyncFunction("scrollToTop") { view: HanzoReviewDiffView, animated: Boolean ->
         view.scrollToTop(animated)
       }
-      AsyncFunction("setRowsJson") { view: HanzoReviewDiffView, rowsJson: String, resetKey: String ->
+      AsyncFunction("setRowsJson") {
+          view: HanzoReviewDiffView,
+          rowsJson: String,
+          resetKey: String
+        ->
         view.setContentResetKey(resetKey)
         view.setRowsJson(rowsJson)
       }

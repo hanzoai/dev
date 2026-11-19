@@ -227,7 +227,12 @@ describe("ssh tunnel scripts", () => {
       const fs = yield* FileSystem.FileSystem;
       const home = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-ssh-launch-log-" });
       const target = { alias: "devbox", hostname: "devbox", username: null, port: null };
-      const stateDir = NodePath.join(home, ".hanzo-dev", "ssh-launch", yield* remoteStateKey(target));
+      const stateDir = NodePath.join(
+        home,
+        ".hanzo-dev",
+        "ssh-launch",
+        yield* remoteStateKey(target),
+      );
       const bin = NodePath.join(home, "bin");
       yield* fs.makeDirectory(stateDir, { recursive: true });
       yield* fs.makeDirectory(bin);

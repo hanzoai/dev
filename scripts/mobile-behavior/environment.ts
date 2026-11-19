@@ -191,7 +191,7 @@ export const startEnvironment = Effect.fn("environment.start")(function* (input:
     .pipe(Effect.flatMap(HttpClientResponse.schemaBodyJson(ExecutionEnvironmentDescriptor)));
   const shell = () =>
     http
-      .get(`${origin}/api/orchestration/shell`)
+      .get(`${origin}/v1/event/shell`)
       .pipe(Effect.flatMap(HttpClientResponse.schemaBodyJson(OrchestrationV2ShellSnapshot)));
   const createProject = Effect.fn("environment.createProject")(function* (
     title: string,
@@ -199,7 +199,7 @@ export const startEnvironment = Effect.fn("environment.start")(function* (input:
   ) {
     const projectId = ProjectId.make(yield* uuid);
     yield* http.execute(
-      HttpClientRequest.post(`${origin}/api/projects/mutate`).pipe(
+      HttpClientRequest.post(`${origin}/v1/projects/mutate`).pipe(
         HttpClientRequest.bodyJsonUnsafe({
           type: "project.create",
           commandId: yield* uuid,
@@ -213,7 +213,7 @@ export const startEnvironment = Effect.fn("environment.start")(function* (input:
   });
   const projectId = yield* createProject("acme-app", workspace);
   const ticket = yield* http
-    .execute(HttpClientRequest.post(`${origin}/api/auth/websocket-ticket`))
+    .execute(HttpClientRequest.post(`${origin}/v1/auth/websocket-ticket`))
     .pipe(
       Effect.flatMap(HttpClientResponse.schemaBodyJson(Schema.Struct({ ticket: Schema.String }))),
     );

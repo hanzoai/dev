@@ -2,9 +2,9 @@
 
 export const DEFAULT_HANZO_ANALYTICS_ENDPOINT = "https://analytics.hanzo.ai/v1/event";
 export const DEFAULT_HANZO_WEBSITE_ID = "hanzo-dev";
-export const HANZO_LOCAL_BEACON_PATH = "/_/beacon";
-export const HANZO_VISITOR_STORAGE_KEY = "hanzo.analytics.visitor.v1";
-export const HANZO_SESSION_STORAGE_PREFIX = "hanzo.analytics.session.";
+const HANZO_LOCAL_BEACON_PATH = "/_/beacon";
+const HANZO_VISITOR_STORAGE_KEY = "hanzo.analytics.visitor.v1";
+const HANZO_SESSION_STORAGE_PREFIX = "hanzo.analytics.session.";
 
 export type HanzoAnalyticsSurface = "desktop" | "web" | "mobile" | "server";
 export type HanzoAnalyticsDevice = "desktop" | "mobile" | "tablet";
@@ -112,7 +112,10 @@ export function computeHanzoEventId(
   if (typeof dedupeKeyRaw === "string" || typeof dedupeKeyRaw === "number") {
     const trimmed = String(dedupeKeyRaw).trim();
     if (trimmed.length > 0) {
-      const normalizedEvent = eventName.trim().toLowerCase().replace(/[^a-z0-9_]+/gu, "_");
+      const normalizedEvent = eventName
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_]+/gu, "_");
       return `evt_${normalizedEvent}_${fnv1aHex(`${normalizedEvent}:${trimmed}`)}`;
     }
   }
@@ -131,17 +134,17 @@ export function normalizeHanzoAnalyticsPath(rawUrlOrPath: string): {
 } {
   const trimmed = rawUrlOrPath.trim() || "/";
   try {
-    const base = trimmed.startsWith("http://") || trimmed.startsWith("https://")
-      ? new URL(trimmed)
-      : new URL(trimmed.startsWith("/") ? trimmed : `/${trimmed}`, "http://localhost");
+    const base =
+      trimmed.startsWith("http://") || trimmed.startsWith("https://")
+        ? new URL(trimmed)
+        : new URL(trimmed.startsWith("/") ? trimmed : `/${trimmed}`, "http://localhost");
     // Hash-routed Electron URLs like `file:///...#/settings/general`
     let rawPathname = base.pathname || "/";
     if (base.hash.startsWith("#/")) {
       const hashPath = base.hash.slice(1).split("?")[0] ?? "/";
       rawPathname = hashPath || "/";
     }
-    const normalizedPath =
-      rawPathname.length > 1 ? rawPathname.replace(/\/+$/u, "") || "/" : "/";
+    const normalizedPath = rawPathname.length > 1 ? rawPathname.replace(/\/+$/u, "") || "/" : "/";
 
     const utm: Record<string, string> = {};
     for (const key of [
@@ -155,18 +158,20 @@ export function normalizeHanzoAnalyticsPath(rawUrlOrPath: string): {
       if (value) utm[key] = value;
     }
 
-    for (const key of [...base.searchParams.keys()]) {
+    const keysToDelete: string[] = [];
+    for (const key of base.searchParams.keys()) {
       if (SENSITIVE_QUERY_KEYS.has(key.toLowerCase())) {
-        base.searchParams.delete(key);
+        keysToDelete.push(key);
       }
+    }
+    for (const key of keysToDelete) {
+      base.searchParams.delete(key);
     }
 
     const query = base.searchParams.toString();
     const sanitizedUrl = query ? `${normalizedPath}?${query}` : normalizedPath;
     const hostname =
-      trimmed.startsWith("http://") || trimmed.startsWith("https://")
-        ? base.hostname
-        : "localhost";
+      trimmed.startsWith("http://") || trimmed.startsWith("https://") ? base.hostname : "localhost";
 
     return {
       path: normalizedPath,
@@ -202,7 +207,7 @@ export function classifyHanzoDevice(
   return "desktop";
 }
 
-export function resolveDailySessionKey(now: Date = new Date()): string {
+function resolveDailySessionKey(now: Date = new Date()): string {
   const yyyy = now.getUTCFullYear();
   const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(now.getUTCDate()).padStart(2, "0");
@@ -383,8 +388,7 @@ export function createHanzoAnalyticsClient(
     const language = env.navigator?.language ?? "en-US";
     const screenWidth = env.window?.screen?.width ?? null;
     const screenHeight = env.window?.screen?.height ?? null;
-    const screen =
-      screenWidth && screenHeight ? `${screenWidth}x${screenHeight}` : "0x0";
+    const screen = screenWidth && screenHeight ? `${screenWidth}x${screenHeight}` : "0x0";
     const ua = env.navigator?.userAgent ?? "";
     const device = classifyHanzoDevice(ua, screenWidth);
     const { visitorId, sessionId } = resolveVisitorAndSessionIds({
@@ -398,8 +402,7 @@ export function createHanzoAnalyticsClient(
         : typeof data.orgId === "string"
           ? data.orgId
           : context.orgId;
-    const surface =
-      (data.surface as HanzoAnalyticsSurface | undefined) ?? context.surface;
+    const surface = (data.surface as HanzoAnalyticsSurface | undefined) ?? context.surface;
 
     const envelope: HanzoAnalyticsEnvelope = {
       type,

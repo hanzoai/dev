@@ -17,7 +17,11 @@ import {
   threadSearchSubject,
   type ThreadSearchShell,
 } from "@hanzodev/client-runtime/state/thread-search";
-import { foldSearchQuery, rankSearchItems, scoreThreadSearch } from "@hanzodev/shared/paletteSearch";
+import {
+  foldSearchQuery,
+  rankSearchItems,
+  scoreThreadSearch,
+} from "@hanzodev/shared/paletteSearch";
 import {
   type ContextMenuItem,
   type EnvironmentId,

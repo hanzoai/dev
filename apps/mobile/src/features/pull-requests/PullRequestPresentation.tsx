@@ -81,7 +81,9 @@ export function PullRequestDiffStats(props: {
   return (
     <View className="shrink-0 flex-row items-center gap-2">
       {!props.compact || props.additions > 0 ? (
-        <Text className={cn(textSize, "font-hanzo-medium tabular-nums text-adaptive-emerald-600-400")}>
+        <Text
+          className={cn(textSize, "font-hanzo-medium tabular-nums text-adaptive-emerald-600-400")}
+        >
           +{props.additions.toLocaleString()}
         </Text>
       ) : null}

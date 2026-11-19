@@ -1,7 +1,10 @@
 import { mFallback, msg } from "gt-i18n";
 import type { MFunctionType } from "gt-i18n/types";
 
-import { resolveHanzoMcpToolDefinition, type HanzoMcpToolPresentation } from "./hanzoMcpToolPresentation.ts";
+import {
+  resolveHanzoMcpToolDefinition,
+  type HanzoMcpToolPresentation,
+} from "./hanzoMcpToolPresentation.ts";
 
 // Same English as each tool's displayName; a name missing here shows as authored.
 const DISPLAY_NAMES: ReadonlyMap<string, string> = new Map([

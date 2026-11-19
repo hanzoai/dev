@@ -140,7 +140,7 @@ describe("resolveProjectFaviconColorScheme", () => {
 
   it("returns non-SVG and remote URLs unchanged", () => {
     const png = "data:image/png;base64,iVBORw0KGgo=";
-    const remote = "https://host/api/assets/token/icon.svg";
+    const remote = "https://host/v1/assets/token/icon.svg";
 
     expect(resolveProjectFaviconColorScheme(png, "dark")).toBe(png);
     expect(resolveProjectFaviconColorScheme(remote, "dark")).toBe(remote);

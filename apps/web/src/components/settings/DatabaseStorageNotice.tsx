@@ -208,9 +208,9 @@ function ReclaimRow({
                 </AlertDialogTitle>
                 <AlertDialogDescription>
                   <T>
-                    Hanzo Dev on <Var>{label}</Var> stops, rebuilds its database, and starts again. It
-                    will be offline for about <Var>{minutes}</Var> min. Running agents stop when it
-                    restarts.
+                    Hanzo Dev on <Var>{label}</Var> stops, rebuilds its database, and starts again.
+                    It will be offline for about <Var>{minutes}</Var> min. Running agents stop when
+                    it restarts.
                   </T>
                 </AlertDialogDescription>
               </AlertDialogHeader>

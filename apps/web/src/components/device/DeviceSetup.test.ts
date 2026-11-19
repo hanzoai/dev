@@ -23,7 +23,7 @@ const deviceState = (overrides: Partial<DeviceServiceState> = {}): DeviceService
   sessions: [],
   onboardingCompleted: false,
   agentAccessEnabled: false,
-  hubBasePath: "/api/device-hub",
+  hubBasePath: "/v1/device-hub",
   revision: 0,
   ...overrides,
 });

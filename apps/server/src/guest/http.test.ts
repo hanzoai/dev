@@ -13,7 +13,7 @@ it.effect("keeps a JSON file a guest attaches as a file, not a form field", () =
     form.append("text", "");
     form.append("file", new File(['{"a":1}'], "data.json", { type: "application/json" }));
     const request = HttpServerRequest.fromWeb(
-      new Request("http://localhost/api/guest/messages?share=share-1", {
+      new Request("http://localhost/v1/guest/messages?share=share-1", {
         method: "POST",
         body: form,
       }),
@@ -37,7 +37,7 @@ it.effect("keeps a multi-line form message within the length limit as the guest 
     form.append("shareId", "share-1");
     form.append("text", text);
     const request = HttpServerRequest.fromWeb(
-      new Request("http://localhost/api/guest/messages?share=share-1", {
+      new Request("http://localhost/v1/guest/messages?share=share-1", {
         method: "POST",
         body: form,
       }),

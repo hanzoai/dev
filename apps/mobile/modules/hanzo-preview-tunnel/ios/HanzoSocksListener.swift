@@ -2,7 +2,7 @@ import Foundation
 import Network
 
 /// A SOCKS5 listener on 127.0.0.1 that carries each loopback CONNECT over one WebSocket to the
-/// environment's /api/preview/tunnel. It never connects anywhere on this device, so a tunnel
+/// environment's /v1/preview/tunnel. It never connects anywhere on this device, so a tunnel
 /// that fails is a connection error, never one of this device's own servers.
 final class HanzoSocksListener {
   typealias AccessRequest = (@escaping (String?) -> Void) -> Void

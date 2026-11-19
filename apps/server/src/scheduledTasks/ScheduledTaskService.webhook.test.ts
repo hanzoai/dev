@@ -147,7 +147,7 @@ const requestFor = (
   hookId: task.id,
   token: task.webhook?.path.split("/").at(-1) ?? "",
   method: "POST",
-  path: `/api/hooks/${task.id}`,
+  path: `/v1/hooks/${task.id}`,
   query: "",
   headers: { "content-type": "application/json" },
   body: pullRequestBody,
@@ -279,7 +279,7 @@ it.effect("dispatches exactly the rendered prompt and logs the delivery", () =>
       const { task } = yield* service.upsert(yield* webhookTaskInput());
       assert.equal(task.nextRunAt, null);
       assert.isDefined(task.webhook);
-      assert.isTrue(task.webhook!.path.startsWith("/api/hooks/scheduled-task%3Ahook/"));
+      assert.isTrue(task.webhook!.path.startsWith("/v1/hooks/scheduled-task%3Ahook/"));
       assert.equal(task.webhook!.url, null);
 
       const result = yield* service.triggerWebhook(requestFor(task));

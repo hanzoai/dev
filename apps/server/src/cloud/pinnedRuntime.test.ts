@@ -111,7 +111,9 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-pinned-progress-failed-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "hanzo-pinned-progress-failed-",
+      });
       const checksums = yield* validChecksums;
       const progress: PinnedRuntimeProgress[] = [];
       let cancelled = false;
@@ -164,7 +166,9 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-pinned-archive-missing-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "hanzo-pinned-archive-missing-",
+      });
       const checksums = yield* validChecksums;
       const failsWith = (status: number) =>
         ensurePinnedRuntimeInstalled({
@@ -577,7 +581,10 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
       yield* fs.makeDirectory(binDir);
       yield* fs.makeDirectory(customBinDir);
       // Chained: the launcher reaches its runtime through a second link.
-      yield* fs.symlink(path.join(versionsDir, "1.2.0", "hanzo"), path.join(baseDir, "alias-hanzo"));
+      yield* fs.symlink(
+        path.join(versionsDir, "1.2.0", "hanzo"),
+        path.join(baseDir, "alias-hanzo"),
+      );
       yield* fs.symlink(path.join(baseDir, "alias-hanzo"), path.join(binDir, "hanzo"));
       yield* fs.symlink(path.join(versionsDir, "1.2.5", "hanzo"), path.join(customBinDir, "hanzo"));
       yield* fs.writeFileString(

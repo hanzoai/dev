@@ -29,11 +29,11 @@ export interface FnVoiceController {
   readonly dispose: () => void;
 }
 
-export function isFnKeyEvent(event: Pick<FnVoiceKeyEventLike, "key" | "code">): boolean {
+function isFnKeyEvent(event: Pick<FnVoiceKeyEventLike, "key" | "code">): boolean {
   return event.key === "Fn" || event.code === "Fn";
 }
 
-export function isVoiceToggleChord(event: FnVoiceKeyEventLike): boolean {
+function isVoiceToggleChord(event: FnVoiceKeyEventLike): boolean {
   const hasPrimaryModifier = Boolean(event.metaKey || event.ctrlKey);
   if (!hasPrimaryModifier || !event.shiftKey || event.altKey) return false;
   return event.key.toLowerCase() === "m" || event.code === "KeyM";

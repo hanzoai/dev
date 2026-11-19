@@ -621,7 +621,10 @@ const buildCliArchive = Effect.fn("buildCliArchive")(function* (input: {
     builtExecutable,
     `Run \`node apps/server/scripts/cli.ts build-exe${targetKey === hostKey ? "" : ` --target ${targetKey}`}\` first.`,
   );
-  yield* requireInput(path.join(webClient, "index.html"), "Run `vp run --filter hanzo build` first.");
+  yield* requireInput(
+    path.join(webClient, "index.html"),
+    "Run `vp run --filter hanzo build` first.",
+  );
   yield* requireInput(
     resourceMonitorDir,
     "Build the resource monitor or pass --resource-monitor-dir.",

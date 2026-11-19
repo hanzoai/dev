@@ -374,7 +374,10 @@ function normalizeEntries(input: {
 const DEFAULT_GROK_SETTINGS = Schema.decodeSync(GrokSettings)({});
 
 const RecorderEnv = Config.all({
-  HANZO_GROK_BIN: Config.String("HANZO_GROK_BIN").pipe(Config.option, Config.map(Option.getOrUndefined)),
+  HANZO_GROK_BIN: Config.String("HANZO_GROK_BIN").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
   HOME: Config.String("HOME").pipe(Config.option, Config.map(Option.getOrUndefined)),
   USER: Config.String("USER").pipe(Config.option, Config.map(Option.getOrUndefined)),
 });

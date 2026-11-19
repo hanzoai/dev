@@ -184,29 +184,34 @@ it.effect("gives a native subagent Hanzo's SubagentStart context instead of Hanz
   }),
 );
 
-it.effect("tells the shell simulator the launchers Hanzo returned and agent-device's real CLI", () =>
-  Effect.gen(function* () {
-    const sample = makeSample(deviceCase({}), base);
-    yield* withDevices(sample);
-    const call = { tool: "Bash", input: { command: "ls /tmp" } };
-    const told = (request: ReturnType<typeof shellRequest>) => JSON.stringify(request.messages);
-    assert.notInclude(told(shellRequest(sample, call, "claude-haiku-5-5")), "launchers Hanzo's");
-    const opened = yield* sample.devices!.call("device_open", { hostId: MAC, deviceId: IPHONE });
-    const { command } = json(opened.text).agentDevice;
-    const request = shellRequest(sample, call, "claude-haiku-5-5");
-    assert.include(told(request), `agent-device launchers Hanzo's device_open returned: ${command}`);
-    // agent-device's own syntax: a positional recording path, and `record stop` with no flag.
-    assert.include(request.system, AGENT_DEVICE_SHELL);
-    assert.include(
-      request.system,
-      "agent-device record start [path] [--scope <app|device|system>]",
-    );
-    assert.include(request.system, "| record stop |");
-    assert.include(request.system, "Unknown flag: --stop. Did you mean --scope?");
-    // A case without devices keeps the shell prompt every other case has.
-    const plain = makeSample(deviceCase({ world: {} }), base);
-    assert.notInclude(shellRequest(plain, call, "claude-haiku-5-5").system, "agent-device");
-  }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+it.effect(
+  "tells the shell simulator the launchers Hanzo returned and agent-device's real CLI",
+  () =>
+    Effect.gen(function* () {
+      const sample = makeSample(deviceCase({}), base);
+      yield* withDevices(sample);
+      const call = { tool: "Bash", input: { command: "ls /tmp" } };
+      const told = (request: ReturnType<typeof shellRequest>) => JSON.stringify(request.messages);
+      assert.notInclude(told(shellRequest(sample, call, "claude-haiku-5-5")), "launchers Hanzo's");
+      const opened = yield* sample.devices!.call("device_open", { hostId: MAC, deviceId: IPHONE });
+      const { command } = json(opened.text).agentDevice;
+      const request = shellRequest(sample, call, "claude-haiku-5-5");
+      assert.include(
+        told(request),
+        `agent-device launchers Hanzo's device_open returned: ${command}`,
+      );
+      // agent-device's own syntax: a positional recording path, and `record stop` with no flag.
+      assert.include(request.system, AGENT_DEVICE_SHELL);
+      assert.include(
+        request.system,
+        "agent-device record start [path] [--scope <app|device|system>]",
+      );
+      assert.include(request.system, "| record stop |");
+      assert.include(request.system, "Unknown flag: --stop. Did you mean --scope?");
+      // A case without devices keeps the shell prompt every other case has.
+      const plain = makeSample(deviceCase({ world: {} }), base);
+      assert.notInclude(shellRequest(plain, call, "claude-haiku-5-5").system, "agent-device");
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 it("prints agent-device's own help for a lone help command on a returned launcher", () => {
@@ -355,7 +360,9 @@ it("names the session on either ref: the bound launcher's own, or the shared one
   const sharedTargets = [shared("hanzo-a"), shared("hanzo-b")];
   // The shared launcher answers each session its flags name; without one, its own check (not
   // modelled) refuses before agent-device runs.
-  const opened = [bash(`${sharedTargets[0]!.command} open com.acme.app ${flags} --session hanzo-a`)];
+  const opened = [
+    bash(`${sharedTargets[0]!.command} open com.acme.app ${flags} --session hanzo-a`),
+  ];
   assert.isUndefined(
     errorCode(
       sharedTargets,
@@ -605,38 +612,42 @@ const deviceTools = (extra: object) =>
     base.environment,
   );
 
-it.effect("lists a host whose discovery fails as Hanzo does: failed, with none of its devices", () =>
-  Effect.gen(function* () {
-    // F1's saved device_list: the hub answered, but its device list timed out.
-    const failure = new DeviceOperationError({
-      operation: "list",
-      reason: "request_failed",
-      cause: null,
-    });
-    const tools = yield* deviceTools({ deviceDiscoveryFailures: { [MAC]: failure } });
-    const listed = json((yield* tools.call("device_list", {})).text);
-    assert.deepEqual(listed.hostStatuses[MAC], {
-      status: "failed",
-      detail:
-        "Device list failed: Could not communicate with device support. Try refreshing devices.",
-    });
-    assert.equal(listed.hostStatuses[SPARE_MAC].status, "ready");
-    assert.deepEqual(
-      listed.devices.map((device: { id: string }) => device.id),
-      [SPARE_PHONE],
-    );
-    const opened = yield* tools.call("device_open", { hostId: MAC, deviceId: IPHONE });
-    assert.isTrue(opened.isError);
-    assert.include(opened.text, IPHONE);
-    assert.isFalse(
-      (yield* tools.call("device_open", { hostId: SPARE_MAC, deviceId: SPARE_PHONE })).isError,
-    );
-    // A failed host with no devices of its own still needs its label.
-    const unlabeled = yield* Effect.exit(
-      deviceTools({ deviceDiscoveryFailures: { "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee": failure } }),
-    );
-    assert.isTrue(unlabeled._tag === "Failure");
-  }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+it.effect(
+  "lists a host whose discovery fails as Hanzo does: failed, with none of its devices",
+  () =>
+    Effect.gen(function* () {
+      // F1's saved device_list: the hub answered, but its device list timed out.
+      const failure = new DeviceOperationError({
+        operation: "list",
+        reason: "request_failed",
+        cause: null,
+      });
+      const tools = yield* deviceTools({ deviceDiscoveryFailures: { [MAC]: failure } });
+      const listed = json((yield* tools.call("device_list", {})).text);
+      assert.deepEqual(listed.hostStatuses[MAC], {
+        status: "failed",
+        detail:
+          "Device list failed: Could not communicate with device support. Try refreshing devices.",
+      });
+      assert.equal(listed.hostStatuses[SPARE_MAC].status, "ready");
+      assert.deepEqual(
+        listed.devices.map((device: { id: string }) => device.id),
+        [SPARE_PHONE],
+      );
+      const opened = yield* tools.call("device_open", { hostId: MAC, deviceId: IPHONE });
+      assert.isTrue(opened.isError);
+      assert.include(opened.text, IPHONE);
+      assert.isFalse(
+        (yield* tools.call("device_open", { hostId: SPARE_MAC, deviceId: SPARE_PHONE })).isError,
+      );
+      // A failed host with no devices of its own still needs its label.
+      const unlabeled = yield* Effect.exit(
+        deviceTools({
+          deviceDiscoveryFailures: { "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee": failure },
+        }),
+      );
+      assert.isTrue(unlabeled._tag === "Failure");
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 it.effect("denies every device tool with Hanzo's own error when agent device access is off", () =>

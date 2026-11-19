@@ -1169,7 +1169,9 @@ const layerMakeServer = Layer.unwrap(
             const recoverManagedTunnel = (config: RelayManagedEndpointRuntimeConfig) =>
               runManagedTunnelRecovery(config).pipe(
                 Effect.tap((recovered) =>
-                  recovered ? Effect.logInfo("Hanzo Connect managed tunnel recovered") : Effect.void,
+                  recovered
+                    ? Effect.logInfo("Hanzo Connect managed tunnel recovered")
+                    : Effect.void,
                 ),
                 Effect.catchCause((cause) =>
                   Cause.hasInterrupts(cause)
@@ -1208,9 +1210,9 @@ const layerMakeServer = Layer.unwrap(
             const wantsCliLink = hasCloudPublicConfig
               ? yield* CloudCliState.readCliDesiredCloudLink.pipe(
                   Effect.catch((cause) =>
-                    Effect.logWarning("Failed to read the desired Hanzo Connect link", { cause }).pipe(
-                      Effect.as(false),
-                    ),
+                    Effect.logWarning("Failed to read the desired Hanzo Connect link", {
+                      cause,
+                    }).pipe(Effect.as(false)),
                   ),
                 )
               : false;

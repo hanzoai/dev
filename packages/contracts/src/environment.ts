@@ -172,7 +172,7 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   desktopAppChannelSwitch: Schema.optionalKey(Schema.Boolean),
   /** Subscribe to command output only when advertised; older servers never send it. */
   commandOutputStreaming: Schema.optionalKey(Schema.Boolean),
-  /** Hosts headless Chromium tabs streamed over /api/preview-stream for clients without a local runtime. */
+  /** Hosts headless Chromium tabs streamed over /v1/preview-stream for clients without a local runtime. */
   serverBrowser: Schema.optionalKey(Schema.Boolean),
   /** Server links to other environments (`PeerLink`) and its agents can work
       in them. Absent on servers from before linking, which clients must not

@@ -35,7 +35,7 @@ import {
   switchHanzoIamVaultOrg,
   upsertHanzoIamVaultAccount,
 } from "@hanzodev/shared/hanzoIamAuth";
-import { T, useGT } from "gt-react";
+import { msg, T, useGT } from "gt-react";
 import {
   Building2Icon,
   CheckIcon,
@@ -66,6 +66,7 @@ import { isHostedStaticApp } from "../hostedPairing";
 import { openLocalAiManager } from "../localAi/localAiState";
 import { trackHanzoEvent } from "../analytics/hanzoWebAnalytics";
 import { toastManager } from "../components/ui/toast";
+import { m } from "../i18n/messages";
 import { ManagedRelayAuthProvider } from "./managedAuth";
 import { resolveCloudPublicConfig } from "./publicConfig";
 
@@ -294,10 +295,7 @@ export class HanzoWebAuthController implements CloudAccountSource {
     for (const account of next.accounts) {
       if (!this.organizationsByAccount.has(account.id)) {
         const orgs = resolveAccountOrganizations(account);
-        this.organizationsByAccount.set(
-          account.id,
-          orgs.length > 0 ? orgs : EMPTY_ORGANIZATIONS,
-        );
+        this.organizationsByAccount.set(account.id, orgs.length > 0 ? orgs : EMPTY_ORGANIZATIONS);
       }
     }
     writeBrowserVault(next);
@@ -669,8 +667,10 @@ export class HanzoWebAuthController implements CloudAccountSource {
     trackHanzoEvent("org_switched", { org_id: trimmed });
     toastManager.add({
       id: "hanzo-org-switched",
-      title: `Active organization: ${trimmed}`,
-      description: `X-Org-Id=${trimmed} will be used across App, Bot, Team, and Platform.`,
+      title: m(msg("Active organization: {org}", { org: trimmed })),
+      description: m(
+        msg("X-Org-Id={org} will be used across App, Bot, Team, and Platform.", { org: trimmed }),
+      ),
       timeout: 2_500,
     });
     void this.refreshOrganizationsAndBilling();
@@ -937,9 +937,9 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                     <div className="mt-1 flex items-center gap-2 text-base font-semibold">
                       <span>{billing?.planName ?? "Hanzo Dev"}</span>
                       {activeOrgId ? (
-                        <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
+                        <code className="rounded-full bg-muted px-2 py-0.5 font-mono text-2xs text-muted-foreground">
                           X-Org-Id: {activeOrgId}
-                        </span>
+                        </code>
                       ) : null}
                     </div>
                   </div>
@@ -963,7 +963,7 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
 
                 <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <div className="rounded-lg border border-border bg-background p-3">
-                    <div className="text-[11px] text-muted-foreground">
+                    <div className="text-2xs text-muted-foreground">
                       <T>Credit balance</T>
                     </div>
                     <div className="mt-0.5 font-mono text-sm font-semibold">
@@ -971,7 +971,7 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                     </div>
                   </div>
                   <div className="rounded-lg border border-border bg-background p-3">
-                    <div className="text-[11px] text-muted-foreground">
+                    <div className="text-2xs text-muted-foreground">
                       <T>Monthly AI usage</T>
                     </div>
                     <div className="mt-0.5 font-mono text-sm font-semibold">
@@ -979,7 +979,7 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                     </div>
                   </div>
                   <div className="rounded-lg border border-border bg-background p-3">
-                    <div className="text-[11px] text-muted-foreground">
+                    <div className="text-2xs text-muted-foreground">
                       <T>Billing endpoint</T>
                     </div>
                     <div className="mt-0.5 font-mono text-xs font-medium text-muted-foreground">
@@ -989,7 +989,7 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                 </div>
 
                 <div className="mt-3 space-y-1">
-                  <div className="flex justify-between text-[11px] text-muted-foreground">
+                  <div className="flex justify-between text-2xs text-muted-foreground">
                     <span>
                       <T>Cycle allowance utilization</T>
                     </span>
@@ -1015,7 +1015,9 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                       <div
                         key={plan.id}
                         className={`flex flex-col justify-between rounded-xl border p-4 ${
-                          isCurrent ? "border-foreground bg-muted/20" : "border-border bg-background"
+                          isCurrent
+                            ? "border-foreground bg-muted/20"
+                            : "border-border bg-background"
                         }`}
                       >
                         <div>
@@ -1027,7 +1029,7 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                           </div>
                           <p className="mt-1 text-xs text-muted-foreground">{plan.summary}</p>
                           <div className="mt-2.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-                            <CheckIcon className="size-3 shrink-0 text-emerald-500" />
+                            <CheckIcon className="size-3 shrink-0 text-success" />
                             <span>
                               {gt("{allowance} monthly AI credit allowance", {
                                 allowance: formatUsdCents(plan.monthlyAllowanceCents),
@@ -1073,7 +1075,8 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                       </div>
                       <div className="text-xs text-muted-foreground">
                         <T>
-                          Manage local Qwen3+ models (:11434), Hanzo Engine (:36900), and hanzod (:9630)
+                          Manage local Qwen3+ models (:11434), Hanzo Engine (:36900), and hanzod
+                          (:9630)
                         </T>
                       </div>
                     </div>
@@ -1097,9 +1100,9 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                     <T>Connected Hanzo ecosystem surfaces</T>
                   </span>
                   {activeOrgId ? (
-                    <span className="font-mono text-[11px] text-muted-foreground">
+                    <code className="font-mono text-2xs text-muted-foreground">
                       ?org={activeOrgId}
-                    </span>
+                    </code>
                   ) : null}
                 </div>
                 <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
@@ -1124,7 +1127,7 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                         <div className="mt-0.5 text-xs text-muted-foreground">
                           {surface.description}
                         </div>
-                        <div className="mt-1.5 truncate font-mono text-[11px] text-muted-foreground">
+                        <div className="mt-1.5 truncate font-mono text-2xs text-muted-foreground">
                           {surface.url.replace("https://", "")}
                         </div>
                       </div>
@@ -1156,11 +1159,11 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                           <span className="text-sm font-semibold">
                             {activeAccount.displayName ?? activeAccount.email ?? activeAccount.id}
                           </span>
-                          <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
+                          <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-2xs text-muted-foreground">
                             {activeAccount.id}
                           </span>
                           {isKeychainBacked && (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-500">
+                            <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-3xs font-medium text-success-foreground">
                               <ShieldCheckIcon className="size-3" />
                               <T>OS Keychain</T>
                             </span>
@@ -1194,9 +1197,9 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                         </span>
                       </div>
                       {activeOrgId ? (
-                        <span className="font-mono text-xs text-muted-foreground">
+                        <code className="font-mono text-xs text-muted-foreground">
                           X-Org-Id: {activeOrgId}
-                        </span>
+                        </code>
                       ) : null}
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
@@ -1215,7 +1218,7 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                           >
                             {selected ? <CheckIcon className="size-3" /> : null}
                             <span>{org.displayName}</span>
-                            <span className="font-mono text-[10px] opacity-75">({org.id})</span>
+                            <span className="font-mono text-3xs opacity-75">({org.id})</span>
                           </button>
                         );
                       })}
@@ -1296,12 +1299,12 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                                   {account.displayName ?? account.email ?? account.id}
                                 </span>
                                 {account.owner && (
-                                  <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                  <span className="rounded-full bg-muted px-2 py-0.5 text-3xs font-medium text-muted-foreground">
                                     {account.owner}
                                   </span>
                                 )}
                                 {isActive && (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-500">
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-3xs font-medium text-success-foreground">
                                     <CheckIcon className="size-2.5" />
                                     <T>Active</T>
                                   </span>
@@ -1493,6 +1496,11 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
   );
 }
 
+function HanzoManagedRelayBridge({ children }: { readonly children: ReactNode }) {
+  const clerk = useClerk();
+  return <ManagedRelayAuthProvider clerk={clerk}>{children}</ManagedRelayAuthProvider>;
+}
+
 export function HanzoManagedAuthShell({ children }: { readonly children: ReactNode }) {
   const [controller] = useState(getHanzoWebAuthController);
 
@@ -1503,7 +1511,7 @@ export function HanzoManagedAuthShell({ children }: { readonly children: ReactNo
 
   return (
     <HanzoWebAuthContext.Provider value={controller}>
-      <ManagedRelayAuthProvider>{children}</ManagedRelayAuthProvider>
+      <HanzoManagedRelayBridge>{children}</HanzoManagedRelayBridge>
       <HanzoAccountModal controller={controller} />
     </HanzoWebAuthContext.Provider>
   );

@@ -98,7 +98,7 @@ it.effect("sets the selected browser session cookies through the HTTP route", ()
       ([environmentA, environmentB]) =>
         Effect.promise(async () => {
           const devResponse = await environmentA.handler(
-            postJson("/api/auth/browser-session", { credential: DEV_TOKEN }),
+            postJson("/v1/auth/browser-session", { credential: DEV_TOKEN }),
             requestContext,
           );
           expect(devResponse.status).toBe(200);
@@ -128,7 +128,7 @@ it.effect("sets the selected browser session cookies through the HTTP route", ()
           expect(devCookies.filter((cookie) => /;\s*Secure/i.test(cookie))).toEqual([]);
           const httpsResponse = await environmentA.handler(
             postJson(
-              "/api/auth/browser-session",
+              "/v1/auth/browser-session",
               { credential: DEV_TOKEN },
               { "x-forwarded-proto": "https" },
             ),
@@ -139,7 +139,7 @@ it.effect("sets the selected browser session cookies through the HTTP route", ()
           for (const cookie of httpsCookies) expect(cookie).toMatch(/;\s*Secure/i);
           const devCookieHeader = devCookie?.split(";", 1)[0] ?? "";
           const environmentBSession = await environmentB.handler(
-            new Request("http://127.0.0.1/api/auth/session", {
+            new Request("http://127.0.0.1/v1/auth/session", {
               headers: { cookie: devCookieHeader },
             }),
             requestContext,
@@ -149,7 +149,7 @@ it.effect("sets the selected browser session cookies through the HTTP route", ()
 
           const pairingResponse = await environmentA.handler(
             postJson(
-              "/api/auth/pairing-token",
+              "/v1/auth/pairing-token",
               { scopes: ["orchestration:read"] },
               { cookie: devCookieHeader },
             ),
@@ -158,7 +158,7 @@ it.effect("sets the selected browser session cookies through the HTTP route", ()
           expect(pairingResponse.status).toBe(200);
           const pairing = (await pairingResponse.json()) as { credential: string };
           const restrictedResponse = await environmentA.handler(
-            postJson("/api/auth/browser-session", { credential: pairing.credential }),
+            postJson("/v1/auth/browser-session", { credential: pairing.credential }),
             requestContext,
           );
           expect(restrictedResponse.status).toBe(200);
@@ -192,7 +192,7 @@ it.effect.each(["DPoP", "dpop"])("challenges a refused %s request with DPoP", (s
         Effect.promise(async () => {
           const refused = await environment.handler(
             postJson(
-              "/api/auth/pairing-token",
+              "/v1/auth/pairing-token",
               { scopes: ["orchestration:read"] },
               { authorization: `${scheme} not-a-valid-token` },
             ),

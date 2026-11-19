@@ -42,7 +42,9 @@ class HanzoSecretInputModule : Module() {
       Prop("fontSize") { view: HanzoSecretInputView, value: Float ->
         view.input.setTextSize(TypedValue.COMPLEX_UNIT_DIP, value)
       }
-      Prop("editable") { view: HanzoSecretInputView, value: Boolean -> view.input.isEnabled = value }
+      Prop("editable") { view: HanzoSecretInputView, value: Boolean ->
+        view.input.isEnabled = value
+      }
       Prop("revealed") { view: HanzoSecretInputView, value: Boolean -> view.setRevealed(value) }
       Events("onChangeText", "onSubmit")
     }
@@ -54,7 +56,10 @@ class HanzoSecretInputModule : Module() {
  * credential autofill, so password managers offer logins above the keyboard; this view owns the
  * EditText so it can.
  */
-class HanzoSecretInputView(context: Context, appContext: AppContext) : ExpoView(context, appContext) {
+class HanzoSecretInputView(
+  context: Context,
+  appContext: AppContext
+) : ExpoView(context, appContext) {
   // Yoga sizes this view; the EditText inside is laid out by Android.
   override val shouldUseAndroidLayout = true
 

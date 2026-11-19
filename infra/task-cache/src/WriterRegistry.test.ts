@@ -21,7 +21,10 @@ it.effect("loads the private writer registry as deployment configuration", () =>
     const fs = yield* FileSystem.FileSystem;
     const home = yield* fs.makeTempDirectoryScoped();
     yield* fs.makeDirectory(`${home}/.config/hanzo-task-cache`, { recursive: true });
-    yield* fs.writeFileString(`${home}/.config/hanzo-task-cache/writers.json`, '{"maria":"digest"}');
+    yield* fs.writeFileString(
+      `${home}/.config/hanzo-task-cache/writers.json`,
+      '{"maria":"digest"}',
+    );
     yield* fs.writeFileString(
       `${home}/.config/hanzo-task-cache/readers.json`,
       '{"ci-reader":"digest"}',

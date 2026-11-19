@@ -127,18 +127,8 @@ const PI_DRIVER_KIND = ProviderDriverKind.make("pi");
 const ACP_REGISTRY_DRIVER_KIND = ProviderDriverKind.make("acpRegistry");
 const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
 
-export const HANZO_DEFAULT_MODEL = "enso-auto";
-export const HANZO_DEFAULT_TEXT_GENERATION_MODEL = "enso-flash";
-
-export const PREFERRED_DEFAULT_HANZO_MODELS: ReadonlyArray<string> = [
-  "enso-auto",
-  "enso-ultra",
-  "enso-max",
-  "zen6-coder",
-  "zen6-max",
-  "zen6-flash",
-  "hanzo/kai",
-];
+const HANZO_DEFAULT_MODEL = "enso-auto";
+const HANZO_DEFAULT_TEXT_GENERATION_MODEL = "enso-flash";
 
 export const DEFAULT_MODEL = "enso-auto";
 

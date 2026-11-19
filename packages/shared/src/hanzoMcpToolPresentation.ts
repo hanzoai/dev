@@ -248,7 +248,10 @@ const HANZO_MCP_TOOLS: Readonly<Record<string, HanzoMcpToolDefinition>> = {
     ["Hand off", "Handing off", "Handed off", "thread to a git worktree"],
     "worktree-handoff",
   ),
-  hanzo_worktree_status: tool(["Get", "Getting", "Got", "thread worktree status"], "worktree-status"),
+  hanzo_worktree_status: tool(
+    ["Get", "Getting", "Got", "thread worktree status"],
+    "worktree-status",
+  ),
   preview_status: tool(["Get", "Getting", "Got", "preview browser status"], "browser", "browser"),
   preview_open: tool(
     ["Open", "Opening", "Opened", "a page in the preview browser"],
@@ -366,7 +369,10 @@ const HANZO_MCP_TOOLS: Readonly<Record<string, HanzoMcpToolDefinition>> = {
     ["Cancel", "Canceling", "Requested cancellation of", "a queued run"],
     "queue-cancel",
   ),
-  hanzo_queue_reorder: tool(["Reorder", "Reordering", "Reordered", "a queued run"], "queue-reorder"),
+  hanzo_queue_reorder: tool(
+    ["Reorder", "Reordering", "Reordered", "a queued run"],
+    "queue-reorder",
+  ),
   hanzo_queue_promote_to_steer: tool(
     ["Steer with", "Steering with", "Requested steering with", "a queued message"],
     "queue-steer",
@@ -375,7 +381,10 @@ const HANZO_MCP_TOOLS: Readonly<Record<string, HanzoMcpToolDefinition>> = {
     ["List", "Listing", "Listed", "pending questions"],
     "question-list",
   ),
-  hanzo_pending_request_read: tool(["Read", "Reading", "Read", "pending questions"], "question-read"),
+  hanzo_pending_request_read: tool(
+    ["Read", "Reading", "Read", "pending questions"],
+    "question-read",
+  ),
   hanzo_pending_request_respond: tool(
     ["Answer", "Answering", "Answered", "pending questions"],
     "question-respond",
@@ -384,7 +393,10 @@ const HANZO_MCP_TOOLS: Readonly<Record<string, HanzoMcpToolDefinition>> = {
     ["Read", "Reading", "Read", "thread configuration"],
     "thread-configuration",
   ),
-  hanzo_thread_configure: tool(["Use", "Using", "Used", "thread model settings"], "thread-configure"),
+  hanzo_thread_configure: tool(
+    ["Use", "Using", "Used", "thread model settings"],
+    "thread-configure",
+  ),
   hanzo_thread_transfer: tool(["Use", "Using", "Used", "thread transfers"], "thread-fork"),
   hanzo_thread_fork: tool(["Fork", "Forking", "Requested a fork of", "this thread"], "thread-fork"),
   hanzo_thread_merge_back: tool(
@@ -393,8 +405,14 @@ const HANZO_MCP_TOOLS: Readonly<Record<string, HanzoMcpToolDefinition>> = {
   ),
   hanzo_thread_search: tool(["Search", "Searching", "Searched", "thread content"], "thread-search"),
   hanzo_thread_transfers: tool(["Read", "Reading", "Read", "thread transfers"], "thread-transfers"),
-  hanzo_thread_organize: tool(["Organize", "Organizing", "Organized", "a thread"], "thread-organize"),
-  hanzo_thread_update: tool(["Update", "Updating", "Updated", "Hanzo thread metadata"], "thread-update"),
+  hanzo_thread_organize: tool(
+    ["Organize", "Organizing", "Organized", "a thread"],
+    "thread-organize",
+  ),
+  hanzo_thread_update: tool(
+    ["Update", "Updating", "Updated", "Hanzo thread metadata"],
+    "thread-update",
+  ),
   hanzo_worktree_list: tool(["List", "Listing", "Listed", "workspace branches"], "worktree-list"),
   hanzo_preview_list: tool(["List", "Listing", "Listed", "preview tabs"], "browser", "browser"),
   hanzo_preview_close: tool(["Close", "Closing", "Closed", "a preview tab"], "browser", "browser"),
@@ -420,10 +438,16 @@ const HANZO_MCP_TOOLS: Readonly<Record<string, HanzoMcpToolDefinition>> = {
   ),
   hanzo_theme_read: tool(["Read", "Reading", "Read", "themes"], "theme-read"),
   hanzo_theme_set: tool(["Set", "Setting", "Set", "the theme"], "theme-set"),
-  hanzo_thread_launch: tool(["Launch", "Launching", "Launched", "a project thread"], "thread-create"),
+  hanzo_thread_launch: tool(
+    ["Launch", "Launching", "Launched", "a project thread"],
+    "thread-create",
+  ),
   hanzo_project_list: tool(["List", "Listing", "Listed", "projects"], "project-list"),
   hanzo_project_read: tool(["Read", "Reading", "Read", "a project"], "project-read"),
-  hanzo_project_create: tool(["Register", "Registering", "Registered", "a project"], "project-create"),
+  hanzo_project_create: tool(
+    ["Register", "Registering", "Registered", "a project"],
+    "project-create",
+  ),
   hanzo_project_update: tool(["Update", "Updating", "Updated", "a project"], "project-update"),
   hanzo_project_delete: tool(["Delete", "Deleting", "Deleted", "a project"], "project-delete"),
   hanzo_project_clone: tool(["Clone", "Cloning", "Cloned", "a repository"], "project-clone"),
@@ -435,7 +459,10 @@ const HANZO_MCP_TOOLS: Readonly<Record<string, HanzoMcpToolDefinition>> = {
     ["Discard", "Discarding", "Discarded", "a pending attachment"],
     "attachment-discard",
   ),
-  hanzo_thread_send_attachments: tool(["Send", "Sending", "Sent", "attachments"], "attachment-send"),
+  hanzo_thread_send_attachments: tool(
+    ["Send", "Sending", "Sent", "attachments"],
+    "attachment-send",
+  ),
   html_preview: tool(["Preview", "Previewing", "Previewed", "an HTML page"], "html-preview"),
   html_render: tool(["Render", "Rendering", "Rendered", "an HTML page"], "html-render"),
   send_to_user: tool(["Send", "Sending", "Sent", "a message"], "send-to-user"),
@@ -477,14 +504,16 @@ function parseHanzoMcpToolName(value: string): string | null {
   }
 
   const namespaceMatch =
-    /^(?<server>hanzo[-_]dev[-_]direct|hanzo-dev|hanzo_dev|hanzodev)(?:[.:/]|\s*·\s*)(?<tool>.+)$/i.exec(
+    /^(?<server>hanzo[-_](?:dev|code)[-_]direct|hanzo-(?:dev|code)|hanzo_(?:dev|code)|hanzodev|hanzocode)(?:[.:/]|\s*·\s*)(?<tool>.+)$/i.exec(
       label,
     );
   if (namespaceMatch?.groups) {
     return namespaceMatch.groups.tool ?? null;
   }
 
-  const prefixed = /^(?:mcp[-_]{1,2})?hanzo[-_ ]?dev(?:__|[-_.:/ ])(?<tool>.+)$/i.exec(label);
+  const prefixed = /^(?:mcp[-_]{1,2})?hanzo[-_ ]?(?:dev|code)(?:__|[-_.:/ ])(?<tool>.+)$/i.exec(
+    label,
+  );
   const candidate = prefixed?.groups?.tool ?? label;
   if (Object.hasOwn(HANZO_MCP_TOOLS, candidate)) return candidate;
   // OpenCode 2 thread prefixes can contain underscores; choose the longest known tool-name suffix.
@@ -512,9 +541,11 @@ const ACTION_TOOLS: Readonly<Record<string, (action: string) => string | undefin
   hanzo_queue: (action) => `hanzo_queue_${action}`,
   hanzo_pending_request: (action) => `hanzo_pending_request_${action}`,
   hanzo_thread_transfer: (action) =>
-    ({ fork: "hanzo_thread_fork", merge_back: "hanzo_thread_merge_back", status: "hanzo_thread_transfers" })[
-      action
-    ],
+    ({
+      fork: "hanzo_thread_fork",
+      merge_back: "hanzo_thread_merge_back",
+      status: "hanzo_thread_transfers",
+    })[action],
 };
 
 /** Pass the call's input so an action tool resolves to the labels and summary of its action. */

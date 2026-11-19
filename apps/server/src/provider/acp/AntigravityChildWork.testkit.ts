@@ -77,7 +77,8 @@ export const makeProfile = Effect.fn("makeProfile")(function* (input: {
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const profile = input.profile ?? (yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-agy-child-" }));
+  const profile =
+    input.profile ?? (yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-agy-child-" }));
   const acp = path.join(profile, "antigravity-acp");
   const logs = path.join(acp, "brain", CHILD, ".system_generated", "logs");
   yield* fs.makeDirectory(path.join(acp, "conversations"), { recursive: true });

@@ -49,8 +49,6 @@ export {
 } from "./micLease.ts";
 export {
   createFnVoiceController,
-  isFnKeyEvent,
-  isVoiceToggleChord,
   type FnVoiceController,
   type FnVoiceHooks,
   type FnVoiceKeyEventLike,

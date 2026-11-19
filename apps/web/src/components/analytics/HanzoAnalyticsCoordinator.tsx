@@ -26,7 +26,7 @@ export function HanzoAnalyticsCoordinator() {
     });
     if (typeof window !== "undefined") {
       try {
-        const params = new URLSearchParams(window.location.search);
+        const params = new URLSearchParams(location.searchStr);
         const incomingOrg = params.get("org")?.trim();
         if (incomingOrg && isSignedIn && incomingOrg !== orgId) {
           getHanzoWebAuthController().switchOrganization(incomingOrg);

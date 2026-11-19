@@ -6,7 +6,7 @@ import { renderWebhookPrompt, type WebhookRequest } from "./webhookTemplate.ts";
 
 const githubPullRequest: WebhookRequest = {
   method: "POST",
-  path: "/api/hooks/task-1",
+  path: "/v1/hooks/task-1",
   query: "source=github",
   headers: { "content-type": "application/json", "x-github-event": "pull_request" },
   bodyText: JSON.stringify({

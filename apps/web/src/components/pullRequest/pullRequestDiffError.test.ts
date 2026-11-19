@@ -5,7 +5,7 @@ import { describePullRequestDiffError } from "./pullRequestDiffError";
 describe("describePullRequestDiffError", () => {
   it("explains the rate limit inside an HTTP transport error without exposing the endpoint", () => {
     const error =
-      "Failed to fetch remote environment endpoint http://127.0.0.1:49477/api/pull-requests/diff (PullRequestOperationError: Pull request operation diff failed: github requests to github.com are paused until the rate limit resets.).";
+      "Failed to fetch remote environment endpoint http://127.0.0.1:49477/v1/pull-requests/diff (PullRequestOperationError: Pull request operation diff failed: github requests to github.com are paused until the rate limit resets.).";
     const result = describePullRequestDiffError(error, "GitHub", "pr");
 
     expect(result.title).toBe("GitHub rate limit reached");
@@ -23,7 +23,7 @@ describe("describePullRequestDiffError", () => {
 
   it("does not blame a rate limit for an unknown connection failure", () => {
     const result = describePullRequestDiffError(
-      "Failed to fetch remote environment endpoint http://localhost:49477/api/pull-requests/diff (TypeError: Failed to fetch).",
+      "Failed to fetch remote environment endpoint http://localhost:49477/v1/pull-requests/diff (TypeError: Failed to fetch).",
       "GitHub",
       "pr",
     );

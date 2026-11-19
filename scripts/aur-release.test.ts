@@ -64,7 +64,11 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("AUR release", 
       const version = nightly ? "1.2.4-nightly.20261104.1" : "1.2.3";
       const pkgname = nightly ? "hanzo-dev-nightly-bin" : "hanzo-dev-bin";
       const prefix =
-        naming === "versioned" ? `Hanzo-Dev-${version}` : nightly ? "Hanzo-Dev-Nightly" : "Hanzo-Dev";
+        naming === "versioned"
+          ? `Hanzo-Dev-${version}`
+          : nightly
+            ? "Hanzo-Dev-Nightly"
+            : "Hanzo-Dev";
       const assets = [
         { name: `${prefix}-x86_64.AppImage`, digest: `sha256:${"a".repeat(64)}` },
         ...(failure === "missing"

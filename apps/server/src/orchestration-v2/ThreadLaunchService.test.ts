@@ -2554,9 +2554,9 @@ it.effect("creates a strong provider-thread mapping for an imported native sessi
 
 it.effect("shared intake preserves durable attachment bytes after a lost launch result", () => {
   const harness = makeHarness();
-  const layerFiles = ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-message-intake-" }).pipe(
-    Layer.provideMerge(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
-  );
+  const layerFiles = ServerConfig.layerTest(process.cwd(), {
+    prefix: "hanzo-message-intake-",
+  }).pipe(Layer.provideMerge(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))));
   return Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
     const fs = yield* FileSystem.FileSystem;

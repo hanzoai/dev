@@ -266,7 +266,7 @@ try {
     [ORCHESTRATION_PROTOCOL_HEADER]: String(ORCHESTRATION_PROTOCOL_VERSION),
   };
   const projectId = ProjectId.make(NodeCrypto.randomUUID());
-  const created = await fetch(`${origin}/api/projects/mutate`, {
+  const created = await fetch(`${origin}/v1/projects/mutate`, {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -278,7 +278,7 @@ try {
     }),
   });
   NodeAssert.ok(created.ok, `Project creation failed: ${created.status} ${await created.text()}`);
-  const ticketResponse = await fetch(`${origin}/api/auth/websocket-ticket`, {
+  const ticketResponse = await fetch(`${origin}/v1/auth/websocket-ticket`, {
     method: "POST",
     headers,
   });
@@ -480,7 +480,7 @@ try {
   await stopServer(server);
   ({ server, ready } = startServer());
   await ready;
-  const restored = await fetch(`${origin}/api/orchestration/threads/${threadId}`, { headers });
+  const restored = await fetch(`${origin}/v1/event/threads/${threadId}`, { headers });
   NodeAssert.ok(restored.ok, `Restart read failed: ${restored.status}`);
   const snapshot = await restored.json();
   NodeFS.writeFileSync(

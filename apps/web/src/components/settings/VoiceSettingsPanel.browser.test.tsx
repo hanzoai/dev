@@ -153,14 +153,14 @@ it.each([{ cpu: null, accelerated: 2.1 }, { cpu: 5, accelerated: null }, { accel
     const fetch = globalThis.fetch;
     using _network = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = new URL(input instanceof Request ? input.url : input, window.location.href);
-      if (url.pathname === "/api/voice/status") {
+      if (url.pathname === "/v1/voice/status") {
         if (url.origin === remote.httpBaseUrl) {
           remoteRequested.resolve();
           return remoteStatus.promise;
         }
         return Promise.resolve(Response.json(status));
       }
-      if (url.pathname === "/api/voice/models")
+      if (url.pathname === "/v1/voice/models")
         return Promise.resolve(Response.json({ models: [model] }));
       return fetch(input, init);
     });
@@ -264,15 +264,15 @@ it("tests the selected model after download and preserves its transcript across 
   const fetch = globalThis.fetch;
   using _network = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const url = new URL(input instanceof Request ? input.url : input, window.location.href);
-    if (url.pathname === "/api/voice/status")
+    if (url.pathname === "/v1/voice/status")
       return Promise.resolve(
         Response.json(installed ? status : { ...status, state: "missing-model" }),
       );
-    if (url.pathname === "/api/voice/models/download") {
+    if (url.pathname === "/v1/voice/models/download") {
       installed = true;
       return Promise.resolve(Response.json({ models: [model] }));
     }
-    if (url.pathname === "/api/voice/models")
+    if (url.pathname === "/v1/voice/models")
       return Promise.resolve(
         Response.json({
           models: [
@@ -457,13 +457,13 @@ it.each([
     const fetch = globalThis.fetch;
     using _network = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = new URL(input instanceof Request ? input.url : input, window.location.href);
-      if (url.pathname === "/api/voice/status") {
+      if (url.pathname === "/v1/voice/status") {
         authorizations.push(new Headers(init?.headers).get("authorization"));
         return Promise.resolve(
           Response.json(legacy ? { ...legacyStatus, acceleration: "cpu", gpuDevices: [] } : status),
         );
       }
-      if (url.pathname === "/api/voice/models")
+      if (url.pathname === "/v1/voice/models")
         return Promise.resolve(
           Response.json({
             models: legacy
@@ -555,8 +555,8 @@ it("recovers from a failed download progress poll without notifying, but reports
   const fetch = globalThis.fetch;
   using _network = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const url = new URL(input instanceof Request ? input.url : input, window.location.href);
-    if (url.pathname === "/api/voice/status") return Promise.resolve(Response.json(status));
-    if (url.pathname === "/api/voice/models")
+    if (url.pathname === "/v1/voice/status") return Promise.resolve(Response.json(status));
+    if (url.pathname === "/v1/voice/models")
       return Promise.resolve(readModels(url.searchParams.has("benchmarks")));
     return fetch(input, init);
   });

@@ -6,6 +6,7 @@ import * as NodePath from "node:path";
 const desktopDir = NodePath.resolve(import.meta.dirname, "..");
 const repoRoot = NodePath.resolve(desktopDir, "..", "..");
 const manifestPath = NodePath.join(desktopDir, "src-tauri", "Cargo.toml");
+// oxlint-disable-next-line hanzo/no-global-process-runtime -- standalone Node launcher script outside Effect runtime
 const exeSuffix = NodeOS.platform() === "win32" ? ".exe" : "";
 const releaseBin = NodePath.join(
   desktopDir,

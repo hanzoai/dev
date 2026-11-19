@@ -70,8 +70,8 @@ describe("Codex orchestration context", () => {
 describe("Codex device context", () => {
   it("adds the shared device block only when the session holds device access", () => {
     const tools = (device: boolean) =>
-      buildCodexAdditionalContext({ model: "gpt-6.1-sol" }, { browser: true, device }).hanzo_dev_tools
-        ?.value ?? "";
+      buildCodexAdditionalContext({ model: "gpt-6.1-sol" }, { browser: true, device })
+        .hanzo_dev_tools?.value ?? "";
 
     NodeAssert.ok(tools(true).includes(HANZO_DEV_DEVICE_TOOL_INSTRUCTIONS));
     NodeAssert.ok(!tools(true).includes("ToolSearch"));

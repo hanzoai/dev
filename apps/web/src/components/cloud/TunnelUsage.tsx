@@ -36,7 +36,9 @@ export function tunnelUpgradeCopy(
         }),
       );
     case "premier":
-      return resolve(msg("Upgrade to Hanzo Chat Premier for up to {premier} tunnels.", { premier }));
+      return resolve(
+        msg("Upgrade to Hanzo Chat Premier for up to {premier} tunnels.", { premier }),
+      );
   }
 }
 
@@ -129,7 +131,9 @@ export function TunnelLimitAlert({
         {upgrade === "link"
           ? gt("Switch to Tailscale or get more tunnels by linking your Hanzo Chat sub (sorry!)")
           : upgrade
-            ? gt("Switch to Tailscale or get more tunnels by upgrading your Hanzo Chat sub (sorry!)")
+            ? gt(
+                "Switch to Tailscale or get more tunnels by upgrading your Hanzo Chat sub (sorry!)",
+              )
             : gt("Switch to Tailscale or deregister an environment you no longer use (sorry!)")}
       </AlertDescription>
       {action ? <AlertAction>{action}</AlertAction> : null}

@@ -12,7 +12,7 @@ function previewVideo(overrides: Partial<PreviewVideo> = {}): PreviewVideo {
     currentTime: 0,
     duration: 5,
     played: { length: 0, start: () => 0, end: () => 0 },
-    src: "https://environment.test/api/assets/signed/video.mp4?signature=example",
+    src: "https://environment.test/v1/assets/signed/video.mp4?signature=example",
     ...overrides,
   };
 }

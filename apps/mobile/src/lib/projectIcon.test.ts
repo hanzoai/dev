@@ -52,7 +52,7 @@ describe("resolveProjectChipIcon", () => {
       resolveProjectChipIcon(
         project("hanzodev"),
         null,
-        () => "https://env.example/api/assets/project-favicon-missing",
+        () => "https://env.example/v1/assets/project-favicon-missing",
       ),
     ).toMatchObject({ kind: "monogram" });
   });
@@ -61,7 +61,7 @@ describe("resolveProjectChipIcon", () => {
 describe("projectAutoMonogram", () => {
   it("matches desktop's deriveProjectIdentity", () => {
     const desktop = [
-      ["hanzodev", "Hanzo", "teal"],
+      ["hanzodev", "HV", "rose"],
       ["Auto Monogram", "AM", "lime"],
       ["blitzdiff", "BF", "pink"],
       ["uoalbumdotclub", "UB", "gray"],

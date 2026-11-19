@@ -273,7 +273,7 @@ describe("web cloud link environment client", () => {
       ).pipe(Effect.flip);
 
       expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
-        "http://127.0.0.1:3000/api/connect/unlink",
+        "http://127.0.0.1:3000/v1/connect/unlink",
         "https://relay.example.test/v1/client/environment-links/environment-1",
       ]);
       expect(error).toMatchObject({

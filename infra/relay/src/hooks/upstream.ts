@@ -89,7 +89,7 @@ export const sendUpstream = Effect.fn("upstream.sendUpstream")(function* (
     [RELAY_RECEIVED_AT_HEADER]: hook.receivedAt,
   };
   let request = HttpClientRequest.make(hook.method as "GET" | "POST" | "PUT" | "PATCH")(
-    `${base}api/hooks/${hook.rawHookId}/${hook.rawToken}${hook.query ? `?${hook.query}` : ""}`,
+    `${base}v1/hooks/${hook.rawHookId}/${hook.rawToken}${hook.query ? `?${hook.query}` : ""}`,
     { headers },
   );
   if (HttpMethod.hasBody(request.method)) {

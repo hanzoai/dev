@@ -79,8 +79,8 @@ persistence and system-browser callback delivery.
 
 Clerk's native Android SDK uses `clerk://<applicationId>.callback`. In the Clerk instance selected by the app's publishable key, add each supported package to **Native applications > Allowlist for mobile SSO redirect**:
 
-| Variant     | Callback                                      |
-| ----------- | --------------------------------------------- |
+| Variant     | Callback                                |
+| ----------- | --------------------------------------- |
 | Development | `clerk://ai.hanzo.dev.dev.callback`     |
 | Preview     | `clerk://ai.hanzo.dev.preview.callback` |
 | Production  | `clerk://ai.hanzo.dev.callback`         |

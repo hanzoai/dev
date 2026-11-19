@@ -576,7 +576,9 @@ describe("video asset byte ranges", () => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-guarded-current-stat-" });
+      const directory = yield* fs.makeTempDirectoryScoped({
+        prefix: "hanzo-guarded-current-stat-",
+      });
       const filePath = path.join(directory, "clip.mp4");
       for (const [contents, range, method, expected, status, contentRange] of [
         ["1234", undefined, "GET", "1234", 200, null],
@@ -619,7 +621,9 @@ describe("video asset byte ranges", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const directory = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-guarded-offset-limit-" });
+        const directory = yield* fs.makeTempDirectoryScoped({
+          prefix: "hanzo-guarded-offset-limit-",
+        });
         const filePath = path.join(directory, "clip.mp4");
         yield* fs.writeFileString(filePath, "0123456789");
         const canonicalPath = yield* fs.realPath(filePath);

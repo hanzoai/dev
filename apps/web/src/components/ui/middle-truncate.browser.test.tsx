@@ -25,7 +25,10 @@ describe("MiddleTruncate", () => {
   });
 
   it("fits every head mounted in the same commit", async () => {
-    const values = ["hanzo/investigate-release-build-times", "hanzo/remove-stale-worktree-branches"];
+    const values = [
+      "hanzo/investigate-release-build-times",
+      "hanzo/remove-stale-worktree-branches",
+    ];
     await using screen = await render(
       <>
         {values.map((value) => (

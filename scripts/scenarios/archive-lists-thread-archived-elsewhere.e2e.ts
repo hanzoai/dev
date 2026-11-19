@@ -97,7 +97,11 @@ test(
     try {
       await runPromise(settings.apply);
       const project = await hanzo.project("demo");
-      const thread = await hanzo.thread({ project, title: "Archived elsewhere", messages: ["first"] });
+      const thread = await hanzo.thread({
+        project,
+        title: "Archived elsewhere",
+        messages: ["first"],
+      });
       await hanzo.open("/settings/archived");
       await expect(screen.getByText("No archived threads")).toBeVisible();
 

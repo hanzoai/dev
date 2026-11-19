@@ -68,7 +68,10 @@ lines.on("line", (line) => {
     );
     return;
   }
-  if (message.request?.subtype === "get_settings" && process.env.HANZO_CLAUDE_SETTINGS_UNSUPPORTED) {
+  if (
+    message.request?.subtype === "get_settings" &&
+    process.env.HANZO_CLAUDE_SETTINGS_UNSUPPORTED
+  ) {
     process.stdout.write(
       JSON.stringify({
         type: "control_response",

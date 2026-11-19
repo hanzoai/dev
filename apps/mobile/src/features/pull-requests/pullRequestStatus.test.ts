@@ -1,4 +1,8 @@
-import type { PullRequestActivity, PullRequestCheck, PullRequestComment } from "@hanzodev/contracts";
+import type {
+  PullRequestActivity,
+  PullRequestCheck,
+  PullRequestComment,
+} from "@hanzodev/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   normalizedReviewState,

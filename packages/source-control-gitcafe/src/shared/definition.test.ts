@@ -44,7 +44,7 @@ describe("GitCafe change request URLs", () => {
     for (const path of ["pull", "pulls"]) {
       expect(parse(`https://git.cafe/HanzoAI/HanzoDev/${path}/23897`), path).toEqual({
         host: "git.cafe",
-        repository: "hanzoai/dev",
+        repository: "hanzoai/hanzodev",
         number: 23897,
         repositoryUrl: "https://git.cafe/HanzoAI/HanzoDev",
       });

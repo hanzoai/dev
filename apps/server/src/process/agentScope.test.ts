@@ -339,7 +339,8 @@ describe("AgentScope service", () => {
         const memoryLimits = () =>
           calls
             .filter(
-              ([, verb, , slice]) => verb === "set-property" && slice === "app-hanzodev-agents.slice",
+              ([, verb, , slice]) =>
+                verb === "set-property" && slice === "app-hanzodev-agents.slice",
             )
             .map((args) => args.slice(4));
         yield* launch;

@@ -118,7 +118,11 @@ export function useDictationShortcut(input: ShortcutInput) {
         void speech.stop();
         return;
       }
-      if ((speech.state.phase === "idle" || speech.state.phase === "error") && speech.available && !disabled) {
+      if (
+        (speech.state.phase === "idle" || speech.state.phase === "error") &&
+        speech.available &&
+        !disabled
+      ) {
         void speech.start();
       }
     };
@@ -225,7 +229,10 @@ export function useDictationShortcut(input: ShortcutInput) {
       blur: onBlur,
     });
     const unsubscribeMenu = window.desktopBridge?.onMenuAction((action) => {
-      if ((action === "voice.toggle" || action === "toggle-voice-input") && ownsShortcut(id.current)) {
+      if (
+        (action === "voice.toggle" || action === "toggle-voice-input") &&
+        ownsShortcut(id.current)
+      ) {
         toggleVoiceForTarget();
       }
     });

@@ -20,7 +20,12 @@ export function useHanzoProjectFileState(
   environmentId: EnvironmentId,
   cwd: string | null,
 ): HanzoProjectFileState {
-  const query = useProjectFileQuery(environmentId, cwd ?? "", HANZO_PROJECT_FILE_NAME, cwd !== null);
+  const query = useProjectFileQuery(
+    environmentId,
+    cwd ?? "",
+    HANZO_PROJECT_FILE_NAME,
+    cwd !== null,
+  );
   const contents = query.data && !query.data.truncated ? query.data.contents : null;
   const isPending = query.isPending;
   if (contents === null) {

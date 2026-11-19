@@ -93,7 +93,9 @@ function layer(input: {
     Layer.provide(
       ServerConfig.layerTest(
         process.cwd(),
-        input.fileSystem ? "/tmp/hanzo-source-control-repos" : { prefix: "hanzo-source-control-repos-" },
+        input.fileSystem
+          ? "/tmp/hanzo-source-control-repos"
+          : { prefix: "hanzo-source-control-repos-" },
       ),
     ),
   );

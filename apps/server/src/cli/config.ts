@@ -104,7 +104,9 @@ export const traceMaxFilesConfig = Config.Int("HANZO_DEV_TRACE_MAX_FILES").pipe(
 const EnvServerConfig = Config.all({
   logLevel: Config.LogLevel("HANZO_DEV_LOG_LEVEL").pipe(Config.withDefault("Info")),
   traceMinLevel: Config.LogLevel("HANZO_DEV_TRACE_MIN_LEVEL").pipe(Config.withDefault("Info")),
-  traceTimingEnabled: Config.Boolean("HANZO_DEV_TRACE_TIMING_ENABLED").pipe(Config.withDefault(true)),
+  traceTimingEnabled: Config.Boolean("HANZO_DEV_TRACE_TIMING_ENABLED").pipe(
+    Config.withDefault(true),
+  ),
   traceFile: traceFileConfig,
   traceMaxBytes: Config.Int("HANZO_DEV_TRACE_MAX_BYTES").pipe(Config.withDefault(10 * 1024 * 1024)),
   traceMaxFiles: traceMaxFilesConfig,

@@ -8,10 +8,6 @@ import {
   deactivateManagedRelayAuthentication,
 } from "./managedAuth";
 
-vi.mock("./hanzoWebAuth", () => ({
-  useClerk: vi.fn(),
-}));
-
 vi.mock("../lib/runtime", () => ({
   runtime: {
     runPromiseExit: vi.fn(),

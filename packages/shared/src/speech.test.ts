@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
-import { DEFAULT_SPEECH_TRANSCRIPTION_OPTIONS, SPEECH_MAX_OPTIONS_BYTES } from "@hanzodev/contracts";
+import {
+  DEFAULT_SPEECH_TRANSCRIPTION_OPTIONS,
+  SPEECH_MAX_OPTIONS_BYTES,
+} from "@hanzodev/contracts";
 
 import {
   chooseSetupSpeechModel,
@@ -61,7 +64,7 @@ describe("resolveSpeechVocabulary", () => {
     const resolved = resolveSpeechVocabulary({
       personal,
       project: [{ term: "effect", aliases: ["a fact"] }],
-      hints: ["  Hanzo   Code ", "word1", "", "x".repeat(51)],
+      hints: ["  Hanzo   Dev ", "word1", "", "x".repeat(51)],
     });
     expect(resolved).toHaveLength(100);
     expect(resolved.slice(0, 3)).toEqual([

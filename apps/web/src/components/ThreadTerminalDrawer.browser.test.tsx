@@ -10,7 +10,10 @@ import {
   type ResolvedKeybindingsConfig,
 } from "@hanzodev/contracts";
 import { Cause } from "effect";
-import { compileResolvedKeybindingsConfig, DEFAULT_KEYBINDINGS } from "@hanzodev/shared/keybindings";
+import {
+  compileResolvedKeybindingsConfig,
+  DEFAULT_KEYBINDINGS,
+} from "@hanzodev/shared/keybindings";
 import { Atom, AsyncResult } from "effect/reactivity";
 import type { GhosttyTerminalSurfaceOptions } from "~/terminal/ghostty/surface";
 import { AppAtomRegistryProvider, appAtomRegistry } from "../rpc/atomRegistry";

@@ -97,10 +97,10 @@ describe("hanzoMobileAuthStore & deep-link routing", () => {
         );
       }
       if (url.includes("/userinfo")) {
-        return new Response(
-          JSON.stringify({ sub: "z", owner: "hanzo", email: "z@hanzo.ai" }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
+        return new Response(JSON.stringify({ sub: "z", owner: "hanzo", email: "z@hanzo.ai" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
       }
       return new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } });
     }) as typeof fetch;

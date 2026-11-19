@@ -224,27 +224,27 @@ function piHanzoMcpExtensionDestPath(cacheDir: string): string {
   return `${cacheDir.replace(/\\/g, "/")}/${PI_HANZO_MCP_EXTENSION_FILENAME}`;
 }
 
-export const materializePiHanzoMcpExtension = Effect.fn("materializePiHanzoMcpExtension")(function* (
-  cacheDir: string,
-) {
-  const fs = yield* FileSystem.FileSystem;
-  yield* fs.makeDirectory(cacheDir, { recursive: true });
-  const dest = piHanzoMcpExtensionDestPath(cacheDir);
-  const existing = yield* fs.readFileString(dest).pipe(Effect.orElseSucceed(() => ""));
-  if (existing !== PI_HANZO_MCP_EXTENSION_SOURCE) {
-    // Concurrent pi launches read this file: stage it in a per-call directory
-    // and rename so readers and other writers never see a partial file.
-    yield* Effect.scoped(
-      Effect.gen(function* () {
-        const stagingDir = yield* fs.makeTempDirectoryScoped({ directory: cacheDir });
-        const staging = `${stagingDir.replace(/\\/g, "/")}/${PI_HANZO_MCP_EXTENSION_FILENAME}`;
-        yield* fs.writeFileString(staging, PI_HANZO_MCP_EXTENSION_SOURCE);
-        yield* fs.rename(staging, dest).pipe(Effect.retry({ times: 3 }));
-      }),
-    );
-  }
-  return dest;
-});
+export const materializePiHanzoMcpExtension = Effect.fn("materializePiHanzoMcpExtension")(
+  function* (cacheDir: string) {
+    const fs = yield* FileSystem.FileSystem;
+    yield* fs.makeDirectory(cacheDir, { recursive: true });
+    const dest = piHanzoMcpExtensionDestPath(cacheDir);
+    const existing = yield* fs.readFileString(dest).pipe(Effect.orElseSucceed(() => ""));
+    if (existing !== PI_HANZO_MCP_EXTENSION_SOURCE) {
+      // Concurrent pi launches read this file: stage it in a per-call directory
+      // and rename so readers and other writers never see a partial file.
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const stagingDir = yield* fs.makeTempDirectoryScoped({ directory: cacheDir });
+          const staging = `${stagingDir.replace(/\\/g, "/")}/${PI_HANZO_MCP_EXTENSION_FILENAME}`;
+          yield* fs.writeFileString(staging, PI_HANZO_MCP_EXTENSION_SOURCE);
+          yield* fs.rename(staging, dest).pipe(Effect.retry({ times: 3 }));
+        }),
+      );
+    }
+    return dest;
+  },
+);
 
 export function buildPiRpcLaunch(input: {
   readonly launchArgs: ReadonlyArray<string>;

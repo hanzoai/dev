@@ -6,10 +6,7 @@ import {
 } from "@hanzodev/shared/hanzoIamAuth";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import {
-  readSelectedLocalAiModel,
-  writeSelectedLocalAiModel,
-} from "../localAi/localAiState";
+import { readSelectedLocalAiModel, writeSelectedLocalAiModel } from "../localAi/localAiState";
 import { HanzoWebAuthController } from "./hanzoWebAuth";
 
 function sampleAccount(overrides: Partial<HanzoIamAccount> = {}): HanzoIamAccount {

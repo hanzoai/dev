@@ -249,7 +249,7 @@ const environmentId = (baseUrl: string) =>
 export const rpcClient = Effect.fn("scenario.rpcClient")(function* (home: string, origin: string) {
   const issued = yield* makeState(home).cli(["auth", "session", "issue", "--token-only"]);
   const { ticket } = yield* HttpClient.execute(
-    HttpClientRequest.post(`${origin}/api/auth/websocket-ticket`).pipe(
+    HttpClientRequest.post(`${origin}/v1/auth/websocket-ticket`).pipe(
       HttpClientRequest.bearerToken(issued.stdout.trim()),
     ),
   ).pipe(

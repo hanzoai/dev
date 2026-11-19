@@ -82,7 +82,8 @@ function withFakeClaudeEnv<A, E, R>(
       HANZO_FAKE_CLAUDE_REJECTS_NO_SESSION_PERSISTENCE: input.rejectsNoSessionPersistence
         ? "1"
         : undefined,
-      HANZO_FAKE_CLAUDE_EXIT_CODE: input.exitCode === undefined ? undefined : String(input.exitCode),
+      HANZO_FAKE_CLAUDE_EXIT_CODE:
+        input.exitCode === undefined ? undefined : String(input.exitCode),
       HANZO_FAKE_CLAUDE_STDERR: input.stderr,
       HANZO_FAKE_CLAUDE_EXPECTED_TOOLS: input.expectedTools,
       HANZO_FAKE_CLAUDE_ARGS_MUST_CONTAIN: input.argsMustContain,

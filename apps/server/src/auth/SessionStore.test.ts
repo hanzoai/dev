@@ -32,7 +32,9 @@ const layerServerConfig = (overrides?: Partial<ServerConfig.ServerConfig["Servic
         ...overrides,
       } satisfies ServerConfig.ServerConfig["Service"];
     }),
-  ).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-auth-session-test-" })));
+  ).pipe(
+    Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-auth-session-test-" })),
+  );
 
 const layerServerEnvironment = (environmentId: EnvironmentId) =>
   Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {

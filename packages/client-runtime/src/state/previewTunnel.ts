@@ -14,7 +14,7 @@ import { mintMediaTicket } from "./deviceHubAccess.ts";
 const TICKET_REFRESH_MARGIN_MS = 30_000;
 
 /**
- * Reads an environment's loopback tunnel URL (`/api/preview/tunnel` with a media ticket) for a
+ * Reads an environment's loopback tunnel URL (`/v1/preview/tunnel` with a media ticket) for a
  * native webview proxy. Tickets are reused until shortly before they expire, and reading the
  * prepared connection re-mints for the route in use after a route switch.
  */

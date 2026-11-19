@@ -51,12 +51,12 @@ function ConfiguredHanzoConnectSidebarAvatar() {
           className="size-6 rounded-full object-cover"
         />
       ) : (
-        <span className="flex size-6 items-center justify-center rounded-full bg-foreground text-[10px] font-bold text-background">
+        <span className="flex size-6 items-center justify-center rounded-full bg-foreground text-3xs font-bold text-background">
           {initials}
         </span>
       )}
       {accounts.length > 1 && (
-        <span className="absolute top-0 right-0 flex size-3.5 items-center justify-center rounded-full bg-emerald-500 text-[9px] font-bold text-white">
+        <span className="absolute top-0 right-0 flex size-3.5 items-center justify-center rounded-full bg-success text-4xs font-bold text-white">
           {accounts.length}
         </span>
       )}

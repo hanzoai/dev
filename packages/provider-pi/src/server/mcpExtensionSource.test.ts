@@ -6,7 +6,10 @@ import * as NodeModule from "node:module";
 import * as NodeVM from "node:vm";
 import { assert, describe, it } from "@effect/vitest";
 
-import { PI_HANZO_MCP_EXTENSION_SOURCE, PI_HANZO_SERVICE_TIER_COMMAND } from "./mcpExtensionSource.ts";
+import {
+  PI_HANZO_MCP_EXTENSION_SOURCE,
+  PI_HANZO_SERVICE_TIER_COMMAND,
+} from "./mcpExtensionSource.ts";
 import { loadMcpBridge } from "./mcpBridge.testkit.ts";
 
 type RequestHook = (
@@ -394,7 +397,10 @@ describe("Pi tool discovery permissions", () => {
       );
     }
     assert.equal(confirmations.length, 0);
-    const result = await toolCall!({ toolName: "mcp__hanzo-dev__preview_snapshot", input: {} }, ctx);
+    const result = await toolCall!(
+      { toolName: "mcp__hanzo-dev__preview_snapshot", input: {} },
+      ctx,
+    );
     assert.equal(result?.block, true);
     assert.deepEqual(confirmations, ["Allow mcp__hanzo-dev__preview_snapshot?"]);
 

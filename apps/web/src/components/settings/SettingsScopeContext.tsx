@@ -1,4 +1,8 @@
-import { type EnvironmentId, HANZO_PROJECT_FILE_NAME, type HanzoProjectFile } from "@hanzodev/contracts";
+import {
+  type EnvironmentId,
+  HANZO_PROJECT_FILE_NAME,
+  type HanzoProjectFile,
+} from "@hanzodev/contracts";
 import { parseHanzoProjectFile } from "@hanzodev/shared/hanzoProjectFile";
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult, Atom } from "effect/reactivity";

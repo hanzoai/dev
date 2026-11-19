@@ -65,8 +65,6 @@ export async function installPdfDocumentNavigation(cdp: CDPSession) {
   });
   // Only document navigations pause; the client's PDF fetch gets the original bytes.
   await cdp.send("Fetch.enable", {
-    patterns: [
-      { urlPattern: "*/api/assets/*", resourceType: "Document", requestStage: "Response" },
-    ],
+    patterns: [{ urlPattern: "*/v1/assets/*", resourceType: "Document", requestStage: "Response" }],
   });
 }

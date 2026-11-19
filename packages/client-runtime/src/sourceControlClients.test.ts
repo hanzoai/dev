@@ -16,7 +16,7 @@ describe("sourceControlClients.parseChangeRequestUrl", () => {
   it("reads a GitHub pull request, lower-casing the repository", () => {
     expect(parse("https://github.com/HanzoDev/HanzoDev/pull/123")).toEqual({
       host: "github.com",
-      repository: "hanzoai/dev",
+      repository: "hanzodev/hanzodev",
       number: 123,
     });
   });
@@ -26,7 +26,7 @@ describe("sourceControlClients.parseChangeRequestUrl", () => {
       const url = `https://git.cafe/HanzoAI/HanzoDev/${path}/23897`;
       expect(parse(url), path).toEqual({
         host: "git.cafe",
-        repository: "hanzoai/dev",
+        repository: "hanzoai/hanzodev",
         number: 23897,
       });
       expect(kindOf(url), path).toBe("gitcafe");
@@ -83,7 +83,7 @@ describe("sourceControlClients.parseChangeRequestUrl", () => {
   });
 
   it("reads a GitLab merge request on any host, nested groups and all", () => {
-    expect(parse("https://gitlab.com/hanzodev/platform/hanzo/-/merge_requests/42")).toEqual({
+    expect(parse("https://gitlab.com/hanzodev/platform/hanzodev/-/merge_requests/42")).toEqual({
       host: "gitlab.com",
       repository: "hanzodev/platform/hanzodev",
       number: 42,
@@ -106,12 +106,12 @@ describe("sourceControlClients.parseChangeRequestUrl", () => {
       repository: "workspace/repo",
       number: 5,
     });
-    expect(parse("https://dev.azure.com/acme/platform/_git/hanzo/pullrequest/17")).toEqual({
+    expect(parse("https://dev.azure.com/acme/platform/_git/hanzodev/pullrequest/17")).toEqual({
       host: "dev.azure.com",
       repository: "acme/platform/_git/hanzodev",
       number: 17,
     });
-    expect(parse("https://acme.visualstudio.com/platform/_git/hanzo/pullrequest/17")).toEqual({
+    expect(parse("https://acme.visualstudio.com/platform/_git/hanzodev/pullrequest/17")).toEqual({
       host: "acme.visualstudio.com",
       repository: "platform/_git/hanzodev",
       number: 17,
@@ -196,7 +196,7 @@ describe("sourceControlClients.isSameChangeRequest", () => {
     expect(
       sourceControlClients.isSameChangeRequest(
         linked,
-        "https://github.com/HanzoAI/HanzoDev/pull/42/files",
+        "https://github.com/HanzoAI/Dev/pull/42/files",
       ),
     ).toBe(true);
   });
@@ -300,7 +300,7 @@ describe("sourceControlClients.recognizeRemote", () => {
 describe("sourceControlClients repository keys", () => {
   // Persisted as `repositoryIdentity.canonicalKey` and in thread pull request keys.
   it.each([
-    ["git@github.com:HanzoDev/HanzoDev.git", "github.com/hanzoai/dev"],
+    ["git@github.com:HanzoDev/HanzoDev.git", "github.com/hanzodev/hanzodev"],
     ["ssh://git@gitlab.company.com:2222/team/project.git", "gitlab.company.com/team/project"],
     [
       "git@ssh.dev.azure.com:v3/HanzoDev/Platform/HanzoDev",

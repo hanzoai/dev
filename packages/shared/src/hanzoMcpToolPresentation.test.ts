@@ -35,9 +35,12 @@ describe("resolveHanzoMcpToolPresentation", () => {
 
   it("matches OpenCode 2's per-thread server names, whose thread ids hold underscores", () => {
     expect(
-      resolveHanzoMcpToolPresentation("hanzo-dev-thread_opencode2-adapter_delegate_task")?.displayName,
+      resolveHanzoMcpToolPresentation("hanzo-dev-thread_opencode2-adapter_delegate_task")
+        ?.displayName,
     ).toBe("Delegate a child task");
-    expect(resolveHanzoMcpToolPresentation("hanzo-dev-thread_opencode2-adapter_not_a_tool")).toBeNull();
+    expect(
+      resolveHanzoMcpToolPresentation("hanzo-dev-thread_opencode2-adapter_not_a_tool"),
+    ).toBeNull();
   });
 });
 
@@ -46,9 +49,9 @@ describe("resolveHanzoMcpToolDefinition", () => {
     expect(
       resolveHanzoMcpToolDefinition("mcp__hanzo-dev__preview_act", { action: "type" })?.labels,
     ).toEqual(resolveHanzoMcpToolDefinition("preview_type")?.labels);
-    expect(resolveHanzoMcpToolDefinition("hanzo_thread_transfer", { action: "fork" })?.displayName).toBe(
-      resolveHanzoMcpToolDefinition("hanzo_thread_fork")?.displayName,
-    );
+    expect(
+      resolveHanzoMcpToolDefinition("hanzo_thread_transfer", { action: "fork" })?.displayName,
+    ).toBe(resolveHanzoMcpToolDefinition("hanzo_thread_fork")?.displayName);
     expect(resolveHanzoMcpToolDefinition("preview_act", { action: "unknown" })?.labels[2]).toBe(
       "Used",
     );

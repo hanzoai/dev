@@ -23,7 +23,10 @@ import {
   type DeviceStreamSession,
   IDLE_DEVICE_STREAM_STATE,
 } from "./deviceStreamSession";
-import type { DeviceHardwareButton, DeviceScreenSize } from "@hanzodev/client-runtime/device/stream";
+import type {
+  DeviceHardwareButton,
+  DeviceScreenSize,
+} from "@hanzodev/client-runtime/device/stream";
 import { observeResize } from "~/lib/observeResize";
 
 const NO_SESSION_ATOM = Atom.make<DeviceStreamSession | null>(null).pipe(

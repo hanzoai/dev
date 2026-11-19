@@ -21,7 +21,8 @@ export const ja: Messages = {
   },
   home: {
     title: "Hanzo Dev | コーディングエージェントのためのオープンソースのコントロールプレーン",
-    description: "Hanzo Dev。コーディングエージェントのためのオープンソースのコントロールプレーン。",
+    description:
+      "Hanzo Dev。コーディングエージェントのためのオープンソースのコントロールプレーン。",
     heroTitle: ["コーディングエージェントの", "オープンソース", "コントロールプレーン。"],
     heroSub:
       "Claude Code、Codex、Antigravity、OpenCode、Cursor、Grok をひとつの画面からオーケストレーション。サブスクリプションは手持ちのものをそのまま。まるごとフォークも自由です。",

@@ -1592,7 +1592,9 @@ describe("sidebarFolderExpansionKeys", () => {
   it("honors a collapse the legacy sidebar saved under a member's cwd", () => {
     const keys = sidebarFolderExpansionKeys({
       projectKey: "github.com/hanzoai/dev",
-      memberProjects: [{ physicalProjectKey: "local:/code/hanzodev", workspaceRoot: "/code/hanzodev" }],
+      memberProjects: [
+        { physicalProjectKey: "local:/code/hanzodev", workspaceRoot: "/code/hanzodev" },
+      ],
     });
     const cwdKey = keys.at(-1)!;
 

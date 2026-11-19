@@ -62,10 +62,10 @@ import { ingestAnalyticsBody, readRecentAnalyticsSnapshot } from "./analyticsHub
 import { requestUrl } from "./requestUrl.ts";
 
 const OTLP_TRACES_PROXY_PATH = "/v1/o11y/traces";
-export const HANZO_IDENTITIES_PATH = "/v1/hanzo/identities";
-export const HANZO_BEACON_PATH = "/_/beacon";
-export const HANZO_ANALYTICS_EVENT_PATH = "/api/analytics/event";
-export const HANZO_ANALYTICS_RECENT_PATH = "/api/analytics/recent";
+const HANZO_IDENTITIES_PATH = "/v1/hanzo/identities";
+const HANZO_BEACON_PATH = "/_/beacon";
+const HANZO_ANALYTICS_EVENT_PATH = "/api/analytics/event";
+const HANZO_ANALYTICS_RECENT_PATH = "/api/analytics/recent";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 const SVG_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
 // Opaque origin blocks cookies, storage and API access while allowing scripts.

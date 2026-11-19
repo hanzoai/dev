@@ -185,7 +185,7 @@ export const REMOTE_CAPABLE_EDITOR_IDS: ReadonlyArray<EditorId> = EDITORS.flatMa
   remoteSchemeOf(editor) !== undefined ? [editor.id] : [],
 );
 
-export const remoteSchemeForEditor = (id: EditorId): string | undefined => {
+const remoteSchemeForEditor = (id: EditorId): string | undefined => {
   const editor = EDITORS.find((candidate) => candidate.id === id);
   return editor === undefined ? undefined : remoteSchemeOf(editor);
 };

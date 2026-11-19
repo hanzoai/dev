@@ -104,7 +104,7 @@ class HanzoMobileAuthController implements CloudAccountSource {
     const activeOrgId = resolveActiveHanzoOrgId(this.vault);
     const organizations = activeAccount
       ? (this.organizationsByAccount.get(activeAccount.id) ??
-          resolveAccountOrganizations(activeAccount))
+        resolveAccountOrganizations(activeAccount))
       : [];
     return {
       isLoaded,
@@ -202,7 +202,7 @@ class HanzoMobileAuthController implements CloudAccountSource {
   readonly getToken = async (accountId?: string): Promise<string | null> => {
     await this.hydrate();
     const target = accountId
-      ? this.snapshot.accounts.find((entry) => entry.id === accountId) ?? null
+      ? (this.snapshot.accounts.find((entry) => entry.id === accountId) ?? null)
       : this.snapshot.activeAccount;
     if (!target) return null;
     if (!isHanzoIamTokenExpiringSoon(target) || !target.refreshToken) {
@@ -253,7 +253,9 @@ class HanzoMobileAuthController implements CloudAccountSource {
     return true;
   };
 
-  readonly signInWithBrand = async (brandId: HanzoIamBrandId = "hanzo"): Promise<HanzoIamAccount> => {
+  readonly signInWithBrand = async (
+    brandId: HanzoIamBrandId = "hanzo",
+  ): Promise<HanzoIamAccount> => {
     await this.hydrate();
     const brand = getHanzoIamBrand(brandId);
     const redirectUri = Linking.createURL("oauth/callback");
@@ -289,9 +291,7 @@ class HanzoMobileAuthController implements CloudAccountSource {
       throw new Error("OAuth state mismatch during Hanzo ID sign-in.");
     }
     if (!callback.code) {
-      throw new Error(
-        callback.errorDescription ?? callback.error ?? "Missing authorization code.",
-      );
+      throw new Error(callback.errorDescription ?? callback.error ?? "Missing authorization code.");
     }
 
     const account = await exchangeHanzoIamAuthorizationCode({
@@ -379,7 +379,9 @@ class HanzoMobileAuthController implements CloudAccountSource {
 
   /** Test helper to reset in-memory state deterministically. */
   readonly resetForTesting = (
-    initial?: Partial<HanzoMobileAuthSnapshot> & { readonly pendingPkce?: PendingMobilePkce | null },
+    initial?: Partial<HanzoMobileAuthSnapshot> & {
+      readonly pendingPkce?: PendingMobilePkce | null;
+    },
   ): void => {
     this.hydratePromise = Promise.resolve();
     this.organizationsByAccount.clear();
@@ -403,8 +405,7 @@ class HanzoMobileAuthController implements CloudAccountSource {
       accounts,
       activeOrgId,
       organizations:
-        initial?.organizations ??
-        (activeAccount ? resolveAccountOrganizations(activeAccount) : []),
+        initial?.organizations ?? (activeAccount ? resolveAccountOrganizations(activeAccount) : []),
       billing: activeAccount ? (initial?.billing ?? null) : null,
     };
     for (const listener of this.listeners) listener();

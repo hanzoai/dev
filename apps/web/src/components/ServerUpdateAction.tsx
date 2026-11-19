@@ -483,7 +483,9 @@ export function OutdatedServerUpdateAction({
     toastManager.add({
       type: "success",
       title: m(msg("{serverLabel} updated", { serverLabel })),
-      description: m(msg("Reconnected on hanzo@{version}.", { version: result.value.targetVersion })),
+      description: m(
+        msg("Reconnected on hanzo@{version}.", { version: result.value.targetVersion }),
+      ),
     });
   };
   if (fromVersion !== undefined && crossesReleaseTrack(fromVersion, targetVersion)) {

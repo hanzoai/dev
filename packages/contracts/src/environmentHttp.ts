@@ -519,10 +519,13 @@ export const HANZO_CONNECT_TROUBLESHOOTING_SECTIONS = [
   "the-host-runs-an-older-hanzo-dev",
   "hanzo-connect-returned-an-error",
 ] as const;
-export type HanzoConnectTroubleshootingSection = (typeof HANZO_CONNECT_TROUBLESHOOTING_SECTIONS)[number];
+export type HanzoConnectTroubleshootingSection =
+  (typeof HANZO_CONNECT_TROUBLESHOOTING_SECTIONS)[number];
 
 /** Clients, the CLI, and server logs link here as "More info". */
-export function hanzoConnectTroubleshootingUrl(section: HanzoConnectTroubleshootingSection): string {
+export function hanzoConnectTroubleshootingUrl(
+  section: HanzoConnectTroubleshootingSection,
+): string {
   return `https://github.com/hanzoai/dev/blob/main/docs/user/hanzo-connect-troubleshooting.md#${section}`;
 }
 

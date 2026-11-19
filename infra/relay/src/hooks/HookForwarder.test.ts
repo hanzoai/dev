@@ -224,7 +224,7 @@ describe("HookForwarder", () => {
       expect(harness.sent).toHaveLength(1);
       const sent = harness.sent[0]!;
       expect(sent.method).toBe("POST");
-      expect(sent.url).toBe("https://env.example.test/api/hooks/hook-1/tok%2Fen?a=1&b=two%20words");
+      expect(sent.url).toBe("https://env.example.test/v1/hooks/hook-1/tok%2Fen?a=1&b=two%20words");
       expect(Array.from(requestBytes(sent))).toEqual(Array.from(body));
       expect(sent.headers.authorization).toBe("Bearer sender-secret");
       expect(sent.headers["x-hub-signature-256"]).toBe("sha256=abc");

@@ -245,7 +245,10 @@ describe("orchestration V2 wire projection", () => {
       },
     };
     expect(projectTurnItemForDetail(appItem)).toMatchObject({
-      output: { hanzoMcpApp, result: { content: [text, { type: "image", mimeType: "image/png" }] } },
+      output: {
+        hanzoMcpApp,
+        result: { content: [text, { type: "image", mimeType: "image/png" }] },
+      },
     });
     const largeOutput = projectTurnItemForDetail(appItem);
     expect(

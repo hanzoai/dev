@@ -189,7 +189,8 @@ export function useManagedTunnelUsage() {
       : (environments.data?.filter(
           (environment) => environment.endpoint.providerKind === "cloudflare_tunnel",
         ).length ?? null);
-  const cap = hanzoChat.accountId !== null && hanzoChat.data ? managedTunnelCap(hanzoChat.data) : null;
+  const cap =
+    hanzoChat.accountId !== null && hanzoChat.data ? managedTunnelCap(hanzoChat.data) : null;
   return {
     used,
     limit: cap?.limit ?? null,

@@ -178,7 +178,7 @@ describe("resolveInitialServerAuthGateState", () => {
     // What FetchHttpClient yields when nothing listens on the backend port.
     const connectionRefused = new HttpClientError.HttpClientError({
       reason: new HttpClientError.TransportError({
-        request: HttpClientRequest.get("http://localhost:3773/api/auth/session"),
+        request: HttpClientRequest.get("http://localhost:3773/v1/auth/session"),
         cause: new TypeError("Failed to fetch"),
       }),
     });

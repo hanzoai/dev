@@ -22,7 +22,10 @@ import {
 } from "@hanzodev/client-runtime/connection";
 import { bootstrapRemoteBearerSession } from "@hanzodev/client-runtime/authorization";
 import { fetchRemoteEnvironmentDescriptor } from "@hanzodev/client-runtime/environment";
-import { managedRelayAccountChanges, managedRelaySessionAtom } from "@hanzodev/client-runtime/relay";
+import {
+  managedRelayAccountChanges,
+  managedRelaySessionAtom,
+} from "@hanzodev/client-runtime/relay";
 import { EnvironmentRpcRequestObserver } from "@hanzodev/client-runtime/rpc";
 import {
   AuthStandardClientScopes,

@@ -23,16 +23,14 @@ function strOrFallback(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
 }
 
-export function normalizeIncomingAnalyticsEnvelope(
+function normalizeIncomingAnalyticsEnvelope(
   rawItem: unknown,
   headers?: Readonly<Record<string, string | undefined>>,
 ): HanzoAnalyticsEnvelope | null {
   if (!rawItem || typeof rawItem !== "object") return null;
   const obj = rawItem as Record<string, unknown>;
   const rawPayload =
-    obj.payload && typeof obj.payload === "object"
-      ? (obj.payload as Record<string, unknown>)
-      : obj;
+    obj.payload && typeof obj.payload === "object" ? (obj.payload as Record<string, unknown>) : obj;
 
   const rawType = obj.type === "pageview" || rawPayload.name === "page_view" ? "pageview" : "event";
   const name = strOrFallback(
@@ -42,9 +40,9 @@ export function normalizeIncomingAnalyticsEnvelope(
   const rawData =
     rawPayload.data && typeof rawPayload.data === "object"
       ? (rawPayload.data as Record<string, unknown>)
-      : (obj.properties && typeof obj.properties === "object"
-          ? (obj.properties as Record<string, unknown>)
-          : {});
+      : obj.properties && typeof obj.properties === "object"
+        ? (obj.properties as Record<string, unknown>)
+        : {};
 
   const urlInput = strOrFallback(rawPayload.url ?? rawPayload.path, "/");
   const normalizedPath = normalizeHanzoAnalyticsPath(urlInput);
@@ -108,8 +106,7 @@ function forwardEnvelopeToCloud(envelope: HanzoAnalyticsEnvelope): void {
   if (process.env.HANZO_ANALYTICS_FORWARD === "0" || process.env.VITEST === "true") {
     return;
   }
-  const endpoint =
-    process.env.HANZO_ANALYTICS_ENDPOINT?.trim() || DEFAULT_HANZO_ANALYTICS_ENDPOINT;
+  const endpoint = process.env.HANZO_ANALYTICS_ENDPOINT?.trim() || DEFAULT_HANZO_ANALYTICS_ENDPOINT;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 2_500);
   timeout.unref?.();

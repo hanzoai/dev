@@ -194,7 +194,7 @@ function normalizeMagicDnsName(status: TailscaleStatusJson): string | null {
   return normalized.length > 0 ? normalized : null;
 }
 
-export function isTailscaleIpv4Address(address: string): boolean {
+function isTailscaleIpv4Address(address: string): boolean {
   const parts = address.split(".");
   if (parts.length !== 4) {
     return false;

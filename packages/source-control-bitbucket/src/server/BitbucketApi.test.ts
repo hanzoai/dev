@@ -271,9 +271,7 @@ it.effect("adds a fork remote with the protocol of the URL origin fetches from",
     git: {
       execute: () =>
         Effect.succeed(
-          gitOutput(
-            "https://bitbucket.org/hanzoai/dev.git\ngit@bitbucket.org:hanzoai/dev.git\n",
-          ),
+          gitOutput("https://bitbucket.org/hanzoai/dev.git\ngit@bitbucket.org:hanzoai/dev.git\n"),
         ),
     },
     response: (request) =>
@@ -327,7 +325,7 @@ it.effect.each([false, true])(
                   baseUrl: "https://bitbucket.org",
                 },
                 remoteName: "upstream",
-                remoteUrl: "git@bitbucket.org:HanzoAI/HanzoDev.git",
+                remoteUrl: "git@bitbucket.org:HanzoAI/Dev.git",
               },
             }
           : {}),
@@ -663,7 +661,7 @@ it.effect("creates pull requests using the official REST payload shape", () => {
       description: "PR body",
       source: {
         branch: { name: "feature/provider" },
-        repository: { full_name: "owner/hanzodev" },
+        repository: { full_name: "owner/dev" },
       },
       destination: {
         branch: { name: "main" },

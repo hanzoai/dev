@@ -2225,7 +2225,12 @@ it.effect("lets a worktree checkout that is still working run past five minutes"
     const worktreePath = path.join(cwd, "worktree");
 
     const creation = yield* driver
-      .createWorktree({ cwd, refName: "main", newRefName: "hanzo/slow-checkout", path: worktreePath })
+      .createWorktree({
+        cwd,
+        refName: "main",
+        newRefName: "hanzo/slow-checkout",
+        path: worktreePath,
+      })
       .pipe(Effect.forkChild);
     yield* Deferred.await(checkoutStarted);
     yield* TestClock.adjust("6 minutes");
@@ -4459,7 +4464,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         yield* git(cwd, ["commit", "-m", "upstream work"]);
         yield* git(cwd, ["push", "-u", "upstream", "main"]);
         yield* git(cwd, ["checkout", "-b", "feature/from-local-main"]);
-        yield* git(cwd, ["config", "branch.feature/from-local-main.hanzo-merge-base", "main"]);
+        yield* git(cwd, ["config", "branch.feature/from-local-main.hanzo-dev-merge-base", "main"]);
         yield* writeTextFile(cwd, "feature.txt", "intended branch change\n");
         yield* git(cwd, ["add", "feature.txt"]);
         yield* git(cwd, ["commit", "-m", "feature work"]);
@@ -4500,10 +4505,10 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         yield* git(cwd, ["fetch", "origin"]);
         yield* git(cwd, ["fetch", "upstream"]);
         yield* git(cwd, ["checkout", "-b", "hanzo/temporary"]);
-        yield* git(cwd, ["config", "branch.hanzo/temporary.hanzo-merge-base", "main"]);
+        yield* git(cwd, ["config", "branch.hanzo/temporary.hanzo-dev-merge-base", "main"]);
         yield* git(cwd, [
           "config",
-          "branch.hanzo/temporary.hanzo-merge-base-ref",
+          "branch.hanzo/temporary.hanzo-dev-merge-base-ref",
           "refs/remotes/upstream/main",
         ]);
         yield* writeTextFile(cwd, "feature.txt", "thread work\n");
@@ -5938,25 +5943,27 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
-    it.effect.each(["hanzo", "Hanzo"])("flattens a generated name when parent %s blocks it", (parent) =>
-      Effect.gen(function* () {
-        const cwd = yield* makeTmpDir();
-        yield* initRepoWithCommit(cwd);
-        const driver = yield* GitVcsDriver.GitVcsDriver;
-        // A local `hanzo` branch is why launches start on the flat `hanzo-<hex>` temporary branch.
-        yield* git(cwd, ["branch", parent]);
-        yield* git(cwd, ["checkout", "-b", "hanzo-abcd1234"]);
-        yield* git(cwd, ["branch", "hanzo-fix-login"]);
+    it.effect.each(["hanzo", "Hanzo"])(
+      "flattens a generated name when parent %s blocks it",
+      (parent) =>
+        Effect.gen(function* () {
+          const cwd = yield* makeTmpDir();
+          yield* initRepoWithCommit(cwd);
+          const driver = yield* GitVcsDriver.GitVcsDriver;
+          // A local `hanzo` branch is why launches start on the flat `hanzo-<hex>` temporary branch.
+          yield* git(cwd, ["branch", parent]);
+          yield* git(cwd, ["checkout", "-b", "hanzo-abcd1234"]);
+          yield* git(cwd, ["branch", "hanzo-fix-login"]);
 
-        const renamed = yield* driver.renameBranch({
-          cwd,
-          oldBranch: "hanzo-abcd1234",
-          newBranch: "hanzo/fix-login",
-        });
+          const renamed = yield* driver.renameBranch({
+            cwd,
+            oldBranch: "hanzo-abcd1234",
+            newBranch: "hanzo/fix-login",
+          });
 
-        assert.equal(renamed.branch, "hanzo-fix-login-1");
-        assert.equal(yield* git(cwd, ["branch", "--show-current"]), "hanzo-fix-login-1");
-      }),
+          assert.equal(renamed.branch, "hanzo-fix-login-1");
+          assert.equal(yield* git(cwd, ["branch", "--show-current"]), "hanzo-fix-login-1");
+        }),
     );
 
     it.effect.each(["hanzo-fix-login/child", "Hanzo-Fix-Login/child", "Hanzo-FIX-LOGIN"])(
@@ -6423,7 +6430,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           yield* git(cwd, ["rev-parse", "HEAD"]),
         );
         assert.equal(
-          yield* git(cwd, ["config", "branch.feature/parallel.hanzo-merge-base"]),
+          yield* git(cwd, ["config", "branch.feature/parallel.hanzo-dev-merge-base"]),
           initialBranch,
         );
         for (const [configured, expected] of [
@@ -6627,7 +6634,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
 
           assert.equal(yield* git(worktreePath, ["rev-parse", "HEAD"]), commit);
           assert.equal(
-            yield* driver.readConfigValue(cwd, "branch.feature/revision.hanzo-merge-base"),
+            yield* driver.readConfigValue(cwd, "branch.feature/revision.hanzo-dev-merge-base"),
             null,
           );
         }),
@@ -6823,7 +6830,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           });
 
           assert.equal(
-            yield* driver.readConfigValue(cwd, "branch.feature/branch.hanzo-merge-base"),
+            yield* driver.readConfigValue(cwd, "branch.feature/branch.hanzo-dev-merge-base"),
             baseBranch,
           );
         }),
@@ -7372,40 +7379,42 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
       }),
     );
 
-    it.effect("fails without a worktree when the hanzo.json sparse pattern path is not a file", () =>
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem;
-        const pathService = yield* Path.Path;
-        const cwd = yield* makeTmpDir();
-        const { initialBranch } = yield* initRepoWithCommit(cwd);
-        yield* writeTextFile(cwd, "patterns/keep.txt", "/*\n");
-        const driver = yield* GitVcsDriver.GitVcsDriver;
-        const worktrees = yield* makeTmpDir("git-worktrees-");
-        for (const patternsPath of ["missing.txt", "patterns"]) {
-          yield* writeTextFile(
-            cwd,
-            "hanzo.json",
-            JSON.stringify({ worktreeSparsePatternsPath: patternsPath }),
-          );
-          yield* git(cwd, ["add", "."]);
-          yield* git(cwd, ["commit", "-m", "missing sparse patterns"]);
-          const worktreePath = pathService.join(worktrees, patternsPath);
-
-          const error = yield* Effect.flip(
-            driver.createWorktree({
+    it.effect(
+      "fails without a worktree when the hanzo.json sparse pattern path is not a file",
+      () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const pathService = yield* Path.Path;
+          const cwd = yield* makeTmpDir();
+          const { initialBranch } = yield* initRepoWithCommit(cwd);
+          yield* writeTextFile(cwd, "patterns/keep.txt", "/*\n");
+          const driver = yield* GitVcsDriver.GitVcsDriver;
+          const worktrees = yield* makeTmpDir("git-worktrees-");
+          for (const patternsPath of ["missing.txt", "patterns"]) {
+            yield* writeTextFile(
               cwd,
-              path: worktreePath,
-              refName: initialBranch,
-              newRefName: `feature/${patternsPath}`,
-            }),
-          );
+              "hanzo.json",
+              JSON.stringify({ worktreeSparsePatternsPath: patternsPath }),
+            );
+            yield* git(cwd, ["add", "."]);
+            yield* git(cwd, ["commit", "-m", "missing sparse patterns"]);
+            const worktreePath = pathService.join(worktrees, patternsPath);
 
-          assert.include(error.detail, patternsPath);
-          assert.isFalse(yield* fileSystem.exists(worktreePath));
-          assert.notInclude(yield* git(cwd, ["worktree", "list"]), worktreePath);
-          assert.equal(yield* git(cwd, ["branch", "--list", `feature/${patternsPath}`]), "");
-        }
-      }),
+            const error = yield* Effect.flip(
+              driver.createWorktree({
+                cwd,
+                path: worktreePath,
+                refName: initialBranch,
+                newRefName: `feature/${patternsPath}`,
+              }),
+            );
+
+            assert.include(error.detail, patternsPath);
+            assert.isFalse(yield* fileSystem.exists(worktreePath));
+            assert.notInclude(yield* git(cwd, ["worktree", "list"]), worktreePath);
+            assert.equal(yield* git(cwd, ["branch", "--list", `feature/${patternsPath}`]), "");
+          }
+        }),
     );
 
     it.effect("still creates the worktree when the base-ref config stays locked", () =>
@@ -7442,7 +7451,10 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           "# test\n",
         );
         assert.equal(
-          yield* driver.readConfigValue(worktreePath, "branch.feature/locked-config.hanzo-merge-base"),
+          yield* driver.readConfigValue(
+            worktreePath,
+            "branch.feature/locked-config.hanzo-dev-merge-base",
+          ),
           null,
         );
         assert.equal(yield* fileSystem.exists(pathService.join(cwd, ".git/config.lock")), true);
@@ -8998,7 +9010,10 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         assert.strictEqual(status.branchChanges?.deletions, 0);
         // gh pr create consumes this setting verbatim as the hosted target branch.
         assert.equal(
-          yield* driver.readConfigValue(worktreePath, "branch.feature/from-upstream.hanzo-merge-base"),
+          yield* driver.readConfigValue(
+            worktreePath,
+            "branch.feature/from-upstream.hanzo-dev-merge-base",
+          ),
           "release",
         );
         assert.equal(changes.baseRef, "upstream/release");
@@ -9134,11 +9149,11 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
 
           if (autoSetupMerge) {
             assert.equal(
-              yield* driver.readConfigValue(cwd, "branch.feature/push.hanzo-merge-base"),
+              yield* driver.readConfigValue(cwd, "branch.feature/push.hanzo-dev-merge-base"),
               initialBranch,
             );
             assert.equal(
-              yield* driver.readConfigValue(cwd, "branch.feature/push.hanzo-merge-base-ref"),
+              yield* driver.readConfigValue(cwd, "branch.feature/push.hanzo-dev-merge-base-ref"),
               `refs/heads/${initialBranch}`,
             );
           }
@@ -9230,7 +9245,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
         assert.equal(
           yield* (yield* GitVcsDriver.GitVcsDriver).readConfigValue(
             cwd,
-            "branch.feature/push.hanzo-merge-base",
+            "branch.feature/push.hanzo-dev-merge-base",
           ),
           "release",
         );
@@ -9509,7 +9524,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
     it.effect.each([
       { upstreamRef: "refs/remotes/origin/main", baseKey: "gh-merge-base" },
       { upstreamRef: "refs/heads/main", baseKey: "gh-merge-base" },
-      { upstreamRef: "refs/heads/main", baseKey: "hanzo-merge-base" },
+      { upstreamRef: "refs/heads/main", baseKey: "hanzo-dev-merge-base" },
     ])(
       "keeps a recorded $baseKey when publishing a branch tracking $upstreamRef",
       ({ upstreamRef, baseKey }) =>
@@ -9526,7 +9541,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           yield* git(cwd, ["config", `branch.feature/y.${baseKey}`, "release/v2"]);
           yield* git(cwd, [
             "config",
-            "branch.feature/y.hanzo-merge-base-ref",
+            "branch.feature/y.hanzo-dev-merge-base-ref",
             "refs/heads/release/v2",
           ]);
           yield* writeTextFile(cwd, "feature.txt", "feature\n");
@@ -9547,7 +9562,7 @@ it.layer(layerTest)("GitVcsDriver core integration", (it) => {
           );
           assert.equal(yield* driver.readBranchBase(cwd, "feature/y"), "release/v2");
           assert.equal(
-            yield* driver.readConfigValue(cwd, "branch.feature/y.hanzo-merge-base-ref"),
+            yield* driver.readConfigValue(cwd, "branch.feature/y.hanzo-dev-merge-base-ref"),
             "refs/heads/release/v2",
           );
         }),

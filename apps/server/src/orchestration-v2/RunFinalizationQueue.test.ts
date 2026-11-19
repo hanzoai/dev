@@ -1,5 +1,11 @@
 import { assert, it } from "@effect/vitest";
-import { CheckpointScopeId, CommandId, GitCommandError, RunId, ThreadId } from "@hanzodev/contracts";
+import {
+  CheckpointScopeId,
+  CommandId,
+  GitCommandError,
+  RunId,
+  ThreadId,
+} from "@hanzodev/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";

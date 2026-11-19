@@ -112,9 +112,9 @@ it("retains all PCM until stop, retries batch audio, and captures preferences be
   const fetch = globalThis.fetch;
   using _network = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const request = new Request(input, init);
-    if (request.url === `${prepared.httpBaseUrl}/api/voice/status`)
+    if (request.url === `${prepared.httpBaseUrl}/v1/voice/status`)
       return (await pendingStatus).clone();
-    if (request.url === `${prepared.httpBaseUrl}/api/voice/transcribe`) {
+    if (request.url === `${prepared.httpBaseUrl}/v1/voice/transcribe`) {
       expect(request.headers.get("authorization")).toBe("Bearer audio-grant");
       requests.push(decodeSpeechPcmRequest(new Uint8Array(await request.arrayBuffer())));
       return requests.length === 1
@@ -213,13 +213,13 @@ it.each([
     );
     using _network = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const request = new Request(input, init);
-      if (request.url.endsWith("/api/voice/status"))
+      if (request.url.endsWith("/v1/voice/status"))
         return Response.json({
           ...status,
           supportsStreaming: native,
           supportsBufferedStreaming: buffered,
         });
-      if (request.url.includes("/api/auth/websocket-ticket/"))
+      if (request.url.includes("/v1/auth/websocket-ticket/"))
         return Response.json({ ticket: "stream-ticket", expiresAt: "2030-01-01T00:00:00.000Z" });
       throw new Error(`Unexpected request: ${request.url}`);
     });

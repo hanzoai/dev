@@ -241,13 +241,13 @@ export const createManagedRelayHanzoChatLinkRequest = Effect.fn(
   return (yield* relay.createHanzoChatLinkRequest({ clerkToken })).url;
 });
 
-export const unlinkManagedRelayHanzoChat = Effect.fn("clientRuntime.managedRelaySession.unlinkHanzoChat")(
-  function* (registry: AtomRegistry.AtomRegistry, input: { readonly accountId: string }) {
-    const clerkToken = yield* requireSessionClerkToken(registry, input.accountId, "unlink-hanzochat");
-    const relay = yield* ManagedRelay.ManagedRelayClient;
-    yield* relay.unlinkHanzoChat({ clerkToken });
-  },
-);
+export const unlinkManagedRelayHanzoChat = Effect.fn(
+  "clientRuntime.managedRelaySession.unlinkHanzoChat",
+)(function* (registry: AtomRegistry.AtomRegistry, input: { readonly accountId: string }) {
+  const clerkToken = yield* requireSessionClerkToken(registry, input.accountId, "unlink-hanzochat");
+  const relay = yield* ManagedRelay.ManagedRelayClient;
+  yield* relay.unlinkHanzoChat({ clerkToken });
+});
 
 function requireClerkToken(
   get: Atom.AtomContext,

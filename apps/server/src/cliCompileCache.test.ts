@@ -59,7 +59,7 @@ it.live("loads the CLI with its cache settings only when the command needs it", 
     expect(normal.exitCode).toBe(0);
     expect(normal.stderr).toContain("LOADED_CLI_MAIN");
     expect(normal.stderr.replaceAll("\\", "/")).toContain(
-      `CACHE=${root}/cache/hanzo/compile-cache`.replaceAll("\\", "/"),
+      `CACHE=${root}/cache/hanzodev/compile-cache`.replaceAll("\\", "/"),
     );
     const launcher = yield* run({ HANZO_DEV_HOME: "" }, ["__service-launcher"]);
     expect(launcher.exitCode).toBe(1);
@@ -77,7 +77,7 @@ it.live("loads the CLI with its cache settings only when the command needs it", 
     expect(launcherFlags.exitCode).toBe(1);
     expect(launcherFlags.stderr).toContain("LOADED_CLI_MAIN");
     expect(launcherFlags.stderr).toContain("[service-launcher] HANZO_DEV_HOME is required");
-    const cacheDir = `${root}/cache/hanzo/compile-cache`;
+    const cacheDir = `${root}/cache/hanzodev/compile-cache`;
     yield* fs.makeDirectory(`${cacheDir}/v24.0.0-x64-legacy-1000`, { recursive: true });
     yield* fs.writeFileString(`${cacheDir}/v24.0.0-x64-legacy-1000/0123abcd`, "stale");
     yield* fs.makeDirectory(`${cacheDir}/server`, { recursive: true });

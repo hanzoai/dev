@@ -27,8 +27,8 @@ beforeEach(() => {
 describe("PDF navigation", () => {
   it("resolves web links against the original PDF rather than its download cache", () => {
     expect(
-      pdfLinkUrl("../next.pdf#page=2", "https://environment.test/api/assets/token/files/a.pdf"),
-    ).toBe("https://environment.test/api/assets/token/next.pdf#page=2");
+      pdfLinkUrl("../next.pdf#page=2", "https://environment.test/v1/assets/token/files/a.pdf"),
+    ).toBe("https://environment.test/v1/assets/token/next.pdf#page=2");
     expect(pdfLinkUrl("https://example.com/?q=one#section", "file:///cache/preview.pdf")).toBe(
       "https://example.com/?q=one#section",
     );
@@ -47,7 +47,7 @@ describe("PDF navigation", () => {
 
   it("recognizes signed PDF links with queries and page fragments", () => {
     expect(
-      isPdfPreviewUri("https://environment.test/api/assets/token/Syllabus.PDF?x=1#page=8"),
+      isPdfPreviewUri("https://environment.test/v1/assets/token/Syllabus.PDF?x=1#page=8"),
     ).toBe(true);
     expect(isPdfPreviewUri("file:///local/document.pdf")).toBe(true);
     expect(isPdfPreviewUri("https://environment.test/index.html?file=syllabus.pdf")).toBe(false);

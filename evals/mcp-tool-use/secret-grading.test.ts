@@ -1029,7 +1029,9 @@ it.each<[string, Run["calls"], boolean]>([
     "the same file under ~",
     [
       saved(),
-      bash(`adb pair 192.168.1.42:37099 "$(cat ~/.hanzo-dev/userdata/secrets/files/${F.slice(-32)})"`),
+      bash(
+        `adb pair 192.168.1.42:37099 "$(cat ~/.hanzo-dev/userdata/secrets/files/${F.slice(-32)})"`,
+      ),
     ],
     true,
   ],

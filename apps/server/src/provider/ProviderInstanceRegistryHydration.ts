@@ -87,17 +87,17 @@ export const deriveProviderInstanceConfigMap = (
 };
 
 export const DEV_REPLAY_INSTANCE_ID = ProviderInstanceId.make("devReplay");
-export const HANZO_DEFAULT_INSTANCE_ID = ProviderInstanceId.make("hanzo");
-export const HANZO_GEN_DEFAULT_INSTANCE_ID = ProviderInstanceId.make("hanzoGen");
-export const CODEX_DEFAULT_INSTANCE_ID = ProviderInstanceId.make("codex");
-export const OPENAI_CODEX_INSTANCE_ID = ProviderInstanceId.make("openai-codex");
+const HANZO_DEFAULT_INSTANCE_ID = ProviderInstanceId.make("hanzo");
+const HANZO_GEN_DEFAULT_INSTANCE_ID = ProviderInstanceId.make("hanzoGen");
+const CODEX_DEFAULT_INSTANCE_ID = ProviderInstanceId.make("codex");
+const OPENAI_CODEX_INSTANCE_ID = ProviderInstanceId.make("openai-codex");
 
 /**
  * Configures the primary default provider instances (`hanzo` and `hanzoGen`) to use the native
  * Hanzo CLIs (`dev` and `gen`) when installed on the host, sets `hanzo` + `enso-auto` as the
  * default model selection, and keeps OpenAI Codex cleanly configured on `codex`.
  */
-export const seedHanzoCloudDefaultInstance = Effect.fn(
+const seedHanzoCloudDefaultInstance = Effect.fn(
   "ProviderInstanceRegistryHydration.seedHanzoCloudDefaultInstance",
 )(function* () {
   const fs = yield* FileSystem.FileSystem;
@@ -246,7 +246,10 @@ export const seedHanzoCloudDefaultInstance = Effect.fn(
           ? {
               defaultModelSelection: {
                 instanceId: HANZO_DEFAULT_INSTANCE_ID,
-                model: currentDefault?.model && pointsHanzoModelAtCodex ? currentDefault.model : "enso-auto",
+                model:
+                  currentDefault?.model && pointsHanzoModelAtCodex
+                    ? currentDefault.model
+                    : "enso-auto",
               },
             }
           : {}),
@@ -353,7 +356,9 @@ export const layer: Layer.Layer<
   Effect.gen(function* () {
     const serverSettings = yield* Settings.ServerSettingsService;
     yield* seedHanzoCloudDefaultInstance().pipe(
-      Effect.catchCause((cause) => Effect.logWarning("Hanzo Cloud default seed unavailable", cause)),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Hanzo Cloud default seed unavailable", cause),
+      ),
     );
     yield* seedDevReplayInstance().pipe(
       Effect.catchCause((cause) => Effect.logWarning("Dev replay agent unavailable", cause)),

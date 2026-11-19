@@ -33,7 +33,11 @@ describe("Self invocation", () => {
       const invocation = yield* resolveSelfInvocation().pipe(
         Effect.provideService(HostProcess.ExecutablePath, "/packaged/hanzo"),
         Effect.provideService(HostProcess.IsExecutable, true),
-        Effect.provideService(HostProcess.Arguments, ["/packaged/hanzo", "/packaged/hanzo", "serve"]),
+        Effect.provideService(HostProcess.Arguments, [
+          "/packaged/hanzo",
+          "/packaged/hanzo",
+          "serve",
+        ]),
       );
       expect(invocation).toEqual({ command: "/packaged/hanzo", entrypoint: undefined });
       expect(selfInvocationArgs(invocation, ["acp-mcp-bridge"])).toEqual(["acp-mcp-bridge"]);

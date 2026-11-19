@@ -162,7 +162,7 @@ const linkProofClient = Effect.gen(function* () {
   const linkableHere = (token: string) =>
     Effect.promise(() =>
       handler(
-        new Request(`${NON_LOOPBACK_ORIGIN}/api/connect/link-state`, {
+        new Request(`${NON_LOOPBACK_ORIGIN}/v1/connect/link-state`, {
           headers: { authorization: `Bearer ${token}` },
         }),
       ),
@@ -181,7 +181,7 @@ describe("link proof over a non-loopback transport", () => {
         const { post, exchange } = yield* linkProofClient;
         const admin = yield* exchange(DESKTOP_BOOTSTRAP_TOKEN);
         const paired = yield* post(
-          "/api/auth/pairing-token",
+          "/v1/auth/pairing-token",
           { scopes: ["relay:read", "relay:configure"] },
           { authorization: `Bearer ${admin}` },
         );
@@ -190,7 +190,7 @@ describe("link proof over a non-loopback transport", () => {
         const token = yield* exchange(credential);
         // The caller's origin and forwarding headers must not steer the tunnel elsewhere.
         const response = yield* post(
-          "/api/connect/link-proof",
+          "/v1/connect/link-proof",
           { ...proofRequest, origin: { localHttpHost: "172.24.162.233", localHttpPort: 5432 } },
           { authorization: `Bearer ${token}`, "x-forwarded-host": "evil.example.test" },
         );
@@ -221,7 +221,7 @@ describe("link proof over a non-loopback transport", () => {
       const { post, exchange, linkableHere } = yield* linkProofClient;
       const desktop = yield* exchange(DESKTOP_BOOTSTRAP_TOKEN);
       const pair = (scopes: ReadonlyArray<string>) =>
-        post("/api/auth/pairing-token", { scopes }, { authorization: `Bearer ${desktop}` }).pipe(
+        post("/v1/auth/pairing-token", { scopes }, { authorization: `Bearer ${desktop}` }).pipe(
           Effect.flatMap(responseJson),
           Effect.flatMap((paired) => exchange((paired as { credential: string }).credential)),
         );
@@ -237,7 +237,7 @@ describe("link proof over a non-loopback transport", () => {
     Effect.gen(function* () {
       const { post, exchange } = yield* linkProofClient;
       const token = yield* exchange(DESKTOP_BOOTSTRAP_TOKEN, "relay:write");
-      const response = yield* post("/api/connect/link-proof", proofRequest, {
+      const response = yield* post("/v1/connect/link-proof", proofRequest, {
         authorization: `Bearer ${token}`,
       });
       expect(response.status).toBe(403);
@@ -252,7 +252,7 @@ describe("link proof over a non-loopback transport", () => {
   it.effect("allows relay writers to set preferences without creating a link", () =>
     Effect.gen(function* () {
       const { post, exchange } = yield* linkProofClient;
-      const path = "/api/connect/live-activity-preference";
+      const path = "/v1/connect/live-activity-preference";
       const payload = { liveActivitiesEnabled: true };
       const readToken = yield* exchange(DESKTOP_BOOTSTRAP_TOKEN, "relay:read");
       const denied = yield* post(path, payload, { authorization: `Bearer ${readToken}` });
@@ -270,7 +270,7 @@ describe("link proof over a non-loopback transport", () => {
       const { post, exchange } = yield* linkProofClient;
       const admin = yield* exchange(DESKTOP_BOOTSTRAP_TOKEN);
       const paired = yield* post(
-        "/api/auth/pairing-token",
+        "/v1/auth/pairing-token",
         {},
         { authorization: `Bearer ${admin}` },
       );
@@ -278,7 +278,7 @@ describe("link proof over a non-loopback transport", () => {
       const { credential } = (yield* responseJson(paired)) as { credential: string };
       const token = yield* exchange(credential);
       const response = yield* post(
-        "/api/connect/relay-config",
+        "/v1/connect/relay-config",
         {
           relayUrl: "https://relay.example.test",
           cloudUserId: "test-link-owner",
@@ -299,7 +299,7 @@ describe("link proof over a non-loopback transport", () => {
   it.effect("rejects unauthenticated requests", () =>
     Effect.gen(function* () {
       const { post } = yield* linkProofClient;
-      const response = yield* post("/api/connect/link-proof", proofRequest);
+      const response = yield* post("/v1/connect/link-proof", proofRequest);
       expect(response.status).toBe(401);
     }),
   );

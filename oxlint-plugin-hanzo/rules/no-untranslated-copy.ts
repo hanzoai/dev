@@ -113,6 +113,7 @@ const PROPER_NOUNS = [
   "Hanzo Connect",
   "Hanzo Chat",
   "Hanzo Cloud",
+  "Hanzo Gen",
   "Hanzo",
   "GitHub",
   "GitLab",

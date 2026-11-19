@@ -536,7 +536,7 @@ it.effect("separates host file URLs from readable attachment URLs", () =>
           group.toLayerHandler(WS_METHODS.assetsCreateUrl, () =>
             Effect.sync(() => {
               handled++;
-              return { relativeUrl: "/api/assets/file", expiresAt: 1 };
+              return { relativeUrl: "/v1/assets/file", expiresAt: 1 };
             }),
           ),
           RpcAuthorization.layer([AuthOrchestrationReadScope]),

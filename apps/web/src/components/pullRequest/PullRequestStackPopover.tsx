@@ -1,5 +1,9 @@
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
-import type { EnvironmentId, PullRequestRef, PullRequestStackMembership } from "@hanzodev/contracts";
+import type {
+  EnvironmentId,
+  PullRequestRef,
+  PullRequestStackMembership,
+} from "@hanzodev/contracts";
 import { T, useGT, Var } from "gt-react";
 import { useState } from "react";
 import { usePullRequestStack } from "~/state/usePullRequestStack";

@@ -648,7 +648,9 @@ function ManagedCodexSetup({
                 ? gt("Using your installed Codex · v{version}.", {
                     version: installation.installedVersion,
                   })
-                : gt("Managed by Hanzo Dev · v{version}.", { version: installation.installedVersion })
+                : gt("Managed by Hanzo Dev · v{version}.", {
+                    version: installation.installedVersion,
+                  })
               : installation?.source === "local"
                 ? gt("Using your installed Codex.")
                 : gt("Managed by Hanzo Dev.")
@@ -732,7 +734,9 @@ function ManagedCodexSetup({
     !handoff && auth?.phase === "waiting" && url ? (
       <div className="flex w-full flex-col gap-3 text-xs leading-relaxed text-muted-foreground">
         <p>
-          <T>If sign-in doesn't return to Hanzo Dev, paste the URL from the final localhost page.</T>
+          <T>
+            If sign-in doesn't return to Hanzo Dev, paste the URL from the final localhost page.
+          </T>
         </p>
         <form
           className="flex flex-col gap-2 sm:flex-row sm:items-center"

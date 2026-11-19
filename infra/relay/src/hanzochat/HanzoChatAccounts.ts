@@ -113,27 +113,27 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  const lookupClerkPrimaryEmail = Effect.fn("relay.hanzochat.lookup_clerk_primary_email")(function* (
-    userId: string,
-  ) {
-    return yield* Effect.tryPromise({
-      try: async () => {
-        const user = await createClerkClient({
-          secretKey: Redacted.value(config.clerkSecretKey),
-          publishableKey: config.clerkPublishableKey,
-        }).users.getUser(userId);
-        const email = user.primaryEmailAddress?.emailAddress;
-        if (!email) throw new Error("Clerk user has no primary email address.");
-        return email;
-      },
-      catch: (cause) => new ClerkUserLookupFailed({ cause }),
-    }).pipe(
-      Effect.timeoutOrElse({
-        duration: HANZOCHAT_REQUEST_TIMEOUT,
-        orElse: () => Effect.fail(new ClerkUserLookupFailed({ cause: "timed out" })),
-      }),
-    );
-  });
+  const lookupClerkPrimaryEmail = Effect.fn("relay.hanzochat.lookup_clerk_primary_email")(
+    function* (userId: string) {
+      return yield* Effect.tryPromise({
+        try: async () => {
+          const user = await createClerkClient({
+            secretKey: Redacted.value(config.clerkSecretKey),
+            publishableKey: config.clerkPublishableKey,
+          }).users.getUser(userId);
+          const email = user.primaryEmailAddress?.emailAddress;
+          if (!email) throw new Error("Clerk user has no primary email address.");
+          return email;
+        },
+        catch: (cause) => new ClerkUserLookupFailed({ cause }),
+      }).pipe(
+        Effect.timeoutOrElse({
+          duration: HANZOCHAT_REQUEST_TIMEOUT,
+          orElse: () => Effect.fail(new ClerkUserLookupFailed({ cause: "timed out" })),
+        }),
+      );
+    },
+  );
 
   return HanzoChatAccounts.of({
     available: settings !== undefined,

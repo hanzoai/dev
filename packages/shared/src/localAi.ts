@@ -3,7 +3,7 @@
 export const LOCAL_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
 export const LOCAL_HANZO_ENGINE_BASE_URL = "http://127.0.0.1:36900";
 export const LOCAL_HANZOD_RPC_BASE_URL = "http://127.0.0.1:9630";
-export const LOCAL_HANZOD_STAKING_PORT = 9631;
+const LOCAL_HANZOD_STAKING_PORT = 9631;
 
 export interface ZenCatalogModel {
   readonly id: string;
@@ -104,7 +104,8 @@ export const ZEN_LOCAL_AI_CATALOG: ReadonlyArray<ZenCatalogModel> = [
     hfRepo: "Qwen/Qwen3-4B",
     title: "Zen 6 Flash (Qwen3 4B)",
     sizeLabel: "2.5 GB",
-    description: "Compact agentic Qwen3 4B model tuned for tool use, fast edits, and laptop batteries.",
+    description:
+      "Compact agentic Qwen3 4B model tuned for tool use, fast edits, and laptop batteries.",
     family: "zen",
     thinking: true,
     tools: true,
@@ -127,7 +128,8 @@ export const ZEN_LOCAL_AI_CATALOG: ReadonlyArray<ZenCatalogModel> = [
     hfRepo: "Qwen/Qwen3-14B",
     title: "Zen 6 14B (Qwen3 14B)",
     sizeLabel: "9.0 GB",
-    description: "High-accuracy local Qwen3 14B reasoning model for multi-file refactors and reviews.",
+    description:
+      "High-accuracy local Qwen3 14B reasoning model for multi-file refactors and reviews.",
     family: "zen",
     thinking: true,
     tools: true,
@@ -138,7 +140,8 @@ export const ZEN_LOCAL_AI_CATALOG: ReadonlyArray<ZenCatalogModel> = [
     hfRepo: "Qwen/Qwen3-30B-A3B",
     title: "Zen 6 Max (Qwen3 30B-A3B MoE)",
     sizeLabel: "18 GB",
-    description: "Sparse Mixture-of-Experts (3B active) delivering frontier reasoning at 4B token speed.",
+    description:
+      "Sparse Mixture-of-Experts (3B active) delivering frontier reasoning at 4B token speed.",
     family: "zen",
     thinking: true,
     tools: true,
@@ -149,7 +152,8 @@ export const ZEN_LOCAL_AI_CATALOG: ReadonlyArray<ZenCatalogModel> = [
     hfRepo: "Qwen/Qwen3-Coder-30B-A3B-Instruct",
     title: "Zen 6 Coder (Qwen3 Coder 30B)",
     sizeLabel: "19 GB",
-    description: "Specialized agentic coding MoE model tuned for repository navigation and patch synthesis.",
+    description:
+      "Specialized agentic coding MoE model tuned for repository navigation and patch synthesis.",
     family: "zen",
     coding: true,
     thinking: true,
@@ -161,7 +165,8 @@ export const ZEN_LOCAL_AI_CATALOG: ReadonlyArray<ZenCatalogModel> = [
     hfRepo: "Qwen/Qwen3-VL-8B-Instruct",
     title: "Zen VL (Qwen3-VL 8B)",
     sizeLabel: "5.8 GB",
-    description: "Multimodal Qwen3-VL model for UI screenshot inspection, diagrams, and visual debugging.",
+    description:
+      "Multimodal Qwen3-VL model for UI screenshot inspection, diagrams, and visual debugging.",
     family: "zen",
     vision: true,
     thinking: true,
@@ -196,7 +201,7 @@ export function resolveOllamaPullTarget(modelTag: string): string {
   return OLLAMA_PULL_ALIASES[trimmed] ?? trimmed;
 }
 
-export function formatChainNetworkLabel(chainId: number | null): string | null {
+function formatChainNetworkLabel(chainId: number | null): string | null {
   if (chainId === null) return null;
   switch (chainId) {
     case 36963:

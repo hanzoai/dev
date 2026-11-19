@@ -35,7 +35,9 @@ const layerServerConfig = (overrides?: Partial<ServerConfig.ServerConfig["Servic
         port: TEST_SERVER_PORT,
       } satisfies ServerConfig.ServerConfig["Service"];
     }),
-  ).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-auth-server-test-" })));
+  ).pipe(
+    Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-auth-server-test-" })),
+  );
 
 const layerEnvironmentAuth = (overrides?: Partial<ServerConfig.ServerConfig["Service"]>) =>
   EnvironmentAuth.layer.pipe(
@@ -1021,14 +1023,14 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodePlatformCrypto.layer))(
           const iat = Math.floor((yield* DateTime.now).epochMilliseconds / 1_000);
           const request = {
             method: "GET",
-            url: "/api/auth/session",
+            url: "/v1/auth/session",
             cookies: {},
             headers: {
               host: "192.168.1.50:3773",
               authorization: `${scheme} ${token}`,
               dpop: key.sign({
                 method: "GET",
-                url: "http://192.168.1.50:3773/api/auth/session",
+                url: "http://192.168.1.50:3773/v1/auth/session",
                 token,
                 iat,
               }),

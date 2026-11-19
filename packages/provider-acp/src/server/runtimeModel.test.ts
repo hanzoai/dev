@@ -1554,7 +1554,11 @@ describe("extractMcpToolCallIdentity", () => {
       kind: "other",
       title: "unrelated display title",
       status: "pending",
-      _meta: { toolName: "mcp::hanzo-dev::hanzo_thread_send", serverId: "hanzo-dev", provenance: "mcp" },
+      _meta: {
+        toolName: "mcp::hanzo-dev::hanzo_thread_send",
+        serverId: "hanzo-dev",
+        provenance: "mcp",
+      },
     });
 
     expect(extractMcpToolCallIdentity(toolCall)).toEqual({

@@ -77,26 +77,8 @@
       ],
     },
     "apps/desktop": {
-      // Electron loads these bundles by filename rather than importing them.
-      "entry": [
-        "gnome-extension/extension.js!",
-        "src/electron/WindowsForegroundFocusWorker.ts!",
-        "src/snapShot/GlobalShiftShortcutWorker.ts!",
-        "src/snapShot/RegionSnapShotWorker.ts!",
-        "src/snapShot/SnapShotAccessibilityWorker.ts!",
-        "src/boot.ts!",
-        "src/compileCache.ts!",
-        "src/serverCompileCache.ts!",
-        "src/main.ts!",
-        "src/preload.ts!",
-        "src/preview-pick-preload.ts!",
-        "src/preview-pip-preload.ts!",
-        "src/mac-permission-preload.ts!",
-        "src/preview/Annotation.css!",
-      ],
-      // The injected runtime resolves Playwright by string; release tooling runs
-      // electron-builder from this workspace, outside its package scripts.
-      "ignoreDependencies": ["playwright-core", "electron-builder"],
+      "entry": ["scripts/dev-tauri.mjs", "scripts/start-tauri.mjs"],
+      "ignoreDependencies": ["@tauri-apps/cli"],
     },
     "apps/web": {
       // Worktree setup (scripts/setup-worktree.ts) runs this directly, and evidence

@@ -158,8 +158,8 @@ const discovered = (
     environmentId: EnvironmentId.make(id),
     label,
     endpoint: {
-      httpBaseUrl: `https://${id}.hanzo-dev.example`,
-      wsBaseUrl: `wss://${id}.hanzo-dev.example`,
+      httpBaseUrl: `https://${id}.hanzo.example`,
+      wsBaseUrl: `wss://${id}.hanzo.example`,
       providerKind: "cloudflare_tunnel",
     },
     linkedAt: "2026-10-01T00:00:00.000Z",
@@ -171,8 +171,8 @@ const discovered = (
       : Option.some({
           environmentId: EnvironmentId.make(id),
           endpoint: {
-            httpBaseUrl: `https://${id}.hanzo-dev.example`,
-            wsBaseUrl: `wss://${id}.hanzo-dev.example`,
+            httpBaseUrl: `https://${id}.hanzo.example`,
+            wsBaseUrl: `wss://${id}.hanzo.example`,
             providerKind: "cloudflare_tunnel",
           },
           status: "online",
@@ -454,9 +454,9 @@ describe("linkRequestTarget", () => {
       kind: "address",
     });
     expect(linkRequestTarget({ url: "not a url" }, [box], null)).toEqual({ kind: "address" });
-    expect(linkRequestTarget({ url: "blob:https://box.hanzoconnect.example/1" }, [box], null)).toEqual(
-      { kind: "address" },
-    );
+    expect(
+      linkRequestTarget({ url: "blob:https://box.hanzoconnect.example/1" }, [box], null),
+    ).toEqual({ kind: "address" });
     // A private address two machines share names neither.
     const mini = { ...box, environmentId: EnvironmentId.make("environment-mini") };
     expect(linkRequestTarget({ url: "http://10.0.0.2:3773" }, [box, mini], null)).toEqual({

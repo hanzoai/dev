@@ -78,7 +78,10 @@ it.each(plugins)("%s finds each escape's word after earlier escapes in the text"
 
 it.each([
   [String.raw`C:\R&D folder\.hanzo-dev\shot.png`, String.raw`C:\R&D folder\.hanzo-dev\shot.png`],
-  [String.raw`C:\R&amp;D folder\.hanzo-dev\shot.png`, String.raw`C:\R&D folder\.hanzo-dev\shot.png`],
+  [
+    String.raw`C:\R&amp;D folder\.hanzo-dev\shot.png`,
+    String.raw`C:\R&D folder\.hanzo-dev\shot.png`,
+  ],
   [String.raw`C:\work\&stuff\.hanzo-dev\shot.png`, String.raw`C:\work\&stuff\.hanzo-dev\shot.png`],
   [String.raw`C:\work\&amp;lt;\.hanzo-dev\shot.png`, String.raw`C:\work\&lt;\.hanzo-dev\shot.png`],
 ])("preserves separators and decodes references once in %s", (authored, expected) => {

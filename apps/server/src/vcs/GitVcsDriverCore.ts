@@ -2134,7 +2134,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       readonly knownOriginDefaultBranch?: string | null;
     },
   ) {
-    const configuredBaseRef = yield* readConfigValue(cwd, `branch.${refName}.hanzo-dev-merge-base-ref`);
+    const configuredBaseRef = yield* readConfigValue(
+      cwd,
+      `branch.${refName}.hanzo-dev-merge-base-ref`,
+    );
     if (
       configuredBaseRef?.startsWith("refs/heads/") ||
       configuredBaseRef?.startsWith("refs/remotes/")
@@ -5109,7 +5112,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     if (projectFile.exitCode !== 0) return null;
     const file = parseHanzoProjectFile(projectFile.stdout);
     if (file === null) {
-      yield* Effect.logWarning("hanzo.json is invalid; checking out the full worktree", { cwd, ref });
+      yield* Effect.logWarning("hanzo.json is invalid; checking out the full worktree", {
+        cwd,
+        ref,
+      });
       return null;
     }
     if (file.worktreeSparsePatternsPath === undefined) return null;
@@ -5464,9 +5470,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
                   if (result.exitCode !== 0) return Effect.succeed(null);
                   const file = parseHanzoProjectFile(result.stdout);
                   return file === null
-                    ? Effect.logWarning("hanzo.json is invalid; initializing submodules recursively", {
-                        worktreePath,
-                      }).pipe(Effect.as(null))
+                    ? Effect.logWarning(
+                        "hanzo.json is invalid; initializing submodules recursively",
+                        {
+                          worktreePath,
+                        },
+                      ).pipe(Effect.as(null))
                     : Effect.succeed(file);
                 }),
                 Effect.orElseSucceed(() => null),

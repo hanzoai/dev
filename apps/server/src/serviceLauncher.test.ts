@@ -438,7 +438,7 @@ setInterval(() => {}, 1_000);
             "PATH=/bad",
             "Path=/bad",
             "HANZO_DEV_HOME=/bad",
-            "hanzodev_home=/bad",
+            "hanzo_dev_home=/bad",
             "HANZO_BOOT_SERVICE_UNIT=bad",
             "hanzo_boot_service_unit=bad",
             "HANZO_SERVICE_LAUNCHER_CONTEXT=bad",
@@ -806,7 +806,9 @@ process.exit(0);
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-service-launcher-repoint-" });
+        const root = yield* fs.makeTempDirectoryScoped({
+          prefix: "hanzo-service-launcher-repoint-",
+        });
         const statePath = path.join(root, "runtime", "service-state.json");
         yield* writeFakeRuntime(
           fs,
@@ -1315,7 +1317,9 @@ if (context.update?.status === "pending") {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-service-launcher-rollback-" });
+      const root = yield* fs.makeTempDirectoryScoped({
+        prefix: "hanzo-service-launcher-rollback-",
+      });
       const statePath = path.join(root, "runtime", "service-state.json");
       const databasePath = path.join(root, "userdata", "state.sqlite");
       const observationsPath = path.join(root, "environment-observations.jsonl");
@@ -1486,7 +1490,9 @@ if (context.update?.status === "pending") {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-service-launcher-online-" });
+        const root = yield* fs.makeTempDirectoryScoped({
+          prefix: "hanzo-service-launcher-online-",
+        });
         const statePath = path.join(root, "runtime", "service-state.json");
         const databasePath = path.join(root, "userdata", "state.sqlite");
         const observationsPath = path.join(root, "observations.json");

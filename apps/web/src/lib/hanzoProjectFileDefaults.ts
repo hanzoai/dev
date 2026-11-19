@@ -1,4 +1,8 @@
-import { HANZO_PROJECT_FILE_NAME, type EnvironmentId, type HanzoProjectFile } from "@hanzodev/contracts";
+import {
+  HANZO_PROJECT_FILE_NAME,
+  type EnvironmentId,
+  type HanzoProjectFile,
+} from "@hanzodev/contracts";
 import { parseHanzoProjectFile } from "@hanzodev/shared/hanzoProjectFile";
 import { executeAtomQuery } from "@hanzodev/client-runtime/state/runtime";
 

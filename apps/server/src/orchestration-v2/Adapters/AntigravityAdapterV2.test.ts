@@ -1384,7 +1384,9 @@ describe("AntigravityAdapterV2 work after the prompt ends", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const profile = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-antigravity-kids-" });
+      const profile = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "hanzo-antigravity-kids-",
+      });
       const records = (conversationId: string, kind: string) =>
         path.join(profile, "antigravity-acp", "brain", conversationId, ".system_generated", kind);
       const write = (directory: string, name: string, value: unknown) =>
@@ -1441,7 +1443,9 @@ describe("AntigravityAdapterV2 work after the prompt ends", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       // No records: nothing proves a child is at work, so none may hold a run open.
-      const profile = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-antigravity-kids-" });
+      const profile = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "hanzo-antigravity-kids-",
+      });
       const { usage, offers, send, startTurn, throughTerminal } =
         yield* openSessionWithRunningCommand({}, profile);
       yield* startTurn(1, false);
@@ -1784,7 +1788,9 @@ describe("AntigravityAdapterV2 session system prompt", () => {
         const mockAgentPath = yield* path.fromFileUrl(
           new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
         );
-        const logs = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-antigravity-log-" });
+        const logs = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "hanzo-antigravity-log-",
+        });
         const requestLog = path.join(logs, "requests.ndjson");
         type RuntimeService = AcpSessionRuntime.AcpSessionRuntime["Service"];
         const promptReceived = yield* Deferred.make<Parameters<RuntimeService["prompt"]>[0]>();

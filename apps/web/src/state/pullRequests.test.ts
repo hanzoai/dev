@@ -319,7 +319,9 @@ describe("pull request list answers across a reload", () => {
           detail: null,
         },
       ],
-      errors: [{ projectId: ProjectId.make("project-1"), projectTitle: "hanzodev", message: "boom" }],
+      errors: [
+        { projectId: ProjectId.make("project-1"), projectTitle: "hanzodev", message: "boom" },
+      ],
       truncated: true,
       nextCursors: { "hanzoai/dev": "cursor-1" },
     }) as PullRequestListResult;

@@ -541,15 +541,13 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         {
           provider: "github",
           owner: "hanzoai",
-          repo: "hanzodev",
+          repo: "dev",
           releaseType: "release",
         },
       ]);
     }).pipe(
       Effect.provide(
-        ConfigProvider.layer(
-          ConfigProvider.fromEnv({ env: { GITHUB_REPOSITORY: "hanzoai/dev" } }),
-        ),
+        ConfigProvider.layer(ConfigProvider.fromEnv({ env: { GITHUB_REPOSITORY: "hanzoai/dev" } })),
       ),
     ),
   );
@@ -585,9 +583,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.notEqual(stable, nightly);
     }).pipe(
       Effect.provide(
-        ConfigProvider.layer(
-          ConfigProvider.fromEnv({ env: { GITHUB_REPOSITORY: "hanzoai/dev" } }),
-        ),
+        ConfigProvider.layer(ConfigProvider.fromEnv({ env: { GITHUB_REPOSITORY: "hanzoai/dev" } })),
       ),
     ),
   );
@@ -1486,7 +1482,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     Effect.scoped(
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const stageDistDir = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-mac-payload-test-" });
+        const stageDistDir = yield* fs.makeTempDirectoryScoped({
+          prefix: "hanzo-mac-payload-test-",
+        });
         const error = yield* validateMacPackagedPayload({ stageDistDir }).pipe(Effect.flip);
 
         assert.instanceOf(error, MacPackagedAppMissingError);
@@ -1498,7 +1496,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     Effect.scoped(
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
-        const stageDistDir = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-mac-payload-test-" });
+        const stageDistDir = yield* fs.makeTempDirectoryScoped({
+          prefix: "hanzo-mac-payload-test-",
+        });
         yield* fs.makeDirectory(`${stageDistDir}/mac-arm64/Hanzo Dev.app/Contents/Resources`, {
           recursive: true,
         });
@@ -1523,7 +1523,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         assert.instanceOf(error, BundleNotSelfContainedError);
         assert.include(error.output, "hanzodev-deliberately-missing-package");
 
-        const emptyStage = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-linux-payload-test-" });
+        const emptyStage = yield* fs.makeTempDirectoryScoped({
+          prefix: "hanzo-linux-payload-test-",
+        });
         const missing = yield* validateLinuxPackagedPayload({ stageDistDir: emptyStage }).pipe(
           Effect.flip,
         );
@@ -1656,7 +1658,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     );
     assert.match(
       entitlements,
-      /<key>keychain-access-groups<\/key>\s*<array>\s*<string>ABC1234567\.com\.hanzodev\.hanzodev\.webauthn<\/string>\s*<\/array>/u,
+      /<key>keychain-access-groups<\/key>\s*<array>\s*<string>ABC1234567\.ai\.hanzo\.dev\.webauthn<\/string>\s*<\/array>/u,
     );
     assert.match(
       entitlements,
@@ -1770,7 +1772,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
   it("parses Windows bsdtar member listings with CRLF line endings", () => {
     assert.deepStrictEqual(
-      parseWslRuntimeArchiveMembers("./hanzo-1.2.3-linux-x64/hanzo\r\nhanzo-1.2.3-linux-x64/client/\r\n"),
+      parseWslRuntimeArchiveMembers(
+        "./hanzo-1.2.3-linux-x64/hanzo\r\nhanzo-1.2.3-linux-x64/client/\r\n",
+      ),
       ["hanzo-1.2.3-linux-x64/hanzo", "hanzo-1.2.3-linux-x64/client"],
     );
   });

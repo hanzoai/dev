@@ -73,7 +73,7 @@ describe("device state for clients from before Expo hosts", () => {
     sessions: [],
     onboardingCompleted: true,
     agentAccessEnabled: true,
-    hubBasePath: "/api/device-hub",
+    hubBasePath: "/v1/device-hub",
     revision: 1,
   };
 

@@ -4,6 +4,10 @@ import {
   CodexSettings,
   defaultInstanceIdForDriver,
   disallowedProviderMessage,
+  HANZO_DRIVER_KIND,
+  HANZO_GEN_DRIVER_KIND,
+  HanzoGenSettings,
+  HanzoSettings,
   type ManagedProviderInstance,
   type ManagedProviderLimits,
   type ManagedPolicySummary,
@@ -63,12 +67,16 @@ const PIN_BYPASS_FIELDS: ReadonlyMap<
   ProviderDriverKind,
   Readonly<Record<string, unknown>>
 > = new Map<ProviderDriverKind, Readonly<Record<string, unknown>>>([
+  [HANZO_DRIVER_KIND, { setupMode: "existing" }],
+  [HANZO_GEN_DRIVER_KIND, { setupMode: "existing" }],
   [ProviderDriverKind.make("codex"), { setupMode: "existing" }],
   [ProviderDriverKind.make("opencode"), { serverUrl: "" }],
 ]);
 
 /** Drivers this build knows, by the names users see; a policy naming any other is refused. */
 const KNOWN_DRIVERS: ReadonlyMap<ProviderDriverKind, KnownDriver> = new Map([
+  known(HANZO_DRIVER_KIND, "Hanzo", HanzoSettings),
+  known(HANZO_GEN_DRIVER_KIND, "Hanzo Gen", HanzoGenSettings),
   known("codex", "Codex", CodexSettings),
   known("claudeAgent", "Claude", ClaudeSettings),
   known("antigravity", "Antigravity", AntigravitySettings),
@@ -193,6 +201,8 @@ const HOME_VARIABLES: ReadonlyMap<
   ProviderDriverKind,
   { readonly variable: string; readonly fields: ReadonlyArray<string> }
 > = new Map([
+  [HANZO_DRIVER_KIND, { variable: "CODEX_HOME", fields: ["homePath", "shadowHomePath"] }],
+  [HANZO_GEN_DRIVER_KIND, { variable: "CODEX_HOME", fields: ["homePath", "shadowHomePath"] }],
   [ProviderDriverKind.make("claudeAgent"), { variable: "CLAUDE_CONFIG_DIR", fields: ["homePath"] }],
   [
     ProviderDriverKind.make("codex"),

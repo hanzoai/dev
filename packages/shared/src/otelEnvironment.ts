@@ -324,7 +324,8 @@ export const isRelayTracingEnabled = (env: Readonly<Record<string, string | unde
     telemetry: flag("HANZO_DEV_TELEMETRY_ENABLED", HANZO_DEV_TRUE, HANZO_DEV_FALSE, String),
   }).pipe(
     Effect.map(
-      ({ telemetry, hanzo, spec }) => telemetry.value !== false && !(hanzo.value ?? spec.value ?? false),
+      ({ telemetry, hanzo, spec }) =>
+        telemetry.value !== false && !(hanzo.value ?? spec.value ?? false),
     ),
     Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnvRecord(env))),
     Effect.orDie,

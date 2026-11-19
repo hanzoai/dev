@@ -7,7 +7,11 @@ import {
 } from "@hanzodev/client-runtime/state/shell";
 import { threadSearchSubject } from "@hanzodev/client-runtime/state/thread-search";
 import type { EnvironmentId } from "@hanzodev/contracts";
-import { foldSearchQuery, rankSearchItems, scoreThreadSearch } from "@hanzodev/shared/paletteSearch";
+import {
+  foldSearchQuery,
+  rankSearchItems,
+  scoreThreadSearch,
+} from "@hanzodev/shared/paletteSearch";
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
 

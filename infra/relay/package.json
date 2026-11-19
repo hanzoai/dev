@@ -20,11 +20,11 @@
     "@distilled.cloud/cloudflare": "catalog:",
     "@effect/sql-pg": "catalog:",
     "@effect/sql-sqlite-do": "catalog:",
-    "@noble/curves": "catalog:",
-    "@noble/hashes": "catalog:",
     "@hanzodev/client-runtime": "workspace:*",
     "@hanzodev/contracts": "workspace:*",
     "@hanzodev/shared": "workspace:*",
+    "@noble/curves": "catalog:",
+    "@noble/hashes": "catalog:",
     "alchemy": "catalog:",
     "drizzle-orm": "1.0.0-rc.5",
     "effect": "catalog:"

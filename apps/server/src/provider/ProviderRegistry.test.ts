@@ -232,7 +232,9 @@ const makeWorkspaceRescanHarness = Effect.gen(function* () {
           subscribeChanges: PubSub.subscribe(changes),
         }),
       ),
-      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-workspace-rescan-" })),
+      Layer.provideMerge(
+        ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-workspace-rescan-" }),
+      ),
       Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     ),
   ).pipe(Scope.provide(scope));
@@ -2526,7 +2528,9 @@ it.layer(
                   }),
                 ),
                 Layer.provideMerge(
-                  ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-provider-registry-path-" }),
+                  ServerConfig.layerTest(process.cwd(), {
+                    prefix: "hanzo-provider-registry-path-",
+                  }),
                 ),
                 Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
               ),

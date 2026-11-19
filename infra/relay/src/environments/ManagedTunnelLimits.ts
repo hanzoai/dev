@@ -6,7 +6,10 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlError from "effect/sql/SqlError";
-import { DEFAULT_MANAGED_TUNNEL_LIMIT, HANZOCHAT_PLAN_TUNNEL_LIMITS } from "@hanzodev/contracts/relay";
+import {
+  DEFAULT_MANAGED_TUNNEL_LIMIT,
+  HANZOCHAT_PLAN_TUNNEL_LIMITS,
+} from "@hanzodev/contracts/relay";
 
 import * as RelayDb from "../db.ts";
 import {

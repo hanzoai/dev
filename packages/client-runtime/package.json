@@ -633,7 +633,6 @@
     "test": "vp test run"
   },
   "dependencies": {
-    "@pierre/diffs": "catalog:",
     "@hanzodev/contracts": "workspace:*",
     "@hanzodev/issue-tracker-linear": "workspace:*",
     "@hanzodev/provider-acp-registry": "workspace:*",
@@ -649,6 +648,7 @@
     "@hanzodev/shared": "workspace:*",
     "@hanzodev/source-control-core": "workspace:*",
     "@hanzodev/source-control-definitions": "workspace:*",
+    "@pierre/diffs": "catalog:",
     "effect": "catalog:",
     "gt-i18n": "1.0.40",
     "jszip": "3.10.1",

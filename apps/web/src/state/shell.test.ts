@@ -4,7 +4,10 @@ import {
   PrimaryConnectionTarget,
 } from "@hanzodev/client-runtime/connection";
 import type { EnvironmentCatalogState } from "@hanzodev/client-runtime/state/connections";
-import { EMPTY_SHELL_STATE, type EnvironmentShellState } from "@hanzodev/client-runtime/state/shell";
+import {
+  EMPTY_SHELL_STATE,
+  type EnvironmentShellState,
+} from "@hanzodev/client-runtime/state/shell";
 import { EnvironmentId } from "@hanzodev/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";

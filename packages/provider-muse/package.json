@@ -29,10 +29,10 @@
     "test": "vp test run --config ../../vite.config.ts --dir ."
   },
   "dependencies": {
-    "@muse-code/sdk": "1.4.6",
     "@hanzodev/contracts": "workspace:*",
     "@hanzodev/provider-core": "workspace:*",
     "@hanzodev/shared": "workspace:*",
+    "@muse-code/sdk": "1.4.6",
     "effect": "catalog:"
   },
   "devDependencies": {

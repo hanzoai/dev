@@ -16,7 +16,9 @@ describe("splitForMiddleTruncate", () => {
   });
 
   it("falls back to an earlier word when the last one is too short", () => {
-    expect(splitForMiddleTruncate("hanzo/compare-long-featurenames-ab")?.tail).toBe("featurenames-ab");
+    expect(splitForMiddleTruncate("hanzo/compare-long-featurenames-ab")?.tail).toBe(
+      "featurenames-ab",
+    );
   });
 
   it("keeps the fixed tail when no word break is near", () => {

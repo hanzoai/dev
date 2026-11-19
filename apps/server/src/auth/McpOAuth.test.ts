@@ -386,11 +386,11 @@ it.live("signs in with a pairing code and issues a token only /mcp accepts", () 
       }
 
       const session = yield* handler(
-        at("/api/auth/session", { headers: { authorization: `Bearer ${token.access_token}` } }),
+        at("/v1/auth/session", { headers: { authorization: `Bearer ${token.access_token}` } }),
       );
       expect(yield* json<unknown>(session)).toMatchObject({ authenticated: false });
       const ticket = yield* handler(
-        at("/api/auth/websocket-ticket", {
+        at("/v1/auth/websocket-ticket", {
           method: "POST",
           headers: { authorization: `Bearer ${token.access_token}` },
         }),
@@ -638,7 +638,7 @@ it.live("an app approval code approves only an app sign-in, at its own level", (
 
       // Signing in a browser, a token exchange and linking all refuse it and leave it unspent.
       const browser = yield* handler(
-        at("/api/auth/browser-session", {
+        at("/v1/auth/browser-session", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: encodeJson({ credential: code }),
@@ -762,7 +762,7 @@ it.live("one-click approves only access the browser session holds the scopes for
         Effect.gen(function* () {
           const pairing = yield* auth.issuePairingCredential({ scopes });
           const response = yield* handler(
-            at("/api/auth/browser-session", {
+            at("/v1/auth/browser-session", {
               method: "POST",
               headers: { "content-type": "application/json" },
               body: encodeJson({ credential: pairing.credential }),

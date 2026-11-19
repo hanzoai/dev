@@ -261,7 +261,9 @@ function contextDraft(start: number, count: number): ComposerDraft {
     name: "skill",
   }));
   return {
-    text: records.map((record) => `[Skill](hanzo-context://v1/skill/${record.contextId})`).join(" "),
+    text: records
+      .map((record) => `[Skill](hanzo-context://v1/skill/${record.contextId})`)
+      .join(" "),
     context: { version: 1, records },
     attachments: [],
   };

@@ -2,8 +2,7 @@ import { assert, describe } from "@effect/vitest";
 
 import { createOxlintRuleHarness } from "../test/utils.ts";
 
-const reports = (output: string) =>
-  output.match(/hanzodev\(no-unreasoned-state-sync\)/g)?.length ?? 0;
+const reports = (output: string) => output.match(/hanzo\(no-unreasoned-state-sync\)/g)?.length ?? 0;
 const lint = (filename: string) =>
   createOxlintRuleHarness("hanzo/no-unreasoned-state-sync", { filename });
 

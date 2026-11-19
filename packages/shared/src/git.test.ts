@@ -19,19 +19,19 @@ import {
 describe("normalizeGitRemoteUrl", () => {
   it("canonicalizes equivalent GitHub remotes across protocol variants", () => {
     expect(normalizeGitRemoteUrl("git@github.com:HanzoDev/HanzoDev.git")).toBe(
-      "github.com/hanzoai/dev",
+      "github.com/hanzodev/hanzodev",
     );
     expect(normalizeGitRemoteUrl("https://github.com/HanzoDev/HanzoDev.git")).toBe(
-      "github.com/hanzoai/dev",
+      "github.com/hanzodev/hanzodev",
     );
     expect(normalizeGitRemoteUrl("ssh://git@github.com/HanzoDev/HanzoDev")).toBe(
-      "github.com/hanzoai/dev",
+      "github.com/hanzodev/hanzodev",
     );
     expect(normalizeGitRemoteUrl("https://github.com/HanzoDev/HanzoDev.git?view=compact")).toBe(
-      "github.com/hanzoai/dev",
+      "github.com/hanzodev/hanzodev",
     );
     expect(normalizeGitRemoteUrl("https://github.com/HanzoDev/HanzoDev.git#section")).toBe(
-      "github.com/hanzoai/dev",
+      "github.com/hanzodev/hanzodev",
     );
     expect(normalizeGitRemoteUrl("https://code.example.test/team/%C3%84pp.git")).toBe(
       normalizeGitRemoteUrl("git@code.example.test:team/Äpp.git"),
@@ -244,7 +244,7 @@ describe("isTemporaryWorktreeBranch", () => {
   it("matches legacy hanzodev temporary worktree refs", () => {
     expect(isTemporaryWorktreeBranch("hanzo/deadbeef")).toBe(true);
     expect(isTemporaryWorktreeBranch("hanzodev-deadbeef")).toBe(true);
-    expect(isTemporaryWorktreeBranch("hanzo/f4ae4e0e-f971-4d48-b4f2-9cf0aa54ab12")).toBe(true);
+    expect(isTemporaryWorktreeBranch("hanzodev/f4ae4e0e-f971-4d48-b4f2-9cf0aa54ab12")).toBe(true);
     expect(
       isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/f4ae4e0e-f971-4d48-b4f2-9cf0aa54ab12`),
     ).toBe(false);

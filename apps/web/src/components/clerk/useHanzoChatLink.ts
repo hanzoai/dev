@@ -39,7 +39,9 @@ export function useHanzoChatLink() {
   const createLinkRequest = useAtomCommand(createManagedRelayHanzoChatLinkRequestCommand, {
     reportFailure: false,
   });
-  const unlinkCommand = useAtomCommand(unlinkManagedRelayHanzoChatCommand, { reportFailure: false });
+  const unlinkCommand = useAtomCommand(unlinkManagedRelayHanzoChatCommand, {
+    reportFailure: false,
+  });
   const [pending, setPending] = useState<"link" | "unlink" | null>(null);
   // Kept so a blocked popup still leaves the user a link to open.
   const [linkUrl, setLinkUrl] = useState<string | null>(null);

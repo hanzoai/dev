@@ -1,9 +1,4 @@
-import {
-  ArrowLeftIcon,
-  ArrowRightIcon,
-  ChartNoAxesColumnIcon,
-  SettingsIcon,
-} from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { T, useGT } from "gt-react";
 import { memo } from "react";
@@ -17,9 +12,7 @@ import {
   useCanNavigateHistory,
   type HistoryDirection,
 } from "../../navigationHistory";
-import {
-  primaryServerKeybindingsAtom,
-} from "../../state/server";
+import { primaryServerKeybindingsAtom } from "../../state/server";
 import { cn } from "../../lib/utils";
 import { useIssuesSupported, usePullRequestsSupported } from "../../state/environments";
 import { Wordmark } from "../Wordmark";

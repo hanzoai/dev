@@ -64,8 +64,8 @@ function viewerFixture(supported: boolean) {
     platform: "ios",
     deviceId: "sim",
     access: {
-      httpBase: "https://environment.test/api/device-hub",
-      wsBase: "wss://environment.test/api/device-hub",
+      httpBase: "https://environment.test/v1/device-hub",
+      wsBase: "wss://environment.test/v1/device-hub",
       credentials: false,
       query: {},
     },
@@ -88,14 +88,14 @@ function viewerFixture(supported: boolean) {
 describe("native iOS simulator viewer", () => {
   it.each([
     { supported: true, image: "" },
-    { supported: false, image: "/api/device-hub/vendor/serve-sim/helper/sim/stream.mjpeg" },
+    { supported: false, image: "/v1/device-hub/vendor/serve-sim/helper/sim/stream.mjpeg" },
   ])(
     "streams H.264 when WebCodecs decodes it, else MJPEG (supported: $supported)",
     async ({ supported, image }) => {
       try {
         const { configured, requested, videoBodies } = viewerFixture(supported);
         await vi.advanceTimersByTimeAsync(0);
-        expect(requested).toContain("/api/device-hub/vendor/serve-sim/helper/sim/stream.avcc");
+        expect(requested).toContain("/v1/device-hub/vendor/serve-sim/helper/sim/stream.avcc");
         videoBodies[0]!.enqueue(new Uint8Array(envelope(1, [1, 0x64, 0x00, 0x33])));
         await vi.advanceTimersByTimeAsync(0);
         expect(configured).toEqual(supported ? ["avc1.640033"] : []);

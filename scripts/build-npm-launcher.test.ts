@@ -238,7 +238,10 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
         yield* fs.makeDirectory(staleDir, { recursive: true });
         yield* fs.writeFileString(path.join(staleDir, "hanzo"), "");
         yield* fs.makeDirectory(peerDir);
-        yield* fs.writeFileString(path.join(peerDir, "hanzo"), '#!/bin/sh\necho "peer $*"\nexit 7\n');
+        yield* fs.writeFileString(
+          path.join(peerDir, "hanzo"),
+          '#!/bin/sh\necho "peer $*"\nexit 7\n',
+        );
         yield* fs.chmod(path.join(peerDir, "hanzo"), 0o755);
         yield* fs.writeFileString(path.join(peerDir, ".install-complete"), `${VERSION}\n`);
         yield* fs.writeFileString(path.join(peerDir, "sidecar"), "peer sidecar");

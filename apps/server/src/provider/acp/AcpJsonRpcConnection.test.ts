@@ -1493,7 +1493,10 @@ describe("AcpSessionRuntime", () => {
         let promptsStarted = 0;
         const runtime = yield* AcpSessionRuntime.make({
           ...mockRuntimeOptions,
-          spawn: { ...mockRuntimeOptions.spawn, env: { HANZO_ACP_REQUEST_LOG_PATH: requestLogPath } },
+          spawn: {
+            ...mockRuntimeOptions.spawn,
+            env: { HANZO_ACP_REQUEST_LOG_PATH: requestLogPath },
+          },
           interruptPromptOnCancel: false,
           // The cancel spends a test-clock second in its outgoing record, the window in which the
           // next prompt could overtake it.

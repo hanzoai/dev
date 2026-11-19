@@ -387,10 +387,13 @@ export function startDesktopUpdateLaunchNotice(): () => void {
           type: "error",
           title: m(msg("Update did not apply")),
           description: m(
-            msg("Hanzo Dev is still on {current}. Install {version} again from the update button.", {
-              current: APP_VERSION,
-              version: notAppliedVersion,
-            }),
+            msg(
+              "Hanzo Dev is still on {current}. Install {version} again from the update button.",
+              {
+                current: APP_VERSION,
+                version: notAppliedVersion,
+              },
+            ),
           ),
         }),
       );

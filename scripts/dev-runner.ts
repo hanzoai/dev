@@ -639,7 +639,12 @@ const prepareFirstStart = Effect.fn("dev-runner.prepareFirstStart")(function* (i
         );
       }
     }
-    const source = path.join(yield* HostProcess.HomeDirectory, ".hanzo-dev", "userdata", "statev2.sqlite");
+    const source = path.join(
+      yield* HostProcess.HomeDirectory,
+      ".hanzo-dev",
+      "userdata",
+      "statev2.sqlite",
+    );
     // A V1 state.sqlite counts as data too: the server imports it only while
     // statev2.sqlite is missing, so seeding would hide it.
     if (
@@ -673,7 +678,9 @@ const prepareFirstStart = Effect.fn("dev-runner.prepareFirstStart")(function* (i
   if (input.mode !== "dev:web") {
     const crate = path.join(repoRoot, "native/resource-monitor");
     const binary =
-      (yield* HostProcess.Platform) === "win32" ? "hanzo-resource-monitor.exe" : "hanzo-resource-monitor";
+      (yield* HostProcess.Platform) === "win32"
+        ? "hanzo-resource-monitor.exe"
+        : "hanzo-resource-monitor";
     if (
       !(yield* exists(path.join(crate, "target/release", binary))) &&
       !(yield* exists(path.join(crate, "target/debug", binary)))

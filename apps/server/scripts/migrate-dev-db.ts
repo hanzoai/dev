@@ -635,7 +635,9 @@ export const migrateDevDbCommand = Command.make(
     ),
     baseDir: Flag.String("base-dir").pipe(
       Flag.optional,
-      Flag.withDescription("Isolated .hanzo-dev directory. Defaults to the current worktree's .hanzo-dev."),
+      Flag.withDescription(
+        "Isolated .hanzo-dev directory. Defaults to the current worktree's .hanzo-dev.",
+      ),
     ),
     source: Flag.String("source").pipe(
       Flag.optional,

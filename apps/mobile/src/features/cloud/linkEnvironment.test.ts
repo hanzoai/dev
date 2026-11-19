@@ -233,13 +233,13 @@ describe("mobile cloud link environment client", () => {
     () =>
       Effect.gen(function* () {
         const fetchMock = vi.fn((url: string | URL) => {
-          if (String(url).endsWith("/api/connect/preferences")) {
+          if (String(url).endsWith("/v1/connect/preferences")) {
             return Promise.resolve(Response.json(linkStateResponse()));
           }
           if (String(url).endsWith("/v1/client/environment-link-challenges")) {
             return Promise.resolve(Response.json(validLinkChallengeResponse()));
           }
-          if (String(url).endsWith("/api/connect/link-proof")) {
+          if (String(url).endsWith("/v1/connect/link-proof")) {
             return Promise.resolve(Response.json(validLinkProof()));
           }
           return Promise.resolve(Response.json(validLinkResponse("env-other")));
@@ -258,13 +258,13 @@ describe("mobile cloud link environment client", () => {
   it.effect("rejects relay link credentials for a different managed endpoint provider", () =>
     Effect.gen(function* () {
       const fetchMock = vi.fn((url: string | URL) => {
-        if (String(url).endsWith("/api/connect/preferences")) {
+        if (String(url).endsWith("/v1/connect/preferences")) {
           return Promise.resolve(Response.json(linkStateResponse()));
         }
         if (String(url).endsWith("/v1/client/environment-link-challenges")) {
           return Promise.resolve(Response.json(validLinkChallengeResponse()));
         }
-        if (String(url).endsWith("/api/connect/link-proof")) {
+        if (String(url).endsWith("/v1/connect/link-proof")) {
           return Promise.resolve(Response.json(validLinkProof()));
         }
         return Promise.resolve(
@@ -298,13 +298,13 @@ describe("mobile cloud link environment client", () => {
         if (String(url).endsWith("/v1/client/environment-link-challenges")) {
           return Promise.resolve(Response.json(validLinkChallengeResponse()));
         }
-        if (String(url).endsWith("/api/connect/link-proof")) {
+        if (String(url).endsWith("/v1/connect/link-proof")) {
           return Promise.resolve(Response.json(validLinkProof()));
         }
         if (String(url).endsWith("/v1/client/environment-links")) {
           return Promise.resolve(Response.json(validLinkResponse()));
         }
-        if (String(url).endsWith("/api/connect/preferences")) {
+        if (String(url).endsWith("/v1/connect/preferences")) {
           return Promise.resolve(Response.json(linkStateResponse()));
         }
         return Promise.resolve(

@@ -90,7 +90,9 @@ describe("HtmlRender", () => {
       expect(prepared).not.toContain(directory);
       for (const src of kept) expect(prepared).toContain(`<img src="${src}">`);
       expect(prepared.indexOf("<head>")).toBeLessThan(prepared.indexOf('<style id="hanzo-theme">'));
-      expect(prepared.indexOf('<style id="hanzo-theme">')).toBeLessThan(prepared.indexOf("<title>"));
+      expect(prepared.indexOf('<style id="hanzo-theme">')).toBeLessThan(
+        prepared.indexOf("<title>"),
+      );
     }).pipe(Effect.provide(layerTest)),
   );
 
@@ -558,7 +560,9 @@ fs.createReadStream(null, { fd: 3 }).on("end", quit).on("data", (chunk) => {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const htmlRender = yield* HtmlRender.HtmlRender;
-        const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-html-files-" });
+        const directory = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "hanzo-html-files-",
+        });
         const secret = path.join(directory, "secret.js");
         yield* fileSystem.writeFileString(secret, 'window.secret = "abc123";');
         const secretUrl = NodeURL.pathToFileURL(secret).href;

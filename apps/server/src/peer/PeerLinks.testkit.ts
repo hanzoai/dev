@@ -85,7 +85,9 @@ export const servePeer = <E, R>(
       Layer.provide(Sqlite.layerMemory),
       Layer.provideMerge(ServerSecretStore.layer),
       Layer.provideMerge(ServerEnvironment.layerIdentity),
-      Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-peer-link-peer-" })),
+      Layer.provideMerge(
+        ServerConfig.layerTest(process.cwd(), { prefix: "hanzo-peer-link-peer-" }),
+      ),
       Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       Layer.fresh,
       Layer.build,

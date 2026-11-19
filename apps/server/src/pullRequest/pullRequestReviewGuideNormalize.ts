@@ -1,4 +1,7 @@
-import type { PullRequestReviewGuideExcerpt, PullRequestReviewGuideStop } from "@hanzodev/contracts";
+import type {
+  PullRequestReviewGuideExcerpt,
+  PullRequestReviewGuideStop,
+} from "@hanzodev/contracts";
 import type { ReviewGuideGenerationResult } from "@hanzodev/provider-core/server/textGeneration";
 import { unquoteGitPatchPath } from "@hanzodev/shared/gitPatchPath";
 

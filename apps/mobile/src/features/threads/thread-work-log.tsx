@@ -134,7 +134,10 @@ function WorkLogIcon(props: {
   const colorClassName = props.highlighted ? "accent-foreground" : props.colorClassName;
   if (props.icon === "hanzo-dev") {
     return (
-      <HanzoWordmark height={10} {...(colorClassName ? { colorClassName } : { color: props.color })} />
+      <HanzoWordmark
+        height={10}
+        {...(colorClassName ? { colorClassName } : { color: props.color })}
+      />
     );
   }
   if (props.icon === "computer") {

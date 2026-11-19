@@ -11,7 +11,7 @@ import { MobileClientsUserProfilePage } from "./MobileClientsUserProfilePage";
 import { HanzoChatUserProfilePage } from "./HanzoChatUserProfilePage";
 import { HanzoConnectUserProfilePage } from "./HanzoConnectUserProfilePage";
 
-export const HANZO_CONNECT_ACCOUNT_PAGES = [
+const HANZO_CONNECT_ACCOUNT_PAGES = [
   {
     label: msg("Mobile clients"),
     url: "mobile-clients",

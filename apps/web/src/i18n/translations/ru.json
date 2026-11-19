@@ -1484,6 +1484,8 @@
   "33fdee6fc52c06c6": "Не удалось импортировать закрытый ключ DPoP.",
   "87338da304e4dd3e": "Не удалось загрузить ключ подтверждения DPoP.",
   "b2ee6fa8c91540d0": "Не удалось подписать подтверждение DPoP.",
+  "4b4b4cc24d0fd8d4": "Active organization: {org}",
+  "0d579d75f4cc2b06": "X-Org-Id={org} will be used across App, Bot, Team, and Platform.",
   "000c563d8f9ae1b9": "Hanzo Account & Organization Control Center",
   "86d287aa1993a091": "Закрыть",
   "08f829cb6937f09e": "{allowance} monthly AI credit allowance",
@@ -3117,10 +3119,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "на компьютере, который открыл эту страницу"
-      ]
+      "c": [" ", "на компьютере, который открыл эту страницу"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3132,10 +3131,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· этот доступ получит любой, кто это запустит"
-      ]
+      "c": [" ", "· этот доступ получит любой, кто это запустит"]
     }
   ],
   "c54cc9c75db9dc58": "Подтверждайте только тот вход, который вы только что начали.",
@@ -4500,6 +4496,11 @@
     }
   ],
   "0832a03c4dc5eac4": "Тред создан",
+  "1a83ad4b98e2f09a": "Assign \"{target}\" -> {owner}",
+  "6674d061c3d104bb": "Current user",
+  "d3b56f07d5dc35b8": "Update \"{target}\" status -> {status}",
+  "17afb3893cdf3b71": "Organization ({org})",
+  "7a84856d1d022944": "Switch active X-Org-Id -> {org}",
   "cdf4e84a79e8f1cb": "Dismiss voice action preview",
   "7c42f076b0cb39a9": "Matched target",
   "fc35030473f18435": "Target item",
@@ -5878,8 +5879,9 @@
   "6bdec95a4fb1f887": "Embedded engine & LAN discovery",
   "a8b5abc093e4bf05": "Load HuggingFace or GGUF Qwen3 weights on :36900 and discover inference nodes on LAN.",
   "917e8c2e2fa9fb56": "Connecting to Ollama on 127.0.0.1:11434...",
-  "30f0e5a0692a9033": "Local Ollama runtime returned HTTP {status}. Start Ollama on :11434 and retry.",
   "8cbc1b9261b99816": "Installed {model}",
+  "30f0e5a0692a9033": "Local Ollama runtime returned HTTP {status}. Start Ollama on :11434 and retry.",
+  "d6023da87c6b2a1f": "Failed to pull model.",
   "bd963c3c1f442667": "Legacy qwen2 weights are blocked; use Zen or Qwen3+ weights.",
   "e78a4e019cfbb30e": "Loading {model} on :36900...",
   "6e103e9ff860834a": "Loaded {model} on Hanzo Engine.",
@@ -5891,11 +5893,17 @@
   "528781eadd873c14": "Filter local models",
   "651cb409bda342a8": "Remove {model}",
   "fe24b3db8664db0c": "Online & Synced",
+  "22a3d5c907f7c940": "Hanzo Mainnet (36963)",
+  "30585c0a2d2c9010": "{latency} ms RPC",
+  "ef4c97c1680176df": "RPC 127.0.0.1:9630",
   "51598be5d6744b5b": "Custom hanzod RPC URL",
   "5f522c6165f04210": "Listening (:36900)",
   "b59ae4e033c69836": "Standby",
   "e916bf83e260bf35": "No model loaded",
+  "05bff2f57c65181f": "Metal / CUDA",
+  "38c810fda289b059": "{memory} MB VRAM",
   "68f54f3700204b65": "Zero-copy inference",
+  "18c663453d17ba7c": "Qwen/Qwen3-8B",
   "434edd79f6670845": "HuggingFace repo or GGUF path",
   "d93e45fdf1ccd041": "Custom engine URL",
   "d364a3cd5a994ee4": "Manage models",
@@ -7779,15 +7787,15 @@
   "e1fcc4b74faaae02": "Удалить сочетание…",
   "efa55bbb1d3aa45e": "Проверить изменения",
   "3e02b74615e20d82": "Ручная настройка",
-  "7ba15aa7ac6347c7": [
-    "Отключите захват в Hanzo Dev, чтобы остановить его. Удалите сочетание из ",
+  "950e432e77fc5a45": [
+    "Turn capture off in Hanzo Dev to stop it. Remove the shortcut from",
+    " ",
     {
       "i": 1,
       "k": "_gt_value_1",
       "v": "v"
     },
-    " ",
-    "чтобы освободить клавиши."
+    " to free up the keys."
   ],
   "4bf700ad94c0c486": "Я добавил(а) сочетание",
   "bcdea6ebe1a65e63": "Аккаунт ChatGPT для подключения",

@@ -215,7 +215,10 @@ it.layer(NodeServices.layer)("ManagedPolicy.load", (it) => {
               driver: codex,
               environment: [
                 variable("HTTPS_PROXY", "http://mine"),
-                variable("HANZO_DEV_CODEX_LAUNCH_ARGS", "--dangerously-bypass-approvals-and-sandbox"),
+                variable(
+                  "HANZO_DEV_CODEX_LAUNCH_ARGS",
+                  "--dangerously-bypass-approvals-and-sandbox",
+                ),
               ],
             },
           },
@@ -267,7 +270,9 @@ it.layer(NodeServices.layer)("ManagedPolicy.load", (it) => {
           saved._tag === "Allowed"
             ? (saved.settings.providerInstances[codexId]?.environment ?? [])
             : [];
-        assert.isTrue(savedEnvironment.some((entry) => entry.name === "HANZO_DEV_CODEX_LAUNCH_ARGS"));
+        assert.isTrue(
+          savedEnvironment.some((entry) => entry.name === "HANZO_DEV_CODEX_LAUNCH_ARGS"),
+        );
         // A home path setting would rewrite a locked home variable at launch, so the lock owns it.
         const claude = ProviderDriverKind.make("claudeAgent");
         const homeLocked = yield* ManagedPolicy.fromDocument("/test/policy.json", {

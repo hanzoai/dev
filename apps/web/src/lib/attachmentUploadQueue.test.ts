@@ -193,7 +193,7 @@ describe("attachmentUploadQueue", () => {
             _tag: "Success",
             value: {
               attachmentId,
-              relativeUrl: `/api/attachments/upload/${attachmentId}`,
+              relativeUrl: `/v1/attachments/upload/${attachmentId}`,
               expiresAt: 1,
             },
           };
@@ -224,7 +224,7 @@ describe("attachmentUploadQueue", () => {
         _tag: "Success",
         value: {
           attachmentId,
-          relativeUrl: `/api/attachments/upload/${attachmentId}`,
+          relativeUrl: `/v1/attachments/upload/${attachmentId}`,
           expiresAt: 1,
         },
       };
@@ -421,7 +421,7 @@ describe("attachmentUploadQueue", () => {
               _tag: "Success",
               value: {
                 attachmentId: "pending-revoked",
-                relativeUrl: "/api/attachments/upload/pending-revoked",
+                relativeUrl: "/v1/attachments/upload/pending-revoked",
                 expiresAt: 1,
               },
             });
@@ -487,7 +487,7 @@ describe("attachmentUploadQueue", () => {
     const request = TestXmlHttpRequest.requests[0]!;
     expect(request.method).toBe("POST");
     expect(request.url).toBe(
-      "https://environment.test/api/attachments/upload/pending-environment-1-image-1.png",
+      "https://environment.test/v1/attachments/upload/pending-environment-1-image-1.png",
     );
     request.progress(1, 3);
     expect(readAttachmentUpload(image.id)).toMatchObject({ status: "uploading", progress: 1 / 3 });
@@ -777,7 +777,7 @@ describe("attachmentUploadQueue", () => {
       _tag: "Success" as const,
       value: {
         attachmentId: "pending-environment-1-image-cancelled.png",
-        relativeUrl: "/api/attachments/upload/cancelled",
+        relativeUrl: "/v1/attachments/upload/cancelled",
         expiresAt: 1,
       },
     };

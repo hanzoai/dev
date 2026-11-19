@@ -7,7 +7,7 @@ const parse = (url: string) => definition.parseChangeRequestUrl(new URL(url));
 
 describe("GitLab change request URLs", () => {
   it("reads a merge request on any host, nested groups and all", () => {
-    expect(parse("https://gitlab.com/hanzodev/platform/hanzo/-/merge_requests/42")).toEqual({
+    expect(parse("https://gitlab.com/hanzodev/platform/hanzodev/-/merge_requests/42")).toEqual({
       host: "gitlab.com",
       repository: "hanzodev/platform/hanzodev",
       number: 42,

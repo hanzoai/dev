@@ -704,7 +704,9 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       ],
       mcpServers: HANZO_MCP_SERVERS,
     });
-    assert.isFalse(overrides.allowedTools?.includes(ClaudeAdapterV2.CLAUDE_HANZO_MCP_TOOL_WILDCARD));
+    assert.isFalse(
+      overrides.allowedTools?.includes(ClaudeAdapterV2.CLAUDE_HANZO_MCP_TOOL_WILDCARD),
+    );
   });
 
   it("invalidates live-query reuse when MCP credentials rotate", () => {
@@ -1310,7 +1312,9 @@ describe("ClaudeAdapterV2 append-system-prompt-file launch argument", () => {
     Effect.scoped(
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
-        const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-claude-append-cwd-" });
+        const cwd = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "hanzo-claude-append-cwd-",
+        });
         const plain = yield* startTurnWithLaunchArgs("", cwd);
         const { exit, opened } = yield* startTurnWithLaunchArgs(
           '--append-system-prompt "-- Always answer in English"',
@@ -4727,7 +4731,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-claude-remote-" });
-        const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-claude-remote-cwd-" });
+        const cwd = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "hanzo-claude-remote-cwd-",
+        });
         const remoteFile = path.join(home, "remote-settings.json");
         const sdk = yield* Effect.promise(() =>
           vi.importActual<typeof ClaudeSdk>("@anthropic-ai/claude-agent-sdk"),
@@ -4823,7 +4829,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-claude-launch-" });
-        const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-claude-launch-cwd-" });
+        const cwd = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "hanzo-claude-launch-cwd-",
+        });
         const sdk = yield* Effect.promise(() =>
           vi.importActual<typeof ClaudeSdk>("@anthropic-ai/claude-agent-sdk"),
         );
@@ -5423,7 +5431,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         );
 
         // Project settings beat user settings, and the process env applies only when no file sets it.
-        const project = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-claude-project-" });
+        const project = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "hanzo-claude-project-",
+        });
         yield* fileSystem.makeDirectory(path.join(project, ".claude"));
         yield* fileSystem.writeFileString(
           path.join(project, ".claude", "settings.json"),
@@ -5681,7 +5691,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const homePath = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-claude-skill-dispatch-" });
+        const homePath = yield* fs.makeTempDirectoryScoped({
+          prefix: "hanzo-claude-skill-dispatch-",
+        });
         for (const [name, userOnly] of [
           ["interrogate", true],
           ["implement", true],
@@ -7194,8 +7206,12 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           vi.importActual<typeof ClaudeSdk>("@anthropic-ai/claude-agent-sdk"),
         );
         vi.mocked(ClaudeSdk.resolveSettings).mockImplementation(sdk.resolveSettings);
-        const probeCwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-claude-probe-" });
-        const project = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-claude-project-" });
+        const probeCwd = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "hanzo-claude-probe-",
+        });
+        const project = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "hanzo-claude-project-",
+        });
         const overridden = yield* fileSystem.makeTempDirectoryScoped({
           prefix: "hanzo-claude-local-",
         });
@@ -10208,7 +10224,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-claude-compact-" });
-        const project = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-claude-compact-" });
+        const project = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "hanzo-claude-compact-",
+        });
         if (userSettings !== undefined) {
           yield* fileSystem.writeFileString(path.join(home, "settings.json"), userSettings);
         }

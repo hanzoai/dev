@@ -79,7 +79,9 @@ class HanzoWorkspaceNavigationModule : Module() {
       }
       Prop("rail") { view: HanzoWorkspaceNavigationView, value: Boolean -> view.rail = value }
       Prop("dark") { view: HanzoWorkspaceNavigationView, value: Boolean -> view.dark = value }
-      Prop("textScale") { view: HanzoWorkspaceNavigationView, value: Float -> view.textScale = value }
+      Prop("textScale") { view: HanzoWorkspaceNavigationView, value: Float ->
+        view.textScale = value
+      }
       Prop("newEnabled") { view: HanzoWorkspaceNavigationView, value: Boolean ->
         view.newEnabled = value
       }

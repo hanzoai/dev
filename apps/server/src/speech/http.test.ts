@@ -97,7 +97,7 @@ effectIt.live("rejects oversized chunked audio without invoking transcription", 
       const server = yield* HttpServer.HttpServer;
       const address = server.address as NetAddress.InetAddress;
       const host = address._tag === "InetAddressV6" ? "[::1]" : "127.0.0.1";
-      const url = `http://${host}:${address.port}/api/voice/transcribe`;
+      const url = `http://${host}:${address.port}/v1/voice/transcribe`;
       const select = yield* Effect.promise(() =>
         fetch(new URL("models/select", url), {
           method: "POST",
@@ -201,7 +201,7 @@ effectIt.effect(
       const context = yield* Layer.build(NodeServices.layer);
       const call = (path: string, init?: RequestInit) =>
         Effect.promise(() =>
-          handler(new Request(`http://localhost/api/voice/cloud/${path}`, init), context),
+          handler(new Request(`http://localhost/v1/voice/cloud/${path}`, init), context),
         );
       const saved = yield* call("openai/key", {
         method: "POST",
@@ -256,7 +256,7 @@ effectIt.effect(
       // Naming a path on the environment needs filesystem access, not only settings access.
       const link = yield* Effect.promise(() =>
         handler(
-          new Request("http://localhost/api/voice/models/link", {
+          new Request("http://localhost/v1/voice/models/link", {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ path: "/models" }),
@@ -266,7 +266,7 @@ effectIt.effect(
       );
       expect(link.status).toBe(403);
       const listed = yield* Effect.promise(() =>
-        handler(new Request("http://localhost/api/voice/models"), context),
+        handler(new Request("http://localhost/v1/voice/models"), context),
       );
       expect(yield* Effect.promise(() => listed.text())).not.toContain("/home/someone");
     }),
@@ -331,7 +331,7 @@ effectIt.effect.each([
         { disableLogger: true },
       );
       yield* Effect.addFinalizer(() => Effect.promise(dispose));
-      const request = new Request("http://localhost/api/voice/transcribe", {
+      const request = new Request("http://localhost/v1/voice/transcribe", {
         method: "POST",
         headers: { "content-type": "application/octet-stream" },
         body:
