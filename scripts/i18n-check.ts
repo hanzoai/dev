@@ -7,11 +7,9 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
-// Desktop only depends on gt-i18n, so the gt CLI hides `generate` there; its script adds it back.
 const GENERATE: Record<string, readonly [string, ...string[]]> = {
   "apps/web": ["node_modules/.bin/gt", "generate"],
   "apps/mobile": ["node_modules/.bin/gt", "generate"],
-  "apps/desktop": [process.execPath, "scripts/i18n-generate.mjs"],
 };
 const APPS = Object.keys(GENERATE);
 

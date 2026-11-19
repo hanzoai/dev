@@ -1,4 +1,5 @@
-import { DEFAULT_ENABLED_DEFAULT_INSTANCES, ProviderInstanceId } from "@hanzodev/contracts";
+import { ProviderDriverKind, ProviderInstanceId } from "@hanzodev/contracts";
+import { DEFAULT_ENABLED_DEFAULT_INSTANCES } from "@hanzodev/contracts/settings";
 import * as HostProcess from "@hanzodev/shared/HostProcess";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
@@ -31,11 +32,13 @@ describe("Native Hanzo Agent & Local IAM Multi-Account Identity", () => {
     const ordered = orderProviderSnapshots([
       {
         instanceId: ProviderInstanceId.make("claudeAgent"),
-        driver: "claudeAgent",
+        driver: ProviderDriverKind.make("claudeAgent"),
         displayName: "Claude",
         enabled: true,
         installed: true,
+        version: "1.0.0",
         status: "ready",
+        auth: { status: "authenticated" },
         checkedAt: "2026-11-19T00:00:00.000Z",
         models: [],
         slashCommands: [],
@@ -43,11 +46,13 @@ describe("Native Hanzo Agent & Local IAM Multi-Account Identity", () => {
       },
       {
         instanceId: ProviderInstanceId.make("codex"),
-        driver: "codex",
+        driver: ProviderDriverKind.make("codex"),
         displayName: "Codex",
         enabled: true,
         installed: true,
+        version: "1.0.0",
         status: "ready",
+        auth: { status: "authenticated" },
         checkedAt: "2026-11-19T00:00:00.000Z",
         models: [],
         slashCommands: [],
@@ -55,11 +60,13 @@ describe("Native Hanzo Agent & Local IAM Multi-Account Identity", () => {
       },
       {
         instanceId: ProviderInstanceId.make("hanzo"),
-        driver: "hanzo",
+        driver: ProviderDriverKind.make("hanzo"),
         displayName: "Hanzo",
         enabled: true,
         installed: true,
+        version: "1.0.0",
         status: "ready",
+        auth: { status: "authenticated" },
         checkedAt: "2026-11-19T00:00:00.000Z",
         models: CURATED_HANZO_MODELS,
         slashCommands: [],

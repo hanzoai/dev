@@ -78,7 +78,7 @@ export interface PrimaryEnvironmentTarget {
   };
 }
 
-const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
+const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost", "tauri.localhost"]);
 
 function getDesktopLocalEnvironmentBootstrap(): DesktopEnvironmentBootstrap | null {
   const bootstraps = window.desktopBridge?.getLocalEnvironmentBootstraps() ?? [];

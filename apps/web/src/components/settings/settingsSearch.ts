@@ -245,7 +245,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: msg("Zen & Qwen3+ local models"),
     to: "/settings/general",
     searchTerms: [
-      msg("local ai ollama qwen3 zen4 zen4-mini zen4-coder weights download offline inference"),
+      msg("local ai ollama qwen3 zen6 zen6-flash zen6-coder zen6-max zen-vl weights download offline inference"),
     ],
   },
   {

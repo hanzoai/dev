@@ -225,7 +225,7 @@ export function useDictationShortcut(input: ShortcutInput) {
       blur: onBlur,
     });
     const unsubscribeMenu = window.desktopBridge?.onMenuAction((action) => {
-      if (action === "voice.toggle" && ownsShortcut(id.current)) {
+      if ((action === "voice.toggle" || action === "toggle-voice-input") && ownsShortcut(id.current)) {
         toggleVoiceForTarget();
       }
     });

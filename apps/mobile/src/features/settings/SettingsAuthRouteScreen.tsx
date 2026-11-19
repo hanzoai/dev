@@ -186,7 +186,7 @@ function ConfiguredSettingsAuthRouteScreen() {
             <Button
               label={
                 busy
-                  ? gt("Signing in...")
+                  ? gt("Waiting for browser return...")
                   : gt("Continue with {brand} ID", {
                       brand: brands.find((b) => b.id === selectedBrand)?.label ?? "Hanzo",
                     })
@@ -194,6 +194,18 @@ function ConfiguredSettingsAuthRouteScreen() {
               disabled={busy}
               onPress={() => handleBrandSignIn(selectedBrand)}
             />
+            {busy ? (
+              <View className="flex-row flex-wrap items-center justify-between gap-2 rounded-2xl bg-subtle px-3.5 py-2.5">
+                <Text className="flex-1 text-xs text-foreground-muted">
+                  {gt("Closed the browser tab? Cancel or reopen sign-in.")}
+                </Text>
+                <Button
+                  label={gt("Cancel")}
+                  tone="secondary"
+                  onPress={() => setBusy(false)}
+                />
+              </View>
+            ) : null}
             <Button
               label={showTokenEntry ? gt("Hide API key / token") : gt("Use API key or CLI token")}
               tone="text"

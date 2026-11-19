@@ -72,13 +72,13 @@ export interface LocalAiStackSnapshot {
 }
 
 /**
- * Strict Zen / Qwen3+ model policy guard: rejects any legacy `qwen2` weight or alias
- * across catalog entries, Ollama tags, Engine models, and LAN discovery results.
+ * Strict evergreen Zen / Qwen3+ model policy guard: rejects any legacy `qwen2`, `zen4`, or `zen5`
+ * weight or alias across catalog entries, Ollama tags, Engine models, and LAN discovery results.
  */
 export function isAllowedLocalAiModel(modelId: string | null | undefined): boolean {
   const trimmed = modelId?.trim() ?? "";
   if (!trimmed) return false;
-  return !/qwen2/iu.test(trimmed);
+  return !/qwen2|zen[45]/iu.test(trimmed);
 }
 
 export function filterAllowedLocalAiModels<T extends { readonly id: string }>(
@@ -89,20 +89,20 @@ export function filterAllowedLocalAiModels<T extends { readonly id: string }>(
 
 export const ZEN_LOCAL_AI_CATALOG: ReadonlyArray<ZenCatalogModel> = [
   {
-    id: "zen-nano:0.6b",
+    id: "zen6-flash:0.6b",
     ollamaTag: "qwen3:0.6b",
     hfRepo: "Qwen/Qwen3-0.6B",
-    title: "Zen Nano 0.6B",
+    title: "Zen 6 Flash Nano (Qwen3 0.6B)",
     sizeLabel: "0.6 GB",
     description: "Ultra-fast on-device Qwen3 0.6B foundation model for instant offline responses.",
     family: "zen",
     tools: true,
   },
   {
-    id: "zen4-mini",
+    id: "zen6-flash",
     ollamaTag: "qwen3:4b",
     hfRepo: "Qwen/Qwen3-4B",
-    title: "Zen4 Mini (Qwen3 4B)",
+    title: "Zen 6 Flash (Qwen3 4B)",
     sizeLabel: "2.5 GB",
     description: "Compact agentic Qwen3 4B model tuned for tool use, fast edits, and laptop batteries.",
     family: "zen",
@@ -110,22 +110,22 @@ export const ZEN_LOCAL_AI_CATALOG: ReadonlyArray<ZenCatalogModel> = [
     tools: true,
   },
   {
-    id: "zen4:8b",
+    id: "zen6",
     ollamaTag: "qwen3:8b",
     hfRepo: "Qwen/Qwen3-8B",
-    title: "Zen4 8B (Qwen3 8B)",
+    title: "Zen 6 (Qwen3 8B)",
     sizeLabel: "5.0 GB",
-    description: "Balanced Zen4 flagship built on Qwen3 8B weights with strong reasoning and tool calling.",
+    description: "Flagship Zen 6 built on Qwen3 8B weights with strong reasoning and tool calling.",
     family: "zen",
     recommended: true,
     thinking: true,
     tools: true,
   },
   {
-    id: "zen4:14b",
+    id: "zen6:14b",
     ollamaTag: "qwen3:14b",
     hfRepo: "Qwen/Qwen3-14B",
-    title: "Zen4 14B (Qwen3 14B)",
+    title: "Zen 6 14B (Qwen3 14B)",
     sizeLabel: "9.0 GB",
     description: "High-accuracy local Qwen3 14B reasoning model for multi-file refactors and reviews.",
     family: "zen",
@@ -133,10 +133,10 @@ export const ZEN_LOCAL_AI_CATALOG: ReadonlyArray<ZenCatalogModel> = [
     tools: true,
   },
   {
-    id: "zen4:30b-a3b",
+    id: "zen6-max",
     ollamaTag: "qwen3:30b-a3b",
     hfRepo: "Qwen/Qwen3-30B-A3B",
-    title: "Zen4 30B MoE (Qwen3 30B-A3B)",
+    title: "Zen 6 Max (Qwen3 30B-A3B MoE)",
     sizeLabel: "18 GB",
     description: "Sparse Mixture-of-Experts (3B active) delivering frontier reasoning at 4B token speed.",
     family: "zen",
@@ -144,10 +144,10 @@ export const ZEN_LOCAL_AI_CATALOG: ReadonlyArray<ZenCatalogModel> = [
     tools: true,
   },
   {
-    id: "zen4-coder:30b",
+    id: "zen6-coder",
     ollamaTag: "qwen3-coder:30b",
     hfRepo: "Qwen/Qwen3-Coder-30B-A3B-Instruct",
-    title: "Zen4 Coder 30B (Qwen3 Coder)",
+    title: "Zen 6 Coder (Qwen3 Coder 30B)",
     sizeLabel: "19 GB",
     description: "Specialized agentic coding MoE model tuned for repository navigation and patch synthesis.",
     family: "zen",
@@ -156,10 +156,10 @@ export const ZEN_LOCAL_AI_CATALOG: ReadonlyArray<ZenCatalogModel> = [
     tools: true,
   },
   {
-    id: "zen4-vl:8b",
+    id: "zen-vl",
     ollamaTag: "qwen3-vl:8b",
     hfRepo: "Qwen/Qwen3-VL-8B-Instruct",
-    title: "Zen4 Vision 8B (Qwen3-VL)",
+    title: "Zen VL (Qwen3-VL 8B)",
     sizeLabel: "5.8 GB",
     description: "Multimodal Qwen3-VL model for UI screenshot inspection, diagrams, and visual debugging.",
     family: "zen",
@@ -170,20 +170,22 @@ export const ZEN_LOCAL_AI_CATALOG: ReadonlyArray<ZenCatalogModel> = [
 ] as const;
 
 const OLLAMA_PULL_ALIASES: Readonly<Record<string, string>> = {
-  "zen-nano:0.6b": "qwen3:0.6b",
-  "zen4-mini": "qwen3:4b",
-  "zen-agent:4b": "qwen3:4b",
-  "zen4:4b": "qwen3:4b",
-  "zen4:latest": "qwen3:8b",
-  "zen4:8b": "qwen3:8b",
-  "zen4:14b": "qwen3:14b",
-  "zen4:30b": "qwen3:30b-a3b",
-  "zen4:30b-a3b": "qwen3:30b-a3b",
-  "zen-coder:24b": "qwen3-coder:30b",
-  "zen4-coder:latest": "qwen3-coder:30b",
-  "zen4-coder:30b": "qwen3-coder:30b",
-  "zen4-coder:31b": "qwen3-coder:30b",
-  "zen4-vl:8b": "qwen3-vl:8b",
+  "zen6-flash:0.6b": "qwen3:0.6b",
+  "zen-nano": "qwen3:0.6b",
+  "zen6-flash": "qwen3:4b",
+  "zen-mini": "qwen3:4b",
+  zen6: "qwen3:8b",
+  zen: "qwen3:8b",
+  "zen6:latest": "qwen3:8b",
+  "zen6:8b": "qwen3:8b",
+  "zen6:14b": "qwen3:14b",
+  "zen6-max": "qwen3:30b-a3b",
+  "zen-max": "qwen3:30b-a3b",
+  "zen6-coder": "qwen3-coder:30b",
+  "zen-coder": "qwen3-coder:30b",
+  "zen6-coder:30b": "qwen3-coder:30b",
+  "zen-vl": "qwen3-vl:8b",
+  "zen-vl:8b": "qwen3-vl:8b",
 };
 
 export function resolveOllamaPullTarget(modelTag: string): string {

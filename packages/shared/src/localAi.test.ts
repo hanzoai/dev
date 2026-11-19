@@ -11,35 +11,54 @@ import {
 } from "./localAi.ts";
 
 describe("localAi Zen / Qwen3+ catalog and runtime probes", () => {
-  it("enforces qwen3+ only and rejects every qwen2 variant", () => {
+  it("enforces canonical zen6 / qwen3+ SKUs only and rejects every qwen2, zen4, and zen5 variant", () => {
     expect(ZEN_LOCAL_AI_CATALOG.length).toBeGreaterThanOrEqual(6);
+    const catalogIds = ZEN_LOCAL_AI_CATALOG.map((m) => m.id);
+    expect(catalogIds).toContain("zen6");
+    expect(catalogIds).toContain("zen6-flash");
+    expect(catalogIds).toContain("zen6-coder");
+    expect(catalogIds).toContain("zen6-max");
+    expect(catalogIds).toContain("zen-vl");
+
     for (const model of ZEN_LOCAL_AI_CATALOG) {
       expect(isAllowedLocalAiModel(model.id)).toBe(true);
       expect(isAllowedLocalAiModel(model.ollamaTag)).toBe(true);
       expect(isAllowedLocalAiModel(model.hfRepo)).toBe(true);
+      expect(model.id.toLowerCase()).not.toMatch(/zen[45]/u);
+      expect(model.title.toLowerCase()).not.toMatch(/zen\s*[45]/u);
       expect(model.ollamaTag.toLowerCase()).not.toContain("qwen2");
     }
 
     expect(isAllowedLocalAiModel("qwen3:8b")).toBe(true);
     expect(isAllowedLocalAiModel("qwen3-coder:30b")).toBe(true);
-    expect(isAllowedLocalAiModel("zen4-mini")).toBe(true);
+    expect(isAllowedLocalAiModel("zen6")).toBe(true);
+    expect(isAllowedLocalAiModel("zen6-coder")).toBe(true);
+    expect(isAllowedLocalAiModel("zen")).toBe(true);
+    expect(isAllowedLocalAiModel("zen4:8b")).toBe(false);
+    expect(isAllowedLocalAiModel("zen5-coder")).toBe(false);
     expect(isAllowedLocalAiModel("qwen2:7b")).toBe(false);
     expect(isAllowedLocalAiModel("Qwen2.5-Coder:14b")).toBe(false);
     expect(isAllowedLocalAiModel("hf.co/Qwen/Qwen2.5-7B-Instruct")).toBe(false);
     expect(() => resolveOllamaPullTarget("qwen2.5:7b")).toThrow(/qwen2/i);
-    expect(resolveOllamaPullTarget("zen4-mini")).toBe("qwen3:4b");
-    expect(resolveOllamaPullTarget("zen4-coder:30b")).toBe("qwen3-coder:30b");
+    expect(resolveOllamaPullTarget("zen6")).toBe("qwen3:8b");
+    expect(resolveOllamaPullTarget("zen")).toBe("qwen3:8b");
+    expect(resolveOllamaPullTarget("zen6-flash")).toBe("qwen3:4b");
+    expect(resolveOllamaPullTarget("zen6-max")).toBe("qwen3:30b-a3b");
+    expect(resolveOllamaPullTarget("zen6-coder")).toBe("qwen3-coder:30b");
+    expect(resolveOllamaPullTarget("zen-vl")).toBe("qwen3-vl:8b");
 
     expect(
       filterAllowedLocalAiModels([
         { id: "qwen2.5:7b" },
+        { id: "zen4:8b" },
+        { id: "zen5:14b" },
         { id: "qwen3:8b" },
-        { id: "zen4:14b" },
+        { id: "zen6:14b" },
       ]),
-    ).toEqual([{ id: "qwen3:8b" }, { id: "zen4:14b" }]);
+    ).toEqual([{ id: "qwen3:8b" }, { id: "zen6:14b" }]);
   });
 
-  it("probes Ollama (:11434) and strips any installed qwen2 tags while mapping Zen aliases", async () => {
+  it("probes Ollama (:11434) and strips any installed qwen2 tags while mapping Zen 6 aliases", async () => {
     const fetchMock = vi.fn(async () =>
       new Response(
         JSON.stringify({
@@ -57,8 +76,8 @@ describe("localAi Zen / Qwen3+ catalog and runtime probes", () => {
     expect(status.online).toBe(true);
     const ids = status.models.map((m) => m.id);
     expect(ids).toContain("qwen3:4b");
-    expect(ids).toContain("zen4-mini");
-    expect(ids.some((id) => /qwen2/i.test(id))).toBe(false);
+    expect(ids).toContain("zen6-flash");
+    expect(ids.some((id) => /qwen2|zen[45]/i.test(id))).toBe(false);
   });
 
   it("probes Embedded Hanzo Engine (:36900) and hanzod validator (:9630 / :9631)", async () => {

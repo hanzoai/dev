@@ -38,7 +38,7 @@ COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm run dev:desktop
 COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm run dev
 ```
 
-- **Desktop App**: Launches `Hanzo Dev.app` (monochrome dark/light UI, official Hanzo icon and menu bar)
+- **Desktop App**: Launches native `Hanzo Dev` (**Rust Tauri v2 + WKWebView/Metal** shell, ~15 MB footprint, native OS Keychain IAM vault, monochrome dark/light UI, official Hanzo icon and menu bar)
 - **Web Control Plane**: `http://127.0.0.1:5733` (if running `dev:desktop` and opening in Safari/Chrome, run `node apps/server/dist/bin.mjs pair --base-dir ~/.hanzo-dev` for a local pairing URL)
 - **Orchestration Server**: `http://127.0.0.1:13773`
 

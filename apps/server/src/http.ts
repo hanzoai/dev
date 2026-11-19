@@ -58,10 +58,14 @@ import {
   MCP_HTTP_PATH,
 } from "./httpCors.ts";
 import { readLocalHanzoIdentities } from "./provider/hanzoLocalIdentity.ts";
+import { ingestAnalyticsBody, readRecentAnalyticsSnapshot } from "./analyticsHub.ts";
 import { requestUrl } from "./requestUrl.ts";
 
 const OTLP_TRACES_PROXY_PATH = "/v1/o11y/traces";
 export const HANZO_IDENTITIES_PATH = "/v1/hanzo/identities";
+export const HANZO_BEACON_PATH = "/_/beacon";
+export const HANZO_ANALYTICS_EVENT_PATH = "/api/analytics/event";
+export const HANZO_ANALYTICS_RECENT_PATH = "/api/analytics/recent";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 const SVG_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
 // Opaque origin blocks cookies, storage and API access while allowing scripts.
@@ -442,9 +446,47 @@ export const layerHanzoIdentitiesRoute = HttpRouter.add(
   ),
 );
 
+const handleAnalyticsIngest = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const rawBody = yield* request.text.pipe(Effect.orElseSucceed(() => ""));
+  const accepted = ingestAnalyticsBody(rawBody, request.headers);
+  // @effect-diagnostics-next-line globalJsonInEffect:off
+  const responseBody = JSON.stringify({
+    ok: true,
+    accepted: accepted.length,
+    eventIds: accepted.map((entry) => entry.payload.event_id),
+  });
+  return HttpServerResponse.text(responseBody, {
+    status: 202,
+    contentType: "application/json; charset=utf-8",
+    headers: { "Cache-Control": "no-store" },
+  });
+}).pipe(Effect.withTracerEnabled(false));
+
+export const layerHanzoAnalyticsRoutes = Layer.mergeAll(
+  HttpRouter.add("POST", HANZO_BEACON_PATH, handleAnalyticsIngest),
+  HttpRouter.add("POST", HANZO_ANALYTICS_EVENT_PATH, handleAnalyticsIngest),
+  HttpRouter.add(
+    "GET",
+    HANZO_ANALYTICS_RECENT_PATH,
+    Effect.sync(() => {
+      const snapshot = readRecentAnalyticsSnapshot();
+      // @effect-diagnostics-next-line globalJsonInEffect:off
+      return HttpServerResponse.text(JSON.stringify(snapshot), {
+        status: 200,
+        contentType: "application/json; charset=utf-8",
+        headers: { "Cache-Control": "no-store" },
+      });
+    }).pipe(Effect.withTracerEnabled(false)),
+  ),
+);
+
 const UNTRACED_REQUEST_PATHS: ReadonlySet<string> = new Set([
   OTLP_TRACES_PROXY_PATH,
   HANZO_IDENTITIES_PATH,
+  HANZO_BEACON_PATH,
+  HANZO_ANALYTICS_EVENT_PATH,
+  HANZO_ANALYTICS_RECENT_PATH,
 ]);
 
 // HttpRouter.serve builds routes privately; provide the server-wide TracerDisabledWhen to the served layer.

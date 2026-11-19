@@ -64,6 +64,8 @@ import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAu
 import { resolvePrimaryEnvironmentHttpUrl } from "../environments/primary/target";
 import { isHostedStaticApp } from "../hostedPairing";
 import { openLocalAiManager } from "../localAi/localAiState";
+import { trackHanzoEvent } from "../analytics/hanzoWebAnalytics";
+import { toastManager } from "../components/ui/toast";
 import { ManagedRelayAuthProvider } from "./managedAuth";
 import { resolveCloudPublicConfig } from "./publicConfig";
 
@@ -190,6 +192,7 @@ export class HanzoWebAuthController implements CloudAccountSource {
   private organizationsByAccount = new Map<string, ReadonlyArray<HanzoIamOrganization>>();
   private billingSummary: HanzoBillingSummary | null = null;
   private pendingDesktopPkce: PendingPkceState | null = null;
+  private pendingAuthorizeUrl: string | null = null;
   private modal: ModalState = { open: false, tab: "accounts", pages: [] };
   private readonly listeners = new Set<() => void>();
   private readonly accountListeners = new Set<
@@ -207,6 +210,10 @@ export class HanzoWebAuthController implements CloudAccountSource {
 
   get isKeychainBacked(): boolean {
     return this.keychainBacked;
+  }
+
+  get pendingOAuthAuthorizeUrl(): string | null {
+    return this.pendingAuthorizeUrl;
   }
 
   get errorMessage(): string | null {
@@ -420,6 +427,7 @@ export class HanzoWebAuthController implements CloudAccountSource {
   private async finishPkceCodeExchange(pending: PendingPkceState, code: string): Promise<void> {
     this.busy = true;
     this.lastError = null;
+    this.pendingAuthorizeUrl = null;
     this.emit();
     try {
       const account = await exchangeHanzoIamAuthorizationCode({
@@ -431,6 +439,12 @@ export class HanzoWebAuthController implements CloudAccountSource {
         brand: pending.brandId,
       });
       this.persistVault(upsertHanzoIamVaultAccount(this.vault, account, true));
+      trackHanzoEvent("login", {
+        method: "oidc_pkce",
+        brand: pending.brandId,
+        accountId: account.id,
+        org_id: account.owner,
+      });
       void this.refreshOrganizationsAndBilling();
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error);
@@ -570,12 +584,27 @@ export class HanzoWebAuthController implements CloudAccountSource {
       state,
       codeChallenge,
     });
+    this.pendingAuthorizeUrl = authorizeUrl;
+    this.lastError = null;
+    this.emit();
     if (useDesktopDeepLink && window.desktopBridge?.openExternal) {
       await window.desktopBridge.openExternal(authorizeUrl);
       return;
     }
     window.location.assign(authorizeUrl);
   }
+
+  reopenPendingSignIn = (): void => {
+    if (!this.pendingAuthorizeUrl) return;
+    openExternalUrl(this.pendingAuthorizeUrl);
+  };
+
+  cancelPendingSignIn = (): void => {
+    this.pendingDesktopPkce = null;
+    this.pendingAuthorizeUrl = null;
+    writePendingPkce(null);
+    this.emit();
+  };
 
   async signInWithAccessToken(input: {
     readonly accessToken: string;
@@ -635,8 +664,15 @@ export class HanzoWebAuthController implements CloudAccountSource {
 
   switchOrganization = (orgId: string): void => {
     const trimmed = orgId.trim();
-    if (!trimmed) return;
+    if (!trimmed || trimmed === this.activeOrgId) return;
     this.persistVault(switchHanzoIamVaultOrg(this.vault, trimmed));
+    trackHanzoEvent("org_switched", { org_id: trimmed });
+    toastManager.add({
+      id: "hanzo-org-switched",
+      title: `Active organization: ${trimmed}`,
+      description: `X-Org-Id=${trimmed} will be used across App, Bot, Team, and Platform.`,
+      timeout: 2_500,
+    });
     void this.refreshOrganizationsAndBilling();
   };
 
@@ -675,6 +711,7 @@ export class HanzoWebAuthController implements CloudAccountSource {
     this.loaded = true;
     this.busy = false;
     this.lastError = null;
+    this.pendingAuthorizeUrl = null;
     this.billingSummary = null;
     this.organizationsByAccount.clear();
     this.emit();
@@ -739,6 +776,11 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
     () => controller.isKeychainBacked,
     () => false,
   );
+  const pendingAuthorizeUrl = useSyncExternalStore(
+    controller.subscribe,
+    () => controller.pendingOAuthAuthorizeUrl,
+    () => null,
+  );
   const errorMessage = useSyncExternalStore(
     controller.subscribe,
     () => controller.errorMessage,
@@ -749,6 +791,7 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [showTokenEntry, setShowTokenEntry] = useState(false);
   const [tokenInput, setTokenInput] = useState("");
+  const [callbackUrlInput, setCallbackUrlInput] = useState("");
   const [customOrgInput, setCustomOrgInput] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -994,14 +1037,19 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                         </div>
                         <button
                           type="button"
-                          onClick={() =>
+                          onClick={() => {
+                            trackHanzoEvent("begin_checkout", {
+                              plan: plan.id,
+                              planName: plan.name,
+                              org_id: activeOrgId,
+                            });
                             openExternalUrl(
                               buildHanzoSurfaceLaunchUrl(
                                 `${HANZO_BILLING_PORTAL_URL}?plan=${plan.id}`,
                                 { orgId: activeOrgId },
                               ),
-                            )
-                          }
+                            );
+                          }}
                           className="mt-3.5 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold hover:bg-muted"
                         >
                           <span>{isCurrent ? gt("Manage plan") : gt("Select plan")}</span>
@@ -1059,11 +1107,16 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                     <button
                       key={surface.id}
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
+                        trackHanzoEvent("surface_handoff", {
+                          targetSurface: surface.id,
+                          targetHost: surface.hostname,
+                          org_id: activeOrgId,
+                        });
                         openExternalUrl(
                           buildHanzoSurfaceLaunchUrl(surface.url, { orgId: activeOrgId }),
-                        )
-                      }
+                        );
+                      }}
                       className="flex items-start justify-between gap-3 rounded-xl border border-border bg-background p-3.5 text-left transition-colors hover:bg-muted/40"
                     >
                       <div className="min-w-0 flex-1">
@@ -1358,6 +1411,57 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                       </span>
                     </button>
                   </div>
+
+                  {pendingAuthorizeUrl ? (
+                    <div
+                      data-testid="pending-oauth-recovery"
+                      className="space-y-2.5 rounded-lg border border-border bg-background p-3 text-xs"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-medium text-foreground">
+                          <T>Waiting for browser sign-in to return via hanzodev://...</T>
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={controller.reopenPendingSignIn}
+                            className="rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-muted"
+                          >
+                            <T>Reopen browser</T>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={controller.cancelPendingSignIn}
+                            className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                          >
+                            <T>Cancel</T>
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={callbackUrlInput}
+                          onChange={(event) => setCallbackUrlInput(event.currentTarget.value)}
+                          placeholder="hanzodev://oauth/callback?code=...&state=..."
+                          aria-label={gt("Paste OAuth callback URL")}
+                          className="flex-1 rounded-md border border-border bg-background px-2.5 py-1 font-mono text-xs focus:outline-hidden"
+                        />
+                        <button
+                          type="button"
+                          disabled={!callbackUrlInput.trim() || isBusy}
+                          onClick={() => {
+                            const raw = callbackUrlInput.trim();
+                            setCallbackUrlInput("");
+                            void controller.handleDeepLinkCallback(raw);
+                          }}
+                          className="rounded-md bg-foreground px-2.5 py-1 text-xs font-semibold text-background disabled:opacity-50"
+                        >
+                          <T>Complete</T>
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
 
                   {showTokenEntry && (
                     <div className="space-y-2 pt-1">

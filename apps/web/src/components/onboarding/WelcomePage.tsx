@@ -291,7 +291,19 @@ export function WelcomePage({
                 .
               </T>
             </p>
-            <div className="mt-10 border-t border-border/60">
+            <div className="mt-6 rounded-xl border border-border/70 bg-muted/20 p-4 text-xs text-muted-foreground">
+              <div className="font-semibold text-foreground">
+                <T>What Hanzo Dev controls &amp; progressive permissions</T>
+              </div>
+              <p className="mt-1 leading-relaxed">
+                <T>
+                  Hanzo Dev orchestrates local workspaces, Git worktrees, terminal commands, browser
+                  previews, and Local AI (Zen 6 / Qwen3+). Microphone, OS Keychain, folder access,
+                  and Hanzo Connect tunnels are requested only when you first use each capability.
+                </T>
+              </p>
+            </div>
+            <div className="mt-8 border-t border-border/60">
               <AgentsSection
                 environmentId={environmentId}
                 label={label}

@@ -2,7 +2,6 @@ import {
   ArrowLeftIcon,
   ArrowRightIcon,
   ChartNoAxesColumnIcon,
-  CpuIcon,
   SettingsIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -11,11 +10,8 @@ import { memo } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useAtomValue } from "@effect/atom-react";
-import { useHanzoWebAccounts } from "../../cloud/hanzoWebAuth";
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { shortcutLabelForCommand } from "../../keybindings";
-import { openLocalAiManager } from "../../localAi/localAiState";
-import { useResolvedHanzoConnectAccountPages } from "../clerk/HanzoConnectAccountPages";
 import {
   navigateHistory,
   useCanNavigateHistory,
@@ -324,93 +320,11 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   );
 });
 
-function SidebarHanzoCloudBar() {
-  const gt = useGT();
-  const providers = useAtomValue(primaryServerProvidersAtom);
-  const welcome = useAtomValue(primaryServerWelcomeAtom);
-  const { activeAccount, activeOrgId, billing, openModal } = useHanzoWebAccounts();
-  const resolvedPages = useResolvedHanzoConnectAccountPages();
-
-  const hanzoProvider = providers.find((provider) => provider.driver === "hanzo");
-  const isAuthenticated = Boolean(activeAccount) || hanzoProvider?.auth.status === "authenticated";
-  const accountLabel =
-    activeAccount?.displayName ??
-    activeAccount?.email ??
-    activeAccount?.id ??
-    hanzoProvider?.auth.label ??
-    gt("Sign in to Hanzo ID");
-  const hostLabel = welcome?.environment.label;
-  const orgBadge = activeOrgId ?? activeAccount?.owner ?? null;
-  const planBadge = billing?.planName ?? (activeAccount ? "Hanzo ID" : null);
-
-  return (
-    <div className="mb-1 flex flex-col gap-1 rounded-lg border border-border/70 bg-accent/30 px-2.5 py-2 text-xs">
-      <div className="flex items-center justify-between gap-1.5">
-        <button
-          type="button"
-          onClick={() => openModal("accounts", resolvedPages)}
-          aria-label={gt("Open Hanzo Account and Organization Control Center")}
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-left font-medium text-sidebar-foreground hover:opacity-80"
-        >
-          <span
-            className={cn(
-              "inline-block size-2 shrink-0 rounded-full",
-              isAuthenticated ? "bg-success" : "bg-muted-foreground/50",
-            )}
-          />
-          <span className="truncate">{accountLabel}</span>
-        </button>
-        <div className="flex shrink-0 items-center gap-1">
-          {planBadge ? (
-            <button
-              type="button"
-              onClick={() => openModal("billing", resolvedPages)}
-              className="rounded bg-accent px-1.5 py-0.5 text-3xs font-medium text-sidebar-foreground/80 hover:text-sidebar-foreground"
-            >
-              {planBadge}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => openLocalAiManager("models")}
-            aria-label={gt("Open Local AI, Validator Node and Engine Manager")}
-            className="inline-flex items-center gap-1 rounded bg-accent px-1.5 py-0.5 text-3xs font-medium text-sidebar-foreground/80 hover:text-sidebar-foreground"
-          >
-            <CpuIcon className="size-2.5" />
-            <span>
-              <T>Local AI</T>
-            </span>
-          </button>
-        </div>
-      </div>
-      <button
-        type="button"
-        onClick={() => openModal(activeAccount ? "surfaces" : "accounts", resolvedPages)}
-        className="flex items-center justify-between gap-2 text-left text-2xs text-muted-foreground hover:text-sidebar-foreground"
-      >
-        <span className="truncate">
-          {orgBadge
-            ? `X-Org-Id: ${orgBadge}`
-            : hostLabel
-              ? gt("Local: {host}", { host: hostLabel })
-              : gt("Unified IAM & Surfaces")}
-        </span>
-        <span
-          className={cn("shrink-0", isAuthenticated ? "text-success" : "text-muted-foreground")}
-        >
-          {activeAccount ? "hanzo.id" : "api.hanzo.ai"}
-        </span>
-      </button>
-    </div>
-  );
-}
-
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   return (
     <SidebarFooter>
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
-      <SidebarHanzoCloudBar />
       <SidebarUtilityMenu />
     </SidebarFooter>
   );

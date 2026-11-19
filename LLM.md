@@ -1,6 +1,6 @@
 # Hanzo Dev
 
-Hanzo Dev is a minimal GUI for coding agents. A Node WebSocket server wraps Hanzo's native coding agent (`Hanzo` via `hanzo-dev serve` / `dev serve`) first and foremost, alongside external provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity, Kiro, Pi, Muse Code, fx), serving web, desktop, and mobile (`iOS` & `Android`) clients.
+Hanzo Dev is a minimal GUI for coding agents. A Node WebSocket server wraps Hanzo's native coding agents (`Hanzo` via `hanzo-dev serve` / `dev serve`, and `Hanzo Gen` via `hanzoai/gen` / `gen`) first and foremost, alongside external provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity, Kiro, Pi, Muse Code, fx), serving web, desktop, and mobile (`iOS` & `Android`) clients.
 
 You can think of Hanzo Dev as an open source "bring-your-own-subscription" alternative to apps like Claude Desktop, Codex App, Cursor Glass and Conductor.
 
@@ -26,13 +26,13 @@ Hanzo Dev has 3 key app surfaces: **web**, **desktop**, and **mobile**.
 
 **Web** is kind of two surfaces, as we have the public facing "hanzo.bot" as well as locally hosting the web app through the `hanzo` command. Both need to be supported by all new features where reasonable.
 
-**Desktop** is the main surface most users install first. It's a full Electron app that bundles the server runner as well. The desktop app can also be used as the host server, allowing remote connections from hanzo.bot or the mobile app.
+**Desktop** is the main surface most users install first. It is a native **Rust Tauri v2** application (`apps/desktop/src-tauri`) using OS-native webviews (`WKWebView`/Metal on macOS, WebView2 on Windows, WebKitGTK on Linux) and supervises the local orchestration backend. The desktop app can also serve as a host environment for remote connections from `hanzo.bot` or the mobile app.
 
 **Mobile** is a React Native app for both iOS and Android, available on the App Store and Google Play. The mobile app allows for connecting to any Hanzo Dev server to control work remotely.
 
-## A note from Theo
+## Engineering Philosophy
 
-I like ambitious ideas, simple systems, and software that feels obvious. Do not preserve complexity just because it already exists. Do not introduce machinery because it looks architecturally impressive. Understand the real constraint, then fight for the smallest model that makes the correct behavior unsurprising.
+Prefer ambitious ideas, simple systems, and software that feels obvious. Do not preserve complexity just because it already exists. Do not introduce machinery because it looks architecturally impressive. Understand the real constraint, then fight for the smallest model that makes the correct behavior unsurprising.
 
 Channel both "measure twice, cut once" and "yagni". Fight scope creep. Try to honor the dev's intent in both a minimal and realistic fashion.
 
@@ -45,7 +45,7 @@ Of note: Most Hanzo Dev contributions will come from Hanzo Dev itself, often con
 We need to be on the same page with terminology. When communicating, use this language:
 
 - **you** means the agent reading this file and changing Hanzo Dev.
-- **we, us, and maintainers** mean Theo, Julius and the people building Hanzo Dev. These are who you are talking to now.
+- **we, us, and maintainers** mean the Hanzo AI engineering team building Hanzo Dev.
 - **user** means the person using Hanzo Dev to direct coding agents.
 - **agent** means the coding agent a user runs inside Hanzo Dev. Depending on context, that may also include you.
 - **provider** means the agent runtime or harness Hanzo Dev talks to, such as Codex, Claude, Cursor, or OpenCode.
@@ -67,8 +67,8 @@ We need to be on the same page with terminology. When communicating, use this la
 The most common defect in this repo is a change that works on the path you tested and is missing everywhere else. Before calling frontend work done, walk this list and say which entries applied:
 
 - **Entry points.** A behavior reachable from the chat view is usually also reachable from Settings, the command palette, and a keybinding. Fixing one is not fixing the feature.
-- **Clients.** Web, desktop (wraps web, adds Electron shell/IPC), and mobile (React Native, separate navigation). Shared logic lives in `packages/client-runtime`
-- **Providers.** Codex, Claude, Cursor, Grok, OpenCode, Antigravity, Kiro, Pi, Muse Code, fx, and ACP Registry each have an adapter. Provider-shaped features need a decision per adapter, even if the decision is "not supported here".
+- **Clients.** Web, desktop (native Rust Tauri v2 host in `apps/desktop/src-tauri` wrapping `apps/web` + injecting `window.desktopBridge`), and mobile (React Native, separate navigation). Shared logic lives in `packages/client-runtime`
+- **Providers.** Hanzo (`hanzo`), Hanzo Gen (`hanzoGen`), Codex, Claude, Cursor, Grok, OpenCode, Antigravity, Kiro, Pi, Muse Code, fx, and ACP Registry each have an adapter. Provider-shaped features need a decision per adapter, even if the decision is "not supported here".
 - **Agents.** A capability a user can trigger is usually one an agent should reach through MCP tools, and scheduled tasks run the same paths. That only works when it is a service method, not handler code.
 - **Contracts.** Anything crossing the wire is typed in `packages/contracts`. Change the schema and the server, web, mobile, and desktop all follow.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Snooze needs unsnooze. Close needs reopen. A one-way door is a bug.
@@ -217,18 +217,25 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 
 ## Native Hanzo Stack Integration (Agent, IAM Multi-Account & Mobile Remote Control)
 
-- **Native Hanzo Agent (#1 Default Provider)**:
-  - `HanzoDriver` (`apps/server/src/provider/Drivers/HanzoDriver.ts`, `driver: "hanzo"`, `instanceId: "hanzo"`) is registered first in `BUILT_IN_DRIVERS`, `DEFAULT_ENABLED_DEFAULT_INSTANCES`, and `providerClients`.
-  - Spawns `~/.local/bin/hanzo-dev` / `~/.local/bin/dev` (`dev serve` JSON-RPC over stdio) with `DEV_HOME=~/.hanzo/dev`, inheriting `[mcp_servers.hanzo]` (`hanzo-mcp`) and `[model_providers.hanzo]` (`https://api.hanzo.ai/v1`), plus curated frontier models (`enso-auto`, `enso-ultra`, `enso-max`, `zen6-coder`, `zen6-max`, `zen6`, `zen6-flash`, `hanzo/kai`, `enso-flash`).
+- **Native Hanzo Agent (#1 Default Provider) & Hanzo Gen (`hanzoai/gen`, #2 Provider)**:
+  - `HanzoDriver` (`apps/server/src/provider/Drivers/HanzoDriver.ts`, `driver: "hanzo"`, `instanceId: "hanzo"`) and `HanzoGenDriver` (`apps/server/src/provider/Drivers/HanzoGenDriver.ts`, `driver: "hanzoGen"`, `instanceId: "hanzoGen"`) are registered #1 and #2 in `BUILT_IN_DRIVERS`, `DEFAULT_ENABLED_DEFAULT_INSTANCES`, and `providerClients`, with crisp Hanzo H-mark icons and zero OpenAI Codex semver advisories.
+  - Spawns `~/.local/bin/dev` (`dev serve` JSON-RPC over stdio) and `~/.local/bin/gen` (`hanzoai/gen`) with `DEV_HOME=~/.hanzo/dev`, defaulting new threads to `hanzo` + `enso-auto` (`enso-auto`, `enso-ultra`, `enso-max`, `zen6-coder`, `zen6-max`, `zen6`, `zen6-flash`, `hanzo/kai`, `enso-flash`).
+- **Canonical Hanzo Dev UI Chrome (Shared with `@hanzo/ui` & `@hanzo/gui`)**:
+  - Top-left header renders mirrored `PanelLeftIcon` (exact mirror of `PanelRightIcon` on the far right), followed by `[Hanzo H-Icon] Dev` (without repeating `"Hanzo"`) and `←` `→` history buttons.
+  - Draft hero headline renders `"Build what's next."` cleanly across web, desktop, and mobile (`DraftHeroHeadline.tsx`, `DraftHeroProjectHeading.tsx`, `NewTaskDraftScreen.tsx`), and Hanzo IAM / Cloud controls live in Settings (`⌘,`) & Command Palette (`⌘K`) rather than cluttering the bottom-left sidebar.
 - **Unified Desktop, Mobile & Web IAM Shell (Clerk-Free)**:
   - Shared OIDC PKCE (`S256`) + multi-account vault (`hanzo.dev.iam.vault.v1`) in `packages/shared/src/hanzoIamAuth.ts` supports `hanzo.id`, `lux.id`, `zoolabs.id`, and `pars.id`, deep-link callback parsing (`hanzo://` and `hanzodev://`), persistent `X-Org-Id` organization switching (`switchHanzoIamVaultOrg`, `buildHanzoApiHeaders`), subscription plan & credit meter (`Go $8/mo`, `Pro $15/mo`, `Team`, `Ultra $195/mo`, `billing.hanzo.ai`), and unified `?org=<orgId>` surface launchers (`hanzo.app`, `hanzo.bot`, `hanzo.team`, `platform.hanzo.ai`).
-  - Desktop (`apps/desktop/src/ipc/methods/iamVault.ts`, `DesktopAppIdentity.ts`, `DesktopClerk.ts`) encrypts the IAM vault in the OS Keychain via Electron `safeStorage` and registers both `hanzo://` and `hanzodev://` protocol handlers for PKCE callback handoff.
-  - Web & Desktop UI (`apps/web/src/cloud/hanzoWebAuth.tsx`, `SidebarChrome.tsx`) exposes the Unified Account & Organization Control Center from the bottom-left sidebar pill, Command Palette, and Electron menu (`Account & Org`, `Plans & Usage`, `Surfaces & Access`, plus `Hanzo Connect` and `Mobile clients`).
+  - Desktop (`apps/desktop/src-tauri/src/{auth,backend,bridge,commands,menu,main}.rs`) encrypts the IAM vault in the OS Keychain via Rust `keyring` (`apple-native`, `windows-native`, `sync-secret-service`) and registers `hanzo://`, `hanzodev://`, and `hanzo-dev://` deep-link handlers for PKCE callback handoff.
+  - Web & Desktop UI (`apps/web/src/cloud/hanzoWebAuth.tsx`, `SidebarChrome.tsx`) exposes the Unified Account & Organization Control Center from the bottom-left sidebar pill, Command Palette, and native Tauri menu (`Account & Org`, `Plans & Usage`, `Surfaces & Access`, plus `Hanzo Connect` and `Mobile clients`).
   - Mobile (`apps/mobile/src/features/cloud/hanzoMobileAuth.tsx`, `HanzoConnectProfilePage.tsx`, `App.tsx`) persists accounts and active `X-Org-Id` in `expo-secure-store`, handles `hanzo://` and `hanzodev://` OAuth callbacks, and renders the unified Org Switcher, Plan/Usage meter, ecosystem surface launchers, and registered servers.
-- **Local AI (Qwen3+ Only), Validator Node (`hanzod`) & Embedded Engine Manager**:
-  - `packages/shared/src/localAi.ts` and `apps/web/src/components/local-ai/LocalAiManagerModal.tsx` (reachable via Settings `⌘,`, Command Palette `⌘K`, `⌥⌘L`, sidebar `Local AI` pill, and Desktop menu) manage curated Zen / `qwen3+` weights (`zen-nano:0.6b`/`qwen3:0.6b`, `zen4-mini`/`qwen3:4b`, `zen4:8b`/`qwen3:8b`, `zen4:14b`/`qwen3:14b`, `zen4:30b-a3b`/`qwen3:30b-a3b`, `zen4-coder:30b`/`qwen3-coder:30b`, `zen4-vl:8b`/`qwen3-vl:8b`) with a strict `!/qwen2/i` guard, live probes for `Ollama` (`127.0.0.1:11434`), `Embedded Hanzo Engine` (`127.0.0.1:36900`), and `hanzod` validator RPC/mesh (`127.0.0.1:9630` `/v1/health` + `/ext/bc/C/rpc` `eth_blockNumber`, `:9631` staking), plus LAN inference discovery (`apps/desktop/src/ipc/methods/localAi.ts`).
-- **Voice `Fn` Gestures, Cross-Window Mic Lease & Native Shortcuts**:
+- **Local AI (Zen 6 / Qwen3+ Only), Validator Node (`hanzod`) & Embedded Engine Manager**:
+  - `packages/shared/src/localAi.ts` and `apps/web/src/components/local-ai/LocalAiManagerModal.tsx` (reachable via Settings `⌘,`, Command Palette `⌘K`, `⌥⌘L`, sidebar `Local AI` pill, and Desktop menu) manage canonical **Zen 6** / `qwen3+` weights (`zen6-flash:0.6b`/`qwen3:0.6b`, `zen6-flash`/`qwen3:4b`, `zen6`/`qwen3:8b`, `zen6:14b`/`qwen3:14b`, `zen6-max`/`qwen3:30b-a3b`, `zen6-coder`/`qwen3-coder:30b`, `zen-vl`/`qwen3-vl:8b`, plus bare `zen` alias) with a strict `!/qwen2|zen[45]/i` guard, live probes for `Ollama` (`127.0.0.1:11434`), `Embedded Hanzo Engine` (`127.0.0.1:36900`), and `hanzod` validator RPC/mesh (`127.0.0.1:9630` `/v1/health` + `/ext/bc/C/rpc` `eth_blockNumber`, `:9631` staking), plus LAN inference discovery (`apps/desktop/src-tauri/src/{commands,bridge}.rs`).
+- **Voice `Fn` Gestures, Visible Stop Control, Voice-to-Action Review & Mic Lease**:
   - `packages/client-runtime/src/voice-input/{fnVoiceController,micLease}.ts` provides `Hold Fn` push-to-talk, `Double-tap Fn` hands-free toggle, `⇧⌘M` / `Ctrl+Shift+M` voice toggle, and `BroadcastChannel('hanzo-mic-lease')` + `localStorage` cross-window microphone preemption, wired into `apps/web/src/speech/` and `apps/mobile/src/features/voice-input/`.
-  - `apps/desktop/src/app/DesktopGlobalShortcuts.ts` and `DesktopApplicationMenu.ts` register global `⇧⌘I` (`CommandOrControl+Shift+I` New Thread) and `⇧⌘J` (`CommandOrControl+Shift+J` Spotlight / Command Palette), safe macOS `activate` window restoration, and in-app `⌘K`, `⌘N` / `⇧⌘O`, `⌘B`, `⇧⌘M`, `⌘,`, `⌘/`, and `⌥⌘L`.
+  - `apps/web/src/components/chat/ComposerSpeechButton.tsx` and `VoiceActionReviewCard.tsx` provide an always-visible composer mic trigger, a high-contrast destructive **Stop** button while listening, and structured Voice-to-Action review/correction cards for mutating commands (`assign ... to ...`, `move ... to ...`, `switch org to ...`).
+  - `apps/desktop/src-tauri/src/{main,menu,bridge}.rs` registers global `⇧⌘I` (`CommandOrControl+Shift+I` New Thread) and `⇧⌘J` (`CommandOrControl+Shift+J` Spotlight / Command Palette), safe macOS `Reopen` window restoration, and in-app `⌘K`, `⌘N` / `⇧⌘O`, `⌘B`, `⇧⌘M`, `⌘,`, `⌘/`, and `⌥⌘L`.
+- **Native + Web + Server Analytics & Journey Tracking (`hanzoAnalytics`)**:
+  - `packages/shared/src/hanzoAnalytics.ts` implements normalized Hanzo Analytics (`/v1/event` & Enhanced Ecommerce schema: `page_view`, `app_launched`, `desktop_app_launched`, `global_shortcut_triggered`, `deep_link_received`, `login`, `org_switched`, `begin_checkout`, `purchase`, `voice_dictation_toggled`, `voice_action_reviewed`, `local_ai_opened`, `surface_handoff`) with deterministic `event_id` deduplication for `order_id`/`transaction_id`, daily `session_id` rotation, `utm_*` extraction, sensitive query scrubbing, and `X-Org-Id` context.
+  - `apps/server/src/analyticsHub.ts` and `apps/server/src/http.ts` expose `POST /_/beacon`, `POST /api/analytics/event`, and `GET /api/analytics/recent` (100-event ring buffer + non-blocking cloud forwarder), proxied in single-origin dev via `packages/shared/src/devProxy.ts` and exposed on `window.hanzo.track(...)` via `apps/web/src/analytics/hanzoWebAnalytics.ts`.
 - **Canonical iOS & Android Remote Control (`apps/mobile`)**:
   - `apps/mobile` (`@hanzodev/mobile`, bundle ID `ai.hanzo.dev`, symlinked at `/Users/z/work/hanzo/mobile`) is the unified iOS & Android remote control app across Hanzo Relay (`https://relay.dev.hanzo.ai`), LAN/QR pairing, Tailscale, SSH, and cross-machine linked environments (`linkedEnvironmentsEnabled: true`, `enableDeviceSupport: true`, `enableAgentDeviceAccess: true`).

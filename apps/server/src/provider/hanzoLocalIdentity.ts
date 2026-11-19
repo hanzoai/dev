@@ -101,6 +101,61 @@ export interface LocalHanzoIdentitySnapshot {
   readonly accounts: ReadonlyArray<HanzoIamAccount>;
 }
 
+function parseLocalHanzoIdentitiesRaw(raw: string): LocalHanzoIdentitySnapshot {
+  try {
+    const parsed = JSON.parse(raw) as {
+      readonly active?: unknown;
+      readonly identities?: Record<string, Record<string, unknown>>;
+    };
+    const accounts: Array<HanzoIamAccount> = [];
+    for (const [id, entry] of Object.entries(parsed.identities ?? {})) {
+      if (!entry || typeof entry !== "object") continue;
+      const accessToken =
+        typeof entry.access_token === "string" ? entry.access_token.trim() : "";
+      if (!accessToken) continue;
+      const refreshToken =
+        typeof entry.refresh_token === "string" && entry.refresh_token.trim()
+          ? entry.refresh_token.trim()
+          : null;
+      const owner =
+        typeof entry.owner === "string" && entry.owner.trim()
+          ? entry.owner.trim()
+          : (id.split("/")[0] ?? "hanzo");
+      const subject =
+        typeof entry.subject === "string" && entry.subject.trim()
+          ? entry.subject.trim()
+          : (id.split("/")[1] ?? "user");
+      const issuer =
+        typeof entry.issuer === "string" && entry.issuer.trim()
+          ? entry.issuer.trim()
+          : "https://hanzo.id";
+      const email =
+        typeof entry.email === "string" && entry.email.trim() ? entry.email.trim() : null;
+      const account = buildHanzoIamAccountFromTokens({
+        issuer,
+        clientId: "hanzo-app",
+        accessToken,
+        refreshToken,
+        userinfo: {
+          sub: subject,
+          owner,
+          name: subject,
+          displayName: `${owner}/${subject}`,
+          email,
+        },
+      });
+      accounts.push({ ...account, id });
+    }
+    const activeRaw =
+      typeof parsed.active === "string" && parsed.active.trim() ? parsed.active.trim() : null;
+    const activeAccountId =
+      accounts.find((entry) => entry.id === activeRaw)?.id ?? accounts[0]?.id ?? null;
+    return { activeAccountId, accounts };
+  } catch {
+    return { activeAccountId: null, accounts: [] };
+  }
+}
+
 export const readLocalHanzoIdentities = Effect.fn("hanzoLocalIdentity.readLocalHanzoIdentities")(
   function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -115,72 +170,22 @@ export const readLocalHanzoIdentities = Effect.fn("hanzoLocalIdentity.readLocalH
     if (!raw.trim()) {
       return { activeAccountId: null, accounts: [] } satisfies LocalHanzoIdentitySnapshot;
     }
-    try {
-      const parsed = JSON.parse(raw) as {
-        readonly active?: unknown;
-        readonly identities?: Record<string, Record<string, unknown>>;
-      };
-      const accounts: Array<HanzoIamAccount> = [];
-      for (const [id, entry] of Object.entries(parsed.identities ?? {})) {
-        if (!entry || typeof entry !== "object") continue;
-        const accessToken =
-          typeof entry.access_token === "string" ? entry.access_token.trim() : "";
-        if (!accessToken) continue;
-        const refreshToken =
-          typeof entry.refresh_token === "string" && entry.refresh_token.trim()
-            ? entry.refresh_token.trim()
-            : null;
-        const owner =
-          typeof entry.owner === "string" && entry.owner.trim()
-            ? entry.owner.trim()
-            : (id.split("/")[0] ?? "hanzo");
-        const subject =
-          typeof entry.subject === "string" && entry.subject.trim()
-            ? entry.subject.trim()
-            : (id.split("/")[1] ?? "user");
-        const issuer =
-          typeof entry.issuer === "string" && entry.issuer.trim()
-            ? entry.issuer.trim()
-            : "https://hanzo.id";
-        const email =
-          typeof entry.email === "string" && entry.email.trim() ? entry.email.trim() : null;
-        const account = buildHanzoIamAccountFromTokens({
-          issuer,
-          clientId: "hanzo-app",
-          accessToken,
-          refreshToken,
-          userinfo: {
-            sub: subject,
-            owner,
-            name: subject,
-            displayName: `${owner}/${subject}`,
-            email,
-          },
-        });
-        accounts.push({ ...account, id });
-      }
-      const activeRaw = typeof parsed.active === "string" && parsed.active.trim() ? parsed.active.trim() : null;
-      const activeAccountId =
-        accounts.find((entry) => entry.id === activeRaw)?.id ?? accounts[0]?.id ?? null;
-      return { activeAccountId, accounts } satisfies LocalHanzoIdentitySnapshot;
-    } catch {
-      return { activeAccountId: null, accounts: [] } satisfies LocalHanzoIdentitySnapshot;
-    }
+    return parseLocalHanzoIdentitiesRaw(raw);
   },
 );
 
 export const resolveHanzoProviderAuth = Effect.fn("hanzoLocalIdentity.resolveHanzoProviderAuth")(
-  function* (): Effect.fn.Return<
-    ServerProvider["auth"],
-    never,
-    FileSystem.FileSystem | Path.Path | HostProcess.HomeDirectory
-  > {
+  function* () {
     const snapshot = yield* readLocalHanzoIdentities();
     const active =
       snapshot.accounts.find((entry) => entry.id === snapshot.activeAccountId) ??
       snapshot.accounts[0];
     if (!active) {
-      return { status: "unknown", type: "hanzo", label: "Hanzo Cloud" };
+      return {
+        status: "unknown",
+        type: "hanzo",
+        label: "Hanzo Cloud",
+      } satisfies ServerProvider["auth"];
     }
     const extraCount = Math.max(0, snapshot.accounts.length - 1);
     const label =
@@ -193,7 +198,7 @@ export const resolveHanzoProviderAuth = Effect.fn("hanzoLocalIdentity.resolveHan
       label,
       ...(active.email ? { email: active.email } : {}),
       workspaceId: active.owner,
-    };
+    } satisfies ServerProvider["auth"];
   },
 );
 
@@ -201,12 +206,19 @@ export const mergeCuratedHanzoModels = (
   discovered: ReadonlyArray<ServerProviderModel> | undefined,
 ): ReadonlyArray<ServerProviderModel> => {
   const bySlug = new Map<string, ServerProviderModel>();
+  const usedNames = new Set<string>();
   for (const curated of CURATED_HANZO_MODELS) {
     bySlug.set(curated.slug, curated);
+    usedNames.add(curated.name.trim().toLowerCase());
   }
   for (const model of discovered ?? []) {
     if (!bySlug.has(model.slug)) {
-      bySlug.set(model.slug, { ...model, isDefault: false });
+      const normalizedName = model.name.trim().toLowerCase();
+      const disambiguatedName = usedNames.has(normalizedName)
+        ? `${model.name} (${model.slug})`
+        : model.name;
+      usedNames.add(disambiguatedName.trim().toLowerCase());
+      bySlug.set(model.slug, { ...model, name: disambiguatedName, isDefault: false });
     }
   }
   return Array.from(bySlug.values());

@@ -1,0 +1,28 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for the Hanzo Dev Tauri desktop window",
+  "local": true,
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*",
+      "http://127.0.0.1:*/*",
+      "http://localhost:*",
+      "http://localhost:*/*"
+    ]
+  },
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "dialog:default",
+    "opener:default",
+    "os:default",
+    "process:default",
+    "shell:default",
+    "notification:default",
+    "global-shortcut:default",
+    "deep-link:default"
+  ]
+}

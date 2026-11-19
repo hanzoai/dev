@@ -138,14 +138,7 @@ export const HanzoDriver: ProviderDriver<
         ...baseInstance.orchestrationAdapter,
         driver: HANZO_DRIVER_KIND,
       },
-      ...(baseInstance.snapshotForCwd
-        ? {
-            snapshotForCwd: (cwd: string) =>
-              baseInstance
-                .snapshotForCwd!(cwd)
-                .pipe(Effect.map((snap) => enrichHanzoSnapshot(snap, resolvedAuth))),
-          }
-        : {}),
+      snapshotForCwd: (_cwd: string) => wrappedSnapshot.getSnapshot,
     } satisfies ProviderInstance;
   }),
 };

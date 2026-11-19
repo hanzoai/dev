@@ -1,6 +1,6 @@
 import type { VoiceInputState } from "@hanzodev/client-runtime/voice-input";
-import { msg, useGT, useMessages } from "gt-react";
-import { CheckIcon, MicIcon, XIcon } from "lucide-react";
+import { msg, T, useGT, useMessages } from "gt-react";
+import { MicIcon, SquareIcon, XIcon } from "lucide-react";
 import { useEffect, useState, type PointerEvent, type ReactElement } from "react";
 
 import { VoiceInputErrorPill } from "./VoiceInputErrorPill";
@@ -116,9 +116,12 @@ export function ComposerSpeechButton(props: {
   const gt = useGT();
   if (props.state.phase !== "idle") return null;
   const label = gt("Start voice input");
+  const shortcutWithFn = props.shortcutLabel
+    ? `${props.shortcutLabel} · Hold Fn · 2x Fn`
+    : "Hold Fn · 2x Fn";
 
   return (
-    <ShortcutTooltip label={label} shortcut={props.shortcutLabel}>
+    <ShortcutTooltip label={label} shortcut={shortcutWithFn}>
       <Button
         type="button"
         size={props.size === "compact" ? "icon-xs" : "icon-sm"}
@@ -230,13 +233,17 @@ export function ComposerSpeechRecordingPill(props: {
         <ShortcutTooltip label={gt("Finish voice input")} shortcut={props.finishShortcutLabel}>
           <Button
             type="button"
-            size={compact ? "icon-xs" : "icon-sm-pill"}
+            variant="destructive"
+            size={compact ? "xs" : "sm-pill"}
             aria-label={gt("Finish voice input")}
             onPointerDown={keepFocus}
             onClick={props.onStop}
             className="shrink-0"
           >
-            <CheckIcon />
+            <SquareIcon className="size-3" />
+            <span>
+              <T>Stop</T>
+            </span>
           </Button>
         </ShortcutTooltip>
       ) : null}

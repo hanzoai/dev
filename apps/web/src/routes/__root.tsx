@@ -37,6 +37,7 @@ import { ConnectDeviceApprovalCoordinator } from "../components/ConnectDeviceApp
 import { ChatGptWelcomeCoordinator } from "../components/settings/ChatGptWelcomeCoordinator";
 import { ThemeEditorHost } from "../components/settings/ThemeEditorHost";
 import { LocalAiManagerModal } from "../components/local-ai/LocalAiManagerModal";
+import { HanzoAnalyticsCoordinator } from "../components/analytics/HanzoAnalyticsCoordinator";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { Button } from "../components/ui/button";
 import { StandalonePage, StandalonePageHeader } from "../components/ui/standalone-page";
@@ -143,6 +144,7 @@ function RootRouteView() {
   return (
     <ToastProvider>
       <AnchoredToastProvider>
+        <HanzoAnalyticsCoordinator />
         <RootRouteBranch />
       </AnchoredToastProvider>
     </ToastProvider>

@@ -105,7 +105,6 @@ import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 // Below this (keyboard up on iPad, phone landscape) the hero cannot fit above the composer,
 // so the project and environment pickers move into the composer controls instead.
 const SHORT_DRAFT_VIEWPORT_HEIGHT = 380;
-const HEADING_PROJECT_SLOT = "\uE000";
 
 function NewTaskWorkspaceIcon(props: {
   readonly workspaceMode: "local" | "worktree";
@@ -763,18 +762,10 @@ export function NewTaskDraftScreen(props: {
       <T>The shared content is no longer in the inbox. You can continue editing this task draft.</T>
     </Text>
   ) : null;
-  const headingParts = gt("What should we build in {project}?", {
-    project: HEADING_PROJECT_SLOT,
-  }).split(HEADING_PROJECT_SLOT);
-  const headingBefore = headingParts[0] ?? "";
-  const headingAfter = headingParts[1] ?? "";
-  const headingBreak = headingBefore.trimEnd().lastIndexOf(" ");
-  const headingFirstLine = headingBreak < 0 ? headingBefore : headingBefore.slice(0, headingBreak);
-  const headingLead = headingBreak < 0 ? "" : headingBefore.slice(headingBreak + 1);
   const hero = flow.isScratchDraft ? (
     <View className="items-center gap-2 px-6" testID="new-task-hero">
       <Text className="text-center text-2xl font-hanzo-medium tracking-tight text-foreground">
-        <T>What should we work on?</T>
+        <T>Build what's next.</T>
       </Text>
       <View className="flex-row flex-wrap items-center justify-center gap-x-1">
         <ComposerInlineControl
@@ -791,37 +782,28 @@ export function NewTaskDraftScreen(props: {
       {shareUnavailableNotice}
     </View>
   ) : (
-    <View className="items-center gap-6 px-6" testID="new-task-hero">
-      <View className="w-full items-center gap-1.5">
-        <Text className="text-center text-2xl font-hanzo-medium tracking-tight text-foreground">
-          {headingFirstLine}
-        </Text>
-        <View className="max-w-full flex-row items-center justify-center">
-          <Text className="text-2xl font-hanzo-medium tracking-tight text-foreground">
-            {headingLead}
-          </Text>
-          <Pressable
-            accessibilityHint={gt("Opens the project picker")}
-            accessibilityLabel={selectedProjectLabel ?? selectedProject.title}
-            accessibilityRole="button"
-            disabled={isComposerInteractionLocked}
-            onPress={chooseProject}
-            className="min-w-0 max-w-[250px] border-b border-foreground-muted active:opacity-65"
+    <View className="items-center gap-3 px-6" testID="new-task-hero">
+      <Text className="text-center text-2xl font-hanzo-medium tracking-tight text-foreground">
+        <T>Build what's next.</T>
+      </Text>
+      <View className="flex-row flex-wrap items-center justify-center gap-x-2">
+        <Pressable
+          accessibilityHint={gt("Opens the project picker")}
+          accessibilityLabel={selectedProjectLabel ?? selectedProject.title}
+          accessibilityRole="button"
+          disabled={isComposerInteractionLocked}
+          onPress={chooseProject}
+          className="min-w-0 max-w-[250px] border-b border-foreground-muted active:opacity-65"
+        >
+          <Text
+            className="text-sm font-hanzo-medium tracking-tight text-foreground-muted"
+            numberOfLines={1}
           >
-            <Text
-              className="text-2xl font-hanzo-medium tracking-tight text-foreground"
-              numberOfLines={1}
-            >
-              {selectedProjectLabel ?? selectedProject.title}
-            </Text>
-          </Pressable>
-          <Text className="text-2xl font-hanzo-medium tracking-tight text-foreground">
-            {headingAfter}
+            {selectedProjectLabel ?? selectedProject.title}
           </Text>
-        </View>
+        </Pressable>
+        {environmentControl}
       </View>
-
-      {environmentControl}
       {shareUnavailableNotice}
     </View>
   );

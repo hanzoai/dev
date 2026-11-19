@@ -1,8 +1,0 @@
-{
-  "uuid": "snap-shot@dev.hanzo.ai",
-  "name": "Hanzo Dev SnapShots",
-  "description": "Allows Hanzo Dev to capture the focused window, identify it for optional accessibility text, and animate it into Hanzo Dev. Disable this extension to revoke access.",
-  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
-  "version": 3,
-  "url": "https://github.com/hanzoai/dev"
-}

@@ -16,6 +16,7 @@ build/
 release/
 release-mock/
 .hanzo-dev
+.hanzo-dev*/
 .idea/
 apps/web/.playwright
 apps/web/playwright-report
@@ -30,6 +31,8 @@ squashfs-root/
 /audits/
 dist-electron/
 .electron-runtime/
+**/src-tauri/target/
+**/src-tauri/gen/
 .showcase/
 apps/mobile/.showcase/
 apps/mobile/.generated/

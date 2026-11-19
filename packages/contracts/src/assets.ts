@@ -92,7 +92,9 @@ export type AssetImageDimensions = typeof AssetImageDimensions.Type;
 export const AssetCreateUrlResult = Schema.Struct({
   relativeUrl: TrimmedNonEmptyString.check(
     Schema.isMaxLength(4096),
-    Schema.isPattern(/^\/api\/assets\/(?!\.{1,2}\/)[\w.-]+\/(?!(?:\.|%2[eE]){1,2}$)[^/\\?#\s]+$/u),
+    Schema.isPattern(
+      /^\/(?:api|v1)\/assets\/(?!\.{1,2}\/)[\w.-]+\/(?!(?:\.|%2[eE]){1,2}$)[^/\\?#\s]+$/u,
+    ),
   ),
   expiresAt: Schema.Number,
   sourcePath: Schema.optional(
@@ -136,7 +138,7 @@ export const AttachmentCreateUploadUrlResult = Schema.Struct({
   attachmentId: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
   relativeUrl: TrimmedNonEmptyString.check(
     Schema.isMaxLength(4096),
-    Schema.isPattern(/^\/api\/attachments\/upload\/(?!\.{1,2}$)[\w.-]+$/u),
+    Schema.isPattern(/^\/(?:api|v1)\/attachments\/upload\/(?!\.{1,2}$)[\w.-]+$/u),
   ),
   expiresAt: Schema.Number,
 });

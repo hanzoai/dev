@@ -468,7 +468,7 @@ export function LocalAiManagerModal() {
                   type="text"
                   value={search}
                   onChange={(event) => setSearch(event.currentTarget.value)}
-                  placeholder={gt("Filter Zen4 / Qwen3+ models...")}
+                  placeholder={gt("Filter Zen / Qwen3+ models...")}
                   aria-label={gt("Filter local models")}
                   className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs focus:outline-hidden"
                 />

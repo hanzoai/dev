@@ -329,7 +329,7 @@ export const CodexDriver: ProviderDriver<
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     );
     const snapshotForCwd = (cwd: string) =>
-      !effectiveConfig.enabled
+      !effectiveConfig.enabled || isHanzoDevBinary(effectiveConfig.binaryPath)
         ? snapshot.getSnapshot
         : Effect.all([
             snapshot.getSnapshot,
@@ -339,7 +339,10 @@ export const CodexDriver: ProviderDriver<
               launchArgs: resolveCodexLaunchArgs(effectiveConfig.launchArgs, processEnv),
               cwd,
               environment: processEnv,
-            }).pipe(Effect.timeout(resolveProviderProbeTimeoutMs("codex", 20_000, processEnv))),
+            }).pipe(
+              Effect.timeout(resolveProviderProbeTimeoutMs("codex", 20_000, processEnv)),
+              Effect.orElseSucceed(() => []),
+            ),
           ]).pipe(
             Effect.map(([machineSnapshot, skills]) => ({ ...machineSnapshot, skills })),
             Effect.mapError(

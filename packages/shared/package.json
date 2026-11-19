@@ -7,6 +7,10 @@
       "types": "./src/png.ts",
       "import": "./src/png.ts"
     },
+    "./hanzoAnalytics": {
+      "types": "./src/hanzoAnalytics.ts",
+      "import": "./src/hanzoAnalytics.ts"
+    },
     "./pullRequestAnchor": {
       "types": "./src/pullRequestAnchor.ts",
       "import": "./src/pullRequestAnchor.ts"

@@ -16,13 +16,8 @@ import { useOrderWhileOpen } from "~/hooks/useOrderWhileOpen";
 import { useProjectPin } from "~/hooks/useProjectGroupUpdate";
 import { useScratchProject } from "~/hooks/useScratchProject";
 import { isTriagePrompt } from "@hanzodev/shared/triagePrompt";
-import { useClientSettings } from "~/hooks/useSettings";
 import { seedDraftModelSelection } from "~/lib/seedDraftModelSelection";
-import {
-  deriveLogicalProjectKeyFromSettings,
-  pickableProjectGroups,
-  selectProjectGroupingSettings,
-} from "@hanzodev/client-runtime/state/project-grouping";
+import { pickableProjectGroups } from "@hanzodev/client-runtime/state/project-grouping";
 import {
   buildSidebarProjectPickerEntries,
   projectGroupsSpanEnvironments,
@@ -71,7 +66,6 @@ export function DraftHeroHeadline({
   const projects = useProjects();
   const { environments } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const setLogicalProjectDraftThreadId = useComposerDraftStore(
     (store) => store.setLogicalProjectDraftThreadId,
   );
@@ -81,7 +75,7 @@ export function DraftHeroHeadline({
     draftId ? isTriagePrompt(store.getComposerDraft(draftId)?.prompt ?? "") : false,
   );
   const openAddProject = () => openCommandPalette({ open: "add-project" });
-  const { scratchEnvironmentId, scratchWorkspaceRootFor, openScratchProject } = useScratchProject();
+  const { scratchWorkspaceRootFor } = useScratchProject();
   const openProjectDraft = useNewThreadHandler();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -135,8 +129,6 @@ export function DraftHeroHeadline({
             project.environmentId === activeProjectRef.environmentId &&
             project.id === activeProjectRef.projectId,
         ) ?? null);
-  const scratchTargetEnvironmentId = scratchEnvironmentId(activeProjectRef?.environmentId ?? null);
-  const scratchWorkspaceRoot = scratchWorkspaceRootFor(scratchTargetEnvironmentId);
   const isScratchDraft =
     activeProject !== null &&
     isScratchProject(activeProject, scratchWorkspaceRootFor(activeProject.environmentId));
@@ -161,23 +153,11 @@ export function DraftHeroHeadline({
         );
   const selectedPickerItem = pickerItems.find((item) => item.value === activeProjectKey) ?? null;
 
-  // The picker can change the draft's target while the no-project home is
-  // still being opened; a stale continuation must not retarget it again. Picking
-  // a project clears the pending request, and the draft session is compared
-  // against the store when the scratch project arrives.
-  const pendingScratchRef = useRef<symbol | null>(null);
-  const draftTargetKey = () => {
-    const session = draftId ? useComposerDraftStore.getState().getDraftSession(draftId) : null;
-    return session
-      ? `${session.environmentId}:${session.projectId}:${session.logicalProjectKey}`
-      : null;
-  };
   // Retargeting an empty draft would overwrite the project's draft and strand browser tabs.
   const selectProject = (project: (typeof projects)[number], logicalProjectKey: string) => {
     if (!draftId) {
       return;
     }
-    pendingScratchRef.current = null;
     const projectRef = scopeProjectRef(project.environmentId, project.id);
     if (!composerDraftHasUserContent(getComposerDraft(draftId))) {
       void openProjectDraft(projectRef);
@@ -185,21 +165,6 @@ export function DraftHeroHeadline({
     }
     setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId);
     seedDraftModelSelection(draftId, projectRef);
-  };
-  const startScratch = async (): Promise<boolean> => {
-    if (scratchTargetEnvironmentId === null || isScratchDraft) {
-      return false;
-    }
-    const request = Symbol("scratch");
-    pendingScratchRef.current = request;
-    const requestedTarget = draftTargetKey();
-    const project = await openScratchProject(scratchTargetEnvironmentId);
-    if (!project || pendingScratchRef.current !== request || draftTargetKey() !== requestedTarget) {
-      return false;
-    }
-    pendingScratchRef.current = null;
-    selectProject(project, deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings));
-    return true;
   };
 
   const projectSelector = shouldShowProjectMenu ? (
@@ -320,31 +285,6 @@ export function DraftHeroHeadline({
     </button>
   );
 
-  const noProjectShortcut = shortcutLabelForCommand(keybindings, "chat.newWithoutProject");
-  const orStartWithoutProject =
-    scratchWorkspaceRoot !== null && !isScratchDraft && (hasResolvedProject || canChooseProject) ? (
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <InlineButton
-              tone="muted"
-              className="pointer-events-auto"
-              onClick={() =>
-                void startScratch().then((started) => {
-                  if (started) {
-                    document.querySelector<HTMLElement>("[data-draft-project-trigger]")?.focus();
-                  }
-                })
-              }
-            />
-          }
-        >
-          <T>or start without a project</T>
-        </TooltipTrigger>
-        {noProjectShortcut ? <TooltipPopup side="bottom">{noProjectShortcut}</TooltipPopup> : null}
-      </Tooltip>
-    ) : null;
-
   if (isScratchDraft && isTriageDraftPrompt) {
     const environment = environments.find(
       (entry) => entry.environmentId === activeProject.environmentId,
@@ -366,7 +306,7 @@ export function DraftHeroHeadline({
       ) : (
         <h1 className="w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
           {isScratchDraft ? (
-            <T>What should we work on?</T>
+            <T>Build what's next.</T>
           ) : canChooseProject ? (
             <T>
               <Var>{projectSelector}</Var> to start
@@ -375,11 +315,6 @@ export function DraftHeroHeadline({
             <T>Add a project to start</T>
           )}
         </h1>
-      )}
-      {scratchWorkspaceRoot === null ? null : (
-        <p className="mt-2 flex h-6 w-full items-center justify-center text-sm">
-          {isScratchDraft ? projectSelector : orStartWithoutProject}
-        </p>
       )}
     </div>
   );

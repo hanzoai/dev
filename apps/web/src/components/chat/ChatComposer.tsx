@@ -146,6 +146,8 @@ import { useDictationShortcut } from "../../speech/useDictationShortcut";
 import { useDictationSubmissionShortcut } from "../../speech/useDictationSubmissionShortcut";
 import { useEnvironmentSpeechInput } from "../../speech/useEnvironmentSpeechInput";
 import { ComposerSpeechButton, ComposerSpeechRecordingPill } from "./ComposerSpeechButton";
+import { VoiceActionReviewCard } from "./VoiceActionReviewCard";
+import { trackHanzoEvent } from "../../analytics/hanzoWebAnalytics";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
 import { shortcutLabelForCommand, type ShortcutMatchContext } from "../../keybindings";
 import {
@@ -3801,6 +3803,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               </div>
             ) : null}
 
+            <VoiceActionReviewCard
+              promptText={prompt}
+              onRewritePrompt={(nextPrompt) => {
+                const snapshot = readComposerSnapshot();
+                applyPromptReplacement(0, snapshot.value.length, nextPrompt, {
+                  expectedText: snapshot.value,
+                });
+              }}
+            />
+
             {isComposerCollapsedMobile && speechInput.state.phase === "idle" ? null : (
               <div
                 data-chat-composer-footer="true"
@@ -3900,7 +3912,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                           onStart={() => void speechInput.start()}
                         />
                       </>
-                    ) : null}
+                    ) : (
+                      <ComposerSpeechButton
+                        state={speechInput.state}
+                        shortcutLabel={dictationShortcutLabel}
+                        disabled={dictationDisabled}
+                        onStart={() => speechInput.setup.setOpen(true)}
+                      />
+                    )}
                     <VoiceInputSetup
                       environmentId={speechInput.transcriptionEnvironmentId}
                       open={speechInput.setup.open}

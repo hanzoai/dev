@@ -233,12 +233,13 @@ export const seedHanzoCloudDefaultInstance = Effect.fn(
     (currentDefault.model.startsWith("enso") ||
       currentDefault.model.startsWith("zen") ||
       currentDefault.model.startsWith("hanzo/"));
+  const needsDarkDefault = currentSettings.defaultAppearance === "";
   const needsRemoteDefaults =
     !currentSettings.linkedEnvironmentsEnabled ||
     !currentSettings.enableDeviceSupport ||
     !currentSettings.enableAgentDeviceAccess;
 
-  if (!currentDefault || pointsHanzoModelAtCodex || needsRemoteDefaults) {
+  if (!currentDefault || pointsHanzoModelAtCodex || needsDarkDefault || needsRemoteDefaults) {
     yield* serverSettings
       .updateSettings({
         ...(!currentDefault || pointsHanzoModelAtCodex
@@ -247,6 +248,12 @@ export const seedHanzoCloudDefaultInstance = Effect.fn(
                 instanceId: HANZO_DEFAULT_INSTANCE_ID,
                 model: currentDefault?.model && pointsHanzoModelAtCodex ? currentDefault.model : "enso-auto",
               },
+            }
+          : {}),
+        ...(needsDarkDefault
+          ? {
+              defaultAppearance: "dark",
+              defaultAppearanceSetAt: "2026-11-19T00:00:00.000Z",
             }
           : {}),
         linkedEnvironmentsEnabled: true,

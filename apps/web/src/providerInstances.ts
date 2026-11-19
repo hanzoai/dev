@@ -257,9 +257,19 @@ export function resolveDefaultProviderModelSelection(
   providers: ReadonlyArray<ServerProvider>,
   selection: ModelSelection | null | undefined,
 ): ModelSelection | null {
-  const instanceId = resolveSelectableProviderInstance(providers, selection?.instanceId);
+  const hanzoInstanceId = ProviderInstanceId.make("hanzo");
+  const normalizedSelection =
+    selection &&
+    selection.instanceId === ProviderInstanceId.make("codex") &&
+    (selection.model.startsWith("enso") ||
+      selection.model.startsWith("zen") ||
+      selection.model.startsWith("hanzo/")) &&
+    providers.some((provider) => provider.instanceId === hanzoInstanceId && provider.enabled)
+      ? { ...selection, instanceId: hanzoInstanceId }
+      : selection;
+  const instanceId = resolveSelectableProviderInstance(providers, normalizedSelection?.instanceId);
   if (instanceId === undefined) return null;
-  if (selection?.instanceId === instanceId) return selection;
+  if (normalizedSelection?.instanceId === instanceId) return normalizedSelection;
   const model = getDefaultProviderInstanceModel(providers, instanceId);
   return model ? { instanceId, model } : null;
 }

@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, PreviewRuntime, PreviewSessionSnapshot } from "@hanzodev/contracts";
 
-import { isElectron } from "~/env";
+import { isElectron, isTauri } from "~/env";
 import { isPreviewSupportedInRuntime } from "~/previewStateStore";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { primaryEnvironmentIdAtom } from "~/state/primaryEnvironment";
@@ -48,6 +48,7 @@ export function rendersServerTabNatively(
 ): boolean {
   return (
     isElectron &&
+    !isTauri &&
     snapshot?.runtime === "server" &&
     !snapshot.headless &&
     primaryEnvironmentId !== null &&

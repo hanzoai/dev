@@ -24,6 +24,7 @@ import { resolveSpeechVocabulary } from "@hanzodev/shared/speech";
 import { useEffect, useSyncExternalStore } from "react";
 
 import { toastManager } from "../components/ui/toast";
+import { trackHanzoEvent } from "../analytics/hanzoWebAnalytics";
 import { chooseRecordingMicrophone } from "./browserMicrophones";
 import { createBrowserVoiceInputPlatform } from "./browserVoiceInput";
 import { runEnvironmentSpeech } from "./runEnvironmentSpeech";
@@ -275,6 +276,7 @@ export class VoiceInputSession {
     this.target = target;
     this.publishActivity(SILENT_ACTIVITY);
     this.publish({ ...this.snapshot, target });
+    trackHanzoEvent("voice_dictation_toggled", { action: "start", ownerKey: target.ownerKey });
     return this.controller.start();
   }
 
@@ -286,6 +288,7 @@ export class VoiceInputSession {
   }
 
   stop(): Promise<void> {
+    trackHanzoEvent("voice_dictation_toggled", { action: "stop", ownerKey: this.ownerKey });
     return this.controller.stop();
   }
 

@@ -615,4 +615,42 @@ describe("provider icon metadata", () => {
     expect(restoredEntry?.acpRegistryIconUrl).toBe(iconUrl);
     expect(restoredEntry?.enabled).toBe(true);
   });
+
+  it("defaults to Hanzo enso-auto and repairs Hanzo model slugs mistakenly paired with codex", () => {
+    const providers = [
+      provider({
+        provider: ProviderDriverKind.make("hanzo"),
+        instanceId: "hanzo",
+        displayName: "Hanzo",
+        models: [model("enso-auto", false, true), model("zen6-coder")],
+      }),
+      provider({
+        provider: ProviderDriverKind.make("hanzoGen"),
+        instanceId: "hanzoGen",
+        displayName: "Hanzo Gen",
+        models: [model("enso-auto", false, true)],
+      }),
+      provider({
+        provider: ProviderDriverKind.make("codex"),
+        instanceId: "codex",
+        displayName: "Codex",
+        models: [model("gpt-5.4", false, true)],
+      }),
+    ];
+
+    expect(resolveDefaultProviderModelSelection(providers, null)).toEqual({
+      instanceId: ProviderInstanceId.make("hanzo"),
+      model: "enso-auto",
+    });
+
+    expect(
+      resolveDefaultProviderModelSelection(providers, {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "enso-auto",
+      }),
+    ).toEqual({
+      instanceId: ProviderInstanceId.make("hanzo"),
+      model: "enso-auto",
+    });
+  });
 });

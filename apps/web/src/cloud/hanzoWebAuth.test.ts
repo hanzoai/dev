@@ -238,11 +238,17 @@ describe("HanzoWebAuthController IAM, Org Switcher & Local AI guard", () => {
     expect(controller.activeAccount?.accessToken).toBe("tok_pkce_desktop");
   });
 
-  it("enforces Qwen3+ local model selection and rejects legacy qwen2 weights", () => {
-    writeSelectedLocalAiModel("zen4-coder:30b");
-    expect(readSelectedLocalAiModel()).toBe("zen4-coder:30b");
+  it("enforces Zen 6 / Qwen3+ local model selection and rejects legacy qwen2, zen4, and zen5 weights", () => {
+    writeSelectedLocalAiModel("zen6-coder");
+    expect(readSelectedLocalAiModel()).toBe("zen6-coder");
 
     writeSelectedLocalAiModel("qwen2.5-coder:7b");
-    expect(readSelectedLocalAiModel()).toBe("zen4-coder:30b");
+    expect(readSelectedLocalAiModel()).toBe("zen6-coder");
+
+    writeSelectedLocalAiModel("zen4:8b");
+    expect(readSelectedLocalAiModel()).toBe("zen6-coder");
+
+    writeSelectedLocalAiModel("zen5:14b");
+    expect(readSelectedLocalAiModel()).toBe("zen6-coder");
   });
 });

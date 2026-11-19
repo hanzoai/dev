@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from "react";
 
+import { trackHanzoEvent } from "../analytics/hanzoWebAnalytics";
+
 export type LocalAiTabId = "models" | "node" | "engine";
 
 export interface LocalAiModalState {
@@ -48,6 +50,7 @@ export function openLocalAiManager(
     filterQuery,
   };
   emit();
+  trackHanzoEvent("local_ai_opened", { tab });
 }
 
 export function closeLocalAiManager(): void {
@@ -66,18 +69,18 @@ export function useLocalAiModalState(): LocalAiModalState {
 }
 
 export function readSelectedLocalAiModel(): string {
-  if (typeof window === "undefined") return "zen4:8b";
+  if (typeof window === "undefined") return "zen6";
   try {
     const raw = window.localStorage.getItem(SELECTED_LOCAL_MODEL_KEY)?.trim();
-    if (raw && !/qwen2/iu.test(raw)) return raw;
+    if (raw && !/qwen2|zen[45]/iu.test(raw)) return raw;
   } catch {
     // Ignore restricted storage environments.
   }
-  return "zen4:8b";
+  return "zen6";
 }
 
 export function writeSelectedLocalAiModel(modelId: string): void {
-  if (typeof window === "undefined" || /qwen2/iu.test(modelId)) return;
+  if (typeof window === "undefined" || /qwen2|zen[45]/iu.test(modelId)) return;
   try {
     window.localStorage.setItem(SELECTED_LOCAL_MODEL_KEY, modelId.trim());
   } catch {

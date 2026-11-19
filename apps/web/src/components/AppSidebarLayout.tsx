@@ -402,7 +402,7 @@ function SidebarControl({ showSidebar }: { readonly showSidebar: boolean }) {
 
     window.addEventListener("keydown", onKeyDown, true);
     const unsubscribe = window.desktopBridge?.onMenuAction((action) => {
-      if (action === "sidebar.toggle") toggleSidebar();
+      if (action === "sidebar.toggle" || action === "toggle-sidebar") toggleSidebar();
     });
     return () => {
       window.removeEventListener("keydown", onKeyDown, true);

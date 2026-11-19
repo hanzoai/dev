@@ -111,10 +111,10 @@ describe("remote environment authorization", () => {
         url: "https://remote.example.com/oauth/token",
         method: "POST",
         headers: { dpop: "token-proof", "content-type": "application/x-www-form-urlencoded" },
-        body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token=one-time-credential&subject_token_type=urn%3At3%3Aparams%3Aoauth%3Atoken-type%3Aenvironment-bootstrap&requested_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aaccess_token&client_label=Hanzo+Code+Mobile&client_device_type=mobile&client_os=iOS",
+        body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token=one-time-credential&subject_token_type=urn%3Ahanzo%3Aparams%3Aoauth%3Atoken-type%3Aenvironment-bootstrap&requested_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aaccess_token&client_label=Hanzo+Dev+Mobile&client_device_type=mobile&client_os=iOS",
       });
       expectFetchCall(fetch.calls, 2, {
-        url: "https://remote.example.com/api/auth/websocket-ticket",
+        url: "https://remote.example.com/v1/auth/websocket-ticket",
         method: "POST",
         headers: {
           authorization: "DPoP dpop-access-token",
@@ -148,7 +148,7 @@ describe("remote environment authorization", () => {
       expectFetchCall(fetch.calls, 1, {
         url: "https://remote.example.com/oauth/token",
         method: "POST",
-        body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token=pairing-token&subject_token_type=urn%3At3%3Aparams%3Aoauth%3Atoken-type%3Aenvironment-bootstrap&requested_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aaccess_token&scope=orchestration%3Aread",
+        body: "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&subject_token=pairing-token&subject_token_type=urn%3Ahanzo%3Aparams%3Aoauth%3Atoken-type%3Aenvironment-bootstrap&requested_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Aaccess_token&scope=orchestration%3Aread",
       });
     }),
   );
@@ -232,14 +232,14 @@ describe("remote environment authorization", () => {
       }).pipe(provideRemoteHttp(fetch.fetchFn));
 
       expectFetchCall(fetch.calls, 1, {
-        url: "https://remote.example.com/api/auth/websocket-ticket/rpc",
+        url: "https://remote.example.com/v1/auth/websocket-ticket/rpc",
         method: "POST",
         headers: { authorization: "DPoP dpop-access-token", dpop: "proof-1" },
       });
       expect(proofs).toEqual([
         {
           method: "POST",
-          url: "https://remote.example.com/api/auth/websocket-ticket/rpc",
+          url: "https://remote.example.com/v1/auth/websocket-ticket/rpc",
           accessToken: "dpop-access-token",
         },
         { method: "GET", url: "https://remote.example.com/ws", accessToken: "ws-ticket" },
@@ -262,7 +262,7 @@ describe("remote environment authorization", () => {
         use: "media",
       }).pipe(provideRemoteHttp(fetch.fetchFn));
       expectFetchCall(fetch.calls, 1, {
-        url: "https://remote.example.com/api/auth/websocket-ticket/media",
+        url: "https://remote.example.com/v1/auth/websocket-ticket/media",
         method: "POST",
         headers: { dpop: "media-proof" },
       });
@@ -288,24 +288,24 @@ describe("remote environment authorization", () => {
       }).pipe(provideRemoteHttp(fetch.fetchFn));
 
       expect(fetch.calls.map(([target]) => String(target))).toEqual([
-        "https://remote.example.com/api/auth/websocket-ticket/rpc",
-        "https://remote.example.com/api/auth/websocket-ticket",
+        "https://remote.example.com/v1/auth/websocket-ticket/rpc",
+        "https://remote.example.com/v1/auth/websocket-ticket",
       ]);
       expect(proofs).toEqual([
         {
           method: "POST",
-          url: "https://remote.example.com/api/auth/websocket-ticket/rpc",
+          url: "https://remote.example.com/v1/auth/websocket-ticket/rpc",
           accessToken: "dpop-access-token",
         },
         {
           method: "POST",
-          url: "https://remote.example.com/api/auth/websocket-ticket",
+          url: "https://remote.example.com/v1/auth/websocket-ticket",
           accessToken: "dpop-access-token",
         },
         { method: "GET", url: "https://remote.example.com/ws", accessToken: "old-ticket" },
       ]);
       expectFetchCall(fetch.calls, 2, {
-        url: "https://remote.example.com/api/auth/websocket-ticket",
+        url: "https://remote.example.com/v1/auth/websocket-ticket",
         method: "POST",
         headers: { dpop: "proof-2" },
       });

@@ -30,6 +30,24 @@ export const hanzoIcon: ProviderIcon = {
   ],
 };
 
+export const hanzoGenIcon: ProviderIcon = {
+  viewBox: "0 0 67 67",
+  fill: { light: "#09090B", dark: "#FAFAFA" },
+  paths: [
+    { d: "M22.21 0H0V22.3184H22.21V0Z" },
+    { d: "M66.7198 0H44.5098V22.3184H66.7198V0Z" },
+    {
+      d: "M66.7038 22.3184H22.2534L0.0878906 44.6367H44.4634L66.7038 22.3184Z",
+      fill: { light: "#A1A1AA", dark: "#71717A" },
+    },
+    { d: "M22.21 67V44.6369H0V67H22.21Z" },
+    {
+      d: "M66.7198 67V44.6369H44.5098V67H66.7198ZM61.16 61.44V50.2H50.07V61.44H61.16Z",
+      fillRule: "evenodd",
+    },
+  ],
+};
+
 // OpenRouter's Ink and Cloud glyphs from https://openrouter.ai/brand.
 export const openRouterIcon: ProviderIcon = {
   viewBox: "0 0 1024 730",
@@ -53,7 +71,7 @@ export const providerClients = makeProviderClientRegistry([
   {
     driverKind: ProviderDriverKind.make("hanzoGen"),
     label: "Hanzo Gen",
-    icon: hanzoIcon,
+    icon: hanzoGenIcon,
     modelFamilies: ["Enso", "Zen ", "Kai "],
     acpRegistryAgentIds: ["hanzo-gen"],
     settingsSchema: HanzoGenSettings,
