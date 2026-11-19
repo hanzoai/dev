@@ -116,7 +116,7 @@ export const HanzoGenDriver: ProviderDriver<
       displayName: displayName ?? "Hanzo Gen",
       accentColor,
       environment: [
-        ...environment,
+        ...(environment ?? []),
         { name: "HANZO_GEN", value: "1", sensitive: false },
         ...(genBinary ? [{ name: "HANZO_GEN_BINARY", value: genBinary, sensitive: false }] : []),
       ],
