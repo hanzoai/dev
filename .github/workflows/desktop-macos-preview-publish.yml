@@ -461,7 +461,7 @@ jobs:
               `Version: ${process.env.PREVIEW_VERSION}`,
               `Commit: ${process.env.HEAD_SHA.slice(0, 7)}`,
               "",
-              "Signed and notarized, with Hanzo Connect enabled. The app bundle (server, web client, Electron main) is built from this PR; packaging, native helpers, and desktop dependencies come from `main`.",
+              "Signed and notarized, with Hanzo Connect enabled. The app bundle (server and web client) is built from this PR; the native Rust Tauri v2 shell, packaging, and native helpers come from `main`.",
               "",
               "No GitHub sign-in is needed. The download stays available until this PR closes. The `preview:mac` label was consumed by this build; a maintainer applies it again to build a newer commit.",
             ].join("\n");

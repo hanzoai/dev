@@ -32,7 +32,6 @@ const childEnv = {
   HANZO_DEV_REPO_ROOT: repoRoot,
 };
 delete childEnv.VITE_DEV_SERVER_URL;
-delete childEnv.ELECTRON_RUN_AS_NODE;
 
 const child = NodeChildProcess.spawn(releaseBin, [], {
   stdio: "inherit",

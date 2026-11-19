@@ -8,7 +8,11 @@ pub fn build_app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     #[cfg(target_os = "macos")]
     {
         let app_menu = Submenu::new(app, "Hanzo Dev", true)?;
-        app_menu.append(&PredefinedMenuItem::about(app, Some("About Hanzo Dev"), None)?)?;
+        app_menu.append(&PredefinedMenuItem::about(
+            app,
+            Some("About Hanzo Dev"),
+            None,
+        )?)?;
         app_menu.append(&PredefinedMenuItem::separator(app)?)?;
         app_menu.append(&MenuItem::with_id(
             app,
@@ -103,6 +107,13 @@ pub fn build_app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         true,
         Some("CmdOrCtrl+Shift+V"),
     )?)?;
+    view_menu.append(&MenuItem::with_id(
+        app,
+        "snapshot:capture",
+        "Take SnapShot",
+        true,
+        Some("CmdOrCtrl+Shift+2"),
+    )?)?;
     view_menu.append(&PredefinedMenuItem::separator(app)?)?;
     view_menu.append(&PredefinedMenuItem::fullscreen(app, None)?)?;
     menu.append(&view_menu)?;
@@ -133,6 +144,11 @@ pub fn handle_menu_event(app: &AppHandle, raw_id: &str) {
                 }
             }
         }
+        return;
+    }
+
+    if raw_id == "snapshot:capture" {
+        crate::snapshot::spawn_interactive_snapshot(app.clone());
         return;
     }
 

@@ -7,6 +7,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { previewBridge } from "~/components/preview/previewBridge";
+import { isTauri } from "~/env";
 import {
   preventThumbButtonFocus,
   takeThumbButtonNavigation,
@@ -151,6 +152,26 @@ export function HostedBrowserWebview(props: {
   const setWebviewRef = (node: HTMLElement | null) => {
     webviewRef.current = node as ElectronWebview | null;
   };
+
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- registers Tauri preview iframe tabs with the desktop preview bridge
+  useEffect(() => {
+    const bridge = previewBridge;
+    if (!isTauri || !clientSettingsHydrated || !config || !bridge) return;
+    let disposed = false;
+    const lease = tabLeaseRef.current;
+    if (!lease) return;
+    void (async () => {
+      try {
+        await lease.ready;
+        if (disposed) return;
+        await bridge.registerWebview(runtimeTabId, 1);
+        withDesktopTab(runtimeTabId, () => bridge.setShown(runtimeTabId, reportedShown()));
+      } catch {}
+    })();
+    return () => {
+      disposed = true;
+    };
+  }, [clientSettingsHydrated, config, runtimeTabId]);
 
   // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- registers the webview's webContents with the desktop bridge and listens for crashes and focus
   useEffect(() => {
@@ -383,45 +404,70 @@ export function HostedBrowserWebview(props: {
             transformStyle: viewportTransform && fullDetail ? "preserve-3d" : undefined,
           }}
         >
-          <webview
-            key={webviewGeneration}
-            ref={setWebviewRef}
-            // Electron needs allowpopups at attachment. React drops boolean values for unknown attributes.
-            {...({ allowpopups: "true" } as unknown as { readonly allowpopups?: boolean })}
-            src={webviewGeneration === 0 ? initialSrc : recoverySrc}
-            partition={config.partition}
-            webpreferences={config.webPreferences}
-            {...(config.preloadUrl ? { preload: config.preloadUrl } : {})}
-            data-preview-tab={runtimeTabId}
-            data-preview-server-tab={tabId}
-            data-preview-viewport-mode={effectiveViewport._tag}
-            data-preview-viewport-key={browserViewportSettingKey(effectiveViewport)}
-            data-preview-css-width={
-              fittedSourceViewport
-                ? fittedSourceViewport.width
-                : effectiveViewport._tag === "fill"
-                  ? Math.max(1, Math.round(layout.viewportWidth / layoutZoomFactor))
-                  : effectiveViewport.width
-            }
-            data-preview-css-height={
-              fittedSourceViewport
-                ? fittedSourceViewport.height
-                : effectiveViewport._tag === "fill"
-                  ? Math.max(1, Math.round(layout.viewportHeight / layoutZoomFactor))
-                  : effectiveViewport.height
-            }
-            aria-hidden={active ? undefined : true}
-            className={cn(
-              "absolute top-0 left-0 flex overflow-hidden bg-white",
-              active && !layout.fillsPanel && "ring-1 ring-border/70 shadow-sm",
-            )}
-            style={{
-              width: layout.viewportWidth / layout.viewportScale,
-              height: layout.viewportHeight / layout.viewportScale,
-              transform: viewportTransform,
-              transformOrigin: "top left",
-            }}
-          />
+          {isTauri ? (
+            <iframe
+              key={webviewGeneration}
+              title={tabId}
+              src={webviewGeneration === 0 ? initialSrc : recoverySrc}
+              sandbox="allow-scripts allow-forms allow-popups allow-modals allow-downloads"
+              data-tauri-preview-iframe={runtimeTabId}
+              data-preview-tab={runtimeTabId}
+              data-preview-server-tab={tabId}
+              data-preview-viewport-mode={effectiveViewport._tag}
+              data-preview-viewport-key={browserViewportSettingKey(effectiveViewport)}
+              aria-hidden={active ? undefined : true}
+              className={cn(
+                "absolute top-0 left-0 border-0 bg-white",
+                active && !layout.fillsPanel && "ring-1 ring-border/70 shadow-sm",
+              )}
+              style={{
+                width: layout.viewportWidth / layout.viewportScale,
+                height: layout.viewportHeight / layout.viewportScale,
+                transform: viewportTransform,
+                transformOrigin: "top left",
+              }}
+            />
+          ) : (
+            <webview
+              key={webviewGeneration}
+              ref={setWebviewRef}
+              // Electron needs allowpopups at attachment. React drops boolean values for unknown attributes.
+              {...({ allowpopups: "true" } as unknown as { readonly allowpopups?: boolean })}
+              src={webviewGeneration === 0 ? initialSrc : recoverySrc}
+              partition={config.partition}
+              webpreferences={config.webPreferences}
+              {...(config.preloadUrl ? { preload: config.preloadUrl } : {})}
+              data-preview-tab={runtimeTabId}
+              data-preview-server-tab={tabId}
+              data-preview-viewport-mode={effectiveViewport._tag}
+              data-preview-viewport-key={browserViewportSettingKey(effectiveViewport)}
+              data-preview-css-width={
+                fittedSourceViewport
+                  ? fittedSourceViewport.width
+                  : effectiveViewport._tag === "fill"
+                    ? Math.max(1, Math.round(layout.viewportWidth / layoutZoomFactor))
+                    : effectiveViewport.width
+              }
+              data-preview-css-height={
+                fittedSourceViewport
+                  ? fittedSourceViewport.height
+                  : effectiveViewport._tag === "fill"
+                    ? Math.max(1, Math.round(layout.viewportHeight / layoutZoomFactor))
+                    : effectiveViewport.height
+              }
+              aria-hidden={active ? undefined : true}
+              className={cn(
+                "absolute top-0 left-0 flex overflow-hidden bg-white",
+                active && !layout.fillsPanel && "ring-1 ring-border/70 shadow-sm",
+              )}
+              style={{
+                width: layout.viewportWidth / layout.viewportScale,
+                height: layout.viewportHeight / layout.viewportScale,
+                transform: viewportTransform,
+                transformOrigin: "top left",
+              }}
+            />
+          )}
         </div>
         {active && effectiveViewport._tag !== "fill" && !fittedSourceViewport ? (
           <>

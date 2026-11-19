@@ -4,6 +4,7 @@
   "version": "0.1.10",
   "identifier": "ai.hanzo.dev",
   "build": {
+    "beforeBuildCommand": "node scripts/stage-tauri-resources.mjs",
     "frontendDist": "../../web/dist",
     "devUrl": "http://127.0.0.1:5733"
   },
@@ -24,6 +25,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": [
+      "resources/**/*"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

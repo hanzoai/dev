@@ -438,9 +438,9 @@ jobs:
         with:
           task-cache-read-token: ${{ secrets.HANZO_TASK_CACHE_READ_TOKEN }}
 
-      # No Electron setup here: `hanzo` (apps/server) has no Electron dependency
-      # and none of its tests touch the runtime. Only the non-server `test`
-      # job, which covers @hanzodev/desktop, needs the download.
+      # No Rust/Tauri setup here: `hanzo` (apps/server) has no Tauri dependency
+      # and none of its tests touch the desktop shell. Only the non-server `test`
+      # job, which covers @hanzodev/desktop, needs the Rust toolchain.
       # Cache the pinned browser and skip apt unless shared libraries are missing.
       - name: Resolve Playwright version
         id: playwright_version
@@ -561,6 +561,7 @@ jobs:
           for crate in resource-monitor kde-snap-shot hyprland-snap-shot; do
             cargo fmt --manifest-path "native/$crate/Cargo.toml" -- --check
           done
+          cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
 
       - name: Test Rust crates
         run: |

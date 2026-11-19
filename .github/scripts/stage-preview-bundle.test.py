@@ -33,15 +33,15 @@ class StagePreviewBundleTests(unittest.TestCase):
 
     def test_preserves_valid_bundle_layout_and_bytes(self):
         self.bundle([("server/", b""), ("server/dist/", b""),
-                     ("desktop/dist-electron/chunks/helper.cjs", b"chunk")])
+                     ("web/dist/assets/app.js", b"chunk")])
         self.stage()
         for name in staging.REQUIRED_FILES:
             self.assertEqual((self.destination / name).read_bytes(), b"bundle data, never executed")
-        self.assertEqual((self.destination / "desktop/dist-electron/chunks/helper.cjs").read_bytes(), b"chunk")
+        self.assertEqual((self.destination / "web/dist/assets/app.js").read_bytes(), b"chunk")
 
     def test_rejects_builder_overwrite_and_unsafe_paths_before_writing(self):
         for name in [
-            "desktop/node_modules/electron-builder/cli.js",
+            "desktop/src-tauri/tauri.conf.json",
             "desktop/package.json",
             "server/dist/../../desktop/package.json",
             "../package.json",
@@ -70,7 +70,7 @@ class StagePreviewBundleTests(unittest.TestCase):
                 self.assertFalse(self.destination.exists())
 
     def test_requires_entry_points(self):
-        self.bundle(missing="desktop/dist-electron/main.cjs")
+        self.bundle(missing="web/dist/index.html")
         with self.assertRaises(ValueError):
             self.stage()
         self.assertFalse(self.destination.exists())

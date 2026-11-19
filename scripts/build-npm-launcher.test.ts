@@ -118,7 +118,9 @@ it.layer(NodeServices.layer)("build-npm-launcher", (it) => {
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-npm-launcher-test-" });
+        const root = yield* fs.realPath(
+          yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-npm-launcher-test-" }),
+        );
         const output = yield* buildNpmLauncher({
           version: VERSION,
           outputDir: path.join(root, "out"),
@@ -422,7 +424,9 @@ syncBuiltinESMExports();
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const root = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-npm-launcher-test-" });
+        const root = yield* fs.realPath(
+          yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-npm-launcher-test-" }),
+        );
         const output = yield* buildNpmLauncher({
           version: VERSION,
           outputDir: path.join(root, "out"),

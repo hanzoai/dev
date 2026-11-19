@@ -102,7 +102,7 @@ export const mergeUpdateManifestsCommand = Command.make(
       secondaryPath,
       Option.getOrUndefined(outputPath),
     ),
-).pipe(Command.withDescription("Merge two Electron updater manifests into a multi-arch manifest."));
+).pipe(Command.withDescription("Merge two desktop updater manifests into a multi-arch manifest."));
 
 if (import.meta.main) {
   Command.run(mergeUpdateManifestsCommand, { version: "0.0.0" }).pipe(

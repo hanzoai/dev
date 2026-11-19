@@ -67,7 +67,7 @@ function planReleaseUpdateManifestMerges(
     }
   }
 
-  // electron-builder names the macOS arm64 manifest without an arch suffix,
+  // Release builds name the macOS arm64 manifest without an arch suffix,
   // so the merged macOS feed keeps that name; Windows gets `<channel>.yml`.
   return [
     ...pairArchitectures("macOS", macArm64, macX64).map(

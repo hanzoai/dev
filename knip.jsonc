@@ -18,18 +18,12 @@
       "vitest": { "entry": [".github/**/*.test.cjs"] },
     },
     "scripts": {
-      // Knip loads its preprocessor through a CLI option; native verification and
-      // worktree setup (from hanzo.json) run directly. release-desktop.yml bundles the
-      // Windows verify script with esbuild through a path knip does not trace,
-      // electron-builder loads the macOS signer and the Linux afterPack hook by path, and mobile-e2e.ts runs
-      // agent-device's CLI by path, and mobile-behavior.ts spawns its runner by path.
-      // release-desktop.yml runs the desktop launch check through xvfb-run, which knip
-      // does not trace.
+      // Knip loads its preprocessor through a CLI option; worktree setup (from hanzo.json),
+      // mobile-e2e.ts, and mobile-behavior.ts spawn runners by path.
       "entry": [
         // These fixture scripts are injected into a browser page by path.
         "fixtures/*/*.js",
         "knip-schemas.ts",
-        "linux-after-pack.ts",
         "mobile-behavior/run.ts",
         "mobile-native-client.ts",
         // e2e loads its config and the scenarios by path, and starts the app script.
@@ -37,10 +31,6 @@
         "prove-scenario.ts",
         "scenarios/*.ts",
         "setup-worktree.ts",
-        "sign-macos.ts",
-        "prepare-server-compile-cache.cjs",
-        "smoke-desktop-app.ts",
-        "verify-windows-desktop-artifact.ts",
       ],
       "ignoreDependencies": ["esbuild"],
       // The `hanzo` npm package's files: copied into the package, never imported.
@@ -77,7 +67,13 @@
       ],
     },
     "apps/desktop": {
-      "entry": ["scripts/dev-tauri.mjs", "scripts/start-tauri.mjs"],
+      // Tauri launcher and resource staging scripts run via package.json and tauri.conf.json.
+      "entry": [
+        "scripts/start-tauri.mjs",
+        "scripts/dev-tauri.mjs",
+        "scripts/stage-tauri-resources.mjs",
+        "scripts/wait-for-resources.mjs",
+      ],
       "ignoreDependencies": ["@tauri-apps/cli"],
     },
     "apps/web": {

@@ -5,7 +5,8 @@ export default defineConfig({
   run: {
     tasks: {
       build: {
-        command: "cargo build --release --manifest-path src-tauri/Cargo.toml",
+        command:
+          "node scripts/stage-tauri-resources.mjs && cargo build --release --features custom-protocol --manifest-path src-tauri/Cargo.toml",
         dependsOn: ["@hanzodev/web#build", "hanzo#build"],
         cache: false,
       },

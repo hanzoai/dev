@@ -73,27 +73,12 @@ jobs:
           # Public Hanzo Connect identifiers (Clerk publishable key, relay URL).
           cp .env.example .env
 
-      # PR heads from before build:desktop:bundle use the full build, which
-      # compiles the Linux browser secret helper and needs libsecret.
-      - name: Check bundle-only build support
-        id: bundle_build
-        run: |
-          script="$(node -p "require('./package.json').scripts['build:desktop:bundle'] ? 'build:desktop:bundle' : 'build:desktop'")"
-          echo "script=$script" >> "$GITHUB_OUTPUT"
-
-      - if: steps.bundle_build.outputs.script == 'build:desktop'
-        uses: ./.github/actions/setup-apt-mirrors
-
-      - name: Install browser secret helper build libraries
-        if: steps.bundle_build.outputs.script == 'build:desktop'
-        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
-
       # desktop-macos-preview-publish.yml packages this bundle as the preview
-      # channel. The Linux browser secret helper is not part of a macOS app.
+      # channel inside the Tauri v2 macOS .app / .dmg bundle.
       - name: Build JS bundle
         env:
           HANZO_DEV_TELEMETRY_CHANNEL: ${{ github.repository == 'hanzoai/dev' && 'preview' || 'dev' }}
-        run: vp run ${{ steps.bundle_build.outputs.script }}
+        run: vp run --filter @hanzodev/web --filter hanzo build
 
       # Same layout as release.yml's js-bundle so release-desktop.yml can
       # package it unchanged.
@@ -103,6 +88,6 @@ jobs:
           name: js-bundle
           path: |
             apps/server/dist
-            apps/desktop/dist-electron
+            apps/web/dist
           if-no-files-found: error
           retention-days: 1

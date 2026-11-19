@@ -206,8 +206,8 @@ describe("check:changed", () => {
       "apps/server/src/orchestration-v2/ThreadSettlementService.ts",
       "apps/server/src/persistence/Migrations/054_ProjectionThreadsAutoSettleDisabledAt.ts",
       "apps/web/src/components/sidebar/SidebarThreadRow.tsx",
-      "apps/desktop/src/backend/DesktopBackendManager.ts",
-      "apps/desktop/src/electron/ElectronProtocol.ts",
+      "apps/desktop/src-tauri/src/backend.rs",
+      "apps/desktop/src-tauri/src/main.rs",
       "packages/contracts/src/settings.ts",
       "scripts/fixtures/desktop-launch/statev2.sqlite",
     ]) {
@@ -216,13 +216,13 @@ describe("check:changed", () => {
     for (const file of [
       "apps/server/src/orchestration-v2/ThreadSettlementService.test.ts",
       "apps/web/src/components/chat/ChatView.tsx",
-      "apps/desktop/src/updates/DesktopRemoteUpdates.ts",
+      "apps/desktop/src-tauri/tauri.conf.json",
       "packages/contracts/src/orchestration.ts",
     ]) {
       assert.isFalse(launches(file), file);
     }
     // A script-only change still builds the app it opens.
-    assert.isTrue(decide(["scripts/smoke-desktop-app.ts"], packages, false).outputs.build);
+    assert.isTrue(decide(["apps/desktop/scripts/stage-tauri-resources.mjs"], packages, false).outputs.build);
   });
 
   it.each([

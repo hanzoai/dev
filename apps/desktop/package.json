@@ -7,6 +7,7 @@
     "start": "node scripts/start-tauri.mjs",
     "dev:tauri": "node scripts/dev-tauri.mjs",
     "build:tauri": "cargo build --release --features custom-protocol --manifest-path src-tauri/Cargo.toml",
+    "stage:resources": "node scripts/stage-tauri-resources.mjs",
     "test:tauri": "cargo test --manifest-path src-tauri/Cargo.toml",
     "test": "cargo test --manifest-path src-tauri/Cargo.toml"
   },

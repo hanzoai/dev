@@ -60,9 +60,11 @@ jobs:
       - name: Install
         run: vp install
 
-      - name: Ensure Electron runtime is installed
+      - name: Setup Rust for Tauri desktop tests
         if: inputs.package == '' || inputs.package == 'apps/desktop'
-        run: vp run --filter "@hanzodev/desktop" ensure:electron
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
 
       # `vp run ... test -- <files>` does not forward positional args to vitest,
       # so file-scoped runs call `vp test run` inside the package instead.

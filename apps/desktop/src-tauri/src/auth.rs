@@ -107,7 +107,10 @@ pub async fn exchange_bootstrap_for_bearer_token(
         let response = client
             .post(&endpoint)
             .form(&[
-                ("grant_type", "urn:ietf:params:oauth:grant-type:token-exchange"),
+                (
+                    "grant_type",
+                    "urn:ietf:params:oauth:grant-type:token-exchange",
+                ),
                 ("subject_token", credential.as_str()),
                 (
                     "subject_token_type",
@@ -134,7 +137,7 @@ pub async fn exchange_bootstrap_for_bearer_token(
             }
             Ok(resp) => {
                 let status = resp.status().as_u16();
-                let is_transient = matches!(status, 502 | 503 | 504);
+                let is_transient = matches!(status, 502..=504);
                 if !is_transient || started.elapsed() >= max_wait {
                     let body = resp.text().await.unwrap_or_default();
                     return Err(format!(
@@ -185,7 +188,8 @@ mod tests {
 
     #[test]
     fn persists_and_reuses_host_scope() {
-        let temp = std::env::temp_dir().join(format!("hanzo-tauri-scope-{}", generate_random_hex(6)));
+        let temp =
+            std::env::temp_dir().join(format!("hanzo-tauri-scope-{}", generate_random_hex(6)));
         let s1 = read_or_create_host_scope(&temp);
         let s2 = read_or_create_host_scope(&temp);
         assert_eq!(s1, s2);

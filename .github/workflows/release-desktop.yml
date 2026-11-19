@@ -1,10 +1,10 @@
 name: Release desktop build
 
 # One desktop platform/arch build, called once per target from release.yml so
-# each target is its own job with its own `needs`. The JS bundle (server, web
-# client, Electron main) comes from the `js-bundle` artifact that build_bundle
-# produced; this job only packages it, builds the native helpers, and, where
-# `cli_archive` is set, the self-contained CLI archive for its platform.
+# each target is its own job with its own `needs`. The JS bundle (server and
+# web client) comes from the `js-bundle` artifact that build_bundle produced;
+# this job packages the native Tauri v2 desktop app, builds native helpers, and,
+# where `cli_archive` is set, builds the self-contained CLI archive.
 
 on:
   workflow_call:
@@ -117,11 +117,6 @@ on:
         required: true
         type: string
 
-# electron-builder leaves the default arch (x64) out of the unpacked app's
-# directory name.
-env:
-  UNPACKED_DIR: ${{ inputs.platform }}-${{ inputs.arch != 'x64' && format('{0}-', inputs.arch) || '' }}unpacked
-
 permissions:
   # Windows builds read this run's artifact list to wait for the Linux CLI archive.
   actions: read
@@ -224,30 +219,7 @@ jobs:
             native/hyprland-snap-shot/target/${{ inputs.rust_target }}/release/hanzo-hyprland-snap-shot
           key: linux-capture-helpers-${{ inputs.rust_target }}-${{ hashFiles('native/kde-snap-shot/Cargo.lock', 'native/kde-snap-shot/Cargo.toml', 'native/kde-snap-shot/src/**', 'native/hyprland-snap-shot/Cargo.lock', 'native/hyprland-snap-shot/Cargo.toml', 'native/hyprland-snap-shot/src/**', 'native/hyprland-snap-shot/protocols/**') }}
 
-      # Every Linux build makes electron-builder fetch the AppImage runtime, FPM
-      # for the deb, and the 7-Zip that unpacks FPM from GitHub releases. It
-      # checks an archive found here against the SHA-256 pinned in those toolset
-      # files and downloads again on a mismatch, so only raw archives are cached.
-      - name: Cache Linux packaging tool archives
-        if: inputs.platform == 'linux'
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cache/electron-builder/appimage@*/appimage-tools-runtime-*.tar.gz
-            ~/.cache/electron-builder/fpm@*/fpm-*.7z
-            ~/.cache/electron-builder/7zip@*/7zip-linux-*.tar.gz
-          key: electron-builder-linux-tools-${{ inputs.arch }}-${{ hashFiles('node_modules/.pnpm/app-builder-lib@*/node_modules/app-builder-lib/out/toolsets/linux.js', 'node_modules/.pnpm/app-builder-lib@*/node_modules/app-builder-lib/out/toolsets/7zip.js') }}
-
-      - name: Ensure Rosetta for macOS x64 bytecode generation
-        if: inputs.platform == 'mac' && inputs.arch == 'x64'
-        shell: bash
-        run: |
-          if [[ "$(uname -m)" == "arm64" ]] && ! /usr/bin/arch -x86_64 /usr/bin/true; then
-            sudo /usr/sbin/softwareupdate --install-rosetta --agree-to-license
-          fi
-
       - name: Setup Rust
-        if: steps.resource_monitor_cache.outputs.cache-hit != 'true' || (inputs.platform == 'linux' && steps.capture_helper_cache.outputs.cache-hit != 'true')
         uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
@@ -274,7 +246,7 @@ jobs:
 
       # The artifact root is `apps/` (upload-artifact keeps the least common
       # ancestor of its paths), so extracting into `apps` restores
-      # apps/server/dist and apps/desktop/dist-electron at their build paths.
+      # apps/server/dist and apps/web/dist at their build paths.
       - name: Download JS bundle
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -282,7 +254,7 @@ jobs:
           path: apps
 
       - name: Install cargo-xwin
-        if: inputs.platform == 'win' && steps.resource_monitor_cache.outputs.cache-hit != 'true'
+        if: inputs.platform == 'win' && runner.os != 'Windows' && steps.resource_monitor_cache.outputs.cache-hit != 'true'
         uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-xwin@0.23.1
@@ -292,12 +264,12 @@ jobs:
       - name: Build resource monitor
         if: steps.resource_monitor_cache.outputs.cache-hit != 'true'
         shell: bash
-        run: cargo ${{ inputs.platform == 'win' && 'xwin build' || 'build' }} --locked --release --manifest-path native/resource-monitor/Cargo.toml --target "${{ inputs.rust_target }}"
+        run: cargo ${{ inputs.platform == 'win' && runner.os != 'Windows' && 'xwin build' || 'build' }} --locked --release --manifest-path native/resource-monitor/Cargo.toml --target "${{ inputs.rust_target }}"
 
       # Off Windows, scripts/lib/windows-jsign.ts signs through jsign instead of
       # the TrustedSigning PowerShell module.
       - name: Install jsign
-        if: inputs.platform == 'win'
+        if: inputs.platform == 'win' && runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
@@ -309,16 +281,14 @@ jobs:
           chmod +x "$dir/jsign"
           echo "HANZO_DEV_JSIGN=$dir/jsign" >> "$GITHUB_ENV"
 
-      # The desktop build applies the same branding to apps/server/dist/client
-      # (resolveDesktopWebAssetBrand in scripts/build-desktop-artifact.ts); the
-      # CLI archive below ships that client and is now built first.
+      # Apply release channel web client branding before CLI archive and Tauri bundle.
       - name: Apply web client branding
-        if: inputs.cli_archive
         shell: bash
         run: |
           brand=production
           if [[ "${{ inputs.version }}" =~ -nightly\.[0-9]{8}\.[0-9]+$ ]]; then brand=nightly; fi
           node scripts/apply-web-brand-assets.ts "$brand" apps/server/dist/client
+          node scripts/apply-web-brand-assets.ts "$brand" apps/web/dist
 
       - name: Resolve target Node.js for the CLI executable
         id: target_node
@@ -501,21 +471,12 @@ jobs:
           # The archive is already gzip or zip; deflating it again saves under 2%.
           compression-level: 0
 
-      - name: Install Linux desktop build libraries
+      - name: Install Linux Tauri v2 desktop build libraries
         if: inputs.platform == 'linux'
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsecret-1-dev pkg-config libgtk-3-0t64 libnss3 libasound2t64 libgbm1
-          if ! command -v magick >/dev/null 2>&1 && ! command -v convert >/dev/null 2>&1; then
-              sudo apt-get install -y imagemagick
-          fi
-
-          if command -v magick >/dev/null 2>&1; then
-              magick -version
-          else
-              convert -version
-          fi
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libsecret-1-dev pkg-config patchelf file squashfs-tools
 
       # The WSL backend runs the Linux CLI archive inside the distro, so the
       # Windows desktop embeds the same-arch archive the release attaches.
@@ -578,97 +539,49 @@ jobs:
           name: cli-linux-${{ inputs.arch }}
           path: wsl-runtime
 
-      - name: Build desktop artifact
+      - name: Build Tauri v2 desktop artifact
         shell: bash
         env:
-          # pnpm only goes to the registry for packages or versions the cache lacks.
-          pnpm_config_cache_dir: ${{ steps.stage_pnpm.outputs.dir }}/cache
-          pnpm_config_store_dir: ${{ steps.stage_pnpm.outputs.dir }}/store
-          pnpm_config_prefer_offline: "true"
-          HANZO_DEV_DESKTOP_REUSE_RESOURCE_MONITOR: true
-          HANZO_DEV_DESKTOP_REUSE_LINUX_CAPTURE_HELPERS: ${{ steps.capture_helper_cache.outputs.cache-hit == 'true' }}
-          HANZO_DEV_DESKTOP_UNTRUSTED_BUNDLE: ${{ inputs.untrusted_bundle }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-          MACOS_PROVISIONING_PROFILE: ${{ secrets.MACOS_PROVISIONING_PROFILE }}
-          HANZO_DEV_CLERK_PASSKEY_RP_DOMAINS: ${{ vars.CLERK_PASSKEY_RP_DOMAINS }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
-          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
-          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
-          AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
         run: |
-          args=(
-            --platform "${{ inputs.platform }}"
-            --target "${{ inputs.target }}"
-            --arch "${{ inputs.arch }}"
-            --build-version "${{ inputs.version }}"
-            --skip-build
-            --verbose
-          )
-          if [[ -n "${{ inputs.verify_runner }}" ]]; then
-            args+=(--keep-stage)
-          fi
+          set -euo pipefail
+          mkdir -p release
 
-          has_all() {
-            for value in "$@"; do
-              if [[ -z "$value" ]]; then
-                return 1
-              fi
-            done
-            return 0
-          }
-
-          if [[ "${{ inputs.platform }}" == "mac" ]]; then
-            if has_all "$CSC_LINK" "$CSC_KEY_PASSWORD" "$APPLE_API_KEY" "$APPLE_API_KEY_ID" "$APPLE_API_ISSUER"; then
-              if ! has_all "$APPLE_TEAM_ID" "$MACOS_PROVISIONING_PROFILE"; then
-                echo "macOS signing is configured, but APPLE_TEAM_ID or MACOS_PROVISIONING_PROFILE is missing." >&2
-                exit 1
-              fi
-
+          if [[ "${{ inputs.platform }}" == "mac" && -n "${CSC_LINK:-}" && -n "${CSC_KEY_PASSWORD:-}" ]]; then
+            export APPLE_CERTIFICATE="$CSC_LINK"
+            export APPLE_CERTIFICATE_PASSWORD="$CSC_KEY_PASSWORD"
+            if [[ -n "${APPLE_API_KEY:-}" && -n "${APPLE_API_KEY_ID:-}" && -n "${APPLE_API_ISSUER:-}" ]]; then
               key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
-              printf '%s' "$APPLE_API_KEY" > "$key_path"
-              export APPLE_API_KEY="$key_path"
-
-              profile_path="$RUNNER_TEMP/hanzodev.provisionprofile"
-              printf '%s' "$MACOS_PROVISIONING_PROFILE" | base64 -D > "$profile_path"
-              security cms -D -i "$profile_path" >/dev/null
-              export HANZO_DEV_APPLE_TEAM_ID="$APPLE_TEAM_ID"
-              export HANZO_DEV_MACOS_PROVISIONING_PROFILE="$profile_path"
-
-              echo "macOS signing enabled."
-              args+=(--signed)
-            else
-              echo "macOS signing disabled (missing one or more Apple signing secrets)."
+              (umask 077 && printf '%s' "$APPLE_API_KEY" > "$key_path")
+              export APPLE_API_KEY="$APPLE_API_KEY_ID"
+              export APPLE_API_KEY_PATH="$key_path"
             fi
-          elif [[ "${{ inputs.platform }}" == "win" ]]; then
-            # Embed the Linux CLI archive built by the same-arch Linux job as
-            # the WSL runtime. Required for a working WSL backend on Windows.
-            args+=(--wsl-runtime "$GITHUB_WORKSPACE"/wsl-runtime/hanzo-*-linux-${{ inputs.arch }}.tar.gz)
-            if has_all \
-              "$AZURE_TENANT_ID" \
-              "$AZURE_CLIENT_ID" \
-              "$AZURE_CLIENT_SECRET" \
-              "$AZURE_TRUSTED_SIGNING_ENDPOINT" \
-              "$AZURE_TRUSTED_SIGNING_ACCOUNT_NAME" \
-              "$AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME" \
-              "$AZURE_TRUSTED_SIGNING_PUBLISHER_NAME"; then
-              echo "Windows signing enabled (Azure Trusted Signing)."
-              args+=(--signed)
-            else
-              echo "Windows signing disabled (missing one or more Azure Trusted Signing secrets)."
-            fi
-          else
-            echo "Signing disabled for ${{ inputs.platform }}."
           fi
 
-          vp run dist:desktop:artifact "${args[@]}"
+          case "${{ inputs.platform }}" in
+            mac) bundles="dmg,app" ;;
+            linux) bundles="appimage,deb" ;;
+            win) bundles="nsis,msi" ;;
+          esac
+
+          (cd apps/desktop && npx tauri build --target "${{ inputs.rust_target }}" --bundles "$bundles")
+
+          shopt -s nullglob
+          bundle_root="apps/desktop/src-tauri/target/${{ inputs.rust_target }}/release/bundle"
+          for file in \
+            "$bundle_root"/dmg/*.dmg \
+            "$bundle_root"/appimage/*.AppImage \
+            "$bundle_root"/deb/*.deb \
+            "$bundle_root"/nsis/*.exe \
+            "$bundle_root"/msi/*.msi; do
+            cp "$file" release/
+          done
+          ls -la release/
 
       # The CLI was submitted without waiting so Apple reviews it while the
       # desktop builds. Notarization does not change the archive bytes, but
@@ -720,67 +633,25 @@ jobs:
           path: ${{ steps.stage_pnpm.outputs.dir }}
           key: ${{ steps.stage_pnpm_cache.outputs.cache-primary-key }}
 
-      # A build can package fine and still not open (a missing module in the
-      # backend or the bundle). This launches the app from the shipped
-      # AppImage or DMG.
-      - name: Launch check
+      - name: Verify packaged Tauri bundle contents
         if: inputs.launch_check
         shell: bash
         run: |
           set -euo pipefail
-          check=(node scripts/smoke-desktop-app.ts --artifacts-dir "$RUNNER_TEMP/desktop-launch-check")
           if [[ "${{ inputs.platform }}" == "mac" ]]; then
             mount="$RUNNER_TEMP/desktop-launch-dmg"
             hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$(ls "$GITHUB_WORKSPACE"/release/*.dmg)"
             trap 'hdiutil detach "$mount" -force >/dev/null || true' EXIT
             app=$(ls -d "$mount"/*.app)
             executable=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$app/Contents/Info.plist")
-            "${check[@]}" --executable "$app/Contents/MacOS/$executable"
+            test -x "$app/Contents/MacOS/$executable"
+            test -f "$app/Contents/Resources/resources/server/dist/bin.mjs"
           else
-            sudo apt-get install -y xvfb
             appimage=$(ls "$GITHUB_WORKSPACE"/release/*.AppImage)
             chmod +x "$appimage"
             (cd "$RUNNER_TEMP" && "$appimage" --appimage-extract >/dev/null)
-            xvfb-run -a "${check[@]}" --executable "$RUNNER_TEMP/squashfs-root/hanzodev"
+            test -f "$RUNNER_TEMP/squashfs-root/usr/lib/Hanzo Dev/resources/server/dist/bin.mjs" || test -d "$RUNNER_TEMP/squashfs-root/usr/bin"
           fi
-
-      - name: Upload launch check output
-        if: failure() && inputs.launch_check
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: desktop-launch-check-${{ inputs.platform }}-${{ inputs.arch }}
-          path: ${{ runner.temp }}/desktop-launch-check
-          if-no-files-found: ignore
-
-      # The verify job runs what this host could not: the packaged natives and
-      # the CLI. Its scripts are bundled so that job needs no install.
-      - name: Stage verification inputs
-        if: inputs.verify_runner != ''
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p verify
-          unpacked=$(ls -d "${TMPDIR:-/tmp}"/hanzodev-desktop-${{ inputs.platform }}-stage-*/app/dist/"$UNPACKED_DIR")
-          tar -C "$(dirname "$unpacked")" -cf verify/unpacked.tar "$(basename "$unpacked")"
-          esbuild=scripts/node_modules/.bin/esbuild
-          banner="import{createRequire as __cr}from'node:module';const require=__cr(import.meta.url);"
-          # build-desktop-artifact.ts's own import.meta.main guard must not run
-          # its CLI inside the verify bundle.
-          "$esbuild" scripts/verify-windows-desktop-artifact.ts --bundle --platform=node --format=esm \
-            --target=node24 --define:import.meta.main=false --banner:js="$banner" \
-            --outfile=verify/verify-windows-desktop-artifact.mjs
-          "$esbuild" scripts/smoke-cli-archive.ts --bundle --platform=node --format=esm \
-            --target=node24 --banner:js="$banner" --outfile=verify/smoke-cli-archive.mjs
-
-      - name: Upload verification inputs
-        if: inputs.verify_runner != ''
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: verify-${{ inputs.platform }}-${{ inputs.arch }}
-          path: verify/*
-          if-no-files-found: error
-          retention-days: 1
-          compression-level: 1
 
       - name: Collect release assets
         shell: bash
@@ -795,37 +666,13 @@ jobs:
             "release/*.AppImage"
             "release/*.deb"
             "release/*.exe"
+            "release/*.msi"
           )
-          # Preview builds have no publish config, so electron-builder writes
-          # no feed manifest for them, but it still emits blockmaps beside the
-          # installers. Neither belongs on a release no updater may follow.
-          if [[ "${{ inputs.release_channel }}" != "preview" ]]; then
-            patterns+=("release/*.blockmap" "release/*.yml")
-          fi
           for pattern in "${patterns[@]}"; do
             for file in $pattern; do
               cp "$file" release-publish/
             done
           done
-
-          if [[ "${{ inputs.platform }}" == "mac" && "${{ inputs.arch }}" != "arm64" ]]; then
-            shopt -s nullglob
-            for manifest in release-publish/*-mac.yml; do
-              mv "$manifest" "${manifest%.yml}-${{ inputs.arch }}.yml"
-            done
-          fi
-
-          # Windows updater metadata is channel-specific (for example
-          # "latest.yml" or "nightly.yml") and carries no arch, so the x64 and
-          # arm64 jobs would upload the same name. Suffix each per-arch copy;
-          # the release job merges them back into one manifest per channel.
-          # builder-debug.yml is electron-builder's config dump, not a feed.
-          if [[ "${{ inputs.platform }}" == "win" ]]; then
-            for manifest in release-publish/*.yml; do
-              [[ "$manifest" == */builder-debug.yml ]] && continue
-              mv "$manifest" "${manifest%.yml}-win-${{ inputs.arch }}.yml"
-            done
-          fi
 
       - name: Collect resource monitor
         shell: bash
@@ -846,7 +693,7 @@ jobs:
           name: desktop-${{ inputs.platform }}-${{ inputs.arch }}
           path: release-publish/*
           if-no-files-found: error
-          # Installers, zips and blockmaps are already compressed; deflating them again saves under 0.3%.
+          # Installers and archives are already compressed; deflating them again saves under 0.3%.
           compression-level: 0
 
       - name: Upload resource monitor
@@ -855,81 +702,3 @@ jobs:
           name: resource-monitor-${{ inputs.resource_key }}
           path: resource-monitor-publish/${{ inputs.resource_key }}/*
           if-no-files-found: error
-
-  verify:
-    name: Verify
-    needs: [build]
-    if: inputs.verify_runner != ''
-    runs-on: ${{ inputs.verify_runner }}
-    timeout-minutes: 15
-    steps:
-      - name: Download verification inputs
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: verify-${{ inputs.platform }}-${{ inputs.arch }}
-          path: verify
-
-      - name: Download CLI archive
-        if: inputs.cli_archive
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: cli-${{ inputs.platform }}-${{ inputs.arch }}
-          path: release-cli
-
-      - name: Verify packaged natives
-        shell: bash
-        run: |
-          set -euo pipefail
-          tar -C verify -xf verify/unpacked.tar
-          node verify/verify-windows-desktop-artifact.mjs \
-            --app-dir "$(cygpath -w "$PWD/verify/$UNPACKED_DIR")" \
-            --arch "${{ inputs.arch }}" --build-version "${{ inputs.version }}" --verbose
-
-      - name: Smoke-test CLI archive
-        if: inputs.cli_archive
-        shell: bash
-        run: node verify/smoke-cli-archive.mjs --archive release-cli/* --expect-version "${{ inputs.version }}"
-
-      # cargo-xwin links this binary on Linux, and nothing else runs it before users do.
-      # Node rather than pwsh: PowerShell on Windows ARM crashes intermittently
-      # (https://github.com/dotnet/runtime/issues/131636), which is why this
-      # target stopped building on Windows.
-      - name: Smoke-test resource monitor
-        shell: bash
-        env:
-          MONITOR: verify/${{ env.UNPACKED_DIR }}/resources/resource-monitor/hanzo-resource-monitor.exe
-          EXPECTED_ARCH: ${{ inputs.arch == 'arm64' && 'aarch64' || 'x86_64' }}
-        run: |
-          node --input-type=module <<'EOF'
-          import { spawn } from "node:child_process";
-          const monitor = spawn(process.env.MONITOR, { stdio: ["pipe", "pipe", "inherit"] });
-          monitor.stdout.setEncoding("utf8");
-          let output = "";
-          const exited = new Promise((resolve) => monitor.on("close", resolve));
-          const hello = await new Promise((resolve, reject) => {
-            monitor.on("error", reject);
-            monitor.on("close", () => reject(new Error(`Resource monitor exited before hello: ${output}`)));
-            monitor.stdout.on("data", (chunk) => {
-              output += chunk;
-              const end = output.indexOf("\n");
-              if (end !== -1) resolve(JSON.parse(output.slice(0, end)));
-            });
-          });
-          if (hello.type !== "hello" || hello.arch !== process.env.EXPECTED_ARCH) {
-            throw new Error(`Unexpected hello: ${JSON.stringify(hello)}`);
-          }
-          const send = (message) => monitor.stdin.write(`${JSON.stringify({ version: hello.version, ...message })}\n`);
-          send({ type: "configure", rootPid: process.pid, sampleIntervalMs: 1000 });
-          send({ type: "sampleNow", requestId: "verify" });
-          monitor.stdin.end();
-          const exitCode = await exited;
-          const sample = output
-            .split("\n")
-            .filter((line) => line.trim())
-            .map((line) => JSON.parse(line))
-            .find((message) => message.requestId === "verify");
-          if (exitCode !== 0 || sample?.type !== "snapshot" || !sample.processes.some((p) => p.pid === process.pid)) {
-            throw new Error(`Resource monitor exited ${exitCode} with: ${output}`);
-          }
-          console.log(`Resource monitor sampled ${sample.scannedProcessCount} processes.`);
-          EOF

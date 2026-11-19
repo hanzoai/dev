@@ -252,8 +252,17 @@ jobs:
         with:
           task-cache-read-token: ${{ secrets.HANZO_TASK_CACHE_READ_TOKEN }}
 
-      - name: Ensure Electron runtime is installed
-        run: vp run --filter @hanzodev/desktop ensure:electron
+      - uses: ./.github/actions/setup-apt-mirrors
+
+      - name: Install Tauri v2 Linux build libraries
+        run: |
+          sudo sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources
+          sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libsecret-1-dev pkg-config
+
+      - name: Setup Rust for Tauri desktop
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
 
       - name: Check
         run: vp check
@@ -284,15 +293,17 @@ jobs:
         with:
           task-cache-read-token: ${{ secrets.HANZO_TASK_CACHE_READ_TOKEN }}
 
-      - name: Ensure Electron runtime is installed
-        run: vp run --filter @hanzodev/desktop ensure:electron
-
       - uses: ./.github/actions/setup-apt-mirrors
 
-      - name: Install browser secret helper build libraries
+      - name: Install Tauri v2 Linux build libraries
         run: |
           sudo sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources
-          sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config build-essential
+          sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libsecret-1-dev pkg-config
+
+      - name: Setup Rust for Tauri desktop
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
 
       - name: Test
         run: vp run --parallel --concurrency-limit 4 --filter '!hanzo' --filter '!@hanzodev/monorepo' --filter '!@hanzodev/web' test
@@ -383,9 +394,9 @@ jobs:
         with:
           task-cache-read-token: ${{ secrets.HANZO_TASK_CACHE_READ_TOKEN }}
 
-      # No Electron setup here: `hanzo` (apps/server) has no Electron dependency
-      # and none of its tests touch the runtime. Only the non-server `test`
-      # job, which covers @hanzodev/desktop, needs the download.
+      # No Rust/Tauri setup here: `hanzo` (apps/server) has no Tauri dependency
+      # and none of its tests touch the desktop shell. Only the non-server `test`
+      # job, which covers @hanzodev/desktop, needs the Rust toolchain.
       - name: Install Chromium for server browser integration tests
         run: node apps/server/node_modules/playwright-core/cli.js install --with-deps --only-shell chromium
 
@@ -512,7 +523,7 @@ jobs:
           echo "clerk_cli_oauth_client_id=$CLERK_CLI_OAUTH_CLIENT_ID" >> "$GITHUB_OUTPUT"
           echo "relay_url=https://$relay_domain" >> "$GITHUB_OUTPUT"
 
-  # The platform-independent JS (server bundle, web client, Electron main) is
+  # The platform-independent JS (server bundle and web client) is
   # built exactly once here and handed to every platform job as `js-bundle`.
   # The relay/Clerk values are baked into the bundle, so they belong to this
   # job rather than to the packaging jobs.
@@ -574,32 +585,12 @@ jobs:
       - name: Align package versions to release version
         run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
 
-      # Older release refs lack build:desktop:bundle and use the full build,
-      # which compiles the Linux browser secret helper and needs libsecret.
-      - name: Check bundle-only build support
-        id: bundle_build
-        run: |
-          script="$(node -p "require('./package.json').scripts['build:desktop:bundle'] ? 'build:desktop:bundle' : 'build:desktop'")"
-          echo "script=$script" >> "$GITHUB_OUTPUT"
-
-      - if: steps.bundle_build.outputs.script == 'build:desktop'
-        uses: ./.github/actions/setup-apt-mirrors
-
-      - name: Install browser secret helper build libraries
-        if: steps.bundle_build.outputs.script == 'build:desktop'
-        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
-
-      # Runs hanzo#build (which depends on @hanzodev/web#build) and the desktop
-      # bundle, so apps/server/dist holds the server bundle plus the web client
-      # and apps/desktop/dist-electron the Electron main. build:desktop:bundle
-      # skips the Linux browser secret helper, which this artifact does not
-      # carry; each Linux package job compiles its own per arch.
-      # The release channel is already stable, nightly, or preview. Builds in
-      # other repositories report "dev" telemetry.
+      # Runs hanzo#build and @hanzodev/web#build so apps/server/dist holds the
+      # server bundle plus the web client and apps/web/dist holds the Tauri frontendDist.
       - name: Build JS bundle
         env:
           HANZO_DEV_TELEMETRY_CHANNEL: ${{ github.repository == 'hanzoai/dev' && needs.preflight.outputs.release_channel || 'dev' }}
-        run: vp run ${{ steps.bundle_build.outputs.script }}
+        run: vp run --filter @hanzodev/web --filter hanzo build
 
       # Two paths under apps/ so the artifact root is apps/; consumers download
       # into `apps` to restore both at their original locations.
@@ -609,7 +600,7 @@ jobs:
           name: js-bundle
           path: |
             apps/server/dist
-            apps/desktop/dist-electron
+            apps/web/dist
           if-no-files-found: error
           retention-days: 1
 
@@ -686,7 +677,7 @@ jobs:
       resource_key: darwin-x64
       # No CLI archive: Node single-executables are unsupported on x64 macOS
       # (the SEA docs list macOS as arm64 only) and the built binary segfaults
-      # on start. The x64 desktop app is Electron and unaffected.
+      # on start. The x64 desktop app is native Tauri v2 and unaffected.
       cli_archive: false
 
   desktop_linux_x64:
@@ -739,10 +730,8 @@ jobs:
       cli_archive: true
 
   # The Windows jobs start with the other platforms and wait for the same-arch
-  # Linux CLI archive after their other setup. Packaging is mostly CPU and
-  # small-file work, which Linux runners do faster than Windows ones, so both
-  # Windows targets build and sign on Linux and only the native checks run on
-  # Windows.
+  # Linux CLI archive after their other setup, then package the native Tauri v2
+  # installers on Windows runners of their own architecture.
   desktop_win_x64:
     name: Desktop Windows x64
     needs: [preflight, relay_public_config, build_bundle]
@@ -758,8 +747,7 @@ jobs:
       clerk_cli_oauth_client_id: ${{ needs.relay_public_config.outputs.clerk_cli_oauth_client_id }}
       relay_url: ${{ needs.relay_public_config.outputs.relay_url }}
       label: Windows x64
-      runner: ubuntu-24.04
-      verify_runner: windows-2025
+      runner: windows-2025
       platform: win
       target: nsis
       arch: x64
@@ -782,8 +770,7 @@ jobs:
       clerk_cli_oauth_client_id: ${{ needs.relay_public_config.outputs.clerk_cli_oauth_client_id }}
       relay_url: ${{ needs.relay_public_config.outputs.relay_url }}
       label: Windows arm64
-      runner: ubuntu-24.04
-      verify_runner: windows-11-arm
+      runner: windows-11-arm
       platform: win
       target: nsis
       arch: arm64
@@ -885,33 +872,28 @@ jobs:
       - name: Wait for nightly Android APK
         wait: android_apk
 
-      # The desktop build omits the publish config for preview versions, so
-      # electron-builder emits no updater manifests for them. Refuse to publish
-      # if one shows up anyway: a `latest*.yml` or `nightly*.yml` on a preview
-      # release is what would let a stable or nightly install update onto it.
+      # Preview releases omit updater manifests so stable/nightly clients never follow them.
       - name: Refuse updater metadata on preview releases
         if: needs.preflight.outputs.release_channel == 'preview'
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s nullglob extglob
-          # builder-debug.yml is electron-builder's config dump, not a feed.
-          updater_files=(release-assets/!(builder-debug).yml release-assets/*.blockmap)
+          shopt -s nullglob
+          updater_files=(release-assets/*.yml release-assets/latest.json)
           if [[ ${#updater_files[@]} -ne 0 ]]; then
             printf 'Preview releases must not carry updater metadata, found: %s\n' "${updater_files[*]}" >&2
             exit 1
           fi
 
-      # electron-updater reads one manifest per platform and channel and picks
-      # the file entry whose name carries the running arch. Require every
-      # platform's two build jobs to have produced matching metadata before
-      # merging it, so a successful release can never strand one architecture.
       - name: Merge desktop updater manifests
         if: needs.preflight.outputs.release_channel != 'preview'
-        run: node scripts/merge-release-update-manifests.ts release-assets
+        run: |
+          shopt -s nullglob
+          manifests=(release-assets/*.yml)
+          if [[ ${#manifests[@]} -gt 0 ]]; then
+            node scripts/merge-release-update-manifests.ts release-assets
+          fi
 
-      # Updater manifests and blockmaps are what electron-updater consumes.
-      # They are only listed for channels an updater is meant to follow.
       - id: release_files
         name: Resolve release asset list
         shell: bash
@@ -923,8 +905,10 @@ jobs:
             echo 'release-assets/*.AppImage'
             echo 'release-assets/*.deb'
             echo 'release-assets/*.exe'
+            echo 'release-assets/*.msi'
             if [[ "${{ needs.preflight.outputs.release_channel }}" != "preview" ]]; then
-              echo 'release-assets/*.blockmap'
+              echo 'release-assets/*.json'
+              echo 'release-assets/*.sig'
               echo 'release-assets/*.yml'
             fi
             echo 'release-assets/*.tar.gz'
@@ -1514,7 +1498,7 @@ jobs:
 
       - name: Format package.json files
         if: steps.update_versions.outputs.changed == 'true'
-        run: vp fmt apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json
+        run: vp fmt apps/server/package.json apps/desktop/package.json apps/desktop/src-tauri/tauri.conf.json apps/web/package.json packages/contracts/package.json
 
       - name: Refresh lockfile
         if: steps.update_versions.outputs.changed == 'true'
@@ -1526,7 +1510,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ needs.preflight.outputs.tag }}
         run: |
-          if git diff --quiet -- apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json pnpm-lock.yaml; then
+          if git diff --quiet -- apps/server/package.json apps/desktop/package.json apps/desktop/src-tauri/tauri.conf.json apps/desktop/src-tauri/Cargo.toml apps/web/package.json packages/contracts/package.json pnpm-lock.yaml; then
             echo "No version changes to commit."
             exit 0
           fi
@@ -1534,7 +1518,7 @@ jobs:
           git config user.name "${{ steps.app_bot.outputs.name }}"
           git config user.email "${{ steps.app_bot.outputs.email }}"
 
-          git add apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json pnpm-lock.yaml
+          git add apps/server/package.json apps/desktop/package.json apps/desktop/src-tauri/tauri.conf.json apps/desktop/src-tauri/Cargo.toml apps/web/package.json packages/contracts/package.json pnpm-lock.yaml
           git commit --no-verify -m "chore(release): prepare $RELEASE_TAG"
 
           # main moves while this job runs, so a rejected push rebases and retries.

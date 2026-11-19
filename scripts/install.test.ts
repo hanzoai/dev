@@ -362,7 +362,7 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "win32")(
         expect(wrapper.code).not.toBe(0);
         expect(await NodeFSP.readFile(shim, "utf8")).toBe(edited);
 
-        const climbing = `@echo off\r\n"${NodePath.join(home, "runtime", "versions")}\\..\\other\\t3.exe" %*`;
+        const climbing = `@echo off\r\n"${NodePath.join(home, "runtime", "versions")}\\..\\other\\hanzo.exe" %*`;
         await NodeFSP.writeFile(shim, climbing, "utf8");
         const outside = await installOver({ script: "install.ps1", home, binDir });
         expect(outside.code).not.toBe(0);

@@ -2,8 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
-    "types": ["node", "electron"],
+    "types": ["node"],
     "lib": ["ESNext", "DOM", "esnext.disposable"]
   },
-  "include": ["src", "vite.config.ts", "../../scripts/lib"]
+  "include": ["vite.config.ts", "../../scripts/lib"]
 }

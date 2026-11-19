@@ -12,7 +12,7 @@ import { type ComponentProps, useState } from "react";
 
 import { primaryEnvironmentIdAtom } from "~/state/primaryEnvironment";
 
-import { isElectron, isTauri } from "~/env";
+import { isElectron } from "~/env";
 import { useClientSettingsHydrated } from "~/hooks/useSettings";
 import { useDesktopHostedPreviewSessions } from "~/components/preview/usePreviewSession";
 import {
@@ -137,7 +137,7 @@ export function ElectronBrowserHost() {
   useDesktopHostedPreviewSessions(primaryEnvironmentId);
   const sessions = hostedBrowserSessions(previewByThreadKey, primaryEnvironmentId);
 
-  if (!isElectron || isTauri) return null;
+  if (!isElectron) return null;
   return (
     <div className="contents" data-electron-browser-host>
       {sessions.map(({ threadRef, snapshot, runtimeTabId, pictureInPicture, zoomFactor }) => {

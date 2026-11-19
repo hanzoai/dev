@@ -23,6 +23,21 @@ pub struct BackendRuntimeConfig {
     pub is_dev: bool,
 }
 
+#[derive(Debug, Clone)]
+pub enum ResolvedBackendTarget {
+    NodeScript {
+        node_bin: PathBuf,
+        entry_mjs: PathBuf,
+        cwd: PathBuf,
+        resource_monitor: Option<PathBuf>,
+    },
+    StandaloneBinary {
+        executable: PathBuf,
+        cwd: PathBuf,
+        resource_monitor: Option<PathBuf>,
+    },
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DesktopBackendBootstrapPayload {
@@ -71,7 +86,7 @@ pub fn resolve_hanzo_home() -> PathBuf {
         .join(".hanzo-dev")
 }
 
-fn augmented_path() -> String {
+pub fn augmented_path() -> String {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/Users/Shared"));
     let mut entries: Vec<String> = vec![
         home.join(".local/bin").to_string_lossy().into_owned(),
@@ -85,24 +100,31 @@ fn augmented_path() -> String {
         "/usr/sbin".to_string(),
         "/sbin".to_string(),
     ];
+    let sep = if cfg!(windows) { ';' } else { ':' };
     if let Ok(existing) = env::var("PATH") {
-        for part in existing.split(':') {
+        for part in existing.split(sep) {
             let trimmed = part.trim();
             if !trimmed.is_empty() && !entries.iter().any(|e| e == trimmed) {
                 entries.push(trimmed.to_string());
             }
         }
     }
-    entries.join(":")
+    entries.join(&sep.to_string())
 }
 
-fn resolve_node_executable() -> PathBuf {
+pub fn resolve_node_executable() -> PathBuf {
     if let Ok(explicit) = env::var("HANZO_NODE_BINARY") {
         let p = PathBuf::from(explicit.trim());
         if p.is_file() {
             return p;
         }
     }
+    #[cfg(windows)]
+    let candidates = [
+        r"C:\Program Files\nodejs\node.exe",
+        r"C:\Program Files (x86)\nodejs\node.exe",
+    ];
+    #[cfg(not(windows))]
     let candidates = [
         "/opt/homebrew/bin/node",
         "/usr/local/bin/node",
@@ -115,45 +137,56 @@ fn resolve_node_executable() -> PathBuf {
         }
     }
     if let Some(home) = dirs::home_dir() {
-        for rel in [".nvm/current/bin/node", ".volta/bin/node", ".local/share/mise/shims/node"] {
+        for rel in [
+            ".nvm/current/bin/node",
+            ".volta/bin/node",
+            ".local/share/mise/shims/node",
+            ".fnm/current/bin/node",
+        ] {
             let p = home.join(rel);
             if p.is_file() {
                 return p;
             }
         }
     }
-    PathBuf::from("node")
+    PathBuf::from(if cfg!(windows) { "node.exe" } else { "node" })
 }
 
-fn resolve_repo_root() -> Option<PathBuf> {
-    if let Ok(explicit) = env::var("HANZO_DEV_REPO_ROOT") {
-        let p = PathBuf::from(explicit.trim());
-        if p.join("apps/server/dist/bin.mjs").is_file() {
-            return Some(p);
+fn check_resource_dir(resource_root: &Path) -> Option<ResolvedBackendTarget> {
+    let monitor_name = if cfg!(windows) {
+        "hanzo-resource-monitor.exe"
+    } else {
+        "hanzo-resource-monitor"
+    };
+    let standalone_name = if cfg!(windows) { "hanzo.exe" } else { "hanzo" };
+
+    for prefix in [resource_root.join("resources"), resource_root.to_path_buf()] {
+        let monitor = prefix.join(monitor_name);
+        let monitor_opt = monitor.is_file().then_some(monitor);
+
+        let standalone_exe = prefix.join("server").join(standalone_name);
+        if standalone_exe.is_file() {
+            return Some(ResolvedBackendTarget::StandaloneBinary {
+                executable: standalone_exe,
+                cwd: prefix.join("server"),
+                resource_monitor: monitor_opt,
+            });
         }
-    }
-    let compile_manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    if let Some(repo) = compile_manifest.parent().and_then(|p| p.parent()).and_then(|p| p.parent()) {
-        if repo.join("apps/server/dist/bin.mjs").is_file() {
-            return Some(repo.to_path_buf());
-        }
-    }
-    if let Ok(exe) = env::current_exe() {
-        let mut cursor = exe.parent();
-        while let Some(dir) = cursor {
-            if dir.join("apps/server/dist/bin.mjs").is_file() {
-                return Some(dir.to_path_buf());
-            }
-            if dir.join("Resources/server/dist/bin.mjs").is_file() {
-                return Some(dir.to_path_buf());
-            }
-            cursor = dir.parent();
+
+        let entry_mjs = prefix.join("server/dist/bin.mjs");
+        if entry_mjs.is_file() {
+            return Some(ResolvedBackendTarget::NodeScript {
+                node_bin: resolve_node_executable(),
+                entry_mjs,
+                cwd: prefix.join("server"),
+                resource_monitor: monitor_opt,
+            });
         }
     }
     None
 }
 
-fn resolve_backend_entry_and_cwd() -> Option<(PathBuf, PathBuf, Option<PathBuf>)> {
+pub fn resolve_backend_target() -> Option<ResolvedBackendTarget> {
     if let Ok(explicit) = env::var("HANZO_DEV_BACKEND_ENTRY") {
         let entry = PathBuf::from(explicit.trim());
         if entry.is_file() {
@@ -162,28 +195,83 @@ fn resolve_backend_entry_and_cwd() -> Option<(PathBuf, PathBuf, Option<PathBuf>)
                 .and_then(Path::parent)
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| PathBuf::from("."));
-            return Some((entry, cwd, None));
+            return Some(ResolvedBackendTarget::NodeScript {
+                node_bin: resolve_node_executable(),
+                entry_mjs: entry,
+                cwd,
+                resource_monitor: None,
+            });
         }
     }
-    let root = resolve_repo_root()?;
-    let packaged_entry = root.join("Resources/server/dist/bin.mjs");
-    if packaged_entry.is_file() {
-        let monitor = root.join("Resources/hanzo-resource-monitor");
-        return Some((
-            packaged_entry,
-            root.join("Resources/server"),
-            monitor.is_file().then_some(monitor),
-        ));
+
+    if let Ok(explicit_repo) = env::var("HANZO_DEV_REPO_ROOT") {
+        let repo = PathBuf::from(explicit_repo.trim());
+        let entry_mjs = repo.join("apps/server/dist/bin.mjs");
+        if entry_mjs.is_file() {
+            let monitor =
+                repo.join("native/resource-monitor/target/release/hanzo-resource-monitor");
+            return Some(ResolvedBackendTarget::NodeScript {
+                node_bin: resolve_node_executable(),
+                entry_mjs,
+                cwd: repo.join("apps/server"),
+                resource_monitor: monitor.is_file().then_some(monitor),
+            });
+        }
     }
-    let repo_entry = root.join("apps/server/dist/bin.mjs");
-    if repo_entry.is_file() {
-        let monitor = root.join("native/resource-monitor/target/release/hanzo-resource-monitor");
-        return Some((
-            repo_entry,
-            root.join("apps/server"),
-            monitor.is_file().then_some(monitor),
-        ));
+
+    // Check packaged Tauri bundle Resources directories next to the executable first.
+    if let Ok(exe) = env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let mut candidates = vec![
+                exe_dir.to_path_buf(),
+                exe_dir.join("Resources"),
+                exe_dir.join("../Resources"),
+                exe_dir.join("../lib/Hanzo Dev"),
+                exe_dir.join("../lib/hanzo-dev-desktop"),
+            ];
+            let mut cursor = exe_dir.parent();
+            while let Some(dir) = cursor {
+                if dir.join("apps/server/dist/bin.mjs").is_file() {
+                    let monitor =
+                        dir.join("native/resource-monitor/target/release/hanzo-resource-monitor");
+                    return Some(ResolvedBackendTarget::NodeScript {
+                        node_bin: resolve_node_executable(),
+                        entry_mjs: dir.join("apps/server/dist/bin.mjs"),
+                        cwd: dir.join("apps/server"),
+                        resource_monitor: monitor.is_file().then_some(monitor),
+                    });
+                }
+                candidates.push(dir.join("Resources"));
+                cursor = dir.parent();
+            }
+            for candidate in candidates {
+                if let Some(found) = check_resource_dir(&candidate) {
+                    return Some(found);
+                }
+            }
+        }
     }
+
+    // Fallback to compile-time workspace root during local cargo development.
+    let compile_manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if let Some(repo) = compile_manifest
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+    {
+        let entry_mjs = repo.join("apps/server/dist/bin.mjs");
+        if entry_mjs.is_file() {
+            let monitor =
+                repo.join("native/resource-monitor/target/release/hanzo-resource-monitor");
+            return Some(ResolvedBackendTarget::NodeScript {
+                node_bin: resolve_node_executable(),
+                entry_mjs,
+                cwd: repo.join("apps/server"),
+                resource_monitor: monitor.is_file().then_some(monitor),
+            });
+        }
+    }
+
     None
 }
 
@@ -200,15 +288,26 @@ impl BackendSupervisor {
             tauri::async_runtime::spawn(async move {
                 let mut backoff_ms = 500u64;
                 while !stop_flag.load(Ordering::SeqCst) {
-                    let Some((entry_path, backend_cwd, monitor_path)) =
-                        resolve_backend_entry_and_cwd()
-                    else {
-                        eprintln!("[hanzo-tauri] Backend entry bin.mjs not found; retrying...");
+                    let Some(target) = resolve_backend_target() else {
+                        eprintln!("[hanzo-tauri] Backend entry not found; retrying...");
                         tokio::time::sleep(Duration::from_secs(2)).await;
                         continue;
                     };
 
-                    let node_bin = resolve_node_executable();
+                    let (program, entry_arg, backend_cwd, monitor_path) = match target {
+                        ResolvedBackendTarget::NodeScript {
+                            node_bin,
+                            entry_mjs,
+                            cwd,
+                            resource_monitor,
+                        } => (node_bin, Some(entry_mjs), cwd, resource_monitor),
+                        ResolvedBackendTarget::StandaloneBinary {
+                            executable,
+                            cwd,
+                            resource_monitor,
+                        } => (executable, None, cwd, resource_monitor),
+                    };
+
                     let payload = DesktopBackendBootstrapPayload {
                         mode: "desktop",
                         no_browser: true,
@@ -232,14 +331,15 @@ impl BackendSupervisor {
                         break;
                     };
 
-                    let mut cmd = Command::new(&node_bin);
-                    cmd.arg(&entry_path)
-                        .arg("--bootstrap-fd")
+                    let mut cmd = Command::new(&program);
+                    if let Some(ref script) = entry_arg {
+                        cmd.arg(script);
+                    }
+                    cmd.arg("--bootstrap-fd")
                         .arg("0")
                         .current_dir(&backend_cwd)
                         .env("PATH", augmented_path())
                         .env("HANZO_DEV_DESKTOP_HOST_SCOPE", &cfg.host_scope)
-                        .env_remove("ELECTRON_RUN_AS_NODE")
                         .env_remove("HANZO_DEV_PORT")
                         .env_remove("HANZO_DEV_MODE")
                         .env_remove("HANZO_DEV_NO_BROWSER")
@@ -270,11 +370,7 @@ impl BackendSupervisor {
                             }
                         }
                         Err(err) => {
-                            eprintln!(
-                                "[hanzo-tauri] Failed to spawn {} {}: {err}",
-                                node_bin.display(),
-                                entry_path.display()
-                            );
+                            eprintln!("[hanzo-tauri] Failed to spawn {}: {err}", program.display());
                         }
                     }
 

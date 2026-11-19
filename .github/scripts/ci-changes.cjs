@@ -22,8 +22,6 @@ const RUNS_EVERYTHING = [
 const EXTRA_OWNERS = [
   // Vite configs and tsconfigs of these apps import scripts/lib directly.
   [/^scripts\/lib\//, ["@hanzodev/desktop", "@hanzodev/mobile", "@hanzodev/web", "hanzo"]],
-  // scripts/build-desktop-artifact.ts reads the GNOME extension manifest.
-  [/^apps\/desktop\/gnome-extension\//, ["@hanzodev/scripts"]],
   [/^native\/browser-secret\//, ["@hanzodev/desktop"]],
   [/^native\/kde-snap-shot\//, ["@hanzodev/desktop"]],
   [/^native\/libghostty-vt\//, ["@hanzodev/web"]],
@@ -52,18 +50,16 @@ const MOBILE_NATIVE =
   /^apps\/mobile\/.*\.(swift|kt|kts)$|^apps\/mobile\/(\.swiftlint\.yml|detekt\.yml|\.editorconfig|Brewfile)$|^scripts\/mobile-native-static-check\.ts$|^package\.json$|^\.github\/workflows\/ci\.yml$|^\.github\/scripts\/ci-changes\.cjs$|^\.github\/actions\/ci-changes\//;
 
 // Startup, migration, settlement, and sidebar paths that decide whether an upgraded user's
-// threads show after launch. Build runs scripts/smoke-desktop-app.ts for them, so they do not
-// first fail in the release launch check.
+// threads show after launch.
 const DESKTOP_LAUNCH = [
-  /^apps\/desktop\/src\/((main|boot|compileCache|serverCompileCache)\.ts$|(app|backend|window)\/)/,
-  /^apps\/desktop\/src\/electron\/(ElectronApp|ElectronProtocol|ElectronWindow)\.ts$/,
+  /^apps\/desktop\/(src-tauri\/src\/|scripts\/)/,
   /^apps\/web\/src\/((main|AppRoot|appInit)\.tsx|(bootstrap|router)\.ts)$/,
   /^apps\/web\/src\/.*sidebar/i,
   /^apps\/server\/src\/(bin|binMain|server|serverRuntimeStartup)\.ts$/,
   /^apps\/server\/src\/persistence\/Migrations/,
   /^apps\/server\/src\/orchestration-v2\/((ThreadSettlementService|ProjectionStore)\.ts$|legacy\/)/,
   /^packages\/contracts\/src\/settings\.ts$/,
-  /^scripts\/(smoke-desktop-app\.ts|fixtures\/desktop-launch\/)/,
+  /^scripts\/fixtures\/desktop-launch\//,
 ];
 
 const OWN_TEST_JOB = new Set(["hanzo", "@hanzodev/web", "@hanzodev/monorepo"]);
@@ -114,7 +110,7 @@ function ownersOf(file, packages) {
   // A manifest can change dependencies or versions other packages read.
   if (path.posix.basename(file) === "package.json") return null;
   if (RUNS_EVERYTHING.some((pattern) => pattern.test(file))) return null;
-  // scripts/build-desktop-artifact.test.ts reads the crates' sources.
+  // Native Rust crates are verified by the Rust job and bundled by scripts/.
   if (RUST.test(file)) return ["@hanzodev/scripts", ...extra];
 
   const owner = packages

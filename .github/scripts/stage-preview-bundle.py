@@ -6,11 +6,11 @@ import sys
 import zipfile
 from pathlib import Path
 
-ROOTS = ("server/dist", "desktop/dist-electron")
+ROOTS = ("server/dist", "web/dist")
 REQUIRED_FILES = {
     "server/dist/bin.mjs",
     "server/dist/client/index.html",
-    "desktop/dist-electron/main.cjs",
+    "web/dist/index.html",
 }
 # Bound trusted-runner extraction even when a PR replaces the uploader.
 MAX_ARCHIVE_BYTES = 512 * 1024 * 1024

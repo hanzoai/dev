@@ -117,6 +117,54 @@ export const updateReleasePackageVersions = Effect.fn("updateReleasePackageVersi
     changed = true;
   }
 
+  const tauriConfPath = path.join(rootDir, "apps/desktop/src-tauri/tauri.conf.json");
+  if (yield* fs.exists(tauriConfPath).pipe(Effect.orElseSucceed(() => false))) {
+    const rawConf = yield* fs.readFileString(tauriConfPath).pipe(
+      Effect.mapError(
+        (cause) => new ReleasePackageManifestError({ operation: "read", filePath: tauriConfPath, cause }),
+      ),
+    );
+    const decodedConf = yield* decodePackageJson(rawConf).pipe(
+      Effect.mapError(
+        (cause) => new ReleasePackageManifestError({ operation: "decode", filePath: tauriConfPath, cause }),
+      ),
+    );
+    if (decodedConf.version !== version) {
+      const encodedConf = yield* encodePackageJson({ ...decodedConf, version }).pipe(
+        Effect.mapError(
+          (cause) => new ReleasePackageManifestError({ operation: "encode", filePath: tauriConfPath, cause }),
+        ),
+      );
+      yield* fs.writeFileString(tauriConfPath, `${encodedConf}\n`).pipe(
+        Effect.mapError(
+          (cause) => new ReleasePackageManifestError({ operation: "write", filePath: tauriConfPath, cause }),
+        ),
+      );
+      changed = true;
+    }
+  }
+
+  const cargoTomlPath = path.join(rootDir, "apps/desktop/src-tauri/Cargo.toml");
+  if (yield* fs.exists(cargoTomlPath).pipe(Effect.orElseSucceed(() => false))) {
+    const rawCargo = yield* fs.readFileString(cargoTomlPath).pipe(
+      Effect.mapError(
+        (cause) => new ReleasePackageManifestError({ operation: "read", filePath: cargoTomlPath, cause }),
+      ),
+    );
+    const updatedCargo = rawCargo.replace(
+      /^version\s*=\s*"[^"]*"/m,
+      `version = "${version}"`,
+    );
+    if (updatedCargo !== rawCargo) {
+      yield* fs.writeFileString(cargoTomlPath, updatedCargo).pipe(
+        Effect.mapError(
+          (cause) => new ReleasePackageManifestError({ operation: "write", filePath: cargoTomlPath, cause }),
+        ),
+      );
+      changed = true;
+    }
+  }
+
   return { changed };
 });
 
