@@ -642,11 +642,11 @@ it.effect.skipIf(windowsHost)(
       assert.include(decodedCommand, "'Directory', 'Folder'");
       assert.include(
         decodedCommand,
-        "Invoke-Item -LiteralPath '\\\\wsl.localhost\\Ubuntu-24.04\\home\\t3\\workspace [draft]\\author''s ‘‘$media'",
+        "Invoke-Item -LiteralPath '\\\\wsl.localhost\\Ubuntu-24.04\\home\\hanzo\\workspace [draft]\\author''s ‘‘$media'",
       );
       assert.include(
         decodedCommand,
-        "'\\\\wsl.localhost\\Ubuntu-24.04\\home\\t3\\workspace [draft]\\author''s ‘‘$media\\clip|draft.mp4'",
+        "'\\\\wsl.localhost\\Ubuntu-24.04\\home\\hanzo\\workspace [draft]\\author''s ‘‘$media\\clip|draft.mp4'",
       );
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
@@ -700,7 +700,7 @@ it.effect.each([
     if (native) {
       assert.isTrue(Exit.isSuccess(exit));
       assert.deepEqual(verbatim, [
-        ["C:\\Windows\\explorer.exe", ['/select,"C:\\Users\\t3\\my project\\a,b.ts"']],
+        ["C:\\Windows\\explorer.exe", ['/select,"C:\\Users\\hanzo\\my project\\a,b.ts"']],
       ]);
     } else {
       assert.deepEqual(verbatim, []);

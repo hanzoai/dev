@@ -3352,7 +3352,7 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
         projectId,
       });
 
-      expect(generatedModelSelection?.instanceId).toBe(ProviderInstanceId.make("claudeAgent"));
+      expect(generatedModelSelection?.instanceId).toBe(ProviderInstanceId.make("hanzo"));
     }),
   );
 
@@ -5515,7 +5515,8 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
           "keep me\n",
         );
         expect(
-          (yield* runGit(repoDir, ["config", "branch.feature/pr-safe.hanzo-pull-request"])).stdout,
+          (yield* runGit(repoDir, ["config", "branch.feature/pr-safe.hanzo-dev-pull-request"]))
+            .stdout,
         ).toBe("https://github.com/hanzoai/codething-mvp/pull/91\n");
       }),
   );

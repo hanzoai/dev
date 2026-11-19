@@ -742,6 +742,14 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
           const fallbackInstanceId = ProviderInstanceId.make(fallbackId);
           const selection = { instanceId: writerId, model: "claude-sonnet-4-6" };
           const providerInstances = {
+            [ProviderInstanceId.make("hanzo")]: {
+              driver: ProviderDriverKind.make("hanzo"),
+              enabled: false,
+            },
+            [ProviderInstanceId.make("hanzoGen")]: {
+              driver: ProviderDriverKind.make("hanzoGen"),
+              enabled: false,
+            },
             [ProviderInstanceId.make("claudeAgent")]: {
               driver: ProviderDriverKind.make("claudeAgent"),
               enabled: false,
@@ -800,6 +808,16 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
       const next = yield* serverSettings.updateSettings({
         providerInstances: {
+          [ProviderInstanceId.make("hanzo")]: {
+            driver: ProviderDriverKind.make("hanzo"),
+            enabled: false,
+            config: {},
+          },
+          [ProviderInstanceId.make("hanzoGen")]: {
+            driver: ProviderDriverKind.make("hanzoGen"),
+            enabled: false,
+            config: {},
+          },
           [ProviderInstanceId.make("codex")]: {
             driver: ProviderDriverKind.make("codex"),
             enabled: false,
@@ -819,6 +837,16 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
       const claude = ProviderInstanceId.make("claudeAgent");
       const providerInstances = {
+        [ProviderInstanceId.make("hanzo")]: {
+          driver: ProviderDriverKind.make("hanzo"),
+          enabled: false,
+          config: {},
+        },
+        [ProviderInstanceId.make("hanzoGen")]: {
+          driver: ProviderDriverKind.make("hanzoGen"),
+          enabled: false,
+          config: {},
+        },
         [ProviderInstanceId.make("codex")]: {
           driver: ProviderDriverKind.make("codex"),
           enabled: false,

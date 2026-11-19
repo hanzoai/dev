@@ -3963,7 +3963,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
           commandId: CommandId.make(`branch-pr-link-${index}`),
           threadId,
           host: "GitHub.com",
-          repository: "HanzoAI/Hanzocode",
+          repository: "HanzoAI/Dev",
           number,
           url: `https://github.com/hanzoai/dev/pull/${number}`,
           source: "manual",
@@ -4037,7 +4037,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         branch: null,
         worktreePath: null,
       });
-      const key = { host: "GitHub.com", repository: "HanzoAI/Hanzocode" };
+      const key = { host: "GitHub.com", repository: "HanzoAI/Dev" };
       for (const number of [1, 2]) {
         yield* orchestrator.dispatch({
           type: "thread.pull-request.link",
@@ -4132,7 +4132,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
       const key = {
         tracker: IssueTrackerKind.make("github"),
         host: "GitHub.com",
-        scope: "HanzoAI/Hanzocode",
+        scope: "HanzoAI/Dev",
         key: "42",
       };
       yield* orchestrator.dispatch({
@@ -4173,7 +4173,7 @@ it.layer(layerTest)("OrchestrationV2LayerLive lifecycle", (it) => {
         [
           {
             host: "github.com",
-            scope: "HanzoAI/Hanzocode",
+            scope: "HanzoAI/Dev",
             key: "42",
             source: "manual",
             title: "Issue links",

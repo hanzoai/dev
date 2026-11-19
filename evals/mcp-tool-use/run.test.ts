@@ -1541,7 +1541,7 @@ it.effect("builds the secrets cases, each citing a finding and grading secret ha
       );
       assert.match(
         String(testCase.source?.finding ?? testCase.source?.issue),
-        /^(?:secret-field-2026-1[01] |hanzoai\/hanzodev#\d+$)/,
+        /^(?:secret-field-2026-1[01] |hanzoai\/dev#\d+$)/,
         testCase.id,
       );
       assert.isTrue(testCase.expect.secret?.chatAsk, testCase.id);

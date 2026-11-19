@@ -1085,7 +1085,7 @@ it.effect("reads a repository once when several worktrees share it", () =>
           id: "p2",
           title: "hanzodev worktree",
           workspaceRoot: "/b",
-          repository: "HanzoAI/HanzoDev",
+          repository: "HanzoAI/Dev",
         }),
       ],
       providers: [
@@ -1232,7 +1232,7 @@ it.effect("puts the author a query names exactly ahead of those it only begins",
     assert.deepStrictEqual(queries, ["theo"]);
     assert.deepStrictEqual(
       result.authors.map((author) => author.login),
-      ["octocat", "hanzoai", "theo-browne"],
+      ["hanzoai", "octocat", "theo-browne"],
     );
     assert.strictEqual(result.truncated, true);
   }),

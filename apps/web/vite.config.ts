@@ -213,10 +213,12 @@ function resolveDevProxyTarget(
   }
 }
 
-const devProxyTarget = resolveDevProxyTarget(
-  process.env.HANZO_DEV_PORT ?? process.env.T3CODE_PORT ?? "13773",
-  configuredWsUrl,
-);
+const devProxyTarget = process.env.VITEST
+  ? undefined
+  : resolveDevProxyTarget(
+      process.env.HANZO_DEV_PORT ?? process.env.T3CODE_PORT ?? "13773",
+      configuredWsUrl,
+    );
 
 // Brotli quality 5 encodes in hundreds of ms; default quality 11 would replace transfer stalls with encode stalls.
 function devCompressionPlugin(): Plugin {
@@ -400,7 +402,7 @@ export default defineConfig(({ command }) => {
             // Share prefixes with the backend catch-all so the proxy and 404 lists cannot drift.
             proxy: Object.fromEntries(
               DEV_PROXIED_PATH_PREFIXES.map((prefix) => [
-                prefix,
+                `^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:/|\\?|$)`,
                 {
                   target: devProxyTarget,
                   changeOrigin: !DEV_PROXIED_ORIGIN_PRESERVING_PREFIXES.has(prefix),
