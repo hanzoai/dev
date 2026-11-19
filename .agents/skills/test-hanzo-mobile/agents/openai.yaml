@@ -1,0 +1,4 @@
+interface:
+  display_name: "Test Hanzo Mobile"
+  short_description: "Test iOS and Android in Hanzo's Device panel"
+  default_prompt: "Use $test-hanzo-mobile to verify the affected native mobile flow through Hanzo's Device panel and AgentDevice."

@@ -1,0 +1,1541 @@
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodePath from "node:path";
+import * as NodeOS from "node:os";
+import * as NodeURL from "node:url";
+import * as NodeFS from "node:fs";
+
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Layer from "effect/Layer";
+import { assert, it } from "@effect/vitest";
+import * as HostProcess from "@hanzodev/shared/HostProcess";
+import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
+import * as Scope from "effect/Scope";
+import * as Result from "effect/Result";
+import * as Scheduler from "effect/Scheduler";
+import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
+import { ChildProcessSpawner } from "effect/process";
+import { describe, expect } from "vite-plus/test";
+
+import * as AcpSessionRuntime from "@hanzodev/provider-acp/server/AcpSessionRuntime";
+import { AgentScope } from "@hanzodev/shared/AgentScope";
+import * as EffectAcpErrors from "effect-acp/errors";
+import type * as EffectAcpProtocol from "effect-acp/protocol";
+
+const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
+const mockAgentPath = NodePath.join(__dirname, "../../../scripts/acp-mock-agent.ts");
+const mockAgentCommand = "node";
+const mockAgentArgs = [mockAgentPath];
+const mockRuntimeOptions = {
+  spawn: { command: mockAgentCommand, args: mockAgentArgs },
+  cwd: process.cwd(),
+  clientInfo: { name: "hanzo-test", version: "0.0.0" },
+  authMethodId: "test",
+} satisfies AcpSessionRuntime.AcpSessionRuntimeOptions;
+
+// The spawner extends the real process environment, so the test must set it there.
+const setProcessEnv = (name: string, value: string) => {
+  const previous = process.env[name];
+  process.env[name] = value;
+  return () => {
+    if (previous === undefined) delete process.env[name];
+    else process.env[name] = previous;
+  };
+};
+
+const isPromptStarted = (event: AcpSessionRuntime.AcpSessionRequestLogEvent) =>
+  event.method === "session/prompt" && event.status === "started";
+
+const isOutgoing = (tag: string) => (event: EffectAcpProtocol.AcpProtocolLogEvent) =>
+  event.direction === "outgoing" &&
+  event.stage === "decoded" &&
+  typeof event.payload === "object" &&
+  event.payload !== null &&
+  Reflect.get(event.payload, "tag") === tag;
+
+// The methods the mock agent read, in order, keeping only the given ones.
+const readReceived = (requestLogPath: string, methods: ReadonlyArray<string>) =>
+  NodeFS.readFileSync(requestLogPath, "utf8")
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => (JSON.parse(line) as { readonly method?: string }).method)
+    .filter((method) => method !== undefined && methods.includes(method));
+
+// Prompts, then cancels while the prompt is held on its way out: in its started request record,
+// in its outgoing protocol log record, or by its fiber yielding every few operations. The cancel
+// comes on dispatch or from inside the held record. Returns the prompt's exit
+// and the order in which the agent read the prompt, the cancel and the request that ends it.
+const promptThenCancel = (input: {
+  readonly cancelBehavior: "interrupt" | "wait-for-prompt";
+  readonly holdPrompt: {
+    readonly in: "request-log" | "protocol-log" | "scheduler";
+    readonly cancelOn: "dispatch" | "log";
+  };
+}) =>
+  Effect.gen(function* () {
+    const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "acp-runtime-"));
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => NodeFS.rmSync(tempDir, { recursive: true, force: true })),
+    );
+    const requestLogPath = NodePath.join(tempDir, "requests.ndjson");
+    const { holdPrompt } = input;
+    const promptHeld = yield* Deferred.make<void>();
+    const promptReleased = yield* Deferred.make<void>();
+    yield* Effect.addFinalizer(() => Deferred.succeed(promptReleased, undefined));
+    const testScope = yield* Scope.Scope;
+    const runtimeMade = yield* Deferred.make<AcpSessionRuntime.AcpSessionRuntime["Service"]>();
+    const cancelledFromLog = yield* Deferred.make<Fiber.Fiber<void, EffectAcpErrors.AcpError>>();
+    const hold = (
+      holdPrompt.cancelOn === "log"
+        ? Deferred.await(runtimeMade).pipe(
+            Effect.flatMap((made) =>
+              made.cancel.pipe(Effect.forkIn(testScope, { startImmediately: true })),
+            ),
+            Effect.flatMap((fiber) => Deferred.succeed(cancelledFromLog, fiber)),
+          )
+        : Effect.void
+    ).pipe(
+      Effect.andThen(Deferred.succeed(promptHeld, undefined)),
+      Effect.andThen(Deferred.await(promptReleased)),
+    );
+    const runtime = yield* AcpSessionRuntime.make({
+      ...mockRuntimeOptions,
+      spawn: {
+        ...mockRuntimeOptions.spawn,
+        env: {
+          HANZO_ACP_COMPLETE_FIRST_PROMPT_ON_CANCEL: "1",
+          HANZO_ACP_REQUEST_LOG_PATH: requestLogPath,
+        },
+      },
+      cancelBehavior: input.cancelBehavior,
+      interruptPromptOnCancel: false,
+      protocolLogging: {
+        logOutgoing: holdPrompt.in === "protocol-log",
+        logger: (event) => (isOutgoing("session/prompt")(event) ? hold : Effect.void),
+      },
+      requestLogger: (event) =>
+        holdPrompt.in === "request-log" && isPromptStarted(event) ? hold : Effect.void,
+    });
+    yield* Deferred.succeed(runtimeMade, runtime);
+    const cancelReceived = yield* Deferred.make<void>();
+    yield* runtime.getEvents().pipe(
+      Stream.runForEach((event) => {
+        if (event._tag === "EventStreamBarrier") {
+          return Deferred.succeed(event.acknowledge, undefined);
+        }
+        if (event._tag === "ThoughtDelta" && event.text === "native-cancel-received") {
+          return Deferred.succeed(cancelReceived, undefined);
+        }
+        return Effect.void;
+      }),
+      Effect.forkChild,
+    );
+    yield* runtime.start();
+    const dispatched = yield* Deferred.make<void>();
+    const prompt = yield* runtime
+      .prompt({ prompt: [{ type: "text", text: "first" }] }, { dispatched })
+      .pipe(
+        holdPrompt.in === "scheduler"
+          ? Effect.provideService(Scheduler.MaxOpsBeforeYield, 3)
+          : (effect) => effect,
+        Effect.forkChild,
+      );
+    // A round trip: whatever was queued before it reaches the agent first.
+    const roundTrip = runtime.request("_test/environment", {});
+    let cancel: Fiber.Fiber<void, EffectAcpErrors.AcpError>;
+    if (holdPrompt.in === "scheduler") {
+      yield* Deferred.await(dispatched);
+      cancel = yield* runtime.cancel.pipe(Effect.forkChild({ startImmediately: true }));
+    } else {
+      yield* Deferred.await(promptHeld);
+      if (holdPrompt.cancelOn === "dispatch") {
+        cancel = yield* Deferred.await(dispatched).pipe(
+          Effect.andThen(runtime.cancel),
+          Effect.forkChild({ startImmediately: true }),
+        );
+      } else {
+        cancel = yield* Deferred.await(cancelledFromLog);
+      }
+      yield* roundTrip;
+      yield* Deferred.succeed(promptReleased, undefined);
+    }
+    yield* Deferred.await(cancelReceived);
+    yield* runtime.request("_test/finish-cancel", {});
+    // The agent answers it only after reading every earlier line.
+    yield* roundTrip;
+    const received = readReceived(requestLogPath, [
+      "session/prompt",
+      "session/cancel",
+      "_test/finish-cancel",
+    ]);
+    const promptExit = yield* Fiber.await(prompt);
+    yield* Fiber.join(cancel);
+    return { received, promptExit };
+  }).pipe(Effect.scoped);
+
+describe("AcpSessionRuntime", () => {
+  it.effect.each(["session/new", "session/resume"] as const)(
+    "buffers root metadata while %s startup is still pending",
+    (setupMethod) =>
+      Effect.gen(function* () {
+        const setupReplied = yield* Deferred.make<void>();
+        const allowStartup = yield* Deferred.make<void>();
+        const events: Array<AcpSessionRuntime.AcpSessionRuntimeEvent> = [];
+        const runtime = yield* AcpSessionRuntime.make({
+          ...mockRuntimeOptions,
+          ...(setupMethod === "session/resume"
+            ? {
+                spawn: {
+                  ...mockRuntimeOptions.spawn,
+                  env: { HANZO_ACP_SESSION_LIFECYCLE: "1" },
+                },
+                resumeSessionId: "mock-session-1",
+                resumeMethod: "resume" as const,
+              }
+            : {}),
+          requestLogger: (event) =>
+            event.method === setupMethod && event.status === "succeeded"
+              ? Deferred.succeed(setupReplied, undefined).pipe(
+                  Effect.andThen(Deferred.await(allowStartup)),
+                )
+              : Effect.void,
+        });
+        yield* runtime.getEvents().pipe(
+          Stream.runForEach((event) => {
+            if (event._tag === "EventStreamBarrier") {
+              return Deferred.succeed(event.acknowledge, undefined);
+            }
+            events.push(event);
+            return Effect.void;
+          }),
+          Effect.forkChild,
+        );
+        const startup = yield* runtime.start().pipe(Effect.forkChild);
+        yield* Deferred.await(setupReplied);
+        yield* runtime.request("_test/startup-metadata", {});
+        yield* Deferred.succeed(allowStartup, undefined);
+        yield* Fiber.join(startup);
+        yield* runtime.drainEvents;
+
+        expect(events.map((event) => event._tag)).toEqual([
+          "AvailableCommandsUpdated",
+          "ModeChanged",
+          "ConfigOptionsUpdated",
+        ]);
+        expect(events[0]).toMatchObject({
+          availableCommands: [{ name: "plan", description: "Native command" }],
+        });
+        expect(yield* runtime.getModeState).toMatchObject({ currentModeId: "code" });
+        expect(events[2]).toMatchObject({
+          configOptions: yield* runtime.getConfigOptions,
+        });
+        expect(
+          (yield* runtime.getConfigOptions).find((option) => option.category === "model"),
+        ).toMatchObject({ currentValue: "gpt-5.4" });
+      }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  );
+
+  it.effect("publishes model changes returned by a config request and live notifications", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.make(mockRuntimeOptions);
+      yield* runtime.start();
+      const updates = yield* Stream.toPull(
+        runtime.getEvents().pipe(Stream.filter((event) => event._tag === "ConfigOptionsUpdated")),
+      );
+      const selected = yield* runtime.setConfigOption("model", "composer-2");
+      expect((yield* updates)[0]?.configOptions).toEqual(selected.configOptions);
+      yield* runtime.request("_test/startup-metadata", {});
+      expect((yield* updates)[0]?.configOptions).toEqual(yield* runtime.getConfigOptions);
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  );
+
+  it.effect("waits for native cancellation and drains final updates before another prompt", () =>
+    Effect.gen(function* () {
+      const toolStarted = yield* Deferred.make<void>();
+      const cancelReceived = yield* Deferred.make<void>();
+      const events: Array<AcpSessionRuntime.AcpSessionRuntimeEvent> = [];
+      let promptRequests = 0;
+      const runtime = yield* AcpSessionRuntime.make({
+        ...mockRuntimeOptions,
+        spawn: {
+          ...mockRuntimeOptions.spawn,
+          env: { HANZO_ACP_COMPLETE_FIRST_PROMPT_ON_CANCEL: "1" },
+        },
+        cancelBehavior: "wait-for-prompt",
+        requestLogger: (event) =>
+          Effect.sync(() => {
+            if (event.method === "session/prompt" && event.status === "started")
+              promptRequests += 1;
+          }),
+      });
+      yield* runtime.getEvents().pipe(
+        Stream.runForEach((event) => {
+          if (event._tag === "EventStreamBarrier") {
+            return Deferred.succeed(event.acknowledge, undefined);
+          }
+          events.push(event);
+          if (event._tag === "ToolCallUpdated" && event.toolCall.status === "inProgress") {
+            return Deferred.succeed(toolStarted, undefined);
+          }
+          if (event._tag === "ThoughtDelta" && event.text === "native-cancel-received") {
+            return Deferred.succeed(cancelReceived, undefined);
+          }
+          return Effect.void;
+        }),
+        Effect.forkChild,
+      );
+      yield* runtime.start();
+      const prompt = yield* runtime
+        .prompt({
+          prompt: [{ type: "text", text: "first" }],
+        })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(toolStarted);
+      const cancellation = yield* runtime.cancel.pipe(Effect.forkChild);
+      yield* Deferred.await(cancelReceived);
+      const replacement = yield* runtime
+        .prompt({
+          prompt: [{ type: "text", text: "second" }],
+        })
+        .pipe(Effect.forkChild({ startImmediately: true }));
+
+      expect(prompt.pollUnsafe()).toBeUndefined();
+      expect(cancellation.pollUnsafe()).toBeUndefined();
+      expect(promptRequests).toBe(1);
+      yield* runtime.request("_test/finish-cancel", {});
+      yield* Fiber.join(cancellation);
+
+      expect(yield* Fiber.join(prompt)).toEqual({
+        stopReason: "cancelled",
+        _meta: { nativeCancel: true },
+      });
+      expect(
+        events.some(
+          (event) =>
+            event._tag === "ToolCallUpdated" &&
+            event.toolCall.status === "failed" &&
+            event.toolCall.detail === "Cancelled.",
+        ),
+      ).toBe(true);
+      const cancelledDelta = events.find(
+        (event) => event._tag === "ContentDelta" && event.text === "Request cancelled.",
+      );
+      expect(cancelledDelta?._tag).toBe("ContentDelta");
+      if (cancelledDelta?._tag === "ContentDelta") {
+        expect(
+          events.filter(
+            (event) =>
+              event._tag === "AssistantItemCompleted" && event.itemId === cancelledDelta.itemId,
+          ),
+        ).toHaveLength(1);
+      }
+      expect(yield* Fiber.join(replacement)).toMatchObject({ stopReason: "end_turn" });
+      expect(promptRequests).toBe(2);
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  );
+
+  it.effect("reports an idle child exit and rejects later prompts", () =>
+    Effect.gen(function* () {
+      const stopped = yield* Deferred.make<string>();
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const runtime = yield* AcpSessionRuntime.make(mockRuntimeOptions).pipe(
+        Effect.provideService(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make((command) =>
+            spawner.spawn(command).pipe(
+              Effect.map((child) =>
+                ChildProcessSpawner.makeHandle({
+                  ...child,
+                  // Model an inherited pipe held open until detached work is stopped.
+                  stdout: Stream.concat(
+                    child.stdout,
+                    Stream.fromEffect(Deferred.await(stopped)).pipe(Stream.drain),
+                  ),
+                }),
+              ),
+            ),
+          ),
+        ),
+        Effect.provideService(AgentScope, {
+          ...AgentScope.defaultValue(),
+          wrap: ({ command, args }) =>
+            Effect.succeed({ command, args, unit: "hanzodev-acp-test.scope" }),
+          stop: (unit) => Deferred.succeed(stopped, unit).pipe(Effect.asVoid),
+        }),
+      );
+      yield* runtime.start();
+      expect(yield* Deferred.isDone(stopped)).toBe(false);
+      yield* runtime.notify("_test/exit", {});
+      const events = yield* runtime.getEvents().pipe(Stream.take(1), Stream.runCollect);
+      expect(yield* Deferred.await(stopped)).toBe("hanzodev-acp-test.scope");
+      const event = events[0];
+      expect(event).toMatchObject({ _tag: "ConnectionTerminated", error: { code: 19 } });
+      if (event?._tag !== "ConnectionTerminated") return;
+      expect(
+        yield* runtime
+          .prompt({
+            prompt: [{ type: "text", text: "must not run" }],
+          })
+          .pipe(Effect.flip),
+      ).toBe(event.error);
+      expect(yield* runtime.start().pipe(Effect.flip)).toBe(event.error);
+      expect(yield* runtime.initialize().pipe(Effect.flip)).toBe(event.error);
+      expect(
+        yield* runtime.request("_test/environment", {}).pipe(
+          Effect.match({
+            onFailure: (error) => error,
+            onSuccess: () => undefined,
+          }),
+        ),
+      ).toBe(event.error);
+      expect(yield* runtime.notify("_test/exit", {}).pipe(Effect.flip)).toBe(event.error);
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  );
+
+  it.effect("retires a native runtime when its prompt caller is interrupted", () =>
+    Effect.gen(function* () {
+      const dispatched = yield* Deferred.make<void>();
+      const runtime = yield* AcpSessionRuntime.make({
+        ...mockRuntimeOptions,
+        spawn: {
+          ...mockRuntimeOptions.spawn,
+          env: { HANZO_ACP_COMPLETE_FIRST_PROMPT_ON_CANCEL: "1" },
+        },
+        cancelBehavior: "wait-for-prompt",
+      });
+      yield* runtime.start();
+      const prompt = yield* runtime
+        .prompt(
+          {
+            prompt: [{ type: "text", text: "first" }],
+          },
+          { dispatched },
+        )
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(dispatched);
+      yield* Fiber.interrupt(prompt);
+      const events = yield* runtime.getEvents().pipe(
+        Stream.filter((event) => event._tag === "ConnectionTerminated"),
+        Stream.take(1),
+        Stream.runCollect,
+      );
+      expect(events[0]).toMatchObject({
+        error: { _tag: "AcpTransportError", method: "session/prompt" },
+      });
+      expect(
+        yield* runtime
+          .prompt({
+            prompt: [{ type: "text", text: "must not run" }],
+          })
+          .pipe(Effect.flip),
+      ).toBe(events[0]?.error);
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  );
+
+  it.effect("fails a pending request when the stderr handler rejects the runtime", () =>
+    Effect.gen(function* () {
+      const failure = new EffectAcpErrors.AcpTransportError({
+        detail: "Sign in before continuing.",
+        cause: undefined,
+      });
+      const runtime = yield* AcpSessionRuntime.make({
+        ...mockRuntimeOptions,
+        spawn: { ...mockRuntimeOptions.spawn, env: { HANZO_ACP_FLOOD_STDERR: "1" } },
+        onStderr: () => Effect.fail(failure),
+      });
+      expect(yield* runtime.start().pipe(Effect.flip)).toBe(failure);
+      const events = yield* runtime.getEvents().pipe(
+        Stream.filter((event) => event._tag === "ConnectionTerminated"),
+        Stream.take(1),
+        Stream.runCollect,
+      );
+      expect(events[0]?.error).toBe(failure);
+      expect(yield* runtime.initialize().pipe(Effect.flip)).toBe(failure);
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  );
+
+  it.effect.each([
+    { name: "exit code", terminate: "process.exit(1)", code: 1, signal: undefined },
+    ...(HostProcess.Platform.defaultValue() === "win32"
+      ? []
+      : [
+          {
+            name: "signal",
+            terminate: "process.kill(process.pid, 'SIGTERM')",
+            code: undefined,
+            signal: "SIGTERM",
+          },
+        ]),
+  ])("retains the $name and sanitized stderr when ACP exits before initialize", (testCase) =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.make({
+        ...mockRuntimeOptions,
+        spawn: {
+          command: process.execPath,
+          args: [
+            "-e",
+            `process.stderr.write("Invalid project config: Unrecognized key in cli.json\\nAuthorization: Bearer secret-token-value\\n", () => { ${testCase.terminate}; });`,
+          ],
+        },
+      });
+      const error = yield* runtime.start().pipe(Effect.flip);
+      assert.instanceOf(error, EffectAcpErrors.AcpProcessExitedError);
+      expect(error.code).toBe(testCase.code);
+      expect(error.signal).toBe(testCase.signal);
+      expect(error).toMatchObject({
+        pid: expect.any(Number),
+        stderr:
+          "Invalid project config: Unrecognized key in cli.json\nAuthorization: Bearer [redacted]",
+      });
+      expect(error.message).toBe(
+        `${testCase.signal ? "ACP process exited after signal SIGTERM" : "ACP process exited with code 1"}\nInvalid project config: Unrecognized key in cli.json\nAuthorization: Bearer [redacted]`,
+      );
+      if (testCase.signal) {
+        expect(error.cause).toMatchObject({
+          reason: {
+            module: "ChildProcess",
+            method: "exitCode",
+            cause: new Error("Process interrupted due to receipt of signal: 'SIGTERM'"),
+          },
+        });
+      }
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  );
+
+  it.effect("drains large stderr output and keeps auth-sized logging chunks", () =>
+    Effect.gen(function* () {
+      const lengths: Array<number> = [];
+      for (const logStderr of [false, true]) {
+        yield* Effect.gen(function* () {
+          const runtime = yield* AcpSessionRuntime.make({
+            ...mockRuntimeOptions,
+            spawn: { ...mockRuntimeOptions.spawn, env: { HANZO_ACP_FLOOD_STDERR: "1" } },
+            ...(logStderr
+              ? {
+                  onStderr: (text: string) =>
+                    Effect.sync(() => {
+                      lengths.push(text.length);
+                    }),
+                }
+              : {}),
+          });
+          expect(yield* runtime.initialize()).toMatchObject({ protocolVersion: 2 });
+        }).pipe(Effect.scoped);
+      }
+      expect(lengths.length).toBeGreaterThan(0);
+      expect(Math.max(...lengths)).toBeGreaterThanOrEqual(16_384);
+      expect(Math.max(...lengths)).toBeLessThanOrEqual(32_768);
+    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  );
+
+  it.effect("releases a queued event drain when its runtime scope closes", () =>
+    Effect.gen(function* () {
+      const scope = yield* Effect.acquireRelease(Scope.make(), (scope) =>
+        Scope.close(scope, Exit.void),
+      );
+      const barrierReceived = yield* Deferred.make<void>();
+      const runtime = yield* AcpSessionRuntime.make(mockRuntimeOptions).pipe(
+        Effect.provideService(Scope.Scope, scope),
+      );
+      yield* runtime.start();
+      yield* runtime.getEvents().pipe(
+        Stream.runForEach((event) =>
+          event._tag === "EventStreamBarrier"
+            ? Deferred.succeed(barrierReceived, undefined).pipe(Effect.andThen(Effect.never))
+            : Effect.void,
+        ),
+        Effect.forkIn(scope),
+      );
+      const drain = yield* runtime.drainEvents.pipe(Effect.forkChild);
+      yield* Deferred.await(barrierReceived);
+      yield* Scope.close(scope, Exit.void);
+      yield* Fiber.join(drain);
+      yield* runtime.drainEvents;
+      expect(yield* runtime.initialize().pipe(Effect.flip)).toMatchObject({
+        _tag: "AcpTransportError",
+        detail: "The ACP session runtime is closed.",
+      });
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  );
+
+  it.effect("does not restore ambient variables to a sanitized child environment", () =>
+    Effect.gen(function* () {
+      yield* Effect.acquireRelease(
+        Effect.sync(() => setProcessEnv("HANZO_ACP_RUNTIME_AMBIENT", "sentinel")),
+        (restore) => Effect.sync(restore),
+      );
+      const runtime = yield* AcpSessionRuntime.make({
+        ...mockRuntimeOptions,
+        spawn: {
+          command: process.execPath,
+          args: mockAgentArgs,
+          extendEnv: false,
+          env: { HANZO_ACP_RUNTIME_EXPLICIT: "kept" },
+        },
+      });
+      yield* runtime.initialize();
+      expect(yield* runtime.request("_test/environment", {})).toEqual({
+        inherited: false,
+        explicit: true,
+      });
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  );
+
+  it("selects explicit or agent-managed authentication without choosing terminal auth", () => {
+    const methods = [
+      { id: "browser", name: "Browser", type: "terminal" as const },
+      { id: "api-key", name: "API key", type: "agent" as const },
+    ];
+
+    expect(AcpSessionRuntime.selectAcpAgentAuthMethod(methods)?.id).toBe("api-key");
+    expect(AcpSessionRuntime.selectAcpAgentAuthMethod(methods, "browser")?.id).toBe("browser");
+    expect(AcpSessionRuntime.selectAcpAgentAuthMethod(methods, "missing")).toBeUndefined();
+  });
+
+  it.effect("prefers MCP-over-ACP only when the agent advertises that transport", () => {
+    const requestEvents: Array<AcpSessionRuntime.AcpSessionRequestLogEvent> = [];
+    return Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+
+      const created = requestEvents.find(
+        (event) => event.method === "session/new" && event.status === "started",
+      );
+      expect(created?.payload).toMatchObject({
+        mcpServers: [{ type: "acp", name: "hanzo-dev", serverId: "hanzo-dev" }],
+      });
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: { HANZO_ACP_MCP_ACP: "1" },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "hanzo-test", version: "0.0.0" },
+          authMethodId: "test",
+          mcpServers: [{ type: "stdio", name: "hanzo-dev", command: "/usr/bin/node", args: [] }],
+          acpMcpServers: [{ type: "acp", name: "hanzo-dev", serverId: "hanzo-dev" }],
+          requestLogger: (event) =>
+            Effect.sync(() => {
+              requestEvents.push(event);
+            }),
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    );
+  });
+
+  it.effect("supports v2 session deletion and secret-safe provider management", () => {
+    const requestEvents: Array<AcpSessionRuntime.AcpSessionRequestLogEvent> = [];
+    return Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+
+      yield* runtime.deleteSession("native-session-1");
+      expect((yield* runtime.listProviders).providers[0]).toMatchObject({
+        providerId: "mock-provider",
+        current: null,
+      });
+      yield* runtime.setProvider({
+        providerId: "mock-provider",
+        apiType: "openai",
+        baseUrl: "https://api.example.test/v1",
+        headers: { Authorization: "Bearer top-secret" },
+      });
+      expect((yield* runtime.listProviders).providers[0]?.current).toEqual({
+        apiType: "openai",
+        baseUrl: "https://api.example.test/v1",
+      });
+      yield* runtime.disableProvider("mock-provider");
+      expect((yield* runtime.listProviders).providers[0]?.current).toBeNull();
+
+      const setRequest = requestEvents.find(
+        (event) => event.method === "providers/set" && event.status === "started",
+      );
+      expect(setRequest?.payload).toMatchObject({
+        headers: { Authorization: "[redacted]" },
+      });
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: { HANZO_ACP_V2_MANAGEMENT: "1" },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "hanzo-test", version: "0.0.0" },
+          authMethodId: "test",
+          requestLogger: (event) =>
+            Effect.sync(() => {
+              requestEvents.push(event);
+            }),
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    );
+  });
+
+  it.effect("authenticates explicitly typed v2 agent methods and retries session creation", () => {
+    const requestEvents: Array<AcpSessionRuntime.AcpSessionRequestLogEvent> = [];
+    return Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      const started = yield* runtime.start();
+      expect(started.sessionId).toBe("mock-session-1");
+      expect(
+        requestEvents.filter((event) => event.status === "started").map((event) => event.method),
+      ).toEqual(["initialize", "session/new", "authenticate", "session/new"]);
+      expect(
+        requestEvents.filter(
+          (event) => event.method === "session/new" && event.status === "failed",
+        ),
+      ).toHaveLength(1);
+      expect(
+        requestEvents.filter(
+          (event) => event.method === "session/new" && event.status === "succeeded",
+        ),
+      ).toHaveLength(1);
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          authMethodId: "test",
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              HANZO_ACP_AUTH_METHOD_ID: "test",
+              HANZO_ACP_REQUIRE_AUTH: "1",
+            },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "hanzo-test", version: "0.0.0" },
+          requestLogger: (event) =>
+            Effect.sync(() => {
+              requestEvents.push(event);
+            }),
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    );
+  });
+
+  it.effect("can surface auth-required without authenticating during discovery", () => {
+    const requestEvents: Array<AcpSessionRuntime.AcpSessionRequestLogEvent> = [];
+    let advertisedAuthMethodName: string | undefined;
+    return Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      const result = yield* Effect.result(runtime.start());
+
+      expect(Result.isFailure(result)).toBe(true);
+      expect(advertisedAuthMethodName).toBe("Mock agent authentication");
+      expect(
+        requestEvents.filter((event) => event.status === "started").map((event) => event.method),
+      ).toEqual(["initialize", "session/new"]);
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          authenticateOnAuthRequired: false,
+          authMethodId: "test",
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              HANZO_ACP_AUTH_METHOD_ID: "test",
+              HANZO_ACP_REQUIRE_AUTH: "1",
+            },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "hanzo-test", version: "0.0.0" },
+          onInitialized: (initializeResult) =>
+            Effect.sync(() => {
+              advertisedAuthMethodName = initializeResult.authMethods?.[0]?.name;
+            }),
+          requestLogger: (event) =>
+            Effect.sync(() => {
+              requestEvents.push(event);
+            }),
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    );
+  });
+
+  it.effect("starts a session, prompts, and emits normalized events against the mock agent", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      const started = yield* runtime.start();
+
+      expect(started.initializeResult).toMatchObject({ protocolVersion: 2 });
+      expect(started.sessionId).toBe("mock-session-1");
+
+      const promptResult = yield* runtime.prompt({
+        prompt: [{ type: "text", text: "hi" }],
+      });
+      expect(promptResult).toMatchObject({ stopReason: "end_turn" });
+
+      const notes = Array.from(yield* Stream.runCollect(Stream.take(runtime.getEvents(), 4)));
+      expect(notes).toHaveLength(4);
+      expect(notes.map((note) => note._tag)).toEqual([
+        "PlanUpdated",
+        "AssistantItemStarted",
+        "ContentDelta",
+        "AssistantItemCompleted",
+      ]);
+      const planUpdate = notes.find((note) => note._tag === "PlanUpdated");
+      expect(planUpdate?._tag).toBe("PlanUpdated");
+      if (planUpdate?._tag === "PlanUpdated") {
+        expect(planUpdate.payload).toMatchObject({
+          nativePlanId: "mock-plan",
+          kind: "items",
+        });
+        if (planUpdate.payload.kind === "items") {
+          expect(planUpdate.payload.plan).toHaveLength(2);
+        }
+      }
+      const assistantStart = notes[1];
+      const assistantDelta = notes[2];
+      if (
+        assistantStart?._tag === "AssistantItemStarted" &&
+        assistantDelta?._tag === "ContentDelta"
+      ) {
+        expect(assistantDelta.itemId).toBe(assistantStart.itemId);
+      }
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "hanzo-test", version: "0.0.0" },
+          authMethodId: "test",
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    ),
+  );
+
+  it.effect("keeps assistant item IDs unique when a provider session restarts", () => {
+    const collectFirstAssistantItemId = Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      const started = yield* runtime.start();
+      expect(started.sessionId).toBe("mock-session-1");
+
+      yield* runtime.prompt({
+        prompt: [{ type: "text", text: "hi" }],
+      });
+
+      const events = Array.from(yield* Stream.runCollect(Stream.take(runtime.getEvents(), 4)));
+      const assistantStart = events.find((event) => event._tag === "AssistantItemStarted");
+      expect(assistantStart?._tag).toBe("AssistantItemStarted");
+      return assistantStart?._tag === "AssistantItemStarted" ? assistantStart.itemId : "";
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "hanzo-test", version: "0.0.0" },
+          authMethodId: "test",
+        }),
+      ),
+      Effect.scoped,
+    );
+
+    return Effect.gen(function* () {
+      const beforeRestart = yield* collectFirstAssistantItemId;
+      const afterRestart = yield* collectFirstAssistantItemId;
+
+      expect(afterRestart).not.toBe(beforeRestart);
+    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
+  });
+
+  it.effect("drops session updates emitted for a child ACP session", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+
+      const promptResult = yield* runtime.prompt({
+        prompt: [{ type: "text", text: "hi" }],
+      });
+      expect(promptResult).toMatchObject({ stopReason: "end_turn" });
+
+      const notes = Array.from(yield* Stream.runCollect(Stream.take(runtime.getEvents(), 4)));
+      expect(notes.map((note) => note._tag)).toEqual([
+        "AssistantItemStarted",
+        "ContentDelta",
+        "ContentDelta",
+        "AssistantItemCompleted",
+      ]);
+      expect(
+        notes
+          .filter((note) => note._tag === "ContentDelta")
+          .map((note) => note.text)
+          .join(""),
+      ).toBe("root before child root after child");
+      expect(notes.some((note) => note._tag === "ToolCallUpdated")).toBe(false);
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              HANZO_ACP_EMIT_FOREIGN_SESSION_UPDATES: "1",
+            },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "hanzo-test", version: "0.0.0" },
+          authMethodId: "test",
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    ),
+  );
+
+  it.effect("segments assistant text around ACP tool calls", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+
+      const promptResult = yield* runtime.prompt({
+        prompt: [{ type: "text", text: "hi" }],
+      });
+      expect(promptResult).toMatchObject({ stopReason: "end_turn" });
+
+      const notes = Array.from(yield* Stream.runCollect(Stream.take(runtime.getEvents(), 7)));
+      expect(notes.map((note) => note._tag)).toEqual([
+        "AssistantItemStarted",
+        "ContentDelta",
+        "AssistantItemCompleted",
+        "ToolCallUpdated",
+        "ToolCallUpdated",
+        "AssistantItemStarted",
+        "ContentDelta",
+      ]);
+
+      const firstStarted = notes[0];
+      const firstDelta = notes[1];
+      const firstCompleted = notes[2];
+      const secondStarted = notes[5];
+      const secondDelta = notes[6];
+      expect(firstStarted?._tag).toBe("AssistantItemStarted");
+      expect(firstCompleted?._tag).toBe("AssistantItemCompleted");
+      expect(secondStarted?._tag).toBe("AssistantItemStarted");
+      if (
+        firstStarted?._tag === "AssistantItemStarted" &&
+        firstDelta?._tag === "ContentDelta" &&
+        firstCompleted?._tag === "AssistantItemCompleted" &&
+        secondStarted?._tag === "AssistantItemStarted" &&
+        secondDelta?._tag === "ContentDelta"
+      ) {
+        expect(firstDelta.itemId).toBe(firstStarted.itemId);
+        expect(firstCompleted.itemId).toBe(firstStarted.itemId);
+        expect(secondStarted.itemId).not.toBe(firstStarted.itemId);
+        expect(secondDelta.itemId).toBe(secondStarted.itemId);
+      }
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              HANZO_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS: "1",
+            },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "hanzo-test", version: "0.0.0" },
+          authMethodId: "test",
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    ),
+  );
+
+  it.effect("keeps one answer when an earlier tool reports progress mid-stream", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+      yield* runtime.prompt({ prompt: [{ type: "text", text: "hi" }] });
+
+      const notes = Array.from(yield* Stream.runCollect(Stream.take(runtime.getEvents(), 9)));
+      expect(notes.map((note) => note._tag)).toEqual([
+        "ToolCallUpdated",
+        "AssistantItemStarted",
+        "ContentDelta",
+        "ContentDelta",
+        "ToolCallUpdated",
+        "ContentDelta",
+        "ToolCallUpdated",
+        "ContentDelta",
+        "AssistantItemCompleted",
+      ]);
+      const itemIds = new Set(
+        notes.flatMap((note) =>
+          note._tag === "ContentDelta" ||
+          note._tag === "AssistantItemStarted" ||
+          note._tag === "AssistantItemCompleted"
+            ? [note.itemId]
+            : [],
+        ),
+      );
+      expect(itemIds.size).toBe(1);
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: { HANZO_ACP_EMIT_BACKGROUND_TOOL_DURING_ANSWER: "1" },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "hanzo-test", version: "0.0.0" },
+          authMethodId: "test",
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    ),
+  );
+
+  it.effect("emits status-only tool updates through completion", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+
+      const promptResult = yield* runtime.prompt({
+        prompt: [{ type: "text", text: "hi" }],
+      });
+      expect(promptResult).toMatchObject({ stopReason: "end_turn" });
+
+      const notes = Array.from(yield* Stream.runCollect(Stream.take(runtime.getEvents(), 3)));
+      expect(notes.map((note) => note._tag)).toEqual([
+        "ToolCallUpdated",
+        "ToolCallUpdated",
+        "ToolCallUpdated",
+      ]);
+      const toolCalls = notes.flatMap((note) =>
+        note._tag === "ToolCallUpdated" ? [note.toolCall] : [],
+      );
+      expect(toolCalls.map((toolCall) => toolCall.status)).toEqual([
+        "pending",
+        "inProgress",
+        "completed",
+      ]);
+      for (const toolCall of toolCalls) {
+        expect(toolCall.title).toBe("Read file");
+      }
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              HANZO_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS: "1",
+            },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "hanzo-test", version: "0.0.0" },
+          authMethodId: "test",
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    ),
+  );
+
+  it.effect("supports negotiated ACP session list, fork, resume, and close methods", () => {
+    const requestEvents: Array<AcpSessionRuntime.AcpSessionRequestLogEvent> = [];
+    return Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      const started = yield* runtime.start();
+      expect(started.initializeResult.agentCapabilities?.sessionCapabilities).toMatchObject({
+        list: {},
+        fork: {},
+        resume: {},
+        close: {},
+      });
+      expect(started.initializeResult.agentCapabilities?.auth).toMatchObject({ logout: {} });
+
+      const listed = yield* runtime.listSessions();
+      expect(listed.sessions.map((session) => session.sessionId)).toEqual(["mock-session-1"]);
+
+      const forked = yield* runtime.forkSession(started.sessionId);
+      expect(forked.sessionId).toBe("mock-session-1-fork");
+      yield* runtime.prompt({ prompt: [{ type: "text", text: "on fork" }] });
+
+      const resumed = yield* runtime.resumeSession(started.sessionId);
+      expect(resumed.sessionId).toBe("mock-session-1");
+      yield* runtime.closeSession();
+      yield* runtime.logout;
+
+      expect(
+        requestEvents.find(
+          (event) => event.method === "session/prompt" && event.status === "started",
+        )?.payload,
+      ).toMatchObject({ sessionId: "mock-session-1-fork" });
+      expect(
+        requestEvents.filter((event) => event.status === "started").map((event) => event.method),
+      ).toEqual(
+        expect.arrayContaining([
+          "session/list",
+          "session/fork",
+          "session/resume",
+          "session/close",
+          "logout",
+        ]),
+      );
+      // Omitted roots clear an agent's stored ones, so every activation resends them.
+      for (const method of ["session/new", "session/fork", "session/resume"]) {
+        expect(
+          requestEvents.find((event) => event.method === method && event.status === "started")
+            ?.payload,
+        ).toMatchObject({
+          additionalDirectories: ["/tmp/hanzo-attachments"],
+          _meta: { negotiated: "0.0.0" },
+        });
+      }
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          authMethodId: "test",
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              HANZO_ACP_SESSION_LIFECYCLE: "1",
+            },
+          },
+          additionalDirectories: ["/tmp/hanzo-attachments"],
+          sessionMeta: (initializeResult) => ({
+            negotiated: initializeResult.agentInfo?.version ?? "none",
+          }),
+          cwd: process.cwd(),
+          clientInfo: { name: "hanzo-test", version: "0.0.0" },
+          requestLogger: (event) =>
+            Effect.sync(() => {
+              requestEvents.push(event);
+            }),
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    );
+  });
+
+  it.effect("rejects unauthenticated ACP session lifecycle requests", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+
+      const listError = yield* runtime.listSessions().pipe(Effect.flip);
+      expect(listError._tag).toBe("AcpRequestError");
+      if (listError._tag === "AcpRequestError") {
+        expect(listError.code).toBe(-32000);
+      }
+
+      const forkError = yield* runtime.forkSession("mock-session-1").pipe(Effect.flip);
+      expect(forkError._tag).toBe("AcpRequestError");
+      if (forkError._tag === "AcpRequestError") {
+        expect(forkError.code).toBe(-32000);
+      }
+
+      const resumeError = yield* runtime.resumeSession("mock-session-1").pipe(Effect.flip);
+      expect(resumeError._tag).toBe("AcpRequestError");
+      if (resumeError._tag === "AcpRequestError") {
+        expect(resumeError.code).toBe(-32000);
+      }
+
+      const closeError = yield* runtime.closeSession().pipe(Effect.flip);
+      expect(closeError._tag).toBe("AcpRequestError");
+      if (closeError._tag === "AcpRequestError") {
+        expect(closeError.code).toBe(-32000);
+      }
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              HANZO_ACP_REQUIRE_AUTH: "1",
+              HANZO_ACP_SESSION_LIFECYCLE: "1",
+            },
+          },
+          cwd: process.cwd(),
+          resumeSessionId: "mock-session-1",
+          clientInfo: { name: "hanzo-test", version: "0.0.0" },
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    ),
+  );
+
+  // regression: #3156 harden ACP resume with replay-idle load readiness
+  it.effect("fails session startup when session/load returns an error", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      const error = yield* runtime.start().pipe(Effect.flip);
+
+      expect(error._tag).toBe("AcpRequestError");
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          authMethodId: "test",
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              HANZO_ACP_FAIL_LOAD_SESSION: "1",
+            },
+          },
+          cwd: process.cwd(),
+          resumeSessionId: "stale-session-id",
+          clientInfo: { name: "hanzo-test", version: "0.0.0" },
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    ),
+  );
+
+  it.effect("keeps active configuration after a candidate session load fails", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+      const before = yield* runtime.getConfigOptions;
+
+      const error = yield* runtime.loadSession("candidate-session").pipe(Effect.flip);
+
+      expect(error._tag).toBe("AcpRequestError");
+      expect(yield* runtime.getConfigOptions).toEqual(before);
+      expect(before.some((option) => option.id === "candidate-only")).toBe(false);
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          authMethodId: "test",
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              HANZO_ACP_FAIL_LOAD_SESSION_AFTER_CONFIG_REPLAY: "1",
+            },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "hanzo-test", version: "0.0.0" },
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    ),
+  );
+
+  it.effect("ignores session/update replay notifications during session/load", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+
+      yield* runtime.prompt({
+        prompt: [{ type: "text", text: "hi" }],
+      });
+      const notes = Array.from(yield* Stream.runCollect(Stream.take(runtime.getEvents(), 4)));
+      expect(notes.map((note) => note._tag)).toEqual([
+        "PlanUpdated",
+        "AssistantItemStarted",
+        "ContentDelta",
+        "AssistantItemCompleted",
+      ]);
+      expect(notes.some((note) => note._tag === "ToolCallUpdated")).toBe(false);
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          authMethodId: "test",
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              HANZO_ACP_EMIT_LOAD_REPLAY: "1",
+            },
+          },
+          cwd: process.cwd(),
+          resumeSessionId: "mock-session-1",
+          clientInfo: { name: "hanzo-test", version: "0.0.0" },
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    ),
+  );
+
+  // regression: #37106 prompt sent before session/load replied
+  it.live("does not prompt before session/load replies after replay goes idle", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+
+      const result = yield* runtime.prompt({
+        prompt: [{ type: "text", text: "hi" }],
+      });
+      expect(result.stopReason).toBe("end_turn");
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          authMethodId: "test",
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              HANZO_ACP_EMIT_LOAD_REPLAY: "1",
+              HANZO_ACP_LOAD_REPLY_DELAY_MS: "500",
+              HANZO_ACP_REJECT_PROMPT_UNTIL_LOADED: "1",
+            },
+          },
+          cwd: process.cwd(),
+          resumeSessionId: "mock-session-1",
+          sessionLoadReplayIdleGap: "50 millis",
+          clientInfo: { name: "hanzo-test", version: "0.0.0" },
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    ),
+  );
+
+  it.live("treats replay idle as loaded when the agent opts in", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      const started = yield* runtime.start();
+
+      expect(started.sessionSetupResult._meta).toMatchObject({
+        hanzoSessionLoadReady: "replay_idle",
+      });
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          authMethodId: "test",
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              HANZO_ACP_EMIT_LOAD_REPLAY: "1",
+              HANZO_ACP_LOAD_NEVER_REPLIES: "1",
+            },
+          },
+          cwd: process.cwd(),
+          resumeSessionId: "mock-session-1",
+          sessionLoadReplayIdleGap: "50 millis",
+          sessionLoadReplayIdleReadiness: true,
+          clientInfo: { name: "hanzo-test", version: "0.0.0" },
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    ),
+  );
+
+  it.effect("rejects invalid config option values before sending session/set_config_option", () => {
+    const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "acp-runtime-"));
+    const requestLogPath = NodePath.join(tempDir, "requests.ndjson");
+    return Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+
+      const error = yield* runtime.setModel("composer-2[fast=false]").pipe(Effect.flip);
+      expect(error._tag).toBe("AcpRequestError");
+      if (error._tag === "AcpRequestError") {
+        expect(error.code).toBe(-32602);
+        expect(error.message).toContain(
+          'Invalid value "composer-2[fast=false]" for session config option "model"',
+        );
+        expect(error.message).toContain("composer-2[fast=true]");
+      }
+
+      const recordedRequests = NodeFS.readFileSync(requestLogPath, "utf8")
+        .trim()
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line) as { method?: string; params?: { value?: unknown } });
+      expect(
+        recordedRequests.some(
+          (message) =>
+            message.method === "session/set_config_option" &&
+            message.params?.value === "composer-2[fast=false]",
+        ),
+      ).toBe(false);
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          authMethodId: "test",
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: {
+              HANZO_ACP_REQUEST_LOG_PATH: requestLogPath,
+            },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "hanzo-test", version: "0.0.0" },
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+      Effect.ensuring(Effect.sync(() => NodeFS.rmSync(tempDir, { recursive: true, force: true }))),
+    );
+  });
+
+  it.effect("sends configured custom models the agent does not advertise", () => {
+    const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "acp-runtime-"));
+    const requestLogPath = NodePath.join(tempDir, "requests.ndjson");
+    return Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.AcpSessionRuntime;
+      yield* runtime.start();
+
+      yield* runtime.setModel("cline-free/custom-model");
+      const error = yield* runtime.setModel("unconfigured/model").pipe(Effect.flip);
+      expect(error._tag).toBe("AcpRequestError");
+
+      const sentModels = NodeFS.readFileSync(requestLogPath, "utf8")
+        .trim()
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line) as { method?: string; params?: { value?: unknown } })
+        .filter((message) => message.method === "session/set_config_option")
+        .map((message) => message.params?.value);
+      expect(sentModels).toEqual(["cline-free/custom-model"]);
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          ...mockRuntimeOptions,
+          spawn: {
+            command: mockAgentCommand,
+            args: mockAgentArgs,
+            env: { HANZO_ACP_REQUEST_LOG_PATH: requestLogPath },
+          },
+          customModels: ["cline-free/custom-model"],
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+      Effect.ensuring(Effect.sync(() => NodeFS.rmSync(tempDir, { recursive: true, force: true }))),
+    );
+  });
+
+  it.effect.each(
+    (["interrupt", "wait-for-prompt"] as const).flatMap((cancelBehavior) =>
+      (
+        [
+          { in: "request-log", cancelOn: "dispatch" },
+          { in: "protocol-log", cancelOn: "log" },
+          { in: "scheduler", cancelOn: "dispatch" },
+        ] as const
+      ).map((holdPrompt) => ({ cancelBehavior, holdPrompt })),
+    ),
+  )(
+    "sends session/prompt before a cancel issued while the prompt is held in the $holdPrompt.in ($cancelBehavior, cancel on $holdPrompt.cancelOn)",
+    ({ cancelBehavior, holdPrompt }) =>
+      Effect.gen(function* () {
+        const run = yield* promptThenCancel({ cancelBehavior, holdPrompt });
+        expect(run.received).toEqual(["session/prompt", "session/cancel", "_test/finish-cancel"]);
+        expect(run.promptExit).toEqual(
+          Exit.succeed({ stopReason: "cancelled", _meta: { nativeCancel: true } }),
+        );
+      }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  );
+
+  it.effect("sends a cancel after the cancel timeout when its prompt never goes out", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.make({
+        ...mockRuntimeOptions,
+        interruptPromptOnCancel: false,
+        cancelTimeout: "5 seconds",
+        requestLogger: (event) => (isPromptStarted(event) ? Effect.never : Effect.void),
+      });
+      yield* runtime.start();
+      const dispatched = yield* Deferred.make<void>();
+      yield* runtime
+        .prompt({ prompt: [{ type: "text", text: "first" }] }, { dispatched })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(dispatched);
+      const cancel = yield* runtime.cancel.pipe(Effect.forkChild({ startImmediately: true }));
+      yield* TestClock.adjust("5 seconds");
+      yield* Fiber.join(cancel);
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  );
+
+  it.effect(
+    "sends a cancel before the next prompt when the prompt it waited for never went out",
+    () =>
+      Effect.gen(function* () {
+        const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "acp-runtime-"));
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => NodeFS.rmSync(tempDir, { recursive: true, force: true })),
+        );
+        const requestLogPath = NodePath.join(tempDir, "requests.ndjson");
+        let promptsStarted = 0;
+        const runtime = yield* AcpSessionRuntime.make({
+          ...mockRuntimeOptions,
+          spawn: { ...mockRuntimeOptions.spawn, env: { HANZO_ACP_REQUEST_LOG_PATH: requestLogPath } },
+          interruptPromptOnCancel: false,
+          // The cancel spends a test-clock second in its outgoing record, the window in which the
+          // next prompt could overtake it.
+          protocolLogging: {
+            logOutgoing: true,
+            logger: (event) =>
+              isOutgoing("session/cancel")(event) ? Effect.sleep("1 second") : Effect.void,
+          },
+          requestLogger: (event) =>
+            isPromptStarted(event) && promptsStarted++ === 0 ? Effect.never : Effect.void,
+        });
+        yield* runtime.getEvents().pipe(
+          Stream.runForEach((event) =>
+            event._tag === "EventStreamBarrier"
+              ? Deferred.succeed(event.acknowledge, undefined)
+              : Effect.void,
+          ),
+          Effect.forkChild,
+        );
+        yield* runtime.start();
+        const dispatched = yield* Deferred.make<void>();
+        const first = yield* runtime
+          .prompt({ prompt: [{ type: "text", text: "first" }] }, { dispatched })
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(dispatched);
+        const cancel = yield* runtime.cancel.pipe(Effect.forkChild({ startImmediately: true }));
+        const next = yield* runtime
+          .prompt({ prompt: [{ type: "text", text: "next" }] })
+          .pipe(Effect.forkChild);
+        // The first prompt ends before it is queued, which releases the cancel's wait.
+        yield* Effect.sleep("1 second").pipe(
+          Effect.andThen(Fiber.interrupt(first)),
+          Effect.forkChild,
+        );
+        yield* TestClock.adjust("1 second");
+        yield* TestClock.adjust("1 second");
+        yield* Fiber.join(cancel);
+        yield* Fiber.join(next);
+        expect(readReceived(requestLogPath, ["session/prompt", "session/cancel"])).toEqual([
+          "session/cancel",
+          "session/prompt",
+        ]);
+      }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  );
+});

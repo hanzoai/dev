@@ -1,0 +1,268 @@
+import { useAtomValue } from "@effect/atom-react";
+import { useAuth } from "./hanzoWebAuth";
+import { findErrorTraceId, thrownErrorMessage } from "@hanzodev/client-runtime/errors";
+import { AuthRelayReadScope, AuthRelayWriteScope, type EnvironmentId } from "@hanzodev/contracts";
+import { ManagedRelay } from "@hanzodev/client-runtime/relay";
+import {
+  isAtomCommandInterrupted,
+  settlePromise,
+  squashAtomCommandFailure,
+} from "@hanzodev/client-runtime/state/runtime";
+import * as Schema from "effect/Schema";
+import { useState } from "react";
+import { msg } from "gt-react";
+
+import { toastManager } from "../components/ui/toast";
+import { m } from "../i18n/messages";
+import { stackedThreadToast } from "../components/ui/toastHelpers";
+import { relayFailureReason } from "./relayFailureReason";
+import { relayEnvironmentDiscovery } from "../state/relay";
+import {
+  readEnvironmentCanConfigureRelay,
+  readEnvironmentScope,
+  useEnvironmentCanConfigureRelay,
+} from "../state/session";
+import { useAtomCommand } from "../state/use-atom-command";
+import { isCloudEnvironmentLinkError } from "./linkEnvironment";
+import { refreshManagedTunnelUsage } from "./managedRelayState";
+import {
+  linkEnvironment as linkEnvironmentAtom,
+  unlinkEnvironment as unlinkEnvironmentAtom,
+  updateEnvironmentPreferences as updateEnvironmentPreferencesAtom,
+} from "./linkEnvironmentAtoms";
+import { readCachedCloudLinkState, useCloudLinkState } from "./cloudLinkState";
+import { resolveRelayClerkTokenOptions } from "./publicConfig";
+import { cloudChangeReplacesLink, isManagedTunnelActive } from "./hanzoConnectState";
+
+export interface CloudLinkDesiredState {
+  readonly managedTunnel: boolean;
+  readonly publish: boolean;
+  readonly holdWebhooksWhileOffline?: boolean;
+}
+
+const isManagedRelayRequestFailedError = Schema.is(ManagedRelay.ManagedRelayRequestFailedError);
+const isManagedRelayClientError = Schema.is(ManagedRelay.ManagedRelayClientError);
+
+/** The account's tunnel cap when the relay refused a new tunnel for being at it. */
+function tunnelLimitFromLinkFailure(cause: unknown): number | null {
+  if (!isCloudEnvironmentLinkError(cause)) return null;
+  const relayCause = cause.cause;
+  if (!isManagedRelayRequestFailedError(relayCause)) return null;
+  return relayCause.relayError?._tag === "RelayEnvironmentLinkLimitExceededError"
+    ? relayCause.relayError.maxTunnels
+    : null;
+}
+
+export function useCloudLinkController(environmentId: EnvironmentId | null) {
+  const { getToken, isSignedIn } = useAuth();
+  const refreshRelayEnvironments = useAtomCommand(relayEnvironmentDiscovery.refresh, {
+    reportFailure: false,
+  });
+  const linkEnvironment = useAtomCommand(linkEnvironmentAtom, {
+    reportFailure: false,
+  });
+  const unlinkEnvironment = useAtomCommand(unlinkEnvironmentAtom, {
+    reportFailure: false,
+  });
+  const updateEnvironmentPreferences = useAtomCommand(updateEnvironmentPreferencesAtom, {
+    reportFailure: false,
+  });
+  const cloudLinkState = useCloudLinkState(environmentId);
+  const relayEnvironments = useAtomValue(relayEnvironmentDiscovery.stateValueAtom).environments;
+  const relayProviderKind = environmentId
+    ? relayEnvironments.get(environmentId)?.environment.endpoint.providerKind
+    : undefined;
+  const [operationError, setOperationError] = useState<string | null>(null);
+  const [tunnelLimit, setTunnelLimit] = useState<number | null>(null);
+
+  const reportUpdateFailure = (cause: unknown, reason?: string) => {
+    const message = thrownErrorMessage(cause, m) ?? m(msg("Could not update Hanzo Connect access."));
+    const traceId = findErrorTraceId(cause);
+    console.error("[hanzo-connect] Could not update Hanzo Connect", { message, traceId, cause });
+    setOperationError(
+      traceId ? m(msg("{message} Trace ID: {traceId}", { message, traceId })) : message,
+    );
+    toastManager.add(
+      stackedThreadToast({
+        type: "error",
+        title: m(msg("Could not update Hanzo Connect")),
+        description: reason ?? relayFailureReason(cause) ?? message,
+        ...(traceId
+          ? {
+              actionProps: {
+                children: m(msg("Copy trace ID")),
+                onClick: () => void navigator.clipboard?.writeText(traceId),
+              },
+              actionVariant: "outline",
+            }
+          : {}),
+        data: { hideCopyButton: true },
+      }),
+    );
+  };
+
+  const linkData = cloudLinkState.data;
+  const linkRevoked = linkData?.linkRevoked ?? false;
+  const managedTunnelActive = linkData ? isManagedTunnelActive(linkData, relayProviderKind) : false;
+  const managedTunnelOutOfSync =
+    linkData !== null && !managedTunnelActive && isManagedTunnelActive(linkData, undefined);
+  const publishAgentActivity = cloudLinkState.data?.publishAgentActivity ?? false;
+  const holdWebhooksWhileOffline = cloudLinkState.data?.holdWebhooksWhileOffline ?? false;
+  const linked = !linkRevoked && (cloudLinkState.data?.linked ?? false);
+  const canConfigureRelay = useEnvironmentCanConfigureRelay(environmentId);
+  const needsRelayConfiguration = (desired: CloudLinkDesiredState) =>
+    !canConfigureRelay &&
+    linkData !== null &&
+    cloudChangeReplacesLink(linkData, relayProviderKind, desired);
+
+  const reconcileCloudState = async (desired: CloudLinkDesiredState): Promise<boolean> => {
+    setOperationError(null);
+    setTunnelLimit(null);
+    const target = cloudLinkState.target;
+    if (!target) {
+      reportUpdateFailure(new Error(m(msg("Choose an environment first."))));
+      return false;
+    }
+    const environmentId = target.environmentId;
+    const canManageLink = () => {
+      if (
+        !readEnvironmentScope(environmentId, AuthRelayReadScope) ||
+        !readEnvironmentScope(environmentId, AuthRelayWriteScope)
+      ) {
+        reportUpdateFailure(
+          new Error(
+            m(msg("This connection needs permission to view and manage Hanzo Connect settings.")),
+          ),
+        );
+        return false;
+      }
+      return true;
+    };
+    const readLinkState = () => {
+      const state = readCachedCloudLinkState(target);
+      if (state === null) {
+        reportUpdateFailure(
+          new Error(m(msg("Wait until the current Hanzo Connect settings can be read."))),
+        );
+      }
+      return state;
+    };
+    if (!canManageLink()) return false;
+    const wantsLink = desired.managedTunnel || desired.publish;
+    if (wantsLink && readLinkState() === null) return false;
+    const tokenResult = await settlePromise(() => getToken(resolveRelayClerkTokenOptions()));
+    if (!canManageLink()) return false;
+
+    // A failed mutation may have partially applied, so refresh server state on every exit.
+    if (!wantsLink) {
+      // Unlink needs no relay token; failed token reads must still allow it.
+      const unlinkResult = await unlinkEnvironment({
+        target,
+        clerkToken: tokenResult._tag === "Success" ? (tokenResult.value ?? null) : null,
+      });
+      refreshManagedTunnelUsage();
+      if (unlinkResult._tag === "Failure") {
+        if (!isAtomCommandInterrupted(unlinkResult)) {
+          const cause = squashAtomCommandFailure(unlinkResult);
+          // Only the relay delete fails with a relay error, and it runs after the local unlink.
+          const relayKeptLink =
+            isCloudEnvironmentLinkError(cause) && isManagedRelayClientError(cause.cause);
+          reportUpdateFailure(
+            cause,
+            relayKeptLink
+              ? m(msg("Disconnected here, but Hanzo Connect still lists it. Remove it in Account."))
+              : undefined,
+          );
+        }
+        cloudLinkState.refresh();
+        await refreshRelayEnvironments();
+        return false;
+      }
+    } else {
+      const currentLinkState = readLinkState();
+      if (currentLinkState === null) return false;
+      if (tokenResult._tag === "Failure") {
+        reportUpdateFailure(squashAtomCommandFailure(tokenResult));
+        return false;
+      }
+      const clerkToken = tokenResult.value;
+      if (!clerkToken) {
+        reportUpdateFailure(new Error(m(msg("Sign in to Hanzo Connect before enabling this."))));
+        return false;
+      }
+      if (cloudChangeReplacesLink(currentLinkState, relayProviderKind, desired)) {
+        if (!readEnvironmentCanConfigureRelay(environmentId)) {
+          reportUpdateFailure(
+            new Error(
+              m(
+                msg(
+                  "This connection needs the relay configuration permission to configure Hanzo Connect.",
+                ),
+              ),
+            ),
+          );
+          return false;
+        }
+        const linkResult = await linkEnvironment({
+          target,
+          clerkToken,
+          mode: desired.managedTunnel ? "managed" : "publish_only",
+        });
+        // Any link attempt can change the account's tunnel count.
+        refreshManagedTunnelUsage();
+        if (linkResult._tag === "Failure") {
+          if (!isAtomCommandInterrupted(linkResult)) {
+            const cause = squashAtomCommandFailure(linkResult);
+            // The caller shows an upgrade prompt instead of an error.
+            const limit = tunnelLimitFromLinkFailure(cause);
+            if (limit === null) reportUpdateFailure(cause);
+            else setTunnelLimit(limit);
+          }
+          cloudLinkState.refresh();
+          return false;
+        }
+      }
+      if (!canManageLink() || readLinkState() === null) {
+        cloudLinkState.refresh();
+        return false;
+      }
+      const prefResult = await updateEnvironmentPreferences({
+        target,
+        publishAgentActivity: desired.publish,
+        ...(desired.holdWebhooksWhileOffline === undefined
+          ? {}
+          : { holdWebhooksWhileOffline: desired.holdWebhooksWhileOffline }),
+      });
+      if (prefResult._tag === "Failure") {
+        if (!isAtomCommandInterrupted(prefResult)) {
+          reportUpdateFailure(squashAtomCommandFailure(prefResult));
+        }
+        cloudLinkState.refresh();
+        return false;
+      }
+    }
+
+    cloudLinkState.refresh();
+    const refreshResult = await refreshRelayEnvironments();
+    if (refreshResult._tag === "Failure" && !isAtomCommandInterrupted(refreshResult)) {
+      reportUpdateFailure(squashAtomCommandFailure(refreshResult));
+      return false;
+    }
+    return true;
+  };
+
+  return {
+    isSignedIn,
+    linkState: cloudLinkState,
+    linked,
+    linkRevoked,
+    managedTunnelActive,
+    managedTunnelOutOfSync,
+    publishAgentActivity,
+    holdWebhooksWhileOffline,
+    operationError,
+    tunnelLimit,
+    needsRelayConfiguration,
+    reconcileCloudState,
+  };
+}

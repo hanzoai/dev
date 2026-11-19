@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["HanzoComposerEditorModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.hanzocomposereditor.HanzoComposerEditorModule"]
+  }
+}

@@ -1,0 +1,620 @@
+import { resolvePullRequestDetailChecks } from "@hanzodev/client-runtime/pull-request-checks";
+import { sourceControlClients } from "@hanzodev/client-runtime/source-control-clients";
+import { changeRequestTermKind } from "../pullRequest/changeRequestTerm";
+import { T, useGT, useMessages, Var } from "gt-react";
+import { PullRequestChangeBreakdownRows } from "../pullRequest/PullRequestChangeBreakdownStat";
+import { ThreadDetailsControl } from "./ThreadDetailsControl";
+import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
+import { selectEnvironmentQueryData } from "@hanzodev/client-runtime/state/runtime";
+import type { EnvironmentProject } from "@hanzodev/client-runtime/state/shell";
+import type { EnvironmentId, ProjectId, PullRequestRef } from "@hanzodev/contracts";
+import {
+  ArrowUpRightIcon,
+  EyeIcon,
+  EyeOffIcon,
+  FileDiffIcon,
+  GitBranchIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
+import { AsyncResult } from "effect/reactivity";
+import { useState, type MouseEvent as ReactMouseEvent } from "react";
+
+import type { ComposerThreadTarget } from "~/composerDraftStore";
+import { useLiveRefresh } from "~/hooks/useLiveRefresh";
+import { usePullRequestChecksRefresh } from "~/hooks/usePullRequestChecksRefresh";
+import { cn } from "~/lib/utils";
+import { useServerConfigs } from "~/state/entities";
+import { pullRequestEnvironment } from "~/state/pullRequests";
+import { useUiStateStore } from "~/uiStateStore";
+import {
+  useEnvironmentQueryIsNewer,
+  useEnvironmentQueryRefresh,
+  useEnvironmentQuerySelector,
+} from "~/state/query";
+
+import {
+  buildFixFindingsHandoff,
+  buildResolveConflictsPrompt,
+  classifyPullRequestChecks,
+  describePullRequestChecks,
+  isPullRequestConflicting,
+  resolvePullRequestMergeMethod,
+  allowedPullRequestMergeMethods,
+  resolveThreadPanelPullRequestAction,
+} from "../pullRequest/pullRequestDetail.logic";
+import { PullRequestChecksPopover } from "../pullRequest/PullRequestChecksPopover";
+import {
+  pullRequestChecksState,
+  PullRequestCheckStatusIcon,
+  PullRequestDiffStat,
+  resolvePullRequestState,
+} from "../pullRequest/pullRequestPresentation";
+import {
+  usePullRequestActionRunner,
+  usePullRequestDefaultMergeMethodResolver,
+  usePullRequestHandoffs,
+  writeHandoffToComposer,
+  type PullRequestThreadTask,
+} from "../pullRequest/usePullRequestActions";
+import {
+  ChangeRequestStatusIcon,
+  type PrStatusIndicator,
+  type ThreadPr,
+} from "../ThreadStatusIndicators";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
+import { Button } from "../ui/button";
+import { Spinner } from "../ui/spinner";
+import { toastManager } from "../ui/toast";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import {
+  THREAD_DETAILS_PANEL_ICON_CLASS,
+  THREAD_DETAILS_PANEL_LABEL_CLASS,
+  THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
+  THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
+} from "./threadDetailsPanelStyles";
+
+// A null checks response is settled; polling cannot find checks.
+const isSettledWithoutChecks = (result: AsyncResult.AsyncResult<unknown, unknown>) =>
+  result._tag === "Success" && result.value === null;
+
+export function ThreadDetailsPrRow({
+  environmentId,
+  pr,
+  number,
+  reference: linkedReference,
+  status,
+  project,
+  label,
+  onOpen,
+  onActed,
+  onStopWatching,
+  composerTarget,
+}: {
+  environmentId: EnvironmentId;
+  pr: ThreadPr;
+  number: number;
+  reference?: Pick<PullRequestRef, "host" | "repository" | "number"> | null;
+  status: PrStatusIndicator | null;
+  project: EnvironmentProject | null;
+  label: string;
+  onOpen: (event: ReactMouseEvent<HTMLElement>) => void;
+  onActed?: () => void;
+  onStopWatching?: (() => void) | undefined;
+  /** Fix and Resolve write here instead of checking the pull request out in a new thread. */
+  composerTarget?: ComposerThreadTarget | undefined;
+}) {
+  const gt = useGT();
+  const m = useMessages();
+  const serverConfigs = useServerConfigs();
+  const supportsPullRequests = serverConfigs.get(environmentId) !== undefined;
+  const repository = sourceControlClients.repositorySelector(project?.repositoryIdentity);
+  const reference: PullRequestRef | null =
+    supportsPullRequests && project !== null
+      ? linkedReference
+        ? { ...linkedReference, projectId: project.id as ProjectId }
+        : repository !== null
+          ? { projectId: project.id as ProjectId, repository, number }
+          : null
+      : null;
+  const detailAtom =
+    reference === null
+      ? null
+      : pullRequestEnvironment.detail({
+          environmentId,
+          input: { ...reference, allowStale: false },
+        });
+  // Select query parts because polling rebuilds unchanged results.
+  const detailData = useEnvironmentQuerySelector(detailAtom, selectEnvironmentQueryData);
+  const detailQuery = useEnvironmentQueryRefresh(detailAtom);
+  const supportsChecks =
+    serverConfigs.get(environmentId)?.environment.capabilities.pullRequestChecks === true;
+  const checksAtom =
+    supportsChecks && reference !== null && detailData !== null
+      ? pullRequestEnvironment.checks({ environmentId, input: reference })
+      : null;
+  const checksData = useEnvironmentQuerySelector(checksAtom, selectEnvironmentQueryData);
+  const checksSettledEmpty = useEnvironmentQuerySelector(checksAtom, isSettledWithoutChecks);
+  const checksQuery = useEnvironmentQueryRefresh(checksAtom);
+  const checksAreNewer = useEnvironmentQueryIsNewer(checksAtom, detailAtom);
+  const detail = resolvePullRequestDetailChecks(detailData, checksData, checksAreNewer);
+  const terminology = sourceControlClients.get(
+    detail?.provider ?? project?.repositoryIdentity?.provider,
+  ).changeRequest;
+  const term = changeRequestTermKind(terminology);
+  const open = reference !== null && (detail?.state ?? pr?.state) === "open";
+  const refreshKey = `${environmentId}:${project?.id}:${reference?.host}:${reference?.repository}:${number}`;
+  useLiveRefresh(
+    () => {
+      if (!detailQuery.isPending()) detailQuery.refresh();
+    },
+    { enabled: open, key: `workspace-pr:${refreshKey}`, intervalMs: 10 * 60_000 },
+  );
+  usePullRequestChecksRefresh({
+    refresh: () => {
+      if (!checksQuery.isPending() && !detailQuery.isPending()) checksQuery.refresh();
+    },
+    enabled: open && supportsChecks && !checksSettledEmpty,
+    key: `workspace-pr-checks:${refreshKey}`,
+    checks: detail?.checks ?? [],
+  });
+
+  const { actionPending, pendingAction, perform } = usePullRequestActionRunner({
+    environmentId,
+    reference,
+    terminology,
+    onSuccess: () => {
+      checksQuery.refresh();
+      onActed?.();
+    },
+  });
+  const { handoff, startHandoff } = usePullRequestHandoffs({ environmentId, detail });
+  const lastSelectedMergeMethod = useUiStateStore((state) => state.pullRequestMergeMethod);
+  const resolveProjectDefaultMergeMethod = usePullRequestDefaultMergeMethodResolver(
+    environmentId,
+    (project?.id as ProjectId | undefined) ?? null,
+  );
+  const [confirmingMerge, setConfirmingMerge] = useState(false);
+
+  const rowAction =
+    pendingAction === "ready" || pendingAction === "merge"
+      ? pendingAction
+      : resolveThreadPanelPullRequestAction(detail);
+  if (confirmingMerge && rowAction !== "merge") {
+    setConfirmingMerge(false);
+  }
+  const conflicting = isPullRequestConflicting(detail);
+  const checksState = detail === null ? "none" : classifyPullRequestChecks(detail.checks);
+  const checksRollup = detail === null ? null : pullRequestChecksState(detail.checks);
+  const selectedMergeMethod = resolvePullRequestMergeMethod(
+    allowedPullRequestMergeMethods(detail),
+    null,
+    resolveProjectDefaultMergeMethod(),
+    lastSelectedMergeMethod,
+  );
+  const mergeMethodKey =
+    selectedMergeMethod === "fast-forward" ? "fastForward" : selectedMergeMethod;
+
+  const handOff = (kind: "conflicts" | "findings", task: PullRequestThreadTask) => {
+    if (composerTarget === undefined) {
+      void startHandoff(kind, task);
+      return;
+    }
+    writeHandoffToComposer(composerTarget, task);
+    toastManager.add({
+      type: "success",
+      title: gt("Added to the composer"),
+      description: gt("The task is in the composer. Read it over, then send."),
+    });
+  };
+
+  const startResolveConflicts = () => {
+    if (detail === null) return;
+    handOff("conflicts", {
+      prompt: buildResolveConflictsPrompt({
+        number: detail.number,
+        url: detail.url,
+        headBranch: detail.headBranch,
+        baseBranch: detail.baseBranch,
+        inThisThread: composerTarget !== undefined,
+      }),
+    });
+  };
+
+  const startFixChecks = () => {
+    if (detail === null) return;
+    handOff(
+      "findings",
+      buildFixFindingsHandoff({
+        number: detail.number,
+        title: detail.title,
+        url: detail.url,
+        headBranch: detail.headBranch,
+        baseBranch: detail.baseBranch,
+        state: detail.state,
+        isDraft: detail.isDraft,
+        reviewThreads: [],
+        comments: [],
+        checks: detail.checks,
+        commentsTruncated: false,
+        inThisThread: composerTarget !== undefined,
+      }),
+    );
+  };
+
+  const statePresentation =
+    detail === null
+      ? null
+      : resolvePullRequestState(
+          {
+            state: detail.state,
+            isDraft: detail.isDraft,
+          },
+          m,
+        );
+  const icon = statePresentation ? (
+    <statePresentation.Icon
+      aria-hidden
+      className={cn("size-4 shrink-0", statePresentation.toneClassName)}
+    />
+  ) : pr && status ? (
+    <ChangeRequestStatusIcon
+      state={pr.state}
+      className={cn(THREAD_DETAILS_PANEL_ICON_CLASS, status.colorClass)}
+    />
+  ) : (
+    <PullRequestGlyph.pullRequest className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+  );
+
+  const stateLabel = (
+    statePresentation ??
+    (pr ? resolvePullRequestState({ state: pr.state, isDraft: pr.isDraft === true }, m) : null)
+  )?.label.toLowerCase();
+  const title = (detail?.title ?? pr?.title)?.trim();
+  const openAriaLabel =
+    stateLabel && title
+      ? gt(
+          "{term, select, mr {Merge request} cr {Change request} other {Pull request}} #{number}, {state}: {title}",
+          { term, number, state: stateLabel, title },
+        )
+      : stateLabel
+        ? gt(
+            "{term, select, mr {Merge request} cr {Change request} other {Pull request}} #{number}, {state}",
+            { term, number, state: stateLabel },
+          )
+        : title
+          ? gt(
+              "{term, select, mr {Merge request} cr {Change request} other {Pull request}} #{number}: {title}",
+              { term, number, title },
+            )
+          : gt(
+              "{term, select, mr {Merge request} cr {Change request} other {Pull request}} #{number}",
+              { term, number },
+            );
+
+  const rowTooltip =
+    detail === null || statePresentation === null ? (
+      <TooltipPopup side="top">
+        {status?.tooltip ??
+          gt(
+            "{term, select, mr {Merge request} cr {Change request} other {Pull request}} #{number}",
+            {
+              term,
+              number,
+            },
+          )}
+      </TooltipPopup>
+    ) : (
+      <TooltipPopup
+        side="top"
+        align="start"
+        sideOffset={4}
+        variant="glass"
+        className="max-w-80 text-left whitespace-normal"
+      >
+        <div className="flex min-w-0 max-w-80 flex-col gap-2 px-1 py-2">
+          <div className="flex min-w-0 items-baseline gap-1.5 text-xs leading-none">
+            <span className="min-w-0 truncate font-medium text-foreground">{detail.title}</span>
+            <span className="shrink-0 text-muted-foreground">#{detail.number}</span>
+          </div>
+          <div className="grid gap-1.5 pl-0.5 text-xs text-muted-foreground">
+            <div className="flex min-w-0 items-center gap-2">
+              <statePresentation.Icon
+                aria-hidden
+                className={cn("size-3 shrink-0", statePresentation.toneClassName)}
+              />
+              <div className="min-w-0 truncate text-foreground/75">{statePresentation.label}</div>
+            </div>
+            <div className="flex min-w-0 items-center gap-2">
+              <GitBranchIcon className="size-3 shrink-0 stroke-muted-foreground" />
+              <div className="min-w-0 truncate text-foreground/75">
+                {detail.baseBranch} ← {detail.headBranch}
+              </div>
+            </div>
+            {detail.state === "open" && checksState !== "none" ? (
+              <div className="flex min-w-0 items-center gap-2">
+                <PullRequestCheckStatusIcon
+                  status={
+                    checksState === "failing"
+                      ? "failure"
+                      : checksState === "pending"
+                        ? "pending"
+                        : "success"
+                  }
+                />
+                <div className="min-w-0 truncate text-foreground/75">
+                  {describePullRequestChecks(detail.checks, m)}
+                </div>
+              </div>
+            ) : null}
+            {detail.isDraft && conflicting ? (
+              <div className="flex min-w-0 items-start gap-2 text-destructive">
+                <TriangleAlertIcon aria-hidden className="mt-0.5 size-3 shrink-0 stroke-current" />
+                <div className="min-w-0 flex-1 wrap-break-word">
+                  <T>
+                    Merge conflicts with <Var>{detail.baseBranch}</Var>
+                  </T>
+                </div>
+              </div>
+            ) : null}
+            <div className="flex min-w-0 items-center gap-2">
+              <FileDiffIcon className="size-3 shrink-0 stroke-muted-foreground" />
+              <div className="min-w-0 flex items-baseline gap-1 truncate text-foreground/75">
+                {gt("{count, plural, one {{formatted} file} other {{formatted} files}}", {
+                  count: detail.changedFiles,
+                  formatted: detail.changedFiles.toLocaleString(),
+                })}
+                <PullRequestDiffStat additions={detail.additions} deletions={detail.deletions} />
+              </div>
+            </div>
+            {reference !== null && (detail.additions > 0 || detail.deletions > 0) ? (
+              <PullRequestChangeBreakdownRows
+                environmentId={environmentId}
+                reference={reference}
+                className="pl-5 text-foreground/75"
+              />
+            ) : null}
+          </div>
+        </div>
+      </TooltipPopup>
+    );
+
+  const newThreadSuffix =
+    composerTarget === undefined ? (
+      <ArrowUpRightIcon aria-hidden className="size-3 shrink-0" />
+    ) : null;
+  const trailingAction =
+    rowAction === "resolve"
+      ? {
+          label: gt("Resolve", { $context: "verb, resolves merge conflicts" }),
+          pendingLabel: gt("Preparing..."),
+          pending: handoff === "conflicts",
+          destructive: true,
+          suffix: newThreadSuffix,
+          tooltip:
+            composerTarget === undefined
+              ? gt("Check the branch out and resolve the conflicts in a new thread")
+              : gt("Resolve the conflicts in this thread"),
+          onClick: startResolveConflicts,
+        }
+      : rowAction === "ready"
+        ? {
+            label: gt("Ready", { $context: "verb, marks a draft pull request ready for review" }),
+            pendingLabel: gt("Marking..."),
+            pending: actionPending,
+            destructive: false,
+            suffix: null,
+            tooltip: gt(
+              "Mark this {term, select, mr {merge request} cr {change request} other {pull request}} as ready for review",
+              { term },
+            ),
+            onClick: () => void perform("ready"),
+          }
+        : rowAction === "fix"
+          ? {
+              label: gt("Fix", { $context: "verb, fixes failing checks" }),
+              pendingLabel: gt("Fix", { $context: "verb, fixes failing checks" }),
+              pending: handoff === "findings",
+              destructive: true,
+              suffix:
+                handoff === "findings" ? (
+                  <Spinner size="xs" aria-label={gt("Preparing fix")} />
+                ) : (
+                  newThreadSuffix
+                ),
+              tooltip:
+                composerTarget === undefined
+                  ? gt("Fix the failing checks in a new thread")
+                  : gt("Fix the failing checks in this thread"),
+              onClick: startFixChecks,
+            }
+          : rowAction === "merge"
+            ? {
+                label: gt("Merge", { $context: "verb, merges a pull request" }),
+                pendingLabel: gt("Merging..."),
+                pending: actionPending,
+                destructive: false,
+                suffix: null,
+                tooltip: gt(
+                  "Merge this {term, select, mr {merge request} cr {change request} other {pull request}} ({method, select, merge {merge} squash {squash} rebase {rebase} fastForward {fast-forward} other {merge}})",
+                  {
+                    term,
+                    method: mergeMethodKey,
+                  },
+                ),
+                onClick: () => setConfirmingMerge(true),
+              }
+            : null;
+
+  const watching =
+    onStopWatching !== undefined && (detail?.state ?? pr?.state ?? "open") === "open";
+  const watchControl = (part: "secondary" | "icon") =>
+    watching ? (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <ThreadDetailsControl
+              type="button"
+              variant="ghost"
+              size="sm"
+              part={part}
+              className="group/watch"
+              aria-label={gt("Stop watching #{number}", { number })}
+              onClick={onStopWatching}
+            />
+          }
+        >
+          <EyeIcon
+            aria-hidden
+            className={cn(part === "icon" ? "size-3.5" : "size-4", "group-hover/watch:hidden")}
+          />
+          <EyeOffIcon
+            aria-hidden
+            className={cn(
+              part === "icon" ? "size-3.5" : "size-4",
+              "hidden group-hover/watch:block",
+            )}
+          />
+        </TooltipTrigger>
+        <TooltipPopup side="top">
+          <T>
+            Watching: the agent wakes when checks finish, someone comments, or the branch conflicts.
+            Click to stop.
+          </T>
+        </TooltipPopup>
+      </Tooltip>
+    ) : null;
+
+  // The title row wraps to two lines; a conventional-commit prefix eats most of one line.
+  const openRow = (text: string, part: "row" | "primary", wrap = false) => (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <ThreadDetailsControl
+            type="button"
+            variant="ghost"
+            size="sm"
+            part={wrap ? "title" : part}
+            aria-label={openAriaLabel}
+            onClick={onOpen}
+            onAuxClick={onOpen}
+          />
+        }
+      >
+        {icon}
+        <span
+          className={cn(
+            "min-w-0 flex-1 text-left",
+            wrap
+              ? "line-clamp-2 whitespace-normal leading-4.5"
+              : cn("truncate", THREAD_DETAILS_PANEL_LABEL_CLASS),
+          )}
+        >
+          {text}
+        </span>
+      </TooltipTrigger>
+      {rowTooltip}
+    </Tooltip>
+  );
+
+  const showChecks = detail !== null && checksRollup !== null && !conflicting && !detail.isDraft;
+
+  return (
+    <>
+      {detail !== null && (showChecks || trailingAction !== null || watching) ? (
+        <div className="pb-1.5">
+          {openRow(detail.title, "row", true)}
+          <div className="flex h-5 min-w-0 items-center gap-0.5 ps-9 pe-2.5 text-xs text-muted-foreground">
+            <span aria-hidden className="me-1 shrink-0 tabular-nums">
+              #{number}
+            </span>
+            {showChecks && checksRollup !== null ? (
+              <PullRequestChecksPopover
+                checksState={checksRollup}
+                checks={detail.checks}
+                variant="count"
+                render={<ThreadDetailsControl part="meta" className="min-w-0 shrink" />}
+              />
+            ) : null}
+            {watchControl("icon")}
+            <span className="flex-1" />
+            {trailingAction ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <ThreadDetailsControl
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      part="meta"
+                      tone={trailingAction.destructive ? "destructive" : "primary"}
+                      disabled={actionPending || handoff !== null}
+                      onClick={trailingAction.onClick}
+                    />
+                  }
+                >
+                  {trailingAction.pending ? trailingAction.pendingLabel : trailingAction.label}
+                  {trailingAction.suffix}
+                </TooltipTrigger>
+                <TooltipPopup side="top">{trailingAction.tooltip}</TooltipPopup>
+              </Tooltip>
+            ) : null}
+          </div>
+        </div>
+      ) : watching ? (
+        <div className={THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS}>
+          {openRow(label, "primary")}
+          <span aria-hidden="true" className={THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS} />
+          {watchControl("secondary")}
+        </div>
+      ) : (
+        openRow(label, "row")
+      )}
+      {rowAction === "merge" ? (
+        <AlertDialog open={confirmingMerge} onOpenChange={(open) => setConfirmingMerge(open)}>
+          <AlertDialogPopup>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {gt(
+                  "Merge {term, select, mr {merge request} cr {change request} other {pull request}}?",
+                  { term },
+                )}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {gt(
+                  "This merges #{number} using {method, select, merge {merge} squash {squash} rebase {rebase} fastForward {fast-forward} other {merge}}.",
+                  {
+                    number,
+                    method: mergeMethodKey,
+                  },
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogClose render={<Button variant="outline" size="sm" />}>
+                <T>Cancel</T>
+              </AlertDialogClose>
+              <Button
+                size="sm"
+                disabled={actionPending}
+                onClick={() => {
+                  setConfirmingMerge(false);
+                  void perform("merge", selectedMergeMethod);
+                }}
+              >
+                <T context="verb, merges a pull request">Merge</T>
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogPopup>
+        </AlertDialog>
+      ) : null}
+    </>
+  );
+}

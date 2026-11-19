@@ -1,0 +1,151 @@
+import type { EnvironmentId, ScopedThreadRef } from "@hanzodev/contracts";
+import {
+  HTML_RENDER_COLUMN_WIDTH,
+  htmlRenderFileName,
+  htmlRenderFrameHeight,
+  type HtmlRenderReference,
+} from "@hanzodev/shared/htmlRender";
+import { T, useGT, Var } from "gt-react";
+import { Maximize2Icon } from "lucide-react";
+import { useEffect, useState } from "react";
+
+import { useAssetUrlRefresh } from "~/assets/assetUrls";
+import { useLongLivedAssetUrl } from "~/assets/longLivedAssetUrls";
+
+import { HtmlRenderDocument } from "../files/BrowserDocumentFrame";
+import { Button } from "../ui/button";
+import { toastManager } from "../ui/toast";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { HtmlRenderDialog } from "./HtmlRenderDialog";
+import { observeResize } from "~/lib/observeResize";
+
+const MIN_URL_LIFE_MS = 5 * 60_000;
+const MAX_MEASURED_CONTENT_HEIGHTS = 200;
+
+// The height each render's page last reported, so a remounted frame opens at it before its page loads.
+const measuredContentHeights = new Map<string, number>();
+
+function rememberContentHeight(attachmentId: string, height: number) {
+  measuredContentHeights.delete(attachmentId);
+  measuredContentHeights.set(attachmentId, height);
+  if (measuredContentHeights.size > MAX_MEASURED_CONTENT_HEIGHTS) {
+    const oldest = measuredContentHeights.keys().next().value;
+    if (oldest !== undefined) measuredContentHeights.delete(oldest);
+  }
+}
+
+export function HtmlRenderFrame(props: {
+  readonly environmentId: EnvironmentId;
+  readonly htmlRender: HtmlRenderReference;
+  readonly threadRef: ScopedThreadRef | undefined;
+  readonly onFullscreenChange?: (fullscreen: boolean) => void;
+}) {
+  const gt = useGT();
+  const { attachmentId, title } = props.htmlRender;
+  const [width, setWidth] = useState(HTML_RENDER_COLUMN_WIDTH);
+  const observeBox = (box: HTMLDivElement) => {
+    setWidth(box.clientWidth);
+    return observeResize(box, ([entry]) => {
+      if (entry) setWidth(entry.contentRect.width);
+    });
+  };
+  // Client fonts can exceed the server-measured height and cause nested scrolling.
+  const [contentHeight, setContentHeight] = useState(() =>
+    measuredContentHeights.get(attachmentId),
+  );
+  const height = htmlRenderFrameHeight(props.htmlRender, width, contentHeight);
+  const fileName = htmlRenderFileName(title);
+  const resource = {
+    _tag: "attachment" as const,
+    attachmentId,
+    fileName,
+    mimeType: "text/html",
+    disposition: "inline" as const,
+  };
+  // The frame keeps the first URL it loads, so later mints do not reload the page.
+  const [loaded, setLoaded] = useState<{ src: string; expiresAt: number } | null>(null);
+  const assetUrl = useLongLivedAssetUrl(loaded === null ? props.environmentId : null, resource);
+  if (loaded === null && assetUrl._tag === "Success") {
+    setLoaded({ src: assetUrl.url, expiresAt: assetUrl.expiresAt });
+  }
+  const src = loaded?.src ?? null;
+  const failed = loaded === null && assetUrl._tag === "Failure";
+  const refresh = useAssetUrlRefresh(props.environmentId, resource);
+  const [expandedSrc, setExpandedSrc] = useState<string | null>(null);
+  const { onFullscreenChange } = props;
+  // Tied to the viewer's lifetime: unmounting while expanded must still release
+  // the timeline's follow pin, which a close handler alone never reaches.
+  const expanded = expandedSrc !== null;
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- holds the parent's fullscreen pin while expanded and releases it on collapse or unmount
+  useEffect(() => {
+    if (!expanded) return;
+    onFullscreenChange?.(true);
+    return () => onFullscreenChange?.(false);
+  }, [expanded, onFullscreenChange]);
+
+  return (
+    <div ref={observeBox} className="group/html-render relative" style={{ height }}>
+      {src !== null ? (
+        <>
+          <HtmlRenderDocument
+            src={src}
+            title={title}
+            threadRef={props.threadRef}
+            className="block size-full"
+            containScroll
+            onContentHeight={(height) => {
+              rememberContentHeight(attachmentId, height);
+              setContentHeight(height);
+            }}
+            onFullscreenChange={onFullscreenChange}
+          />
+          <div className="absolute end-2 top-2 flex gap-1 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/html-render:opacity-100 pointer-coarse:opacity-100">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    aria-label={gt("Open full screen")}
+                    size="icon-xs"
+                    variant="glass"
+                    onClick={async () => {
+                      const url =
+                        loaded !== null && loaded.expiresAt - Date.now() > MIN_URL_LIFE_MS
+                          ? src
+                          : await refresh().catch(() => null);
+                      if (url !== null) setExpandedSrc(url);
+                      else
+                        toastManager.add({
+                          type: "error",
+                          title: gt("Page unavailable"),
+                          description: gt("Reconnect to the environment and try again."),
+                        });
+                    }}
+                  />
+                }
+              >
+                <Maximize2Icon className="size-3.5" />
+              </TooltipTrigger>
+              <TooltipPopup side="left">
+                <T>Open full screen</T>
+              </TooltipPopup>
+            </Tooltip>
+          </div>
+          {expandedSrc !== null ? (
+            <HtmlRenderDialog
+              src={expandedSrc}
+              htmlRender={props.htmlRender}
+              threadRef={props.threadRef}
+              onClose={() => setExpandedSrc(null)}
+            />
+          ) : null}
+        </>
+      ) : failed ? (
+        <p className="flex size-full items-center justify-center text-muted-foreground text-xs">
+          <T>
+            Unable to load <Var>{title}</Var>
+          </T>
+        </p>
+      ) : null}
+    </div>
+  );
+}

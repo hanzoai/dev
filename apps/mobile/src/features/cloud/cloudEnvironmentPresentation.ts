@@ -1,0 +1,80 @@
+import type { RelayEnvironmentStatusResponse } from "@hanzodev/contracts/relay";
+import {
+  orchestrationProtocolCompatibilityError,
+  type EnvironmentConnectionPhase,
+} from "@hanzodev/client-runtime/connection";
+import { errorDisplayMessage } from "@hanzodev/client-runtime/errors";
+import { relayOfflineReasonMessage } from "@hanzodev/client-runtime/relay";
+import { msg } from "gt-react-native";
+
+import { m, type MessageResolver } from "../../i18n/messages";
+
+export interface AvailableCloudEnvironmentPresentation {
+  readonly connectionError: string | null;
+  readonly connectionErrorTraceId: string | null;
+  readonly connectionState: EnvironmentConnectionPhase;
+  readonly statusText: string;
+}
+
+export function availableCloudEnvironmentPresentation(
+  input: {
+    readonly isStatusPending: boolean;
+    readonly status: RelayEnvironmentStatusResponse | null;
+    readonly statusError: string | null;
+    readonly statusErrorTraceId: string | null;
+  },
+  resolve: MessageResolver = m,
+): AvailableCloudEnvironmentPresentation {
+  const compatibilityError =
+    input.status?.descriptor === undefined
+      ? null
+      : orchestrationProtocolCompatibilityError(input.status.descriptor);
+  if (compatibilityError !== null) {
+    const message = errorDisplayMessage(compatibilityError, resolve) ?? compatibilityError.message;
+    return {
+      connectionError: message,
+      connectionErrorTraceId: null,
+      connectionState: "unsupported",
+      statusText: message,
+    };
+  }
+  if (input.status?.status === "online") {
+    return {
+      connectionError: null,
+      connectionErrorTraceId: null,
+      connectionState: "available",
+      statusText: resolve(msg("Available · Relay online")),
+    };
+  }
+
+  if (input.status?.status === "offline") {
+    const connectionError =
+      relayOfflineReasonMessage(input.status, resolve) ??
+      input.status.error ??
+      resolve(msg("Relay is offline."));
+    return {
+      connectionError,
+      connectionErrorTraceId: input.status.traceId ?? null,
+      connectionState: "error",
+      statusText: connectionError,
+    };
+  }
+
+  if (input.statusError) {
+    return {
+      connectionError: input.statusError,
+      connectionErrorTraceId: input.statusErrorTraceId,
+      connectionState: "error",
+      statusText: input.statusError,
+    };
+  }
+
+  return {
+    connectionError: null,
+    connectionErrorTraceId: null,
+    connectionState: "available",
+    statusText: input.isStatusPending
+      ? resolve(msg("Available · Checking relay status..."))
+      : resolve(msg("Available · Relay status unknown")),
+  };
+}

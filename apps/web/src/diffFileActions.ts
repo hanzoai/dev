@@ -1,0 +1,119 @@
+import type { ScopedThreadRef } from "@hanzodev/contracts";
+import {
+  isAbsolutePath,
+  isWindowsAbsolutePath,
+  normalizeProjectPathForComparison,
+  workspaceRelativeFilePath,
+} from "@hanzodev/shared/path";
+
+import { useRightPanelStore } from "./rightPanelStore";
+import { resolvePathLinkTarget } from "@hanzodev/shared/fileLinks";
+
+interface OpenDiffFilePrimaryActionInput {
+  readonly threadRef: ScopedThreadRef | null;
+  readonly filePath: string;
+  readonly activeCwd: string | undefined;
+  readonly repositoryRoot?: string | undefined;
+  readonly openInEditor: (targetPath: string) => void;
+}
+
+function normalizedRelativePathSegments(
+  filePath: string,
+  windowsRoot: boolean,
+): ReadonlyArray<string> | null {
+  if (filePath.startsWith("/") || isWindowsAbsolutePath(filePath) || /^[a-zA-Z]:/.test(filePath)) {
+    return null;
+  }
+
+  // On POSIX a backslash is part of a file name; Windows treats it as a separator
+  // (tool-call patches can name files with either), so reject ".." either way.
+  const parts = filePath.split(/[\\/]/);
+  if (parts.includes("..")) return null;
+  const segments = (windowsRoot ? parts : filePath.split("/")).filter(
+    (segment) => segment.length > 0 && segment !== ".",
+  );
+  if (segments.length === 0) return null;
+  return segments;
+}
+
+function repositoryRelativeWorkspaceSegments(
+  workspaceRoot: string | undefined,
+  repositoryRoot: string | undefined,
+): ReadonlyArray<string> | null {
+  if (!workspaceRoot || !repositoryRoot) return null;
+
+  const normalizedWorkspaceRoot = normalizeProjectPathForComparison(workspaceRoot);
+  const normalizedRepositoryRoot = normalizeProjectPathForComparison(repositoryRoot);
+  if (normalizedWorkspaceRoot === normalizedRepositoryRoot) return [];
+
+  const separator = isWindowsAbsolutePath(normalizedRepositoryRoot) ? "\\" : "/";
+  const repositoryPrefix = normalizedRepositoryRoot.endsWith(separator)
+    ? normalizedRepositoryRoot
+    : `${normalizedRepositoryRoot}${separator}`;
+  if (!normalizedWorkspaceRoot.startsWith(repositoryPrefix)) return null;
+
+  return normalizedWorkspaceRoot.slice(repositoryPrefix.length).split(separator).filter(Boolean);
+}
+
+export function resolveDiffPathForWorkspace(input: {
+  readonly filePath: string;
+  readonly workspaceRoot: string | undefined;
+  readonly repositoryRoot: string | undefined;
+}): string | null {
+  const windowsRoot = [input.workspaceRoot, input.repositoryRoot].some(
+    (root) => root !== undefined && isWindowsAbsolutePath(root),
+  );
+  // Claude and ACP tool-call diffs name files by absolute path.
+  if (isAbsolutePath(input.filePath)) {
+    const relativePath = workspaceRelativeFilePath(input.filePath, input.workspaceRoot);
+    const segments =
+      relativePath === null ? null : normalizedRelativePathSegments(relativePath, windowsRoot);
+    return segments ? segments.join("/") : null;
+  }
+
+  const fileSegments = normalizedRelativePathSegments(input.filePath, windowsRoot);
+  if (!fileSegments) return null;
+
+  const workspaceSegments = repositoryRelativeWorkspaceSegments(
+    input.workspaceRoot,
+    input.repositoryRoot,
+  );
+  if (!workspaceSegments || workspaceSegments.length === 0) {
+    return fileSegments.join("/");
+  }
+
+  const caseInsensitive = input.repositoryRoot
+    ? isWindowsAbsolutePath(input.repositoryRoot)
+    : false;
+  const belongsToWorkspace = workspaceSegments.every((segment, index) => {
+    const candidate = fileSegments[index];
+    if (candidate === undefined) return false;
+    return caseInsensitive ? candidate.toLowerCase() === segment : candidate === segment;
+  });
+  if (!belongsToWorkspace) return null;
+
+  const relativeSegments = fileSegments.slice(workspaceSegments.length);
+  return relativeSegments.length > 0 ? relativeSegments.join("/") : null;
+}
+
+export function openDiffFilePrimaryAction({
+  threadRef,
+  filePath,
+  activeCwd,
+  repositoryRoot,
+  openInEditor,
+}: OpenDiffFilePrimaryActionInput): void {
+  const workspaceFilePath = resolveDiffPathForWorkspace({
+    filePath,
+    workspaceRoot: activeCwd,
+    repositoryRoot,
+  });
+  if (!workspaceFilePath) return;
+
+  if (threadRef) {
+    useRightPanelStore.getState().openFile(threadRef, workspaceFilePath);
+    return;
+  }
+
+  openInEditor(activeCwd ? resolvePathLinkTarget(workspaceFilePath, activeCwd) : workspaceFilePath);
+}

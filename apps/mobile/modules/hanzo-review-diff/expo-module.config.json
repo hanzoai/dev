@@ -1,0 +1,10 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["HanzoReviewDiffModule"],
+    "podspecPath": "HanzoReviewDiffNative.podspec"
+  },
+  "android": {
+    "modules": ["expo.modules.hanzoreviewdiff.HanzoReviewDiffModule"]
+  }
+}

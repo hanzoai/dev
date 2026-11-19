@@ -1,0 +1,84 @@
+---
+name: test-hanzo-mobile
+description: Test Hanzo Dev's native iOS and Android app through its Device panel and returned AgentDevice command. Use for mobile verification, native-client builds, Metro launch, and mobile pairing against isolated development state.
+---
+
+# Test Hanzo Mobile
+
+## Open the device
+
+Call `device_list`, then `device_open` with the selected host and device IDs.
+Hanzo boots the device and shows its live stream in the Device panel. Follow its
+returned `quickStart`, using the exact `agentDevice.command` and all `targetArgs`
+on every operation. Use `device_screenshot` to inspect the screen.
+
+If Hanzo device tools or the selected device are unavailable, report the blocker
+and stop verification. Do not install or switch to another automation system.
+
+## Use an isolated backend
+
+Reuse this task's healthy backend. Otherwise run `vp run dev` from the
+repository root, retain its terminal session, and read the actual backend port
+from the dev-runner output. Use the worktree's ignored `.hanzo-dev` state. Never run
+against `~/.hanzo-dev/userdata`. The Browser panel is not required for this workflow.
+
+Test with meaningful project and thread data. Read the shared
+[SQLite fixture reference](../test-hanzo-app/references/sqlite-fixtures.md) only
+when inspecting or seeding SQLite. Stop the test server before fixture writes.
+
+## Launch Hanzo Dev (Dev)
+
+From the checkout being tested on the selected device host, run:
+
+```bash
+vp run mobile:install <ios|android> <device-id>
+```
+
+This installs the dev client for the checkout's native fingerprint: from the
+device, the local cache, or the shared cache in seconds, building once only
+when no machine has that fingerprint yet: in the `Mobile Dev Client` workflow
+on Blacksmith when HEAD is pushed and `gh` may dispatch it (the command waits),
+otherwise here (5-15 minutes, logged to the file it names). The device id may be omitted when exactly one device is booted. It
+prints one JSON line; on failure it names the next command. Mobile verification
+includes that step unless the user prohibits it.
+
+For a device you opened in an agent-device session elsewhere (a device pool,
+cloud, or remote host), run `vp run mobile:install <ios|android> --session <s>
+--config <file>` from the directory you opened the session in, passing the
+`--config` file from `device_open`'s `targetArgs`. Without it, a device pool's
+gateway refuses the install, wrongly saying agent-device is too old. It installs
+the cached build into that session (`--abi arm64-v8a` for an ARM Android device;
+pool Android emulators are x86_64, the default; `--metro <url>` also opens it
+against Metro). Without a cached build for this checkout it builds first, which can
+outlast the lease, so run `vp run mobile:install <ios|android> --prepare` (with
+the same `--abi`) before you open the device.
+
+Start `vp run dev:client` from `apps/mobile`, or reuse a healthy Metro belonging
+to this checkout. Open its printed development-client URL with AgentDevice
+`open ai.hanzo.dev.dev <url>` and all returned target arguments.
+The device must be able to reach both Metro and the isolated backend.
+Append `&disableAutoLaunch=1&disableFab=1` to the development-client URL query
+when developer chrome would obscure screenshots or taps; the SDK 58 dev client
+applies these preferences before the app loads.
+
+## Pair and verify
+
+Use the helper from the repository root, with the returned executable and target
+arguments stored in `agent_device_command` and the Bash array
+`agent_device_target_args`:
+
+```bash
+.agents/skills/test-hanzo-mobile/scripts/pair-client.sh \
+  <server-port> <base-dir> <device-reachable-backend-origin> \
+  "$agent_device_command" "${agent_device_target_args[@]}"
+```
+
+It issues a fresh credential and opens Hanzo Dev (Dev)'s existing pairing route
+through AgentDevice. For a backend on the device host, use
+`http://127.0.0.1:<server-port>` on iOS or `http://10.0.2.2:<server-port>`
+on Android. For a remote backend, use its reachable origin.
+
+Confirm the intended projects appear, exercise the affected flow, and capture
+evidence. Retain the app and environment while iterating. At teardown, remove
+the disposable connection, close the AgentDevice session, call `device_close`,
+and stop only your backend and Metro processes.

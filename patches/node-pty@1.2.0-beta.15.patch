@@ -1,0 +1,86 @@
+diff --git a/lib/windowsConoutConnection.js b/lib/windowsConoutConnection.js
+--- a/lib/windowsConoutConnection.js
++++ b/lib/windowsConoutConnection.js
+@@ -63,7 +63,11 @@
+             conoutPipeName: _conoutPipeName
+         };
+         var scriptPath = __dirname.replace('node_modules.asar', 'node_modules.asar.unpacked');
+-        this._worker = new worker_threads_1.Worker((0, path_1.join)(scriptPath, 'worker/conoutSocketWorker.js'), { workerData: workerData });
++        // Node's watch mode reports dependencies through worker messages.
++        // Keep the host's watch environment out of this protocol worker.
++        var workerEnv = Object.assign({}, process.env);
++        delete workerEnv.WATCH_REPORT_DEPENDENCIES;
++        this._worker = new worker_threads_1.Worker((0, path_1.join)(scriptPath, 'worker/conoutSocketWorker.js'), { workerData: workerData, env: workerEnv, execArgv: [] });
+         this._worker.on('message', function (message) {
+             switch (message) {
+                 case 1 /* ConoutWorkerMessage.READY */:
+diff --git a/lib/windowsPtyAgent.js b/lib/windowsPtyAgent.js
+--- a/lib/windowsPtyAgent.js
++++ b/lib/windowsPtyAgent.js
+@@ -20,7 +20,9 @@ var conptyNative;
+  * shutting down the socket. The timer will be reset if a new data event comes in after the timer
+  * has started.
+  */
+-var FLUSH_DATA_INTERVAL = 1000;
++// ConPTY never closes the output pipe on its own after the shell exits, so wait this long for the last
++// screen update. Trailing output follows the exit within about 20 ms; 1000 ms made every exit report 1 s late.
++var FLUSH_DATA_INTERVAL = 100;
+ var CONNECTION_TIMEOUT = 5000;
+ var defaultWindowsPtyAgentOptions = {
+     connectionTimeout: CONNECTION_TIMEOUT,
+@@ -218,13 +220,31 @@
+             return Promise.resolve([]);
+         }
+         return new Promise(function (resolve) {
+-            var agent = (0, child_process_1.fork)(path.join(__dirname, 'conpty_console_list_agent'), [_this._innerPid.toString()]);
++            // Node's watch mode sends its own messages over the helper's IPC channel.
++            var agentEnv = Object.assign({}, process.env);
++            delete agentEnv.WATCH_REPORT_DEPENDENCIES;
++            var settled = false;
++            var finish = function (list) {
++                if (settled) return;
++                settled = true;
++                clearTimeout(timeout);
++                resolve(list);
++            };
++            var agent = (0, child_process_1.fork)(path.join(__dirname, 'conpty_console_list_agent'), [_this._innerPid.toString()], { env: agentEnv, execArgv: [], windowsHide: true });
+             agent.on('message', function (message) {
+-                clearTimeout(timeout);
+-                resolve(message.consoleProcessList);
++                if (!message || !Array.isArray(message.consoleProcessList)) {
++                    return;
++                }
++                finish(message.consoleProcessList);
++            });
++            agent.on('error', function () {
++                finish([_this._innerPid]);
++            });
++            agent.on('close', function () {
++                finish([_this._innerPid]);
+             });
+             var timeout = setTimeout(function () {
+                 // Something went wrong, just send back the shell PID
+                 agent.kill();
+-                resolve([_this._innerPid]);
++                finish([_this._innerPid]);
+             }, 5000);
+@@ -259,7 +279,18 @@ var WindowsPtyAgent = /** @class */ (function () {
+         if (this._closeTimeout) {
+             clearTimeout(this._closeTimeout);
+         }
+-        this._closeTimeout = setTimeout(function () { return _this._cleanUpProcess(); }, FLUSH_DATA_INTERVAL);
++        // Timers run before the poll phase. After a main-thread stall longer than the interval, output that is already
++        // buffered in the pipe would be dropped by the cleanup, so give the poll phase one turn to read it first; every
++        // chunk it reads re-arms this timer.
++        this._flushDataSeq = (this._flushDataSeq || 0) + 1;
++        this._closeTimeout = setTimeout(function () {
++            var seq = _this._flushDataSeq;
++            setImmediate(function () {
++                if (_this._flushDataSeq === seq) {
++                    _this._cleanUpProcess();
++                }
++            });
++        }, FLUSH_DATA_INTERVAL);
+     };
+     WindowsPtyAgent.prototype._cleanUpProcess = function () {
+         if (this._useConptyDll) {

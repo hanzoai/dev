@@ -1,0 +1,46 @@
+{
+  "name": "@hanzodev/provider-grok",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./client": {
+      "types": "./src/client.ts",
+      "import": "./src/client.ts"
+    },
+    "./settings": {
+      "types": "./src/settings.ts",
+      "import": "./src/settings.ts"
+    },
+    "./server": {
+      "types": "./src/server.ts",
+      "import": "./src/server.ts"
+    },
+    "./server/usage": {
+      "types": "./src/server/usage.ts",
+      "import": "./src/server/usage.ts"
+    },
+    "./testing": {
+      "types": "./src/testing.ts",
+      "import": "./src/testing.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "effect-tsgo tsrs --noEmit",
+    "test": "vp test run --config ../../vite.config.ts --dir ."
+  },
+  "dependencies": {
+    "@hanzodev/contracts": "workspace:*",
+    "@hanzodev/provider-acp": "workspace:*",
+    "@hanzodev/provider-core": "workspace:*",
+    "@hanzodev/shared": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@hanzodev/provider-testing": "workspace:*",
+    "@types/node": "catalog:",
+    "effect-acp": "workspace:*",
+    "vite-plus": "catalog:"
+  }
+}

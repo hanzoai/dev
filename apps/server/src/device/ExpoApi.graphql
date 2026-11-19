@@ -1,0 +1,72 @@
+query HanzoExpoViewer {
+  meActor {
+    __typename
+    ... on UserActor {
+      username
+    }
+    ... on Robot {
+      firstName
+    }
+    accounts {
+      name
+      appsPaginated(first: 100) {
+        edges {
+          node {
+            id
+            fullName
+          }
+        }
+      }
+    }
+  }
+}
+
+mutation HanzoCreateEasSimulatorSession($input: CreateDeviceRunSessionInput!) {
+  deviceRunSession {
+    createDeviceRunSession(deviceRunSessionInput: $input) {
+      id
+    }
+  }
+}
+
+query HanzoEasSimulatorSession($id: ID!) {
+  deviceRunSessions {
+    byId(deviceRunSessionId: $id) {
+      id
+      status
+      remoteConfig {
+        ... on AgentDeviceRunSessionRemoteConfig {
+          agentDeviceRemoteSessionUrl
+          agentDeviceRemoteSessionToken
+          webPreviewToken
+          previewApiUrl
+        }
+      }
+    }
+  }
+}
+
+query HanzoActiveEasSimulatorSessions($appId: String!, $filter: DeviceRunSessionFilterInput) {
+  app {
+    byId(appId: $appId) {
+      deviceRunSessionsPaginated(first: 50, filter: $filter) {
+        edges {
+          node {
+            id
+            status
+            name
+          }
+        }
+      }
+    }
+  }
+}
+
+mutation HanzoStopEasSimulatorSession($id: ID!) {
+  deviceRunSession {
+    ensureDeviceRunSessionStopped(deviceRunSessionId: $id) {
+      id
+      status
+    }
+  }
+}

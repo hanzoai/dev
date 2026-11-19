@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hanzo App Testing"
+  short_description: "Test web and desktop in Hanzo's Browser panel"
+  default_prompt: "Use $test-hanzo-app to verify the affected web or desktop flow through Hanzo's Browser panel."

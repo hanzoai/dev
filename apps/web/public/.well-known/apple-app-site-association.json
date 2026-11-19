@@ -1,0 +1,14 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": [
+          "ARK85ZXQ4Z.ai.hanzo.dev",
+          "ARK85ZXQ4Z.ai.hanzo.dev.preview",
+          "ARK85ZXQ4Z.ai.hanzo.dev.dev"
+        ],
+        "components": [{ "/": "/threads/*" }]
+      }
+    ]
+  }
+}

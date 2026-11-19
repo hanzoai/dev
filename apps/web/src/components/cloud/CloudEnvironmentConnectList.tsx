@@ -1,0 +1,530 @@
+import {
+  errorDisplayMessage,
+  findErrorTraceId,
+  thrownErrorMessage,
+} from "@hanzodev/client-runtime/errors";
+import {
+  connectionErrorText,
+  type ConnectionTarget,
+  type EnvironmentConnectionPresentation,
+  RelayConnectionRegistration,
+  RelayConnectionTarget,
+  orchestrationProtocolCompatibilityError,
+} from "@hanzodev/client-runtime/connection";
+import { relayOfflineReasonMessage } from "@hanzodev/client-runtime/relay";
+import {
+  isAtomCommandInterrupted,
+  settlePromise,
+  squashAtomCommandFailure,
+} from "@hanzodev/client-runtime/state/runtime";
+import {
+  type EnvironmentId,
+  resolveEnvironmentMachineKind,
+  type ServerConfig,
+} from "@hanzodev/contracts";
+import type {
+  RelayClientEnvironmentRecord,
+  RelayEnvironmentStatusResponse,
+} from "@hanzodev/contracts/relay";
+import * as Option from "effect/Option";
+import { T, useGT, useMessages } from "gt-react";
+import { type ReactNode, useEffect, useEffectEvent, useState } from "react";
+
+import { environmentCatalog } from "~/connection/catalog";
+import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
+import { cn } from "~/lib/utils";
+import { relayEnvironmentDiscovery } from "~/state/relay";
+import { useRelayEnvironmentDiscovery } from "~/state/environments";
+import { useAtomCommand } from "~/state/use-atom-command";
+import { ConnectionStatusDot } from "../ConnectionStatusDot";
+import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
+import { ITEM_ROW_CLASSNAME, ITEM_ROW_INNER_CLASSNAME } from "../settings/itemRows";
+import { Checkbox } from "../ui/checkbox";
+import { Button } from "../ui/button";
+import { Skeleton } from "../ui/skeleton";
+import { toastManager } from "../ui/toast";
+import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
+import { presentSavedCloudEnvironmentConnection } from "./cloudEnvironmentConnectionPresentation";
+
+const EMPTY_DISCOVERY_REFRESH_INTERVAL_MS = 5_000;
+
+function discoveredCompatibilityError(
+  status: Option.Option<RelayEnvironmentStatusResponse> | undefined,
+) {
+  const descriptor = status === undefined ? undefined : Option.getOrNull(status)?.descriptor;
+  return descriptor === undefined ? null : orchestrationProtocolCompatibilityError(descriptor);
+}
+
+export interface SavedCloudEnvironmentConnection {
+  readonly environmentId: EnvironmentId;
+  readonly entry: { readonly target: ConnectionTarget };
+  readonly connection: EnvironmentConnectionPresentation;
+  readonly relayManaged: boolean;
+  readonly serverConfig?: Pick<ServerConfig, "environment"> | null;
+}
+
+function RemoteEnvironmentRowsSkeleton() {
+  return (
+    <div className={ITEM_ROW_CLASSNAME}>
+      <div className={ITEM_ROW_INNER_CLASSNAME}>
+        <div className="min-w-0 flex-1 space-y-2">
+          <Skeleton shape="pill" className="h-4 w-32" />
+          <Skeleton shape="pill" className="h-3 w-20" />
+        </div>
+        <Skeleton className="h-7 w-16" />
+      </div>
+    </div>
+  );
+}
+
+export function CloudEnvironmentConnectRows({
+  primaryEnvironmentId,
+  savedEnvironments,
+  showSavedEnvironments = false,
+  refreshWhileEmpty = false,
+  empty = null,
+  selection,
+  onDiscoveryReady,
+}: {
+  readonly primaryEnvironmentId: EnvironmentId | null;
+  readonly savedEnvironments: ReadonlyArray<SavedCloudEnvironmentConnection>;
+  readonly showSavedEnvironments?: boolean;
+  readonly refreshWhileEmpty?: boolean;
+  readonly empty?: ReactNode;
+  readonly onDiscoveryReady?: () => void;
+  readonly selection?: {
+    readonly autoSelectedComputers?: Set<EnvironmentId>;
+    readonly selectedIds: ReadonlySet<EnvironmentId>;
+    readonly onChange: (environmentId: EnvironmentId, selected: boolean) => void;
+  };
+}) {
+  const gt = useGT();
+  const m = useMessages();
+  const environmentsState = useRelayEnvironmentDiscovery();
+  const registerEnvironment = useAtomCommand(environmentCatalog.register, {
+    reportFailure: false,
+  });
+  const refreshRelayEnvironments = useAtomCommand(relayEnvironmentDiscovery.refresh, {
+    reportFailure: false,
+  });
+  const refreshDiscoveryWhenIdle = useEffectEvent(async () => {
+    if (environmentsState.refreshing || environmentsState.offline) return;
+    await refreshRelayEnvironments();
+  });
+  const connectRelayEnvironment = (environment: RelayClientEnvironmentRecord) =>
+    registerEnvironment(
+      new RelayConnectionRegistration({
+        target: new RelayConnectionTarget({
+          environmentId: environment.environmentId,
+          label: environment.label,
+        }),
+      }),
+    );
+  const [connectingEnvironmentIds, setConnectingEnvironmentIds] = useState<
+    ReadonlySet<EnvironmentId>
+  >(new Set());
+  const savedById = new Map(
+    savedEnvironments
+      .filter((environment) => environment.relayManaged)
+      .map((environment) => [environment.environmentId, environment]),
+  );
+  const savedWithoutRelay = new Set(
+    savedEnvironments
+      .filter((environment) => !environment.relayManaged)
+      .map((environment) => environment.environmentId),
+  );
+  const desktopLocalIds = new Set(
+    savedEnvironments
+      .filter((environment) => isDesktopLocalConnectionTarget(environment.entry.target))
+      .map((environment) => environment.environmentId),
+  );
+
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- fetches relay discovery when its inputs change, unless hidden polling covers it, and reports readiness
+  useEffect(() => {
+    let active = true;
+    if (onDiscoveryReady || !refreshWhileEmpty || document.visibilityState === "visible") {
+      void refreshRelayEnvironments().then(() => {
+        if (active) onDiscoveryReady?.();
+      });
+    }
+    return () => {
+      active = false;
+    };
+  }, [refreshRelayEnvironments, refreshWhileEmpty, onDiscoveryReady]);
+
+  const connectEnvironment = async (environment: RelayClientEnvironmentRecord) => {
+    if (
+      discoveredCompatibilityError(
+        environmentsState.environments.get(environment.environmentId)?.status,
+      ) !== null
+    )
+      return false;
+    setConnectingEnvironmentIds((current) => new Set([...current, environment.environmentId]));
+    const result = await connectRelayEnvironment(environment);
+    setConnectingEnvironmentIds((current) => {
+      const next = new Set(current);
+      next.delete(environment.environmentId);
+      return next;
+    });
+    if (result._tag === "Success") {
+      toastManager.add({
+        type: "success",
+        title: savedWithoutRelay.has(environment.environmentId)
+          ? gt("Hanzo Connect route added")
+          : gt("Environment added"),
+        description: savedWithoutRelay.has(environment.environmentId)
+          ? gt("{environment} falls back to Hanzo Connect when its other routes are unreachable.", {
+              environment: environment.label,
+            })
+          : gt("Connecting to {environment} through Hanzo Connect.", {
+              environment: environment.label,
+            }),
+      });
+      return true;
+    }
+    if (isAtomCommandInterrupted(result)) {
+      return false;
+    }
+    const cause = squashAtomCommandFailure(result);
+    const message =
+      thrownErrorMessage(cause, m) ?? gt("Could not connect the Hanzo Connect environment.");
+    const traceId = findErrorTraceId(cause);
+    console.error("[hanzo-connect] Could not connect environment", { message, traceId, cause });
+    toastManager.add({
+      type: "error",
+      title: gt("Could not connect environment"),
+      description: message,
+      data: traceId
+        ? {
+            secondaryActionProps: {
+              children: gt("Copy trace ID"),
+              onClick: () => void navigator.clipboard?.writeText(traceId),
+            },
+          }
+        : undefined,
+    });
+    return false;
+  };
+
+  // Omit machines saved over other routes; onboarding selection must not add a Hanzo Connect route.
+  const isVisibleEnvironment = (environmentId: EnvironmentId) =>
+    environmentId !== primaryEnvironmentId &&
+    !desktopLocalIds.has(environmentId) &&
+    (showSavedEnvironments || !savedById.has(environmentId)) &&
+    !(selection && savedWithoutRelay.has(environmentId));
+  const visibleEnvironments = [...environmentsState.environments.values()].filter(
+    ({ environment }) => isVisibleEnvironment(environment.environmentId),
+  );
+  const selectNewComputers = useEffectEvent(
+    (environments: typeof environmentsState.environments) => {
+      const seen = selection?.autoSelectedComputers;
+      if (!selection || !seen) return;
+      for (const { environment, status, availability } of environments.values()) {
+        if (!isVisibleEnvironment(environment.environmentId)) continue;
+        const id = environment.environmentId;
+        if (availability === "checking") continue;
+        if (
+          discoveredCompatibilityError(status) !== null ||
+          savedById.get(id)?.connection.phase === "unsupported"
+        ) {
+          seen.add(id);
+          if (selection.selectedIds.has(id)) selection.onChange(id, false);
+          continue;
+        }
+        if (seen.has(id)) continue;
+        seen.add(id);
+        selection.onChange(id, true);
+        if (!savedById.has(id)) {
+          void connectEnvironment(environment).then((connected) => {
+            if (!connected) selection.onChange(id, false);
+          });
+        }
+      }
+    },
+  );
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- auto-selects newly discovered machines from the discovery store and starts their relay connections
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- Discovery results arrive from an external store and auto-selection starts relay connections, which mark themselves connecting.
+    selectNewComputers(environmentsState.environments);
+  }, [environmentsState.environments]);
+
+  // Discovery clears its list on refresh, so poll only until a machine appears.
+  const shouldRefreshWhileEmpty =
+    refreshWhileEmpty && visibleEnvironments.length === 0 && !environmentsState.offline;
+
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- polls relay discovery on a timer, focus and visibility change while no machine is found
+  useEffect(() => {
+    if (!shouldRefreshWhileEmpty) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let disposed = false;
+    let pending = false;
+    const visible = () => document.visibilityState === "visible";
+    const schedule = () => {
+      clearTimeout(timer);
+      if (!disposed && visible()) {
+        timer = setTimeout(() => void refresh(), EMPTY_DISCOVERY_REFRESH_INTERVAL_MS);
+      }
+    };
+    const refresh = async () => {
+      if (disposed || pending || !visible()) return;
+      clearTimeout(timer);
+      pending = true;
+      await settlePromise(() => refreshDiscoveryWhenIdle());
+      pending = false;
+      schedule();
+    };
+    const onFocus = () => void refresh();
+    const onVisibilityChange = () => {
+      clearTimeout(timer);
+      if (visible()) void refresh();
+    };
+
+    schedule();
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [shouldRefreshWhileEmpty]);
+
+  const standalone = showSavedEnvironments || savedEnvironments.length === desktopLocalIds.size;
+
+  if (
+    !refreshWhileEmpty &&
+    standalone &&
+    visibleEnvironments.length === 0 &&
+    environmentsState.refreshing &&
+    environmentsState.environments.size === 0
+  ) {
+    return <RemoteEnvironmentRowsSkeleton />;
+  }
+
+  if (standalone && visibleEnvironments.length === 0) {
+    const discoveryProblem = environmentsState.offline
+      ? gt("You appear to be offline.")
+      : thrownErrorMessage(Option.getOrNull(environmentsState.error), m);
+    if (discoveryProblem !== null && !environmentsState.refreshing) {
+      return (
+        <div className={ITEM_ROW_CLASSNAME}>
+          <p className="text-sm font-medium text-destructive">
+            <T>Could not load Hanzo Connect environments</T>
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{discoveryProblem}</p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-3"
+            onClick={() => void refreshRelayEnvironments()}
+          >
+            <T>Try again</T>
+          </Button>
+        </div>
+      );
+    }
+    return empty;
+  }
+
+  return visibleEnvironments.map(({ environment, availability, error, status }) => {
+    const savedEnvironment = savedById.get(environment.environmentId);
+    const compatibilityError = discoveredCompatibilityError(status);
+    const unsupported =
+      compatibilityError !== null || savedEnvironment?.connection.phase === "unsupported";
+    const unsupportedDetail =
+      thrownErrorMessage(compatibilityError, m) ??
+      (savedEnvironment ? connectionErrorText(savedEnvironment.connection, m) : null);
+    const savedConnection = unsupported
+      ? presentSavedCloudEnvironmentConnection(
+          {
+            phase: "unsupported",
+            error: unsupportedDetail,
+            traceId: null,
+          },
+          m,
+        )
+      : savedEnvironment
+        ? presentSavedCloudEnvironmentConnection(savedEnvironment.connection, m)
+        : null;
+    const relayStatus = status === undefined ? null : Option.getOrNull(status);
+    const descriptor = relayStatus?.descriptor;
+    const offlineReason =
+      availability === "offline" && relayStatus !== null
+        ? relayOfflineReasonMessage(relayStatus, m)
+        : null;
+    const machineKind = resolveEnvironmentMachineKind(
+      savedEnvironment?.serverConfig ??
+        (descriptor === undefined ? null : { environment: descriptor }),
+    );
+    const dotClassName = savedConnection
+      ? savedConnection.tone === "connected"
+        ? "bg-success"
+        : savedConnection.tone === "connecting"
+          ? "bg-warning"
+          : savedConnection.tone === "error"
+            ? "bg-destructive"
+            : "bg-muted-foreground/35"
+      : availability === "online"
+        ? "bg-success"
+        : availability === "error"
+          ? "bg-destructive"
+          : availability === "checking"
+            ? "bg-warning"
+            : "bg-muted-foreground/35";
+    const notAdded = savedWithoutRelay.has(environment.environmentId)
+      ? gt("Saved without Hanzo Connect")
+      : gt("Not added");
+    const statusText =
+      unsupported && !savedEnvironment
+        ? `Hanzo Connect · ${notAdded} · ${gt("Client not supported")}`
+        : offlineReason !== null
+          ? offlineReason
+          : savedConnection
+            ? savedConnection.statusText
+            : availability === "online"
+              ? `Hanzo Connect · ${notAdded} · ${gt("Relay online")}`
+              : availability === "offline"
+                ? `Hanzo Connect · ${notAdded} · ${gt("Relay offline")}`
+                : availability === "checking"
+                  ? `Hanzo Connect · ${notAdded} · ${gt("Checking relay status…")}`
+                  : (errorDisplayMessage(Option.getOrNull(error), m) ??
+                    `Hanzo Connect · ${notAdded} · ${gt("Relay status unavailable")}`);
+    if (selection) {
+      return (
+        <label
+          key={environment.environmentId}
+          className="flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 has-disabled:cursor-default"
+        >
+          <Checkbox
+            checked={!unsupported && selection.selectedIds.has(environment.environmentId)}
+            disabled={unsupported || connectingEnvironmentIds.has(environment.environmentId)}
+            onCheckedChange={async (checked) => {
+              if (unsupported) return;
+              selection.onChange(environment.environmentId, checked);
+              if (checked && !savedEnvironment) {
+                const connected = await connectEnvironment(environment);
+                if (!connected) selection.onChange(environment.environmentId, false);
+              }
+            }}
+          />
+          <EnvironmentMachineIcon
+            aria-hidden
+            kind={machineKind}
+            className="size-4 shrink-0 text-muted-foreground"
+          />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium">{environment.label}</span>
+            {unsupportedDetail !== null ? (
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                {unsupportedDetail}
+              </span>
+            ) : null}
+          </span>
+          <Tooltip>
+            <TooltipTrigger
+              render={<span tabIndex={0} />}
+              className={cn(
+                "max-w-[45%] shrink-0 truncate text-xs",
+                savedConnection?.tone === "error" ? "text-destructive" : "text-muted-foreground",
+              )}
+            >
+              {connectingEnvironmentIds.has(environment.environmentId)
+                ? gt("Connecting…")
+                : (savedConnection?.buttonLabel ??
+                  (availability === "online"
+                    ? gt("Available")
+                    : availability === "offline"
+                      ? gt("Offline")
+                      : availability === "error"
+                        ? gt("Unavailable")
+                        : gt("Checking…")))}
+            </TooltipTrigger>
+            <TooltipPopup>{unsupportedDetail ?? statusText}</TooltipPopup>
+          </Tooltip>
+        </label>
+      );
+    }
+    return (
+      <div key={environment.environmentId} className={ITEM_ROW_CLASSNAME}>
+        <div className={ITEM_ROW_INNER_CLASSNAME}>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <ConnectionStatusDot
+                dotClassName={dotClassName}
+                pingClassName={
+                  savedConnection?.tone === "connecting" ||
+                  (savedConnection === null && availability === "checking")
+                    ? "bg-warning/60 duration-2000"
+                    : null
+                }
+                tooltipText={
+                  unsupportedDetail !== null
+                    ? unsupportedDetail
+                    : offlineReason !== null
+                      ? offlineReason
+                      : savedConnection
+                        ? savedConnection.statusText
+                        : availability === "online"
+                          ? gt("Relay online")
+                          : availability === "offline"
+                            ? gt("Relay offline")
+                            : availability === "checking"
+                              ? gt("Checking relay status")
+                              : (errorDisplayMessage(Option.getOrNull(error), m) ??
+                                gt("Relay status unavailable"))
+                }
+              />
+              <EnvironmentMachineIcon
+                aria-hidden
+                kind={machineKind}
+                className="size-4 shrink-0 text-muted-foreground"
+              />
+              <p className="truncate text-sm font-medium">{environment.label}</p>
+            </div>
+            <p
+              className={cn(
+                "mt-1 truncate text-xs",
+                savedConnection?.tone === "error" ||
+                  (savedConnection?.tone === "connecting" &&
+                    savedEnvironment?.connection.error &&
+                    !savedEnvironment.connection.awaitingApproval) ||
+                  (savedConnection === null && availability === "error")
+                  ? "text-destructive"
+                  : "text-muted-foreground",
+              )}
+            >
+              {statusText}
+            </p>
+          </div>
+          {unsupported && !savedEnvironment ? (
+            <Tooltip>
+              <TooltipTrigger render={<span className="inline-flex" tabIndex={0} />}>
+                <Button size="sm" disabled>
+                  <T context="verb, adds an environment">Add</T>
+                </Button>
+              </TooltipTrigger>
+              <TooltipPopup>{unsupportedDetail ?? gt("Client not supported")}</TooltipPopup>
+            </Tooltip>
+          ) : savedConnection ? (
+            <Button size="sm" variant="outline" disabled>
+              {savedConnection.buttonLabel}
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              disabled={connectingEnvironmentIds.size > 0}
+              onClick={() => void connectEnvironment(environment)}
+            >
+              {connectingEnvironmentIds.has(environment.environmentId)
+                ? gt("Adding…")
+                : savedWithoutRelay.has(environment.environmentId)
+                  ? gt("Add route")
+                  : gt("Add", { $context: "verb, adds an environment" })}
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  });
+}

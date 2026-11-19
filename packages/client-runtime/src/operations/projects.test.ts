@@ -1,0 +1,235 @@
+import { SourceControlProviderKind } from "@hanzodev/contracts";
+import { describe, expect, it } from "vite-plus/test";
+import { EnvironmentId, ProjectId } from "@hanzodev/contracts";
+
+import {
+  findExistingAddProject,
+  getCloneDestinationForPickedFolder,
+  getCloneDestinationPath,
+  getCloneDirectoryLeafName,
+  getCloneDirectoryName,
+  getCloneDirectoryPath,
+  getAddProjectInitialQuery,
+  getDefaultCloneUrl,
+  githubIncompleteOwnerRepositoryMessage,
+  normalizePastedCloneUrl,
+  sortAddProjectProviderSources,
+} from "./projects.ts";
+import type { EnvironmentProject } from "../state/models.ts";
+import { isFilesystemBrowseQuery } from "../state/projects.ts";
+
+describe("add project shared logic", () => {
+  it("starts the Add Project picker on a browsable path for a relative base directory", () => {
+    expect(isFilesystemBrowseQuery(getAddProjectInitialQuery("Desktop/dev"))).toBe(true);
+    expect(getAddProjectInitialQuery("Desktop/dev")).toBe("~/Desktop/dev/");
+    expect(getAddProjectInitialQuery("/srv/code")).toBe("/srv/code/");
+    expect(getAddProjectInitialQuery("~")).toBe("~/");
+    expect(getAddProjectInitialQuery("./work")).toBe("./work/");
+    expect(getAddProjectInitialQuery("C:\\dev")).toBe("C:\\dev\\");
+  });
+
+  it("offers only GitHub until other hosts are turned on", () => {
+    const ready = () => ({ ready: true, hint: null });
+    expect(sortAddProjectProviderSources(ready, {})).toEqual(["github"]);
+    expect(sortAddProjectProviderSources(ready, { gitlab: true, github: false })).toEqual([
+      "gitlab",
+    ]);
+  });
+
+  it("asks for a repository name when GitHub input is only an owner path", () => {
+    const github = SourceControlProviderKind.make("github");
+    expect(githubIncompleteOwnerRepositoryMessage(github, "hanzoai/")).toBe(
+      "Enter the full owner/repository name.",
+    );
+    expect(githubIncompleteOwnerRepositoryMessage(github, "  hanzoai//  ")).toBe(
+      "Enter the full owner/repository name.",
+    );
+    expect(githubIncompleteOwnerRepositoryMessage(github, "mona-cat_octo/")).toBe(
+      "Enter the full owner/repository name.",
+    );
+
+    for (const input of [
+      "hanzoai/dev",
+      "mona-cat_octo/repo",
+      "hanzoai",
+      "https://github.com/hanzoai/dev.git",
+      "git@github.com:hanzoai/dev.git",
+    ]) {
+      expect(githubIncompleteOwnerRepositoryMessage(github, input)).toBeNull();
+    }
+    expect(
+      githubIncompleteOwnerRepositoryMessage(SourceControlProviderKind.make("gitlab"), "group/"),
+    ).toBeNull();
+    expect(githubIncompleteOwnerRepositoryMessage("url", "owner/")).toBeNull();
+    expect(
+      githubIncompleteOwnerRepositoryMessage(SourceControlProviderKind.make("forgejo"), "owner/"),
+    ).toBeNull();
+  });
+
+  it("routes owner/repository shorthand to GitHub over HTTPS", () => {
+    expect(normalizePastedCloneUrl("imputnet/helium")).toBe(
+      "https://github.com/imputnet/helium.git",
+    );
+    expect(normalizePastedCloneUrl("  hanzoai/dev  ")).toBe(
+      "https://github.com/hanzoai/dev.git",
+    );
+  });
+
+  it("keeps explicit clone URLs and local paths unchanged", () => {
+    expect(normalizePastedCloneUrl("https://gitlab.com/group/project.git")).toBe(
+      "https://gitlab.com/group/project.git",
+    );
+    expect(normalizePastedCloneUrl("git@github.com:owner/repo.git")).toBe(
+      "git@github.com:owner/repo.git",
+    );
+    expect(normalizePastedCloneUrl("group/subgroup/project")).toBe("group/subgroup/project");
+    expect(normalizePastedCloneUrl("/srv/git/repo.git")).toBe("/srv/git/repo.git");
+    for (const gitlabProject of [
+      "https://gitlab.com/acme/tools/src/branch/worker.git",
+      "https://scm.example.test/acme/tools/src/branch/worker.git",
+      "https://scm.example.test/acme/tools/src/branch/worker",
+      "https://scm.example.test/team/repo/src/branch/main/-/README.md",
+      "https://forgejo.example.test/a/b/src/branch/mount/team/repo.git",
+    ]) {
+      expect(normalizePastedCloneUrl(gitlabProject)).toBe(gitlabProject);
+    }
+  });
+
+  it("clones the repository when given a page URL copied from the browser", () => {
+    for (const [pageUrl, pageRoute, repository] of [
+      ["https://github.com/hanzoai/dev/tree/main", "/tree/", "hanzodev"],
+      ["https://gitlab.com/gitlab-org/gitlab-runner/-/tree/main", "/-/", "gitlab-runner"],
+      ["https://git.cafe/hanzoai/dev/tree/main", "/tree/", "hanzodev"],
+      ["https://gitlab.example.test/g/p/-/blob/main/src/branch/x", "/-/", "p"],
+      ["https://code.company.test/g/p/-/tree/main", "/-/", "p"],
+      ["https://github.com/hanzoai/dev/tree/release.git", "/tree/", "hanzodev"],
+    ] as const) {
+      const cloneUrl = normalizePastedCloneUrl(pageUrl);
+      expect(cloneUrl).not.toContain(pageRoute);
+      expect(getCloneDirectoryName(cloneUrl)).toBe(repository);
+    }
+    expect(
+      normalizePastedCloneUrl("https://alice:example@bitbucket.org/workspace/repo/src/master/"),
+    ).toBe("https://alice:example@bitbucket.org/workspace/repo");
+  });
+
+  it("uses HTTPS for repositories selected through a provider", () => {
+    expect(
+      getDefaultCloneUrl({
+        provider: SourceControlProviderKind.make("github"),
+        url: "https://github.com/imputnet/helium",
+        sshUrl: "git@github.com:imputnet/helium.git",
+      }),
+    ).toBe("https://github.com/imputnet/helium");
+    expect(
+      getDefaultCloneUrl({
+        provider: SourceControlProviderKind.make("forgejo"),
+        url: "https://forgejo.example.test:8443/owner/repo.git",
+        sshUrl: "ssh://git@forgejo.example.test:2222/owner/repo.git",
+      }),
+    ).toBe("https://forgejo.example.test:8443/owner/repo.git");
+  });
+
+  it("derives the clone folder name from any pasted clone URL", () => {
+    expect(getCloneDirectoryName("https://github.com/owner/repo.git")).toBe("repo");
+    expect(getCloneDirectoryName("https://github.com/owner/repo")).toBe("repo");
+    expect(getCloneDirectoryName("https://github.com/owner/repo/")).toBe("repo");
+    expect(getCloneDirectoryName("git@github.com:owner/repo.git")).toBe("repo");
+    expect(getCloneDirectoryName("ssh://git@github.com:22/owner/repo.git")).toBe("repo");
+    expect(getCloneDirectoryName("https://user@bitbucket.org/owner/repo.git")).toBe("repo");
+    expect(getCloneDirectoryName("https://dev.azure.com/org/project/_git/repo")).toBe("repo");
+    expect(getCloneDirectoryName("https://github.com/owner/repo.git?ref=main#readme")).toBe("repo");
+    expect(getCloneDirectoryName("/srv/git/repo.git")).toBe("repo");
+    expect(getCloneDirectoryName("C:\\src\\repo.git")).toBe("repo");
+    expect(getCloneDirectoryName("git@github.com:repo.git")).toBe("repo");
+    expect(getCloneDirectoryName("  https://github.com/owner/repo.git  ")).toBe("repo");
+  });
+
+  it("lays clone folders out like ghq only when asked, and only when the URL is safe", () => {
+    expect(getCloneDirectoryPath("git@github.com:owner/repo.git", false)).toBe("repo");
+    expect(getCloneDirectoryPath("git@github.com:owner/repo.git", true)).toBe(
+      "github.com/owner/repo",
+    );
+    expect(getCloneDirectoryPath("ssh://git@gitlab.com:2222/group/sub/repo.git", true)).toBe(
+      "gitlab.com/group/sub/repo",
+    );
+    expect(getCloneDirectoryPath("https://github.com/owner/../../repo", true)).toBe("repo");
+    expect(getCloneDirectoryPath("/srv/git/repo.git", true)).toBe("repo");
+    expect(
+      getCloneDirectoryPath(
+        "git@ssh.dev.azure.com:v3/org/Project/My%20Repo",
+        false,
+        "Project/My Repo",
+      ),
+    ).toBe("My Repo");
+    expect(
+      getCloneDirectoryLeafName(
+        "git@ssh.dev.azure.com:v3/org/Project/My%20Repo",
+        true,
+        "Project/My Repo",
+      ),
+    ).toBe("My%20Repo");
+    expect(
+      getCloneDestinationPath(
+        "C:\\Users\\me\\ghq",
+        getCloneDirectoryPath("git@github.com:owner/repo.git", true),
+      ),
+    ).toBe("C:\\Users\\me\\ghq\\github.com\\owner\\repo");
+  });
+
+  it("keeps a numeric repository name that sits on a path", () => {
+    expect(getCloneDirectoryName("https://github.com/acme/123.git")).toBe("123");
+    expect(getCloneDirectoryName("https://github.com/acme/123")).toBe("123");
+    expect(getCloneDirectoryName("git@github.com:acme/123.git")).toBe("123");
+  });
+
+  it("resolves a native-picker folder like an in-app clone selection", () => {
+    const pick = (pickedPath: string, caseSensitive = true) =>
+      getCloneDestinationForPickedFolder({
+        pickedPath,
+        cloneDirectoryName: "repo",
+        caseSensitive,
+      });
+
+    expect(pick("/Users/me/code")).toBe("/Users/me/code/repo");
+    expect(pick("/Users/me/code/")).toBe("/Users/me/code/repo");
+    expect(pick("/Users/me/repo")).toBe("/Users/me/repo/");
+    expect(pick("/Users/me/Repo")).toBe("/Users/me/Repo/repo");
+    expect(pick("C:\\Projects\\Repo", false)).toBe("C:\\Projects\\Repo\\");
+    expect(pick("C:\\Projects", false)).toBe("C:\\Projects\\repo");
+    expect(pick("/")).toBe("/repo");
+  });
+
+  it("finds existing projects by normalized path in the target environment", () => {
+    const env = EnvironmentId.make("env");
+    const other = EnvironmentId.make("other");
+    const projects: EnvironmentProject[] = [
+      {
+        environmentId: other,
+        id: ProjectId.make("same-path-other-env"),
+        title: "Other",
+        workspaceRoot: "/repo",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        repositoryIdentity: null,
+        defaultModelSelection: null,
+        scripts: [],
+      },
+      {
+        environmentId: env,
+        id: ProjectId.make("project"),
+        title: "Repo",
+        workspaceRoot: "/repo/",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        repositoryIdentity: null,
+        defaultModelSelection: null,
+        scripts: [],
+      },
+    ];
+
+    expect(findExistingAddProject({ projects, environmentId: env, path: "/repo" })?.id).toBe(
+      "project",
+    );
+  });
+});

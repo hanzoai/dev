@@ -1,0 +1,462 @@
+import { describe, expect, it, vi } from "vite-plus/test";
+
+import {
+  createCdpRelayConnection,
+  type CdpRelayConnection,
+  type CdpRelayTarget,
+} from "./CdpRelay.ts";
+
+const makeTarget = (
+  send: CdpRelayTarget["send"],
+  setDownloadDirectory: CdpRelayTarget["setDownloadDirectory"] = () => {},
+  ackScreencastFrame: CdpRelayTarget["ackScreencastFrame"] = () => {},
+): CdpRelayTarget => ({
+  send,
+  targetId: async () => "GUEST-TARGET",
+  url: () => "http://localhost:4719/",
+  title: () => "Fixture",
+  userAgent: () => "Electron",
+  setDownloadDirectory,
+  receivesScreencast: () => true,
+  ackScreencastFrame,
+});
+
+const makeRelay = (target: CdpRelayTarget, write: (raw: string) => void) =>
+  createCdpRelayConnection(target, write, () => {});
+
+// Each relay reply resolves after a few microtasks; one macrotask lets them all land.
+// oxlint-disable-next-line hanzo/no-real-time-wait-in-tests -- a zero-delay macrotask boundary, not a wait for time
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+describe("CDP relay", () => {
+  it("announces only the tab's page, under its real target id", async () => {
+    const written: Array<Record<string, unknown>> = [];
+    const relay = makeRelay(makeTarget(vi.fn()), (raw) => written.push(JSON.parse(raw)));
+    relay.receive(JSON.stringify({ id: 1, method: "Target.setAutoAttach", params: {} }));
+    relay.receive(JSON.stringify({ id: 2, method: "Target.createTarget", params: {} }));
+    await settle();
+    const attach = written.findIndex((message) => message["id"] === 1);
+    expect(written.slice(attach, attach + 2)).toEqual([
+      { id: 1, result: {} },
+      {
+        method: "Target.attachedToTarget",
+        params: expect.objectContaining({
+          sessionId: "hanzo-preview-page",
+          targetInfo: expect.objectContaining({ targetId: "GUEST-TARGET", type: "page" }),
+        }),
+      },
+    ]);
+    expect(written).toContainEqual({
+      id: 2,
+      error: expect.objectContaining({ message: expect.stringContaining("createTarget") }),
+    });
+  });
+
+  it("forwards page commands to the tab and lets a slow one finish last", async () => {
+    const pending: Array<() => void> = [];
+    const send = vi.fn(
+      (method: string) =>
+        new Promise<unknown>((resolve) => pending.push(() => resolve({ method }))),
+    );
+    const written: Array<Record<string, unknown>> = [];
+    const relay = makeRelay(makeTarget(send), (raw) => written.push(JSON.parse(raw)));
+    relay.receive(
+      JSON.stringify({ id: 5, method: "Page.captureScreenshot", sessionId: "hanzo-preview-page" }),
+    );
+    relay.receive(JSON.stringify({ id: 6, method: "DOM.enable", sessionId: "iframe-session" }));
+    pending[1]!();
+    await settle();
+    expect(written).toEqual([
+      { id: 6, result: { method: "DOM.enable" }, sessionId: "iframe-session" },
+    ]);
+    pending[0]!();
+    await settle();
+    expect(send).toHaveBeenNthCalledWith(1, "Page.captureScreenshot", {}, undefined, undefined);
+    expect(send).toHaveBeenNthCalledWith(2, "DOM.enable", {}, "iframe-session", undefined);
+    expect(written.at(-1)).toEqual({
+      id: 5,
+      result: { method: "Page.captureScreenshot" },
+      sessionId: "hanzo-preview-page",
+    });
+  });
+
+  it("resumes paused child frames, so cross-site iframes run", async () => {
+    const send = vi.fn(async () => ({}));
+    const relay = makeRelay(makeTarget(send), () => {});
+    relay.receive(
+      JSON.stringify({
+        id: 1,
+        method: "Runtime.runIfWaitingForDebugger",
+        sessionId: "hanzo-preview-page",
+      }),
+    );
+    relay.receive(
+      JSON.stringify({
+        id: 2,
+        method: "Runtime.runIfWaitingForDebugger",
+        sessionId: "iframe-session",
+      }),
+    );
+    await settle();
+    expect(send.mock.calls).toEqual([
+      ["Runtime.runIfWaitingForDebugger", {}, "iframe-session", undefined],
+    ]);
+  });
+
+  // Playwright enables focus emulation on every page it connects to, and Chromium then
+  // counts the guest as captured: a preview the panel hides keeps its timers unthrottled.
+  it("acknowledges Playwright's focus emulation without forcing it onto the guest", async () => {
+    const send = vi.fn(async () => ({}));
+    const written: Array<Record<string, unknown>> = [];
+    const relay = makeRelay(makeTarget(send), (raw) => written.push(JSON.parse(raw)));
+    relay.receive(
+      JSON.stringify({
+        id: 1,
+        method: "Emulation.setFocusEmulationEnabled",
+        params: { enabled: true },
+        sessionId: "hanzo-preview-page",
+      }),
+    );
+    await settle();
+    expect(written).toEqual([{ id: 1, result: {}, sessionId: "hanzo-preview-page" }]);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("routes tab events to the page session once the page is announced", async () => {
+    const written: Array<Record<string, unknown>> = [];
+    const relay = makeRelay(makeTarget(vi.fn()), (raw) => written.push(JSON.parse(raw)));
+    relay.event("Page.loadEventFired", {}, undefined);
+    expect(written).toEqual([]);
+    relay.receive(JSON.stringify({ id: 1, method: "Target.setAutoAttach", params: {} }));
+    await settle();
+    relay.event("Page.loadEventFired", { timestamp: 1 }, "");
+    relay.event("Runtime.consoleAPICalled", {}, "iframe-session");
+    expect(written.slice(-2)).toEqual([
+      { method: "Page.loadEventFired", params: { timestamp: 1 }, sessionId: "hanzo-preview-page" },
+      { method: "Runtime.consoleAPICalled", params: {}, sessionId: "iframe-session" },
+    ]);
+  });
+});
+
+describe("CDP relay extra sessions", () => {
+  it("gives a second page session the page's commands and events", async () => {
+    const send = vi.fn<CdpRelayTarget["send"]>(async () => ({}));
+    const written: Array<Record<string, unknown>> = [];
+    const nativeAcks: Array<number> = [];
+    const relay = makeRelay(
+      makeTarget(send, undefined, (frameId) => nativeAcks.push(frameId)),
+      (raw) => written.push(JSON.parse(raw)),
+    );
+    relay.receive(JSON.stringify({ id: 1, method: "Target.setAutoAttach", params: {} }));
+    relay.receive(JSON.stringify({ id: 2, method: "Target.attachToBrowserTarget" }));
+    await settle();
+    const browserSession = (written.find((m) => m["id"] === 2)!["result"] as { sessionId: string })
+      .sessionId;
+    relay.receive(
+      JSON.stringify({
+        id: 3,
+        method: "Target.attachToTarget",
+        params: { targetId: "GUEST-TARGET", flatten: true },
+        sessionId: browserSession,
+      }),
+    );
+    relay.receive(
+      JSON.stringify({
+        id: 4,
+        method: "Target.attachToTarget",
+        params: { targetId: "SOMETHING-ELSE" },
+        sessionId: browserSession,
+      }),
+    );
+    await settle();
+    const extra = (written.find((m) => m["id"] === 3)!["result"] as { sessionId: string })
+      .sessionId;
+    expect(written.find((m) => m["id"] === 4)).toHaveProperty("error");
+    relay.receive(JSON.stringify({ id: 5, method: "Page.startScreencast", sessionId: extra }));
+    await settle();
+    expect(send).toHaveBeenLastCalledWith("Page.startScreencast", {}, undefined, extra);
+    written.length = 0;
+    const frame = (frameId: number) =>
+      relay.event("Page.screencastFrame", { data: "x", sessionId: frameId }, undefined);
+    const ack = (sessionId: string, frameId: number) =>
+      relay.receive(
+        JSON.stringify({
+          id: 6,
+          method: "Page.screencastFrameAck",
+          params: { sessionId: frameId },
+          sessionId,
+        }),
+      );
+    const delivered = () => {
+      const frames = written
+        .filter((m) => m["method"])
+        .map((m) => [m["sessionId"], (m["params"] as { sessionId?: number }).sessionId]);
+      written.length = 0;
+      return frames;
+    };
+    frame(1);
+    expect(delivered()).toEqual([
+      ["hanzo-preview-page", 1],
+      [extra, 1],
+    ]);
+    // A session that has not acknowledged its frame gets only the newest one, on its ack.
+    for (let i = 2; i < 100; i++) frame(i);
+    expect(delivered()).toEqual([]);
+    // Frames every session is busy for stay unacknowledged, so Chromium pauses at its in-flight limit.
+    expect(nativeAcks).toEqual([1]);
+    ack(extra, 1);
+    await settle();
+    expect(delivered()).toEqual([[extra, 99]]);
+    // Each consumer ack lets Chromium send one more frame.
+    expect(nativeAcks).toEqual([1, 2]);
+    ack(extra, 99);
+    await settle();
+    expect(delivered()).toEqual([]);
+    expect(nativeAcks).toEqual([1, 2, 3]);
+    frame(100);
+    expect(delivered()).toEqual([[extra, 100]]);
+    ack(extra, 99);
+    await settle();
+    frame(101);
+    expect(delivered()).toEqual([]);
+    expect(send.mock.calls.some(([method]) => method === "Page.screencastFrameAck")).toBe(false);
+    // A restart keeps the unacknowledged frame's slot until its own acknowledgement.
+    relay.receive(JSON.stringify({ id: 7, method: "Page.stopScreencast", sessionId: extra }));
+    relay.receive(JSON.stringify({ id: 8, method: "Page.startScreencast", sessionId: extra }));
+    await settle();
+    delivered();
+    frame(102);
+    expect(delivered()).toEqual([]);
+    ack(extra, 100);
+    await settle();
+    expect(delivered()).toEqual([[extra, 102]]);
+    // Other events still reach a session while its frame is unacknowledged.
+    relay.event("Page.loadEventFired", { timestamp: 1 }, undefined);
+    expect(delivered().map(([session]) => session)).toEqual(["hanzo-preview-page", extra]);
+  });
+});
+
+describe("CDP relay downloads", () => {
+  it("captures preview downloads without changing the default browser context", async () => {
+    const send = vi.fn(async () => ({}));
+    const directories: Array<string | null> = [];
+    const written: Array<Record<string, unknown>> = [];
+    const relay = makeRelay(
+      makeTarget(send, (directory) => directories.push(directory)),
+      (raw) => written.push(JSON.parse(raw)),
+    );
+    relay.receive(JSON.stringify({ id: 1, method: "Target.setAutoAttach", params: {} }));
+    relay.receive(
+      JSON.stringify({
+        id: 2,
+        method: "Browser.setDownloadBehavior",
+        params: {
+          behavior: "allowAndName",
+          browserContextId: "hanzo-preview",
+          downloadPath: "/srv/artifacts",
+          eventsEnabled: true,
+        },
+      }),
+    );
+    await settle();
+    expect(directories).toEqual(["/srv/artifacts"]);
+    expect(send.mock.calls).toEqual([
+      ["Page.setDownloadBehavior", { behavior: "default" }, undefined],
+    ]);
+    written.length = 0;
+    relay.event("Page.downloadWillBegin", { guid: "g1", suggestedFilename: "r.csv" }, "");
+    relay.event("Page.downloadProgress", { guid: "g1", state: "completed" }, "");
+    expect(written).toEqual([
+      { method: "Browser.downloadWillBegin", params: { guid: "g1", suggestedFilename: "r.csv" } },
+      { method: "Browser.downloadProgress", params: { guid: "g1", state: "completed" } },
+    ]);
+  });
+
+  it("keeps denial scoped to the preview and restores Electron's save handling when allowed", async () => {
+    const send = vi.fn(async () => ({}));
+    const directories: Array<string | null> = [];
+    const relay = makeRelay(
+      makeTarget(send, (directory) => directories.push(directory)),
+      () => {},
+    );
+    for (const [id, behavior] of ["deny", "allowAndName"].entries()) {
+      relay.receive(
+        JSON.stringify({
+          id,
+          method: "Browser.setDownloadBehavior",
+          params: { behavior, downloadPath: "/srv/artifacts" },
+        }),
+      );
+      await settle();
+    }
+    expect(directories).toEqual([null, "/srv/artifacts"]);
+    expect(send.mock.calls).toEqual([
+      ["Page.setDownloadBehavior", { behavior: "deny" }, undefined],
+      ["Page.setDownloadBehavior", { behavior: "default" }, undefined],
+    ]);
+  });
+
+  it("does not publish download events when the connection has disabled them", async () => {
+    const written: Array<Record<string, unknown>> = [];
+    const relay = makeRelay(makeTarget(vi.fn(async () => ({}))), (raw) =>
+      written.push(JSON.parse(raw)),
+    );
+    relay.receive(JSON.stringify({ id: 1, method: "Target.setAutoAttach", params: {} }));
+    relay.receive(
+      JSON.stringify({
+        id: 2,
+        method: "Browser.setDownloadBehavior",
+        params: { behavior: "allowAndName", downloadPath: "/srv/artifacts", eventsEnabled: false },
+      }),
+    );
+    await settle();
+    written.length = 0;
+    relay.event("Page.downloadWillBegin", { guid: "g1" }, "");
+    relay.event("Page.downloadProgress", { guid: "g1", state: "completed" }, "");
+    expect(written).toEqual([]);
+  });
+
+  it.each([false, true])(
+    "keeps the previous download configuration (events enabled: %s) when configuration fails",
+    async (enabled) => {
+      const send = vi
+        .fn(async () => ({}))
+        .mockResolvedValueOnce({})
+        .mockRejectedValueOnce(new Error("Page command rejected"));
+      const written: Array<Record<string, unknown>> = [];
+      let directory: string | null = null;
+      const relay = makeRelay(
+        makeTarget(send, (value) => {
+          directory = value;
+        }),
+        (raw) => written.push(JSON.parse(raw)),
+      );
+      relay.receive(JSON.stringify({ id: 1, method: "Target.setAutoAttach", params: {} }));
+      for (const [id, eventsEnabled] of [enabled, !enabled].entries()) {
+        relay.receive(
+          JSON.stringify({
+            id: id + 2,
+            method: "Browser.setDownloadBehavior",
+            params: {
+              behavior: id === 1 && enabled ? "deny" : "allowAndName",
+              downloadPath: id === 0 ? "/srv/artifacts" : "/srv/new-artifacts",
+              eventsEnabled,
+            },
+          }),
+        );
+        await settle();
+      }
+      expect(written).toContainEqual({
+        id: 3,
+        error: { code: -32000, message: "Page command rejected" },
+      });
+      expect(directory).toBe("/srv/artifacts");
+      written.length = 0;
+      relay.event("Page.downloadWillBegin", { guid: "g1" }, "");
+      relay.event("Page.downloadProgress", { guid: "g1", state: "completed" }, "");
+      expect(written).toEqual(
+        enabled
+          ? [
+              { method: "Browser.downloadWillBegin", params: { guid: "g1" } },
+              { method: "Browser.downloadProgress", params: { guid: "g1", state: "completed" } },
+            ]
+          : [],
+      );
+    },
+  );
+});
+
+describe("CDP relay payload budget", () => {
+  // 2,048 references to one 40 KiB string: about 80 MiB once serialized, little memory here.
+  const oversized = Array(2048).fill("x".repeat(40 * 1024));
+
+  it("fails only an oversized reply and still returns a large screenshot", async () => {
+    const screenshot = "A".repeat(16 * 1024 * 1024);
+    const send = vi.fn(async (method: string) =>
+      method === "DOM.getDocument" ? { nodes: oversized } : { data: screenshot },
+    );
+    const written: Array<Record<string, unknown>> = [];
+    const relay = makeRelay(makeTarget(send), (raw) => written.push(JSON.parse(raw)));
+    relay.receive(
+      JSON.stringify({ id: 1, method: "DOM.getDocument", sessionId: "hanzo-preview-page" }),
+    );
+    relay.receive(
+      JSON.stringify({ id: 2, method: "Page.captureScreenshot", sessionId: "hanzo-preview-page" }),
+    );
+    await settle();
+
+    const replies = written.map(({ id, error, result }) => ({
+      id,
+      error,
+      size: (result as { data?: string } | undefined)?.data?.length,
+    }));
+    expect(replies).toEqual([
+      { id: 1, error: { code: -32000, message: "CDP payload too large" }, size: undefined },
+      { id: 2, error: undefined, size: screenshot.length },
+    ]);
+  });
+
+  it.each([
+    { args: oversized },
+    { args: "\u0001".repeat(12 * 1024 * 1024) },
+    { args: Array(2_700_000).fill(-0.0000010000000000000002) },
+  ])("closes instead of dropping an oversized event (%#)", async ({ args }) => {
+    const written: Array<Record<string, unknown>> = [];
+    const close = vi.fn();
+    const relay = createCdpRelayConnection(
+      makeTarget(vi.fn()),
+      (raw) => written.push(JSON.parse(raw)),
+      close,
+    );
+    relay.receive(JSON.stringify({ id: 1, method: "Target.setAutoAttach", params: {} }));
+    await settle();
+    written.length = 0;
+
+    relay.event("Runtime.consoleAPICalled", { args }, "");
+    relay.event("Page.loadEventFired", { timestamp: 1 }, "");
+
+    relay.receive(JSON.stringify({ id: 2, method: "Target.setAutoAttach" }));
+    expect(close).toHaveBeenCalledOnce();
+    expect(written.map((message) => message["method"])).toEqual([]);
+  });
+});
+
+describe("CDP relay reconnects", () => {
+  it("reports the page's default execution context to every connection", async () => {
+    // Electron keeps one debugger attached, so Runtime stays enabled after a client drops,
+    // and the native Runtime.enable announces contexts again only after Runtime.disable.
+    let runtimeEnabled = false;
+    let current: CdpRelayConnection | undefined;
+    const context = {
+      context: { id: 1, origin: "null", name: "", auxData: { isDefault: true, frameId: "F" } },
+    };
+    const send = vi.fn(async (method: string) => {
+      if (method === "Runtime.disable") runtimeEnabled = false;
+      if (method === "Runtime.enable" && !runtimeEnabled) {
+        runtimeEnabled = true;
+        current!.event("Runtime.executionContextCreated", context, "");
+      }
+      return {};
+    });
+    const connect = async () => {
+      const written: Array<Record<string, unknown>> = [];
+      current = makeRelay(makeTarget(send), (raw) => written.push(JSON.parse(raw)));
+      current.receive(JSON.stringify({ id: 1, method: "Target.setAutoAttach", params: {} }));
+      await settle();
+      current.receive(
+        JSON.stringify({ id: 2, method: "Runtime.enable", sessionId: "hanzo-preview-page" }),
+      );
+      await settle();
+      return written.filter((m) => m["method"] === "Runtime.executionContextCreated");
+    };
+    const expected = [
+      {
+        method: "Runtime.executionContextCreated",
+        params: context,
+        sessionId: "hanzo-preview-page",
+      },
+    ];
+    expect(await connect()).toEqual(expected);
+    expect(await connect()).toEqual(expected);
+  });
+});

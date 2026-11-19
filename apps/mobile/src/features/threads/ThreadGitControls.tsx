@@ -1,0 +1,414 @@
+import { msg, useGT, useMessages } from "gt-react-native";
+
+import * as Dialog from "../../components/ui/Dialog";
+import { useOpenPullRequest } from "../../native/useOpenPullRequest";
+import type { AppBarMenu } from "../../components/ui/AppBar.types";
+import {
+  AuthSourceControlWriteScope,
+  EnvironmentId,
+  type GitRunStackedActionResult,
+  type ProjectScript,
+  ThreadId,
+  type VcsStatusResult,
+} from "@hanzodev/contracts";
+import {
+  type GitActionRequestInput,
+  requiresDefaultBranchConfirmation,
+  resolveQuickAction,
+} from "@hanzodev/client-runtime/state/vcs";
+import { useNavigation } from "@react-navigation/native";
+import { sourceControlClients } from "@hanzodev/client-runtime/source-control-clients";
+import { changeRequestTermKind } from "../../lib/changeRequestTerm";
+
+import { m, type MessageResolver } from "../../i18n/messages";
+import { useEnvironmentScope } from "../../state/session";
+import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
+import {
+  basename,
+  getTerminalStatusLabel,
+  projectScriptMenuIcon,
+  type TerminalMenuSession,
+} from "../terminal/terminalMenu";
+import { projectScriptMenuLabel } from "@hanzodev/shared/projectScriptsCopy";
+
+function truncateMiddle(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  const headLength = Math.ceil((maxLength - 1) / 2);
+  const tailLength = Math.floor((maxLength - 1) / 2);
+  return `${value.slice(0, headLength)}…${value.slice(value.length - tailLength)}`;
+}
+
+function compactMenuBranchLabel(branch: string): string {
+  return truncateMiddle(branch, 24);
+}
+
+function compactMenuStatus(gitStatus: VcsStatusResult | null, resolve: MessageResolver): string {
+  if (!gitStatus) {
+    return resolve(msg("Checking status"));
+  }
+  if (!gitStatus.isRepo) {
+    return resolve(msg("Not a repo"));
+  }
+
+  const parts: string[] = [];
+  if (gitStatus.hasWorkingTreeChanges) {
+    parts.push(
+      resolve(
+        msg("{count, plural, one {{count} changed} other {{count} changed}}", {
+          count: gitStatus.workingTree.files.length,
+        }),
+      ),
+    );
+  } else if (gitStatus.aheadCount === 0 && gitStatus.behindCount === 0) {
+    parts.push(resolve(msg("Clean", { $context: "git working tree has no changes" })));
+  }
+  if (gitStatus.aheadCount > 0) {
+    parts.push(
+      resolve(
+        msg("{count, plural, one {{count} ahead} other {{count} ahead}}", {
+          count: gitStatus.aheadCount,
+        }),
+      ),
+    );
+  }
+  if (gitStatus.behindCount > 0) {
+    parts.push(
+      resolve(
+        msg("{count, plural, one {{count} behind} other {{count} behind}}", {
+          count: gitStatus.behindCount,
+        }),
+      ),
+    );
+  }
+  if (gitStatus.pr?.state === "open") {
+    const { shortLabel } = sourceControlClients.get(
+      gitStatus.sourceControlProvider?.kind,
+    ).changeRequest;
+    parts.push(`${shortLabel} #${gitStatus.pr.number}`);
+  }
+
+  return parts.join(" · ");
+}
+
+type QuickActionIcon =
+  | "arrow.down.circle"
+  | "arrow.up.right.circle"
+  | "checkmark.circle"
+  | "arrow.up.circle";
+
+export type ThreadGitMenuProps = {
+  readonly environmentId: EnvironmentId | string;
+  readonly threadId: ThreadId | string;
+  readonly currentBranch: string | null;
+  readonly hasThread?: boolean;
+  readonly gitStatus: VcsStatusResult | null;
+  readonly gitOperationLabel: string | null;
+  readonly onOpenFilesInspector?: () => void;
+  readonly onOpenGitInspector?: () => void;
+  readonly onMergeBack?: () => void;
+  readonly onPull: () => Promise<void>;
+  readonly onRunAction: (input: GitActionRequestInput) => Promise<GitRunStackedActionResult | null>;
+};
+
+export type ThreadGitControlsProps = ThreadGitMenuProps & {
+  readonly canOpenTerminal: boolean;
+  readonly canOperateTerminal: boolean;
+  readonly canOpenFiles: boolean;
+  readonly projectScripts: ReadonlyArray<ProjectScript>;
+  readonly terminalSessions: ReadonlyArray<TerminalMenuSession>;
+  readonly onOpenTerminal: (terminalId?: string | null) => void;
+  readonly onOpenNewTerminal: () => void;
+  readonly onRunProjectScript: (script: ProjectScript) => Promise<void>;
+};
+
+function useThreadGitControlModel(props: ThreadGitMenuProps) {
+  const navigation = useNavigation();
+  const gt = useGT();
+  const messages = useMessages();
+  const openPullRequest = useOpenPullRequest();
+  const environmentId = props.environmentId;
+  const canWriteSourceControl = useEnvironmentScope(
+    environmentId ? EnvironmentId.make(String(environmentId)) : null,
+    AuthSourceControlWriteScope,
+  );
+  const threadId = props.threadId;
+  const { gitStatus, gitOperationLabel, onPull, onRunAction } = props;
+
+  const currentBranchLabel = gitStatus?.refName ?? props.currentBranch ?? gt("Detached HEAD");
+  const busy = gitOperationLabel !== null;
+  const isRepo = gitStatus?.isRepo ?? true;
+  const hasPrimaryRemote = gitStatus?.hasPrimaryRemote ?? false;
+  const isDefaultRef = gitStatus?.isDefaultRef ?? false;
+
+  const quickAction = (() => {
+    if (!isRepo) {
+      return {
+        label: gt("Git unavailable"),
+        disabled: true,
+        kind: "show_hint" as const,
+        hint: gt("This workspace is not a git repository."),
+      };
+    }
+    const action = resolveQuickAction(gitStatus, busy, isDefaultRef, hasPrimaryRemote, messages);
+    return !canWriteSourceControl && (action.kind === "run_pull" || action.kind === "run_action")
+      ? {
+          ...action,
+          disabled: true,
+          hint: gt("This connection cannot change source control."),
+        }
+      : action;
+  })();
+
+  const quickActionHint = quickAction.disabled
+    ? (quickAction.hint ?? gt("This action is unavailable."))
+    : null;
+
+  const quickActionIcon: QuickActionIcon = (() => {
+    if (quickAction.kind === "run_pull") return "arrow.down.circle";
+    if (quickAction.kind === "open_pr") return "arrow.up.right.circle";
+    if (quickAction.kind === "run_action") {
+      if (quickAction.action === "commit") return "checkmark.circle";
+      if (quickAction.action === "push" || quickAction.action === "commit_push")
+        return "arrow.up.circle";
+    }
+    return "arrow.up.right.circle";
+  })();
+
+  const openExistingPr = async () => {
+    const term = changeRequestTermKind(
+      sourceControlClients.get(gitStatus?.sourceControlProvider?.kind).changeRequest,
+    );
+    const prUrl = gitStatus?.pr?.state === "open" ? gitStatus.pr.url : null;
+    if (!prUrl) {
+      Dialog.alert(
+        gt("{term, select, mr {No open MR} cr {No open change request} other {No open PR}}", {
+          term,
+        }),
+        gt(
+          "{term, select, mr {This branch does not have an open merge request.} cr {This branch does not have an open change request.} other {This branch does not have an open pull request.}}",
+          { term },
+        ),
+      );
+      return;
+    }
+    if (!(await openPullRequest(prUrl))) {
+      Dialog.alert(
+        gt(
+          "{term, select, mr {Unable to open MR} cr {Unable to open change request} other {Unable to open PR}}",
+          { term },
+        ),
+        gt(
+          "{term, select, mr {The merge request could not be opened.} cr {The change request could not be opened.} other {The pull request could not be opened.}}",
+          { term },
+        ),
+      );
+    }
+  };
+
+  const runActionWithPrompt = async (input: GitActionRequestInput) => {
+    if (!canWriteSourceControl) return;
+    const confirmableAction =
+      input.action === "push" ||
+      input.action === "create_pr" ||
+      input.action === "commit_push" ||
+      input.action === "commit_push_pr"
+        ? input.action
+        : null;
+    const branchName = gitStatus?.refName;
+    if (
+      branchName &&
+      confirmableAction &&
+      !input.featureBranch &&
+      requiresDefaultBranchConfirmation(input.action, isDefaultRef)
+    ) {
+      if (props.hasThread === false) {
+        Dialog.alert(
+          gt("Choose a feature branch"),
+          gt("Switch branches before publishing changes from this draft."),
+        );
+        return;
+      }
+      navigation.navigate("GitConfirm", {
+        environmentId: String(environmentId),
+        threadId: String(threadId),
+        confirmAction: confirmableAction,
+        branchName,
+        includesCommit: String(input.action === "commit_push" || input.action === "commit_push_pr"),
+      });
+      return;
+    }
+
+    await onRunAction(input);
+  };
+
+  const runQuickAction = async () => {
+    if (quickAction.disabled) return;
+    if (quickAction.kind === "open_pr") {
+      await openExistingPr();
+      return;
+    }
+    if (quickAction.kind === "run_pull") {
+      await onPull();
+      return;
+    }
+    if (quickAction.kind === "run_action" && quickAction.action) {
+      await runActionWithPrompt({ action: quickAction.action });
+    }
+  };
+
+  const openReview = () => {
+    navigation.navigate("ThreadReview", {
+      environmentId: EnvironmentId.make(String(environmentId)),
+      threadId: ThreadId.make(String(threadId)),
+    });
+  };
+
+  const openGitInspector = () => {
+    if (props.onOpenGitInspector) {
+      props.onOpenGitInspector();
+      return;
+    }
+    navigation.navigate("GitOverview", {
+      environmentId: String(environmentId),
+      threadId: String(threadId),
+    });
+  };
+
+  return {
+    currentBranchLabel,
+    isRepo,
+    openGitInspector,
+    openReview,
+    quickAction,
+    quickActionHint,
+    quickActionIcon,
+    runQuickAction,
+  };
+}
+
+export function threadTerminalMenu(
+  props: ThreadGitControlsProps,
+  resolve: MessageResolver = m,
+): AppBarMenu | null {
+  if (!props.canOpenTerminal) return null;
+  return {
+    title: resolve(msg("Terminal")),
+    icon: "terminal",
+    separateBackground: false,
+    items: [
+      ...(props.projectScripts.length > 0
+        ? props.projectScripts.map((script) => ({
+            id: `script-${script.id}`,
+            title: projectScriptMenuLabel(script, resolve),
+            icon: projectScriptMenuIcon(script.icon),
+            subtitle: script.command,
+            disabled: !props.canOperateTerminal,
+            onPress: () => void props.onRunProjectScript(script),
+          }))
+        : [
+            {
+              id: "script-none",
+              title: resolve(msg("No project scripts")),
+              icon: "play",
+              subtitle: resolve(msg("This project has no saved scripts yet")),
+              disabled: true,
+              onPress: () => {},
+            },
+          ]),
+      ...props.terminalSessions.map((session) => ({
+        id: `terminal-${session.terminalId}`,
+        title: session.displayLabel,
+        icon: "terminal",
+        subtitle: [
+          getTerminalStatusLabel(
+            {
+              status: session.status,
+              hasRunningSubprocess: session.hasRunningSubprocess,
+            },
+            resolve,
+          ),
+          basename(session.cwd),
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        onPress: () => props.onOpenTerminal(session.terminalId),
+      })),
+      {
+        id: "terminal-new",
+        title: resolve(msg("Open new terminal")),
+        icon: "plus",
+        subtitle: resolve(msg("Start another shell for this thread")),
+        disabled: !props.canOperateTerminal,
+        onPress: props.onOpenNewTerminal,
+      },
+    ],
+  };
+}
+
+/** The thread's git menu, shared by the thread bar and Review. */
+export function useThreadGitMenuDefinition(props: ThreadGitMenuProps): AppBarMenu | null {
+  const model = useThreadGitControlModel(props);
+  const gt = useGT();
+  const messages = useMessages();
+  return {
+    title: gt("Git controls"),
+    icon: "point.topleft.down.curvedto.point.bottomright.up",
+    separateBackground: false,
+    items: [
+      {
+        id: "git-status",
+        title: compactMenuBranchLabel(model.currentBranchLabel),
+        icon: "point.topleft.down.curvedto.point.bottomright.up",
+        disabled: true,
+        subtitle: compactMenuStatus(props.gitStatus, messages),
+        onPress: () => {},
+      },
+      {
+        id: "git-quick-action",
+        title: model.quickAction.label,
+        icon: model.quickActionIcon,
+        disabled: model.quickAction.disabled,
+        subtitle: model.quickActionHint ?? undefined,
+        onPress: () => {
+          void model.runQuickAction();
+        },
+      },
+      {
+        id: "git-review",
+        title: gt("Review changes"),
+        icon: "text.bubble",
+        disabled: !model.isRepo || props.hasThread === false,
+        subtitle:
+          props.hasThread === false
+            ? gt("Available after the first message")
+            : gt("Turn diffs and worktree changes"),
+        onPress: model.openReview,
+      },
+      ...(props.onMergeBack
+        ? [
+            {
+              id: "git-merge-back",
+              title: gt("Merge back to source"),
+              icon: PullRequestGlyph.merged,
+              subtitle: gt("Bring this thread's latest turn into its source"),
+              onPress: props.onMergeBack,
+            },
+          ]
+        : []),
+      {
+        id: "git-more",
+        title: gt("More", { $context: "menu item that opens more git actions" }),
+        icon: "ellipsis",
+        disabled: props.hasThread === false,
+        subtitle:
+          props.hasThread === false
+            ? gt("Available after the first message")
+            : gt("Commit, files, branches"),
+        onPress: model.openGitInspector,
+      },
+    ],
+  };
+}

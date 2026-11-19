@@ -1,0 +1,209 @@
+import { describe, expect, it } from "vite-plus/test";
+import { AuthFilesystemReadScope, AuthOrchestrationReadScope } from "@hanzodev/contracts";
+
+import {
+  createBrowseNavigationCoordinator,
+  filterFilesystemBrowseEntries,
+  getFilesystemBrowsePath,
+  getFilesystemBrowseTabCompletion,
+  resolveFilesystemReadAccess,
+} from "./filesystem.ts";
+
+const SPLIT_SCOPES_SERVER = { serverUpdateScope: "environment:maintain" } as const;
+
+describe("filesystem read access", () => {
+  it("waits for the initial catalog before declaring a missing environment disconnected", () => {
+    expect(
+      resolveFilesystemReadAccess({
+        isCatalogReady: false,
+        connection: null,
+        session: null,
+        sessionError: null,
+      }),
+    ).toEqual({ canReadFiles: false, isPending: true, error: null });
+  });
+
+  it.each([false, true])(
+    "preserves a cached file grant offline with catalog ready=%s",
+    (isCatalogReady) => {
+      const input = {
+        isCatalogReady,
+        connection: { phase: "offline", error: null },
+        session: { authenticated: true, scopes: [AuthFilesystemReadScope] },
+        sessionError: null,
+      } as const;
+      expect(resolveFilesystemReadAccess(input)).toEqual({
+        canReadFiles: true,
+        isPending: false,
+        error: null,
+      });
+      expect(
+        resolveFilesystemReadAccess({ ...input, sessionError: "The session has expired." }),
+      ).toEqual({ canReadFiles: false, isPending: false, error: "The session has expired." });
+    },
+  );
+
+  it.each([
+    { authenticated: true, scopes: [AuthOrchestrationReadScope], auth: SPLIT_SCOPES_SERVER },
+    { authenticated: false, scopes: [AuthFilesystemReadScope], auth: SPLIT_SCOPES_SERVER },
+  ] as const)("does not infer file access from an ungranted session", (session) => {
+    expect(
+      resolveFilesystemReadAccess({
+        isCatalogReady: true,
+        connection: { phase: "connected", error: null },
+        session,
+        sessionError: null,
+      }),
+    ).toEqual({ canReadFiles: false, isPending: false, error: null });
+  });
+
+  it("falls back to the orchestration grant on a server that predates filesystem:read", () => {
+    expect(
+      resolveFilesystemReadAccess({
+        isCatalogReady: true,
+        connection: { phase: "connected", error: null },
+        session: { authenticated: true, scopes: [AuthOrchestrationReadScope], auth: {} },
+        sessionError: null,
+      }),
+    ).toEqual({ canReadFiles: true, isPending: false, error: null });
+  });
+});
+
+describe("filesystem browse model", () => {
+  it("derives the browse target and navigation state", () => {
+    expect(getFilesystemBrowsePath("~/projects/hanzo")).toEqual({
+      isBrowsing: true,
+      directoryPath: "~/projects/",
+      filterQuery: "hanzo",
+      parentPath: "~/",
+      canBrowseUp: true,
+    });
+    expect(getFilesystemBrowsePath("C:\\Users\\test", "MacIntel").isBrowsing).toBe(false);
+    expect(getFilesystemBrowsePath("~/projects/", "", false).isBrowsing).toBe(false);
+  });
+
+  it("completes Tab like a shell", () => {
+    const entry = (name: string) => ({ name, fullPath: `/Users/me/${name}` });
+    expect(getFilesystemBrowseTabCompletion([entry("Creations")], "Creation")).toEqual({
+      name: "Creations",
+      isComplete: true,
+    });
+    expect(getFilesystemBrowseTabCompletion([entry("OpenSourced"), entry("OpenAI")], "op")).toEqual(
+      { name: "Open", isComplete: false },
+    );
+    expect(getFilesystemBrowseTabCompletion([entry("Open"), entry("Opal")], "Op")).toBeNull();
+    expect(getFilesystemBrowseTabCompletion([entry("openAI"), entry("OpenSource")], "o")).toEqual({
+      name: "open",
+      isComplete: false,
+    });
+    expect(getFilesystemBrowseTabCompletion([entry("😀one"), entry("😁two")], "")).toBeNull();
+    expect(getFilesystemBrowseTabCompletion([entry("ΟΣα"), entry("οσβ")], "ο")).toBeNull();
+    expect(getFilesystemBrowseTabCompletion([entry("İfoo"), entry("İfar")], "i\u0307")).toEqual({
+      name: "İf",
+      isComplete: false,
+    });
+    expect(getFilesystemBrowseTabCompletion([entry("😀one"), entry("😀other")], "😀")).toEqual({
+      name: "😀o",
+      isComplete: false,
+    });
+    expect(getFilesystemBrowseTabCompletion([], "x")).toBeNull();
+    // The list also shows substring and fuzzy matches; Tab completes only the typed name.
+    expect(getFilesystemBrowseTabCompletion([entry("hanzodev"), entry("my-hanzodev")], "hanzo")).toEqual({
+      name: "hanzo",
+      isComplete: true,
+    });
+    expect(
+      getFilesystemBrowseTabCompletion(
+        [entry("OpenSourced"), entry("OpenAI"), entry("reopen"), entry("photos")],
+        "op",
+      ),
+    ).toEqual({ name: "Open", isComplete: false });
+    expect(getFilesystemBrowseTabCompletion([entry("hanzodev")], "tcd")).toBeNull();
+  });
+
+  it("matches folder names stored decomposed, as macOS Finder names them", () => {
+    const entry = { name: "De\u0301veloppement", fullPath: "/Users/me/De\u0301veloppement" };
+    expect(filterFilesystemBrowseEntries([entry], "d\u00e9v")).toEqual({
+      visibleEntries: [entry],
+      exactEntry: null,
+    });
+    expect(filterFilesystemBrowseEntries([entry], "De").visibleEntries).toEqual([entry]);
+    expect(filterFilesystemBrowseEntries([entry], "dévpt").visibleEntries).toEqual([entry]);
+    expect(filterFilesystemBrowseEntries([entry], "D\u00e9veloppement").exactEntry).toBe(entry);
+    // Linux keeps both spellings as separate folders; the one typed exactly wins.
+    const composed = { name: "D\u00e9veloppement", fullPath: "/home/me/D\u00e9veloppement" };
+    expect(filterFilesystemBrowseEntries([entry, composed], "D\u00e9veloppement").exactEntry).toBe(
+      composed,
+    );
+    // Two spellings that both normalize to the query are ambiguous; neither is picked.
+    const angstroms = [
+      { name: "\u212B", fullPath: "/home/me/\u212B" },
+      { name: "A\u030A", fullPath: "/home/me/A\u030A" },
+    ];
+    expect(filterFilesystemBrowseEntries(angstroms, "\u00C5").exactEntry).toBeNull();
+  });
+});
+
+describe("browse navigation", () => {
+  it("only commits the latest valid navigation", async () => {
+    const navigation = createBrowseNavigationCoordinator();
+    const first = Promise.withResolvers<void>();
+    const second = Promise.withResolvers<void>();
+    const commits: string[] = [];
+    const commit = (name: string) => () => commits.push(name);
+    const firstRun = navigation.run(() => first.promise, commit("first"));
+    const secondRun = navigation.run(() => second.promise, commit("second"));
+
+    second.resolve();
+    await expect(secondRun).resolves.toBe(true);
+    first.resolve();
+    await expect(firstRun).resolves.toBe(false);
+
+    const invalidated = Promise.withResolvers<void>();
+    const invalidatedRun = navigation.run(() => invalidated.promise, commit("stale"));
+    navigation.invalidate();
+    invalidated.resolve();
+
+    await expect(invalidatedRun).resolves.toBe(false);
+    expect(commits).toEqual(["second"]);
+  });
+});
+
+describe("browse entry filtering", () => {
+  const entries = ["my-hanzodev", "hanzodev", "cotton", "HanzoDev-old", ".hanzo-dev", "docs"].map((name) => ({
+    name,
+    fullPath: `~/code/${name}`,
+  }));
+  const names = (query: string) =>
+    filterFilesystemBrowseEntries(entries, query).visibleEntries.map((entry) => entry.name);
+
+  it("keeps every visible entry in order for an empty query", () => {
+    expect(names("")).toEqual(["my-hanzodev", "hanzodev", "cotton", "HanzoDev-old", "docs"]);
+  });
+
+  it("matches substrings and subsequences, best match first", () => {
+    expect(names("code")).toEqual(["hanzodev", "HanzoDev-old", "my-hanzodev"]);
+    expect(names("hanzoc")).toEqual(["hanzodev", "HanzoDev-old", "my-hanzodev"]);
+    expect(names("tcd")).toEqual(["hanzodev", "HanzoDev-old", "my-hanzodev"]);
+    expect(names("xyz")).toEqual([]);
+  });
+
+  it("ranks a word-start match in a long name above any substring match", () => {
+    const longName = `${"a".repeat(240)}-foo`;
+    const folders = [
+      { name: "xfoo", fullPath: "~/xfoo" },
+      { name: longName, fullPath: "~/long" },
+    ];
+    expect(
+      filterFilesystemBrowseEntries(folders, "foo").visibleEntries.map((entry) => entry.name),
+    ).toEqual([longName, "xfoo"]);
+  });
+
+  it("shows dot folders only when the query starts with a dot", () => {
+    expect(names("hanzo")).not.toContain(".hanzo-dev");
+    expect(filterFilesystemBrowseEntries(entries, ".hanzo-dev")).toEqual({
+      visibleEntries: [entries[4]],
+      exactEntry: entries[4],
+    });
+  });
+});

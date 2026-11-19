@@ -1,0 +1,10 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["HanzoTerminalModule"],
+    "podspecPath": "HanzoTerminalNative.podspec"
+  },
+  "android": {
+    "modules": ["expo.modules.hanzoterminal.HanzoTerminalModule"]
+  }
+}

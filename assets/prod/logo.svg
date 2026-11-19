@@ -1,0 +1,25 @@
+<svg role="img" aria-label="Hanzo" viewBox="0 0 67 67" xmlns="http://www.w3.org/2000/svg">
+<!-- Origami fold-in → hover: one 3-D turn → press: squash. Pure CSS, no JS. Canonical 7-path shaded H. -->
+
+<style>.o{fill:currentColor;opacity:0;transform-box:fill-box;transform-origin:left center;animation:fold 0.42s cubic-bezier(.16,1,.3,1) forwards}
+.s{fill:currentColor;opacity:.55}
+@keyframes fold{from{opacity:0;transform:perspective(320px) rotateY(90deg)}to{opacity:1;transform:none}}
+.o0{animation-delay:0.00s}.o1{animation-delay:0.06s}.o2{animation-delay:0.12s}.o3{animation-delay:0.18s}.o4{animation-delay:0.24s}
+/* interaction — pure CSS, no JS: hover = one graceful turn (returns to rest), press = squash */
+.hanzo-hov{transform-box:view-box;transform-origin:33.5px 33.5px}
+.hanzo-prs{transform-box:view-box;transform-origin:33.5px 33.5px;transition:transform .22s cubic-bezier(.22,1,.36,1)}
+svg:hover .hanzo-hov{animation:hanzoTurn 0.85s cubic-bezier(.45,0,.2,1)}
+svg:active .hanzo-prs{transform:scale(.92)}
+@keyframes hanzoTurn{0%{transform:perspective(300px) rotateY(0)}100%{transform:perspective(300px) rotateY(360deg)}}
+@media (prefers-reduced-motion:reduce){.hanzo-hov,.hanzo-prs{animation:none!important;transform:none!important}.o{opacity:1;animation:none;transform:none}}
+</style>
+<g class="hanzo-hov"><g class="hanzo-prs">
+<path class="o o0" d="M22.21 0H0V22.3184H22.21V0Z"/>
+<path class="o o1" d="M66.7198 0H44.5098V22.3184H66.7198V0Z"/>
+<path class="o o1 s" d="M66.6753 22.3185L44.5098 20.0822V22.3185H66.6753Z"/>
+<path class="o o2" d="M66.7038 22.3184H22.2534L0.0878906 44.6367H44.4634L66.7038 22.3184Z"/>
+<path class="o o3" d="M22.21 67V44.6369H0V67H22.21Z"/>
+<path class="o o3 s" d="M0 44.6369L22.21 46.8285V44.6369H0Z"/>
+<path class="o o4" d="M66.7198 67V44.6369H44.5098V67H66.7198Z"/>
+</g></g>
+</svg>

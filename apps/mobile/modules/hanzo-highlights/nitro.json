@@ -1,0 +1,20 @@
+{
+  "$schema": "https://nitro.margelo.com/nitro.schema.json",
+  "cxxNamespace": ["hanzohighlights"],
+  "ios": {
+    "iosModuleName": "HanzoHighlightsNative"
+  },
+  "android": {
+    "androidNamespace": ["hanzohighlights"],
+    "androidCxxLibName": "hanzohighlights"
+  },
+  "autolinking": {
+    "HanzoHighlights": {
+      "all": {
+        "language": "c++",
+        "implementationClassName": "HybridHanzoHighlights"
+      }
+    }
+  },
+  "ignorePaths": ["node_modules", "Vendor"]
+}

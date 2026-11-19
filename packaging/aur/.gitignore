@@ -1,0 +1,9 @@
+src/
+pkg/
+*.AppImage
+*.pkg.tar.zst
+.SRCINFO
+hanzo-dev-bin-*.png
+hanzo-dev-bin-*-LICENSE
+hanzo-dev-nightly-bin-*.png
+hanzo-dev-nightly-bin-*-LICENSE

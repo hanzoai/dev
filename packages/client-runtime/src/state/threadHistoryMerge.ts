@@ -1,0 +1,230 @@
+import type {
+  OrchestrationV2ProjectedTurnItem,
+  OrchestrationV2Subagent,
+  OrchestrationV2ThreadProjection,
+} from "@hanzodev/contracts";
+import { isOrchestrationV2TurnItemVisible } from "@hanzodev/shared/orchestrationV2Timeline";
+
+export type ThreadHistoryMeta = {
+  readonly historyCursor: string | null;
+  readonly hasMoreHistory: boolean;
+  readonly loading: boolean;
+  readonly error: string | null;
+  readonly expanded: boolean;
+  readonly latestLocalTurnOrdinal: number | null;
+};
+
+export const EMPTY_THREAD_HISTORY_META: ThreadHistoryMeta = {
+  historyCursor: null,
+  hasMoreHistory: false,
+  loading: false,
+  error: null,
+  expanded: false,
+  latestLocalTurnOrdinal: null,
+};
+
+export function isActiveHistoryRequestCursor(
+  requestCursor: string,
+  history: { readonly historyCursor: string | null },
+): boolean {
+  return history.historyCursor === requestCursor;
+}
+
+export function clearActiveHistoryLoading(
+  requestCursor: string,
+  history: ThreadHistoryMeta,
+): ThreadHistoryMeta {
+  if (!isActiveHistoryRequestCursor(requestCursor, history) || !history.loading) {
+    return history;
+  }
+  return { ...history, loading: false };
+}
+
+function projectedItemKey(row: OrchestrationV2ProjectedTurnItem): string {
+  return `${row.sourceThreadId}:${row.sourceItemId}`;
+}
+
+function renumberVisible(
+  rows: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
+): OrchestrationV2ProjectedTurnItem[] {
+  return rows.map((row, position) => (row.position === position ? row : { ...row, position }));
+}
+
+// A page is a contiguous history range, so current rows before its first
+// visible row are older than the page start and new page rows sit just
+// before the next row both lists share.
+function interleavePage(
+  current: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
+  page: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
+  pageKeys: ReadonlySet<string>,
+): OrchestrationV2ProjectedTurnItem[] {
+  const currentIndex = new Map(current.map((row, index) => [projectedItemKey(row), index]));
+  const merged: OrchestrationV2ProjectedTurnItem[] = [];
+  let pending: OrchestrationV2ProjectedTurnItem[] = [];
+  let next = 0;
+  const emitCurrentThrough = (end: number) => {
+    for (; next < end; next += 1) {
+      const row = current[next]!;
+      if (!pageKeys.has(projectedItemKey(row))) merged.push(row);
+    }
+  };
+  for (const row of page) {
+    const index = currentIndex.get(projectedItemKey(row));
+    if (index === undefined) {
+      pending.push(row);
+      continue;
+    }
+    emitCurrentThrough(index + 1);
+    merged.push(...pending, row);
+    pending = [];
+  }
+  merged.push(...pending);
+  emitCurrentThrough(current.length);
+  return merged;
+}
+
+export function mergeOlderHistoryIntoProjection(
+  projection: OrchestrationV2ThreadProjection,
+  olderItems: ReadonlyArray<OrchestrationV2ProjectedTurnItem>,
+  work?: { readonly anchorId: string; readonly nextCursor: string | null },
+): OrchestrationV2ThreadProjection {
+  if (olderItems.length === 0 && work === undefined) {
+    return projection;
+  }
+
+  const start =
+    work === undefined
+      ? -1
+      : projection.visibleTurnItems.findIndex((row) => row.sourceItemId === work.anchorId);
+  const anchor = projection.visibleTurnItems[start];
+  const deferred = anchor?.item.deferredWork;
+  if (work !== undefined && deferred === undefined) return projection;
+  const currentByKey = new Map(
+    projection.visibleTurnItems.map((row) => [projectedItemKey(row), row]),
+  );
+  const turnItemById = new Map(projection.turnItems.map((item) => [String(item.id), item]));
+  const pageKeys = new Set<string>();
+  const page: OrchestrationV2ProjectedTurnItem[] = [];
+  for (const pageRow of olderItems) {
+    if (
+      work &&
+      anchor &&
+      deferred &&
+      (pageRow.sourceThreadId !== anchor.sourceThreadId ||
+        pageRow.item.ordinal < anchor.item.ordinal ||
+        pageRow.item.ordinal > deferred.lastOrdinal)
+    )
+      continue;
+    const key = projectedItemKey(pageRow);
+    if (pageKeys.has(key)) continue;
+    let row = currentByKey.get(key) ?? pageRow;
+    if (
+      !currentByKey.has(key) &&
+      (row.visibility === "local" || row.sourceThreadId === projection.thread.id)
+    ) {
+      const currentItem = turnItemById.get(String(row.sourceItemId));
+      // Hidden live items stay hidden. Snapshots also retain interrupt requests and
+      // pending request cards outside the visible window; their history page shows them.
+      if (currentItem !== undefined) {
+        if (
+          (currentItem.type !== "run_interrupt_request" &&
+            currentItem.type !== "approval_request" &&
+            currentItem.type !== "user_input_request") ||
+          !isOrchestrationV2TurnItemVisible({
+            item: currentItem,
+            runs: projection.runs,
+            attempts: projection.attempts,
+            items: projection.turnItems,
+          })
+        )
+          continue;
+        row = { ...row, item: currentItem };
+      }
+    }
+    pageKeys.add(key);
+    page.push(row);
+    if (
+      (row.visibility === "local" || row.sourceThreadId === projection.thread.id) &&
+      !turnItemById.has(String(row.sourceItemId))
+    )
+      turnItemById.set(String(row.sourceItemId), row.item);
+  }
+  if (page.length === 0 && work === undefined) return projection;
+  let visible: OrchestrationV2ProjectedTurnItem[];
+  if (work && anchor && deferred) {
+    let end = start + 1;
+    while (end < projection.visibleTurnItems.length) {
+      const row = projection.visibleTurnItems[end]!;
+      if (
+        row.sourceThreadId !== anchor.sourceThreadId ||
+        row.visibility === "synthetic" ||
+        row.item.ordinal > deferred.lastOrdinal
+      )
+        break;
+      end += 1;
+    }
+    const item = { ...anchor.item };
+    if (work.nextCursor === null) delete item.deferredWork;
+    else item.deferredWork = { ...deferred, cursor: work.nextCursor };
+    const updated = { ...anchor, item };
+    const section = [
+      ...page,
+      ...projection.visibleTurnItems
+        .slice(start, end)
+        .filter((row) => !pageKeys.has(projectedItemKey(row))),
+    ];
+    const ordered = section
+      .map((row) => (row.sourceItemId === anchor.sourceItemId ? updated : row))
+      .sort((left, right) => left.item.ordinal - right.item.ordinal);
+    visible = [
+      ...projection.visibleTurnItems.slice(0, start),
+      ...ordered,
+      ...projection.visibleTurnItems.slice(end),
+    ];
+    if (anchor.visibility === "local") turnItemById.set(String(updated.item.id), updated.item);
+  } else {
+    visible = interleavePage(projection.visibleTurnItems, page, pageKeys);
+  }
+  if (
+    visible.length === projection.visibleTurnItems.length &&
+    visible.every((row, index) => row === projection.visibleTurnItems[index])
+  )
+    return projection;
+  return {
+    ...projection,
+    turnItems: [...turnItemById.values()],
+    visibleTurnItems: renumberVisible(visible),
+  };
+}
+
+/** Adds the records of older subagents; a record already held is newer and stays. */
+export function mergeOlderSubagentsIntoProjection(
+  projection: OrchestrationV2ThreadProjection,
+  olderSubagents: ReadonlyArray<OrchestrationV2Subagent> | undefined,
+): OrchestrationV2ThreadProjection {
+  const held = new Set(projection.subagents.map((agent) => agent.id));
+  const added = olderSubagents?.filter((agent) => !held.has(agent.id)) ?? [];
+  if (added.length === 0) return projection;
+  return { ...projection, subagents: [...added, ...projection.subagents] };
+}
+
+export function applyHistoryPageMeta(
+  current: ThreadHistoryMeta,
+  page: {
+    readonly nextCursor: string | null;
+    readonly hasMoreHistory: boolean;
+  },
+): ThreadHistoryMeta {
+  return {
+    historyCursor: page.nextCursor,
+    hasMoreHistory: page.hasMoreHistory,
+    loading: false,
+    error: null,
+    expanded: true,
+    latestLocalTurnOrdinal: current.latestLocalTurnOrdinal,
+  };
+}
+
+export function shouldShowLoadEarlierControl(history: ThreadHistoryMeta): boolean {
+  return history.hasMoreHistory || history.error !== null;
+}

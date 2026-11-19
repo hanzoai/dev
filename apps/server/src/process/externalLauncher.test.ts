@@ -1,0 +1,1459 @@
+// @effect-diagnostics nodeBuiltinImport:off - the Windows launch smoke tests use filesystem notifications to observe real PowerShell launches.
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { assert, it } from "@effect/vitest";
+import * as ConfigProvider from "effect/ConfigProvider";
+import * as Deferred from "effect/Deferred";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as TestClock from "effect/testing/TestClock";
+import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
+import * as Option from "effect/Option";
+import * as PlatformError from "effect/PlatformError";
+import * as Sink from "effect/Sink";
+import * as Stream from "effect/Stream";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
+
+import { EDITORS } from "@hanzodev/contracts";
+import { resolveEditorCommand } from "@hanzodev/shared/editor";
+import * as HostProcess from "@hanzodev/shared/HostProcess";
+import { SpawnExecutableResolution } from "@hanzodev/shared/shell";
+import * as ExternalLauncher from "./externalLauncher.ts";
+import { WindowsVerbatimSpawn } from "./windowsVerbatimSpawn.ts";
+
+// Windows drive letters break mocked POSIX PATH splitting; these tests also require /bin/sh stubs.
+const windowsHost = HostProcess.Platform.defaultValue() === "win32";
+
+interface MockSpawnResult {
+  readonly spawnError?: PlatformError.PlatformError;
+  readonly exitCode?: number;
+  readonly stdout?: string;
+  readonly stall?: boolean;
+}
+
+function makeMockDetachedHandle(input: MockSpawnResult & { readonly onUnref?: () => void } = {}) {
+  return ChildProcessSpawner.makeHandle({
+    pid: ChildProcessSpawner.ProcessId(1),
+    exitCode: input.stall
+      ? Effect.never
+      : Effect.succeed(ChildProcessSpawner.ExitCode(input.exitCode ?? 0)),
+    isRunning: Effect.succeed(true),
+    kill: () => Effect.void,
+    unref: Effect.sync(() => {
+      input.onUnref?.();
+      return Effect.void;
+    }),
+    stdin: Sink.drain,
+    stdout:
+      input.stdout === undefined
+        ? Stream.empty
+        : Stream.make(new TextEncoder().encode(input.stdout)),
+    stderr: Stream.empty,
+    all: Stream.empty,
+    getInputFd: () => Sink.drain,
+    getOutputFd: () => Stream.empty,
+  });
+}
+
+const layerTest = (input: {
+  readonly platform: NodeJS.Platform;
+  readonly env?: Record<string, string>;
+  readonly path?: Path.Path;
+  readonly resolveExecutable?: (command: string) => string | undefined;
+  readonly onSpawn?: (command: ChildProcess.StandardCommand) => void;
+  readonly onUnref?: () => void;
+  readonly spawnResult?: (command: ChildProcess.StandardCommand) => MockSpawnResult | undefined;
+}) => {
+  const layerSpawner = Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make((command) =>
+      Effect.gen(function* () {
+        assert.equal(ChildProcess.isStandardCommand(command), true);
+        if (!ChildProcess.isStandardCommand(command)) {
+          throw new Error("Expected a standard command");
+        }
+        input.onSpawn?.(command);
+        const result = input.spawnResult?.(command);
+        if (result?.spawnError) return yield* result.spawnError;
+        return makeMockDetachedHandle({
+          ...(input.onUnref === undefined ? {} : { onUnref: input.onUnref }),
+          ...result,
+        });
+      }),
+    ),
+  );
+
+  return Layer.mergeAll(
+    ExternalLauncher.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          NodeServices.layer,
+          layerSpawner,
+          input.path ? Layer.succeed(Path.Path, input.path) : Layer.empty,
+        ),
+      ),
+    ),
+    Layer.succeed(HostProcess.Platform, input.platform),
+    Layer.succeed(
+      SpawnExecutableResolution,
+      (command) => input.resolveExecutable?.(command) ?? command,
+    ),
+    ConfigProvider.layer(ConfigProvider.fromEnv({ env: input.env ?? {} })),
+  );
+};
+
+// macOS command lookup cannot search a Windows drive-letter PATH.
+it.effect.skipIf(windowsHost)("opens home-relative targets using the server home directory", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const bin = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-app-open-" });
+    for (const name of ["open", "code", "idea"]) {
+      yield* fs.writeFileString(path.join(bin, name), "#!/bin/sh\n");
+      yield* fs.chmod(path.join(bin, name), 0o755);
+    }
+    const spawned: ChildProcess.StandardCommand[] = [];
+    yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      for (const cwd of ["~/Applications/My App.app", "/Applications/My App.app", "/tmp/a:12"]) {
+        yield* launcher.launchEditor({ editor: "file-manager", cwd, position: { line: 5 } });
+      }
+      yield* launcher.launchEditor({ editor: "vscode", cwd: "~/notes/todo.md:3" });
+      yield* launcher.launchEditor({
+        editor: "idea",
+        cwd: "~/notes/todo.md:3",
+        projectRoot: "~/notes",
+      });
+    }).pipe(
+      Effect.provide(
+        layerTest({
+          platform: "darwin",
+          env: { PATH: bin },
+          onSpawn: (command) => spawned.push(command),
+        }),
+      ),
+      Effect.provideService(HostProcess.HomeDirectory, "/Users/server"),
+    );
+    assert.deepEqual(
+      spawned.map((command) => command.args),
+      [
+        ["/Users/server/Applications/My App.app"],
+        ["/Applications/My App.app"],
+        ["/tmp/a:12"],
+        ["--goto", "/Users/server/notes/todo.md:3"],
+        ["/Users/server/notes", "--line", "3", "/Users/server/notes/todo.md"],
+      ],
+    );
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect.skipIf(windowsHost)(
+  "launched browsers and editors do not inherit ELECTRON_RUN_AS_NODE",
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-editors-" });
+      const codePath = path.join(binDir, "code");
+      yield* fileSystem.writeFileString(codePath, "#!/bin/sh\n");
+      yield* fileSystem.chmod(codePath, 0o755);
+
+      const spawned: ChildProcess.StandardCommand[] = [];
+      yield* Effect.gen(function* () {
+        const launcher = yield* ExternalLauncher.ExternalLauncher;
+        yield* launcher.launchBrowser("https://example.com");
+        yield* launcher.launchEditor({ editor: "vscode", cwd: "/workspace" });
+      }).pipe(
+        Effect.provide(
+          layerTest({
+            platform: "linux",
+            env: { PATH: binDir, DISPLAY: ":0" },
+            onSpawn: (command) => spawned.push(command),
+          }),
+        ),
+        Effect.provideService(HostProcess.Environment, {
+          PATH: binDir,
+          DISPLAY: ":0",
+          ELECTRON_RUN_AS_NODE: "1",
+        }),
+      );
+
+      assert.deepEqual(
+        spawned.map((command) => ({
+          command: command.command,
+          env: command.options.env,
+          extendEnv: command.options.extendEnv,
+        })),
+        ["xdg-open", "code"].map((command) => ({
+          command,
+          env: { PATH: binDir, DISPLAY: ":0" },
+          extendEnv: false,
+        })),
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+// A project opened from Hanzo must not replace the editor's last active window.
+it.effect.skipIf(windowsHost)(
+  "opens a project folder in a new VS Code window and a file in the existing one",
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-editors-" });
+      const project = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-project-" });
+      for (const name of ["code", "zeditor", "idea"]) {
+        const executable = path.join(binDir, name);
+        yield* fileSystem.writeFileString(executable, "#!/bin/sh\n");
+        yield* fileSystem.chmod(executable, 0o755);
+      }
+      const colonProject = path.join(project, "build:2026");
+      yield* fileSystem.makeDirectory(colonProject);
+      const file = `${path.join(project, "file.ts")}:3:7`;
+      const exactFile = path.join(project, "a:12");
+      yield* fileSystem.writeFileString(exactFile, "exact");
+      yield* fileSystem.makeDirectory(`${exactFile}:1:1`);
+      const positionedFile = path.join(project, "position.txt");
+      yield* fileSystem.writeFileString(positionedFile, "position");
+      yield* fileSystem.writeFileString(`${positionedFile}:7`, "collision");
+
+      const spawned: ChildProcess.StandardCommand[] = [];
+      yield* Effect.gen(function* () {
+        const launcher = yield* ExternalLauncher.ExternalLauncher;
+        yield* launcher.launchEditor({ editor: "vscode", cwd: project });
+        yield* launcher.launchEditor({ editor: "vscode", cwd: file });
+        yield* launcher.launchEditor({ editor: "vscode", cwd: colonProject });
+        for (const position of [{}, { line: 5 }]) {
+          yield* launcher.launchEditor({ editor: "vscode", cwd: exactFile, position });
+        }
+
+        yield* launcher.launchEditor({ editor: "zed", cwd: exactFile, position: {} });
+        yield* launcher.launchEditor({
+          editor: "zed",
+          cwd: positionedFile,
+          position: { line: 5, column: 3 },
+        });
+        yield* launcher.launchEditor({ editor: "zed", cwd: positionedFile, position: { line: 7 } });
+        yield* launcher.launchEditor({
+          editor: "vscode",
+          cwd: `${project}/exponent:1e3`,
+          position: { line: 5 },
+        });
+        yield* launcher.launchEditor({
+          editor: "idea",
+          cwd: exactFile,
+          position: { line: 5, column: 3 },
+        });
+      }).pipe(
+        Effect.provide(
+          layerTest({
+            platform: "linux",
+            env: { PATH: binDir, DISPLAY: ":0" },
+            onSpawn: (command) => spawned.push(command),
+          }),
+        ),
+        Effect.provideService(HostProcess.Environment, { PATH: binDir, DISPLAY: ":0" }),
+      );
+
+      assert.deepEqual(
+        spawned.map((command) => command.args),
+        [
+          ["--new-window", project],
+          ["--goto", file],
+          ["--new-window", colonProject],
+          [exactFile],
+          [exactFile],
+          [exactFile],
+          [`${positionedFile}:5:3`],
+          [positionedFile],
+          [`${project}/exponent:1e3`],
+          ["--line", "5", "--column", "2", exactFile],
+        ],
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+// Windows drive letters cannot resolve the POSIX editor stub.
+it.effect.skipIf(windowsHost)(
+  "a Linux editor launch without a display takes the desktop session's display from the systemd user manager",
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-editors-" });
+      const codiumPath = path.join(binDir, "codium");
+      yield* fileSystem.writeFileString(codiumPath, "#!/bin/sh\n");
+      yield* fileSystem.chmod(codiumPath, 0o755);
+
+      const launchEnv = (sessionManager: MockSpawnResult) =>
+        Effect.gen(function* () {
+          const spawned: ChildProcess.StandardCommand[] = [];
+          yield* Effect.gen(function* () {
+            const launcher = yield* ExternalLauncher.ExternalLauncher;
+            yield* launcher.launchEditor({ editor: "vscodium", cwd: "/workspace" });
+            yield* launcher.launchBrowser("https://example.com");
+          }).pipe(
+            Effect.provide(
+              layerTest({
+                platform: "linux",
+                env: { PATH: binDir },
+                onSpawn: (command) => spawned.push(command),
+                spawnResult: (command) =>
+                  command.command === "busctl" ? sessionManager : undefined,
+              }),
+            ),
+            Effect.provideService(HostProcess.Environment, { PATH: binDir }),
+          );
+          // Only editors borrow the session display; a browser must not open on that screen.
+          assert.deepEqual(spawned.find((command) => command.command === "xdg-open")?.options.env, {
+            PATH: binDir,
+          });
+          return spawned.find((command) => command.command === "codium")?.options.env;
+        });
+
+      assert.deepEqual(
+        yield* launchEnv({
+          stdout: JSON.stringify({
+            type: "as",
+            data: [
+              "DISPLAY=:0",
+              "HOME=/home/user",
+              "WAYLAND_DISPLAY=wayland-1",
+              "XAUTHORITY=/home/user/auth files/cookie",
+            ],
+          }),
+        }),
+        {
+          PATH: binDir,
+          DISPLAY: ":0",
+          WAYLAND_DISPLAY: "wayland-1",
+          // Raw, not the $'...' quoting `systemctl show-environment` would print.
+          XAUTHORITY: "/home/user/auth files/cookie",
+        },
+      );
+      assert.deepEqual(yield* launchEnv({ stdout: "invalid JSON" }), { PATH: binDir });
+      assert.deepEqual(yield* launchEnv({ stdout: '{"data":[42]}' }), { PATH: binDir });
+      assert.deepEqual(
+        yield* launchEnv({
+          spawnError: PlatformError.systemError({
+            _tag: "NotFound",
+            module: "ChildProcess",
+            method: "spawn",
+          }),
+        }),
+        { PATH: binDir },
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+// Windows drive letters cannot resolve the POSIX xdg stubs.
+it.effect.skipIf(windowsHost)(
+  "a Linux server without a display offers and opens the file manager on the desktop session's display",
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-editors-" });
+      for (const name of ["xdg-open", "xdg-mime"]) {
+        const filePath = path.join(binDir, name);
+        yield* fileSystem.writeFileString(filePath, "#!/bin/sh\n");
+        yield* fileSystem.chmod(filePath, 0o755);
+      }
+
+      const fileManager = (sessionEnv: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          const spawned: ChildProcess.StandardCommand[] = [];
+          const result = yield* Effect.gen(function* () {
+            const launcher = yield* ExternalLauncher.ExternalLauncher;
+            const editors = yield* launcher.resolveAvailableEditors();
+            const kind = yield* launcher.resolveFileManagerRevealKind();
+            const opened = yield* launcher
+              .launchEditor({ editor: "file-manager", cwd: "/workspace" })
+              .pipe(Effect.exit);
+            return { offered: editors.includes("file-manager"), kind, opened };
+          }).pipe(
+            Effect.provide(
+              layerTest({
+                platform: "linux",
+                env: { PATH: binDir },
+                onSpawn: (command) => spawned.push(command),
+                spawnResult: (command) =>
+                  command.command === "busctl"
+                    ? { stdout: JSON.stringify({ type: "as", data: sessionEnv }) }
+                    : command.command === "xdg-mime"
+                      ? { stdout: "org.kde.dolphin.desktop\n" }
+                      : undefined,
+              }),
+            ),
+            Effect.provideService(HostProcess.Environment, { PATH: binDir }),
+          );
+          const open = spawned.find((command) => command.command === "xdg-open");
+          return { ...result, open: open && { args: open.args, env: open.options.env } };
+        });
+
+      const session = yield* fileManager(["DISPLAY=:0", "HOME=/home/user"]);
+      assert.equal(session.offered, true);
+      assert.equal(session.kind, "files");
+      assert.equal(Exit.isSuccess(session.opened), true);
+      assert.deepEqual(session.open, {
+        args: ["/workspace"],
+        env: { PATH: binDir, DISPLAY: ":0" },
+      });
+
+      // No one is logged in to a desktop, so there is no screen to open it on.
+      const headless = yield* fileManager(["HOME=/home/user"]);
+      assert.equal(headless.offered, false);
+      assert.equal(headless.kind, undefined);
+      assert.equal(Exit.isFailure(headless.opened), true);
+      assert.equal(headless.open, undefined);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("launches an installed editor with platform-safe arguments", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-editors-" });
+    yield* fileSystem.writeFileString(path.join(binDir, "code.CMD"), "@echo off\r\n");
+
+    let spawned: ChildProcess.StandardCommand | undefined;
+    yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      yield* launcher.launchEditor({
+        editor: "vscode",
+        cwd: "C:\\workspace with spaces\\src\\index.ts:12:4",
+      });
+    }).pipe(
+      Effect.provide(
+        layerTest({
+          platform: "win32",
+          env: { PATH: binDir, PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+          resolveExecutable: (command) =>
+            command === "code" ? "C:\\Program Files\\Microsoft VS Code\\bin\\code.CMD" : command,
+          onSpawn: (command) => {
+            spawned = command;
+          },
+        }),
+      ),
+    );
+
+    assert.ok(spawned);
+    assert.equal(
+      spawned.command,
+      [
+        '^"C:\\Program^ Files\\Microsoft^ VS^ Code\\bin\\code.CMD^"',
+        '^"--goto^"',
+        '^"C:\\workspace^ with^ spaces\\src\\index.ts:12:4^"',
+      ].join(" "),
+    );
+    assert.deepEqual(spawned.args, []);
+    assert.equal(spawned.options.shell, true);
+    assert.equal(spawned.options.detached, true);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+const wslpathSpawner = (out: string | undefined) =>
+  Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make((command) =>
+      Effect.sync(() => {
+        if (!ChildProcess.isStandardCommand(command)) {
+          throw new Error("Expected a standard command");
+        }
+        assert.equal(command.command, "wslpath");
+        return makeMockDetachedHandle(
+          out === undefined ? { exitCode: 1 } : { exitCode: 0, stdout: `${out}\n` },
+        );
+      }),
+    ),
+  );
+
+it.effect.each([
+  // wslpath is mount-aware: a drive remapped in /etc/wsl.conf keeps its real letter.
+  { target: "/mnt/d/project", wslpath: "E:\\project", expected: "E:\\project" },
+  // wslpath missing or failing falls back to the hand-built UNC path.
+  {
+    target: "/home/user/repo",
+    wslpath: undefined,
+    expected: "\\\\wsl.localhost\\Ubuntu-24.04\\home\\user\\repo",
+  },
+  { target: "/", wslpath: undefined, expected: "\\\\wsl.localhost\\Ubuntu-24.04" },
+])("resolveWslFileManagerPath resolves $target to $expected", ({ target, wslpath, expected }) =>
+  Effect.gen(function* () {
+    const result = yield* ExternalLauncher.resolveWslFileManagerPath(target, "Ubuntu-24.04");
+    assert.equal(result, expected);
+  }).pipe(Effect.provide(wslpathSpawner(wslpath))),
+);
+
+it.live.skipIf(!windowsHost)("opens Windows folders through the default shell handler", () =>
+  Effect.gen(function* () {
+    let spawned: ChildProcess.StandardCommand | undefined;
+    yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      yield* launcher.launchEditor({
+        editor: "file-manager",
+        cwd: "C:/workspace [draft]/author's ‘left’ ‚low‛ $media/’; Write-Output injected; #",
+      });
+    }).pipe(
+      Effect.provide(
+        layerTest({
+          platform: "win32",
+          env: { PATH: "C:\\Windows", PATHEXT: ".EXE" },
+          onSpawn: (command) => {
+            spawned = command;
+          },
+        }),
+      ),
+    );
+    assert.ok(spawned);
+    assert.equal(spawned.options.detached, false);
+    const source = Buffer.from(String(spawned.args.at(-1) ?? ""), "base64").toString("utf16le");
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const output = yield* spawner.string(
+      ChildProcess.make(spawned.command, [
+        ...spawned.args.slice(0, -1),
+        Buffer.from(
+          `[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); function Invoke-Item { param($LiteralPath) Write-Output $LiteralPath }; ${source}`,
+          "utf16le",
+        ).toString("base64"),
+      ]),
+    );
+    assert.equal(
+      output.trim(),
+      "C:\\workspace [draft]\\author's ‘left’ ‚low‛ $media\\’; Write-Output injected; #",
+    );
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+for (const [replacement, verb, handler, target, expected] of [
+  ["none", "none", "", "C:/repo/file.txt", 'explorer.exe /select,"C:\\repo\\file.txt"'],
+  ["Directory", "openindopus", "dopusrt.exe", "C:/repo/file.txt", "shell:C:\\repo"],
+  ["Folder", "openindopus", "dopusrt.exe", "C:/repo/file.txt", "shell:C:\\repo"],
+  [
+    "Folder",
+    "open",
+    '"C:\\Windows\\explorer.exe"',
+    "C:/repo/file.txt",
+    'explorer.exe /select,"C:\\repo\\file.txt"',
+  ],
+  [
+    "Folder",
+    "open",
+    "ExplorerDelegate",
+    "C:/repo/file.txt",
+    'explorer.exe /select,"C:\\repo\\file.txt"',
+  ],
+  [
+    "Drive",
+    "openindopus",
+    "dopusrt.exe",
+    "C:/repo/file.txt",
+    'explorer.exe /select,"C:\\repo\\file.txt"',
+  ],
+  ["Drive", "openindopus", "dopusrt.exe", "C:/file.txt", "shell:C:\\"],
+] as const) {
+  it.live.skipIf(!windowsHost)(
+    `reveals ${target} with ${replacement}/${verb} handled by ${handler}`,
+    () =>
+      Effect.gen(function* () {
+        let spawned: ChildProcess.StandardCommand | undefined;
+        yield* Effect.gen(function* () {
+          const launcher = yield* ExternalLauncher.ExternalLauncher;
+          yield* launcher.launchEditor({
+            editor: "file-manager",
+            cwd: target,
+            reveal: true,
+          });
+        }).pipe(
+          Effect.provide(
+            layerTest({
+              platform: "win32",
+              env: { PATH: "C:\\Windows", PATHEXT: ".EXE" },
+              onSpawn: (command) => {
+                spawned = command;
+              },
+            }),
+          ),
+        );
+        assert.ok(spawned);
+        const source = Buffer.from(String(spawned.args.at(-1) ?? ""), "base64").toString("utf16le");
+        const stubs = `function Get-ItemProperty { param($LiteralPath, $ErrorAction) @{ '(default)' = if ($LiteralPath -eq 'Registry::HKEY_CLASSES_ROOT\\${replacement}\\shell') { '${verb}' } elseif ($LiteralPath -eq 'Registry::HKEY_CLASSES_ROOT\\${replacement}\\shell\\${verb}\\command') { '${handler}' } else { 'none' }; DelegateExecute = if ('${handler}' -eq 'ExplorerDelegate') { '{11dbb47c-a525-400b-9e80-a54615a090c0}' } else { '' } } }; function Invoke-Item { param($LiteralPath) Write-Output "shell:$LiteralPath" }; function Start-Process { param($FilePath, $ArgumentList) Write-Output "$FilePath $ArgumentList" }; `;
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const output = yield* spawner.string(
+          ChildProcess.make(spawned.command, [
+            ...spawned.args.slice(0, -1),
+            Buffer.from(stubs + source, "utf16le").toString("base64"),
+          ]),
+        );
+        assert.equal(output.trim(), expected);
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+}
+
+it.effect.skipIf(windowsHost)(
+  "reveals a WSL file in Windows File Explorer through its UNC path",
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-editors-" });
+      for (const name of ["explorer.exe", "powershell.exe", "xdg-open"]) {
+        const filePath = path.join(binDir, name);
+        yield* fileSystem.writeFileString(filePath, "#!/bin/sh\n");
+        yield* fileSystem.chmod(filePath, 0o755);
+      }
+
+      let spawned: ChildProcess.StandardCommand | undefined;
+      const result = yield* Effect.gen(function* () {
+        const launcher = yield* ExternalLauncher.ExternalLauncher;
+        const kind = yield* launcher.resolveFileManagerRevealKind();
+        const editors = yield* launcher.resolveAvailableEditors();
+        yield* launcher.launchEditor({
+          editor: "file-manager",
+          cwd: "/home/hanzo/workspace [draft]/author's ‘$media/clip|draft.mp4",
+          reveal: true,
+        });
+        return { kind, editors };
+      }).pipe(
+        Effect.provide(
+          layerTest({
+            platform: "linux",
+            env: {
+              PATH: binDir,
+              WSL_DISTRO_NAME: "Ubuntu-24.04",
+              WSL_INTEROP: "/run/WSL/1_interop",
+            },
+            onSpawn: (command) => {
+              spawned = command;
+            },
+          }),
+        ),
+      );
+
+      assert.equal(result.kind, "file-explorer");
+      assert.equal(result.editors.includes("file-manager"), true);
+      assert.ok(spawned);
+      assert.equal(spawned.command, "powershell.exe");
+      assert.equal(spawned.options.detached, true);
+      const encodedCommand = String(spawned.args[spawned.args.length - 1] ?? "");
+      const decodedCommand = Buffer.from(encodedCommand, "base64").toString("utf16le");
+      assert.include(decodedCommand, "'Directory', 'Folder'");
+      assert.include(
+        decodedCommand,
+        "Invoke-Item -LiteralPath '\\\\wsl.localhost\\Ubuntu-24.04\\home\\t3\\workspace [draft]\\author''s ‘‘$media'",
+      );
+      assert.include(
+        decodedCommand,
+        "'\\\\wsl.localhost\\Ubuntu-24.04\\home\\t3\\workspace [draft]\\author''s ‘‘$media\\clip|draft.mp4'",
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+const STOCK_FOLDER_VERB =
+  "\r\nHKEY_CLASSES_ROOT\\Directory\\shell\r\n    (Default)    REG_SZ    none\r\n\r\n";
+
+it.effect.each([
+  ["selects the file with Explorer on stock Windows", { stdout: STOCK_FOLDER_VERB }, true],
+  [
+    "keeps the PowerShell reveal for a replacement file manager",
+    { stdout: "    (Default)    REG_SZ    open\r\n" },
+    false,
+  ],
+  ["keeps the PowerShell reveal when the registry lookup fails", { exitCode: 1 }, false],
+] as const)("%s", ([, registry, native]) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-editors-" });
+    yield* fileSystem.writeFileString(path.join(binDir, "explorer.EXE"), "");
+    const spawned: ChildProcess.StandardCommand[] = [];
+    const verbatim: Array<readonly [string, ReadonlyArray<string>]> = [];
+    const exit = yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      return yield* launcher
+        .launchEditor({
+          editor: "file-manager",
+          cwd: "C:/Users/hanzo/my project/a,b.ts",
+          reveal: true,
+        })
+        .pipe(Effect.exit);
+    }).pipe(
+      Effect.provideService(WindowsVerbatimSpawn, (command, args) =>
+        Effect.sync(() => verbatim.push([command, args])),
+      ),
+      Effect.provide(
+        layerTest({
+          platform: "win32",
+          env: { PATH: binDir, PATHEXT: ".COM;.EXE;.BAT;.CMD", SYSTEMROOT: "C:\\Windows" },
+          onSpawn: (command) => spawned.push(command),
+          spawnResult: (command) => (command.command.endsWith("reg.exe") ? registry : undefined),
+        }),
+      ),
+    );
+
+    assert.deepEqual(
+      spawned.map((command) => command.command),
+      ["C:\\Windows\\System32\\reg.exe"],
+    );
+    if (native) {
+      assert.isTrue(Exit.isSuccess(exit));
+      assert.deepEqual(verbatim, [
+        ["C:\\Windows\\explorer.exe", ['/select,"C:\\Users\\t3\\my project\\a,b.ts"']],
+      ]);
+    } else {
+      assert.deepEqual(verbatim, []);
+      // The PowerShell launch is reached; this host has no powershell.exe to run it.
+      assert.isTrue(Exit.isFailure(exit));
+      if (Exit.isFailure(exit)) {
+        const error = Cause.squash(exit.cause);
+        assert.instanceOf(error, ExternalLauncher.ExternalLauncherCommandNotFoundError);
+        assert.equal(
+          (error as ExternalLauncher.ExternalLauncherCommandNotFoundError).command,
+          "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        );
+      }
+    }
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+for (const wsl of [false, true]) {
+  it.effect.skipIf(windowsHost)(
+    "selects a file over D-Bus on " + (wsl ? "WSLg without interop PowerShell" : "Linux"),
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-editors-" });
+        for (const name of ["xdg-open", "xdg-mime", "gdbus", ...(wsl ? ["explorer.exe"] : [])]) {
+          const filePath = path.join(binDir, name);
+          yield* fileSystem.writeFileString(filePath, "#!/bin/sh\n");
+          yield* fileSystem.chmod(filePath, 0o755);
+        }
+        const target = "/workspace/media/a 'quoted' \"clip\" #100% ? é\\name.mp4";
+        const spawnedCommands: ChildProcess.StandardCommand[] = [];
+        yield* Effect.gen(function* () {
+          const launcher = yield* ExternalLauncher.ExternalLauncher;
+          yield* launcher.launchEditor({ editor: "file-manager", cwd: target, reveal: true });
+        }).pipe(
+          Effect.provide(
+            layerTest({
+              platform: "linux",
+              env: {
+                PATH: binDir,
+                WAYLAND_DISPLAY: "wayland-1",
+                ...(wsl
+                  ? { WSL_DISTRO_NAME: "Ubuntu-24.04", WSL_INTEROP: "/run/WSL/1_interop" }
+                  : {}),
+              },
+              onSpawn: (command) => spawnedCommands.push(command),
+              spawnResult: (command) =>
+                command.command === "xdg-mime"
+                  ? { stdout: "com.thisisgm.flea.desktop\n" }
+                  : undefined,
+            }),
+          ),
+        );
+
+        const reveal = spawnedCommands.find((command) => command.command === "gdbus");
+        assert.ok(reveal);
+        assert.deepEqual(reveal.args, [
+          "call",
+          "--session",
+          "--dest",
+          "org.freedesktop.FileManager1",
+          "--object-path",
+          "/org/freedesktop/FileManager1",
+          "--method",
+          "org.freedesktop.FileManager1.ShowItems",
+          "[\"file:///workspace/media/a%20'quoted'%20%22clip%22%20%23100%25%20%3F%20%C3%A9%5Cname.mp4\"]",
+          "",
+        ]);
+        assert.deepEqual(
+          spawnedCommands.filter((command) => command.command !== "xdg-mime"),
+          [reveal],
+        );
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+}
+
+for (const cwd of ["/workspace with spaces/", "/workspace with spaces/file.ts:12:4"]) {
+  it.effect.skipIf(windowsHost)(
+    `opens ${cwd} with the macOS Zed bundle when another zed is on PATH`,
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const home = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-zed-collision-" });
+        const executable = path.join(home, "Applications/Zed.app/Contents/MacOS/cli");
+        const binDir = path.join(home, "zfs/bin");
+        yield* fs.makeDirectory(path.dirname(executable), { recursive: true });
+        yield* fs.makeDirectory(binDir, { recursive: true });
+        for (const command of [executable, path.join(binDir, "zed")]) {
+          yield* fs.writeFileString(command, "#!/bin/sh\n");
+          yield* fs.chmod(command, 0o755);
+        }
+
+        let spawned: ChildProcess.StandardCommand | undefined;
+        yield* Effect.gen(function* () {
+          const launcher = yield* ExternalLauncher.ExternalLauncher;
+          assert.include(yield* launcher.resolveAvailableEditors(), "zed");
+          yield* launcher.launchEditor({ editor: "zed", cwd });
+        }).pipe(
+          Effect.provide(
+            layerTest({
+              platform: "darwin",
+              env: { HOME: home, PATH: binDir },
+              onSpawn: (command) => {
+                spawned = command;
+              },
+            }),
+          ),
+        );
+        assert.ok(spawned);
+        assert.equal(spawned.command, executable);
+        assert.deepEqual(spawned.args, [cwd]);
+        assert.equal(spawned.options.shell, false);
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+}
+
+for (const { layout, pathNames, fallbackNames, expected } of [
+  { layout: "PATH", pathNames: ["zed", "zeditor"], fallbackNames: [], expected: "zeditor" },
+  {
+    layout: "mixed locations",
+    pathNames: ["zed"],
+    fallbackNames: ["zeditor"],
+    expected: "fallback",
+  },
+  {
+    layout: "fallback directory",
+    pathNames: [],
+    fallbackNames: ["zed", "zeditor"],
+    expected: "fallback",
+  },
+]) {
+  it.effect.skipIf(windowsHost)(`prefers the Zed editor on Linux with ${layout}`, () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-zed-linux-" });
+      const binDir = path.join(home, "bin");
+      const fallbackDir = path.join(home, ".local/bin");
+      for (const [dir, names] of [
+        [binDir, pathNames],
+        [fallbackDir, fallbackNames],
+      ] as const) {
+        yield* fs.makeDirectory(dir, { recursive: true });
+        for (const name of names) {
+          yield* fs.writeFileString(path.join(dir, name), "#!/bin/sh\n");
+          yield* fs.chmod(path.join(dir, name), 0o755);
+        }
+      }
+
+      let spawned: ChildProcess.StandardCommand | undefined;
+      yield* Effect.gen(function* () {
+        const launcher = yield* ExternalLauncher.ExternalLauncher;
+        assert.include(yield* launcher.resolveAvailableEditors(), "zed");
+        yield* launcher.launchEditor({ editor: "zed", cwd: "/workspace" });
+      }).pipe(
+        Effect.provide(
+          layerTest({
+            platform: "linux",
+            env: { HOME: home, PATH: binDir },
+            onSpawn: (command) => {
+              spawned = command;
+            },
+          }),
+        ),
+      );
+      assert.ok(spawned);
+      assert.equal(
+        spawned.command,
+        expected === "fallback" ? path.join(fallbackDir, "zeditor") : expected,
+      );
+      assert.deepEqual(spawned.args, ["/workspace"]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+}
+
+// Linux editor discovery also probes fixed system directories; tests point them at a temp
+// directory so an editor installed on the host cannot satisfy the lookup.
+const withSystemBin = (path: Path.Path, systemBin: string): Path.Path => ({
+  ...path,
+  join: (...parts) =>
+    path.join(
+      ...parts.map((part) =>
+        ["/usr/local/bin", "/usr/bin", "/snap/bin"].includes(part) ? systemBin : part,
+      ),
+    ),
+});
+
+it.effect.skipIf(windowsHost)("prefers zeditor in a later Linux fallback directory", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const home = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-zed-fallback-" });
+    const localBin = path.join(home, ".local/bin");
+    const systemBin = path.join(home, "system-bin");
+    for (const [dir, name] of [
+      [localBin, "zed"],
+      [systemBin, "zeditor"],
+    ] as const) {
+      yield* fs.makeDirectory(dir, { recursive: true });
+      const executable = path.join(dir, name);
+      yield* fs.writeFileString(executable, "#!/bin/sh\necho 'Zed 0.200.0'\n");
+      yield* fs.chmod(executable, 0o755);
+    }
+    const editor = EDITORS.find((editor) => editor.id === "zed")!;
+    const resolve = resolveEditorCommand(editor, { HOME: home, PATH: "" }).pipe(
+      Effect.provideService(HostProcess.Platform, "linux"),
+      Effect.provideService(Path.Path, withSystemBin(path, systemBin)),
+    );
+    assert.deepEqual(
+      yield* resolve,
+      Option.some({ command: path.join(systemBin, "zeditor"), baseArgs: [] }),
+    );
+    yield* fs.remove(path.join(systemBin, "zeditor"));
+    assert.deepEqual(
+      yield* resolve,
+      Option.some({ command: path.join(localBin, "zed"), baseArgs: [] }),
+    );
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect.skipIf(windowsHost)("does not offer the OpenZFS zed daemon as Zed on Linux", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const home = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-zed-zfs-" });
+    const binDir = path.join(home, "bin");
+    const systemBin = path.join(home, "system-bin");
+    yield* fs.makeDirectory(binDir, { recursive: true });
+    yield* fs.makeDirectory(systemBin, { recursive: true });
+    const zfsZed = path.join(binDir, "zed");
+    // OpenZFS zed only takes short options: `--version` is rejected with usage on stderr.
+    yield* fs.writeFileString(
+      zfsZed,
+      "#!/bin/sh\necho \"Invalid option '--'\" >&2\necho 'Usage: zed [OPTION]...' >&2\nexit 1\n",
+    );
+    yield* fs.chmod(zfsZed, 0o755);
+    const editor = EDITORS.find((editor) => editor.id === "zed")!;
+    const laterBin = path.join(home, "later-bin");
+    const resolveOn = (platform: NodeJS.Platform) =>
+      resolveEditorCommand(editor, { HOME: home, PATH: `${binDir}:${laterBin}` }).pipe(
+        Effect.provideService(HostProcess.Platform, platform),
+        Effect.provideService(Path.Path, withSystemBin(path, systemBin)),
+      );
+    assert.deepEqual(yield* resolveOn("linux"), Option.none());
+    assert.deepEqual(yield* resolveOn("darwin"), Option.none());
+
+    const zedEditor = path.join(home, ".local/bin/zed");
+    yield* fs.makeDirectory(path.dirname(zedEditor), { recursive: true });
+    yield* fs.writeFileString(zedEditor, "#!/bin/sh\necho 'Zed 0.200.0'\n");
+    yield* fs.chmod(zedEditor, 0o755);
+    assert.deepEqual(yield* resolveOn("linux"), Option.some({ command: zedEditor, baseArgs: [] }));
+
+    yield* fs.remove(zedEditor);
+    const laterZed = path.join(laterBin, "zed");
+    yield* fs.makeDirectory(laterBin, { recursive: true });
+    yield* fs.writeFileString(laterZed, "#!/bin/sh\necho 'Zed 0.200.0'\n");
+    yield* fs.chmod(laterZed, 0o755);
+    for (const platform of ["linux", "darwin"] as const) {
+      assert.deepEqual(
+        yield* resolveOn(platform),
+        Option.some({ command: laterZed, baseArgs: [] }),
+      );
+    }
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect.skipIf(windowsHost)("does not open Zed with the OpenZFS zed daemon on Linux", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const home = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-zed-zfs-launch-" });
+    const binDir = path.join(home, "bin");
+    const systemBin = path.join(home, "system-bin");
+    yield* fs.makeDirectory(binDir, { recursive: true });
+    yield* fs.writeFileString(path.join(binDir, "zed"), "#!/bin/sh\nexit 1\n");
+    yield* fs.chmod(path.join(binDir, "zed"), 0o755);
+
+    const spawned: ChildProcess.StandardCommand[] = [];
+    const exit = yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      return yield* launcher.launchEditor({ editor: "zed", cwd: "/workspace" }).pipe(Effect.exit);
+    }).pipe(
+      Effect.provide(
+        layerTest({
+          platform: "linux",
+          env: { HOME: home, PATH: binDir, DISPLAY: ":0" },
+          path: withSystemBin(path, systemBin),
+          onSpawn: (command) => spawned.push(command),
+          spawnResult: (command) => (command.args[0] === "--version" ? { exitCode: 1 } : undefined),
+        }),
+      ),
+    );
+    assert.isTrue(Exit.isFailure(exit));
+    if (Exit.isFailure(exit)) {
+      assert.instanceOf(
+        Cause.squash(exit.cause),
+        ExternalLauncher.ExternalLauncherCommandNotFoundError,
+      );
+    }
+    assert.deepEqual(
+      spawned.map((command) => command.args),
+      [["--version"]],
+    );
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect.each([
+  { editor: "webstorm", installPath: "Applications/WebStorm 2026.2.app/Contents/MacOS/webstorm" },
+  { editor: "idea", installPath: "Applications/IntelliJ IDEA 2026.1.4.app/Contents/MacOS/idea" },
+] as const)(
+  "discovers and launches $editor from a versioned macOS bundle",
+  ({ editor, installPath }) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-editor-versioned-" });
+      const executable = path.join(home, installPath);
+      yield* fs.makeDirectory(path.dirname(executable), { recursive: true });
+      yield* fs.writeFileString(executable, "#!/bin/sh\n");
+      yield* fs.chmod(executable, 0o755);
+
+      let spawned: ChildProcess.StandardCommand | undefined;
+      yield* Effect.gen(function* () {
+        const launcher = yield* ExternalLauncher.ExternalLauncher;
+        assert.include(yield* launcher.resolveAvailableEditors(), editor);
+        yield* launcher.launchEditor({
+          editor,
+          cwd: "/workspace with spaces/file.ts:12:4",
+          projectRoot: "/workspace with spaces",
+        });
+      }).pipe(
+        Effect.provide(
+          layerTest({
+            platform: "darwin",
+            env: { HOME: home, PATH: path.join(home, "empty") },
+            onSpawn: (command) => {
+              spawned = command;
+            },
+          }),
+        ),
+      );
+
+      assert.ok(spawned);
+      assert.equal(spawned.command, executable);
+      assert.deepEqual(spawned.args, [
+        "/workspace with spaces",
+        "--line",
+        "12",
+        "--column",
+        "3",
+        "/workspace with spaces/file.ts",
+      ]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("matches macOS bundles on the name boundary only", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const unrelatedHome = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-editor-unrelated-" });
+    const unrelated = path.join(
+      unrelatedHome,
+      "Applications/WebStormHelper.app/Contents/MacOS/webstorm",
+    );
+    yield* fs.makeDirectory(path.dirname(unrelated), { recursive: true });
+    yield* fs.writeFileString(unrelated, "#!/bin/sh\n");
+    yield* fs.chmod(unrelated, 0o755);
+
+    const editorsFor = (home: string) =>
+      Effect.gen(function* () {
+        const launcher = yield* ExternalLauncher.ExternalLauncher;
+        return yield* launcher.resolveAvailableEditors();
+      }).pipe(
+        Effect.provide(
+          layerTest({ platform: "darwin", env: { HOME: home, PATH: path.join(home, "bin") } }),
+        ),
+      );
+
+    assert.notInclude(yield* editorsFor(unrelatedHome), "webstorm");
+
+    const exactHome = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-editor-exact-" });
+    const exact = path.join(exactHome, "Applications/WebStorm.app/Contents/MacOS/webstorm");
+    yield* fs.makeDirectory(path.dirname(exact), { recursive: true });
+    yield* fs.writeFileString(exact, "#!/bin/sh\n");
+    yield* fs.chmod(exact, 0o755);
+
+    assert.include(yield* editorsFor(exactHome), "webstorm");
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("keeps the macOS VS Code Insiders bundle out of stable VS Code", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const home = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-editor-insiders-" });
+    // The real Insiders bundle ships both `code-insiders` and `code`.
+    const bin = path.join(
+      home,
+      "Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin",
+    );
+    yield* fs.makeDirectory(bin, { recursive: true });
+    for (const name of ["code", "code-insiders"]) {
+      yield* fs.writeFileString(path.join(bin, name), "#!/bin/sh\n");
+      yield* fs.chmod(path.join(bin, name), 0o755);
+    }
+
+    let spawned: ChildProcess.StandardCommand | undefined;
+    const editors = yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      const available = yield* launcher.resolveAvailableEditors();
+      yield* launcher.launchEditor({ editor: "vscode-insiders", cwd: "/workspace/file.ts" });
+      return available;
+    }).pipe(
+      Effect.provide(
+        layerTest({
+          platform: "darwin",
+          env: { HOME: home, PATH: path.join(home, "empty") },
+          onSpawn: (command) => {
+            spawned = command;
+          },
+        }),
+      ),
+    );
+
+    assert.notInclude(editors, "vscode");
+    assert.include(editors, "vscode-insiders");
+    assert.equal(spawned?.command, path.join(bin, "code-insiders"));
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect.each([
+  {
+    platform: "darwin",
+    scripts: "Library/Application Support/JetBrains/Toolbox/scripts",
+    suffix: "",
+  },
+  { platform: "linux", scripts: ".local/share/JetBrains/Toolbox/scripts", suffix: "" },
+  { platform: "win32", scripts: "JetBrains/Toolbox/scripts", suffix: ".cmd" },
+  {
+    platform: "win32",
+    scripts: "JetBrains/Toolbox/scripts",
+    suffix: ".cmd",
+    install: "Programs/IntelliJ IDEA/bin/idea64.exe",
+  },
+] as const)(
+  "discovers a numbered JetBrains Toolbox script on $platform",
+  ({ platform, scripts, suffix, ...row }) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-toolbox-numbered-" });
+      const dir = path.join(home, scripts);
+      yield* fs.makeDirectory(dir, { recursive: true });
+      for (const name of ["idea10", "idea2"]) {
+        yield* fs.writeFileString(path.join(dir, `${name}${suffix}`), "#!/bin/sh\n");
+        yield* fs.chmod(path.join(dir, `${name}${suffix}`), 0o755);
+      }
+      const install = "install" in row ? path.join(home, row.install) : undefined;
+      if (install) {
+        yield* fs.makeDirectory(path.dirname(install), { recursive: true });
+        yield* fs.writeFileString(install, "");
+      }
+
+      const editor = EDITORS.find((editor) => editor.id === "idea")!;
+      const resolved = yield* resolveEditorCommand(editor, {
+        HOME: home,
+        LOCALAPPDATA: home,
+        PATH: path.join(home, "empty"),
+        PATHEXT: ".COM;.EXE;.BAT;.CMD",
+      }).pipe(
+        Effect.provideService(HostProcess.Platform, platform),
+        // Keep IDEs installed on the host out of system locations such as /Applications.
+        Effect.provideService(FileSystem.FileSystem, {
+          ...fs,
+          stat: (file) =>
+            fs.stat(file.startsWith(`${home}${path.sep}`) ? file : path.join(home, "missing")),
+        }),
+      );
+
+      assert.deepEqual(
+        resolved,
+        Option.some({ command: install ?? path.join(dir, `idea2${suffix}`), baseArgs: [] }),
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+for (const { platform, installPath, onPath } of [
+  { platform: "darwin", installPath: ".local/bin/agy", onPath: true },
+  { platform: "linux", installPath: ".local/bin/agy", onPath: false },
+  { platform: "win32", installPath: "agy/bin/agy.cmd", onPath: true },
+] as const) {
+  it.effect.skipIf(windowsHost && platform !== "win32")(
+    `does not report the agy CLI as the Antigravity IDE on ${platform}`,
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const home = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-agy-cli-" });
+        const executable = path.join(home, installPath);
+        yield* fs.makeDirectory(path.dirname(executable), { recursive: true });
+        yield* fs.writeFileString(executable, "#!/bin/sh\n");
+        yield* fs.chmod(executable, 0o755);
+        const editors = yield* Effect.gen(function* () {
+          const launcher = yield* ExternalLauncher.ExternalLauncher;
+          return yield* launcher.resolveAvailableEditors();
+        }).pipe(
+          Effect.provide(
+            layerTest({
+              platform,
+              env: {
+                HOME: home,
+                LOCALAPPDATA: home,
+                PATH: onPath ? path.dirname(executable) : path.join(home, "empty"),
+                PATHEXT: ".COM;.EXE;.BAT;.CMD",
+              },
+            }),
+          ),
+        );
+        assert.notInclude(editors, "antigravity");
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+}
+
+it.effect.skipIf(windowsHost)("ignores unusable app bundles and keeps PATH launchers first", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const home = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-editor-priority-" });
+    const executable = path.join(home, "Applications/Cursor.app/Contents/Resources/app/bin/code");
+    const env = { HOME: home, PATH: path.join(home, "bin") };
+    const discover = Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      return yield* launcher.resolveAvailableEditors();
+    });
+    const before = yield* discover.pipe(Effect.provide(layerTest({ platform: "darwin", env })));
+    yield* fs.makeDirectory(executable, { recursive: true });
+    assert.deepEqual(
+      yield* discover.pipe(Effect.provide(layerTest({ platform: "darwin", env }))),
+      before,
+    );
+    yield* fs.remove(executable, { recursive: true });
+    yield* fs.writeFileString(executable, "#!/bin/sh\n");
+    yield* fs.chmod(executable, 0o644);
+    assert.deepEqual(
+      yield* discover.pipe(Effect.provide(layerTest({ platform: "darwin", env }))),
+      before,
+    );
+    yield* fs.chmod(executable, 0o755);
+    yield* fs.makeDirectory(env.PATH);
+    yield* fs.writeFileString(path.join(env.PATH, "cursor"), "#!/bin/sh\n");
+    yield* fs.chmod(path.join(env.PATH, "cursor"), 0o755);
+    let spawned: ChildProcess.StandardCommand | undefined;
+    yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      yield* launcher.launchEditor({ editor: "cursor", cwd: "/workspace" });
+    }).pipe(
+      Effect.provide(
+        layerTest({
+          platform: "darwin",
+          env: { ...env, PATH: `${env.PATH}:/usr/bin` },
+          onSpawn: (command) => {
+            spawned = command;
+          },
+        }),
+      ),
+    );
+    assert.equal(spawned?.command, "cursor");
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "memoizes editor discovery and refreshes in the background after the cache window",
+  () => {
+    let statCalls = 0;
+    const rescanned = Deferred.makeUnsafe<void>();
+    let initialScanDone = false;
+    const fileInfo = { type: "File" } as FileSystem.File.Info;
+    const layerLauncher = ExternalLauncher.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          FileSystem.layerNoop({
+            stat: () =>
+              Effect.sync(() => {
+                statCalls += 1;
+                return fileInfo;
+              }).pipe(
+                Effect.tap(() =>
+                  initialScanDone ? Deferred.succeed(rescanned, undefined) : Effect.void,
+                ),
+              ),
+          }),
+          Path.layer,
+          Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() => Effect.sync(() => makeMockDetachedHandle())),
+          ),
+        ),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+
+      const first = yield* launcher.resolveAvailableEditors();
+      assert.equal(first.includes("vscode"), true);
+      const statCallsAfterFirstScan = statCalls;
+      initialScanDone = true;
+      assert.isAbove(statCallsAfterFirstScan, 0);
+
+      // Past the shared command-resolution cache TTL (30s) but within the
+      // discovery cache window: the memoized set is reused without any scan.
+      yield* TestClock.adjust("31 seconds");
+      const second = yield* launcher.resolveAvailableEditors();
+      assert.deepEqual([...second], [...first]);
+      assert.equal(statCalls, statCallsAfterFirstScan);
+
+      // Past the discovery cache window the next call still answers from the
+      // memoized set and rescans in the background.
+      yield* TestClock.adjust("30 seconds");
+      const third = yield* launcher.resolveAvailableEditors();
+      assert.deepEqual([...third], [...first]);
+      yield* Deferred.await(rescanned);
+      assert.isAbove(statCalls, statCallsAfterFirstScan);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          layerLauncher,
+          Layer.succeed(HostProcess.Platform, "win32"),
+          ConfigProvider.layer(
+            ConfigProvider.fromEnv({
+              env: {
+                PATH: "C:\\t3-editor-discovery-cache-test",
+                PATHEXT: ".COM;.EXE;.BAT;.CMD",
+              },
+            }),
+          ),
+          TestClock.layer(),
+        ),
+      ),
+    );
+  },
+);
+
+it.effect.each(["Zed Nightly", "Zed Preview"])(
+  "launches stable Zed on Windows when %s comes first on PATH",
+  (channel) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-zed-channels-" });
+      // A user folder naming Zed and a channel does not mark either install.
+      const programs = path.join(root, "Users", "zedpreview", "Programs");
+      const prereleaseBin = path.join(programs, channel, "bin");
+      const stableBin = path.join(programs, "Zed", "bin");
+      for (const dir of [prereleaseBin, stableBin]) {
+        yield* fs.makeDirectory(dir, { recursive: true });
+        yield* fs.writeFileString(path.join(dir, "zed.EXE"), "");
+      }
+      const env = { PATH: `${prereleaseBin};${stableBin}`, PATHEXT: ".COM;.EXE;.BAT;.CMD" };
+
+      const launchZed = Effect.gen(function* () {
+        let spawned: ChildProcess.StandardCommand | undefined;
+        yield* Effect.gen(function* () {
+          const launcher = yield* ExternalLauncher.ExternalLauncher;
+          yield* launcher.launchEditor({ editor: "zed", cwd: "C:\\workspace" });
+        }).pipe(
+          Effect.provide(
+            layerTest({
+              platform: "win32",
+              env,
+              onSpawn: (command) => {
+                spawned = command;
+              },
+            }),
+          ),
+        );
+        assert.ok(spawned);
+        return spawned;
+      });
+
+      const stable = yield* launchZed;
+      assert.equal(stable.command, path.join(stableBin, "zed.EXE"));
+      assert.deepEqual(stable.args, ["C:\\workspace"]);
+
+      env.PATH = `${stableBin};${prereleaseBin}`;
+      assert.equal((yield* launchZed).command, "zed");
+
+      env.PATH = `${prereleaseBin};${stableBin}`;
+      // With only the prerelease install left, it still opens by name.
+      yield* fs.remove(path.join(stableBin, "zed.EXE"));
+      assert.equal((yield* launchZed).command, "zed");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+const launchWindowsShimEditor = (cwd: string) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hanzo-editors-" });
+    yield* fileSystem.writeFileString(path.join(binDir, "code.CMD"), "@echo off\r\n");
+    let spawned: ChildProcess.StandardCommand | undefined;
+    const exit = yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      return yield* launcher.launchEditor({ editor: "vscode", cwd }).pipe(Effect.exit);
+    }).pipe(
+      Effect.provide(
+        layerTest({
+          platform: "win32",
+          env: { PATH: binDir, PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+          resolveExecutable: (command) =>
+            command === "code" ? "C:\\Program Files\\Microsoft VS Code\\bin\\code.CMD" : command,
+          onSpawn: (command) => {
+            spawned = command;
+          },
+        }),
+      ),
+    );
+    return { exit, spawned };
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
+
+it.effect.each([
+  ["CRLF", "C:\\workspace\\file.ts\r\ncalc.exe"],
+  ["LF", "C:\\workspace\\file.ts\ncalc.exe"],
+  ["double quote", 'C:\\workspace\\file.ts" & calc.exe & "'],
+] as const)("does not start a Windows command shim for a path with a $0", ([, cwd]) =>
+  Effect.gen(function* () {
+    const { exit, spawned } = yield* launchWindowsShimEditor(cwd);
+    assert.equal(spawned, undefined);
+    assert.isTrue(Exit.isFailure(exit));
+    if (Exit.isFailure(exit)) {
+      assert.instanceOf(
+        Cause.squash(exit.cause),
+        ExternalLauncher.ExternalLauncherUnsupportedTargetError,
+      );
+    }
+  }),
+);
+
+it.effect("starts a Windows command shim for unicode paths with cmd metacharacters", () =>
+  Effect.gen(function* () {
+    const { exit, spawned } = yield* launchWindowsShimEditor(
+      "C:\\Users\\jö\\R&D (100%)\\naïve ^file!.ts:3:7",
+    );
+    assert.isTrue(Exit.isSuccess(exit));
+    assert.ok(spawned);
+    assert.equal(spawned.options.shell, true);
+    assert.deepEqual(spawned.args, []);
+    assert.isTrue(
+      spawned.command.endsWith(
+        ' ^"--goto^" ^"C:\\Users\\jö\\R^&D^ ^(100^%^)\\naïve^ ^^file^!.ts:3:7^"',
+      ),
+    );
+  }),
+);

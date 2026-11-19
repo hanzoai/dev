@@ -1,0 +1,85 @@
+import { tokenizeCliArgs } from "@hanzodev/shared/cliArgs";
+
+const HANZO_DEV_CODEX_LAUNCH_ARGS_ENV = "HANZO_DEV_CODEX_LAUNCH_ARGS";
+
+export const resolveCodexLaunchArgs = (
+  launchArgs?: string,
+  environment: NodeJS.ProcessEnv = process.env,
+) => environment[HANZO_DEV_CODEX_LAUNCH_ARGS_ENV]?.trim() || launchArgs?.trim() || "";
+
+const codexLaunchArgv = (launchArgs?: string): ReadonlyArray<string> => tokenizeCliArgs(launchArgs);
+
+export const isHanzoDevBinary = (binaryPath?: string): boolean => {
+  if (!binaryPath) return false;
+  const base = binaryPath.trim().replace(/\\/g, "/").split("/").pop()?.toLowerCase() ?? "";
+  return base === "dev" || base === "dev.exe" || base === "hanzo-dev" || base === "hanzo";
+};
+
+// Hanzo unsubscribes only when it unloads a thread; Codex's own unload delay would stack on that.
+export const codexAppServerArgs = (launchArgs?: string, binaryPath?: string) => [
+  isHanzoDevBinary(binaryPath) ? "serve" : "app-server",
+  "-c",
+  "thread_unload_delay_secs=0",
+  ...codexLaunchArgv(launchArgs),
+];
+
+interface LaunchArgFilter {
+  readonly switches: ReadonlySet<string>;
+  readonly valueFlags: ReadonlySet<string>;
+  readonly inlinePrefixes: ReadonlyArray<string>;
+}
+
+const SHARED_VALUE_FLAGS = ["--config", "-c", "--enable", "--disable"];
+const SHARED_INLINE_PREFIXES = ["--config=", "-c=", "--enable=", "--disable="];
+
+const MCP_LIST_FILTER: LaunchArgFilter = {
+  switches: new Set(),
+  valueFlags: new Set([...SHARED_VALUE_FLAGS, "--profile", "-p"]),
+  inlinePrefixes: [...SHARED_INLINE_PREFIXES, "--profile=", "-p="],
+};
+
+const EXEC_FILTER: LaunchArgFilter = {
+  switches: new Set(["--strict-config", "--oss"]),
+  valueFlags: new Set([...SHARED_VALUE_FLAGS, "--local-provider", "--profile", "-p"]),
+  inlinePrefixes: [...SHARED_INLINE_PREFIXES, "--local-provider=", "--profile=", "-p="],
+};
+
+const filterLaunchArgs = (launchArgs: string | undefined, allowed: LaunchArgFilter) => {
+  const args = codexLaunchArgv(launchArgs);
+  const kept: Array<string> = [];
+
+  for (let index = 0; index < args.length; index++) {
+    const rawArg = args[index];
+    if (rawArg === undefined) continue;
+    const arg = rawArg.replace(/^(-[cp])(?=[^=])/u, "$1=");
+
+    if (allowed.switches.has(arg)) {
+      kept.push(arg);
+    } else if (allowed.valueFlags.has(arg)) {
+      const value = args[index + 1];
+      if (value !== undefined && !value.startsWith("-")) {
+        kept.push(arg, value);
+        index++;
+      }
+    } else if (allowed.inlinePrefixes.some((prefix) => arg.startsWith(prefix))) {
+      kept.push(arg);
+    }
+  }
+
+  return kept;
+};
+
+const HOOK_FEATURES = new Set(["hooks", "codex_hooks"]);
+
+// Feature toggles beat config overrides, so a launch arg's hook enable would undo ours.
+export const codexExecLaunchArgs = (launchArgs?: string) => {
+  const args = filterLaunchArgs(launchArgs, EXEC_FILTER);
+  return args.filter((arg, index) => {
+    if (arg.startsWith("--enable=")) return !HOOK_FEATURES.has(arg.slice("--enable=".length));
+    if (arg === "--enable") return !HOOK_FEATURES.has(args[index + 1] ?? "");
+    return !(args[index - 1] === "--enable" && HOOK_FEATURES.has(arg));
+  });
+};
+
+export const codexMcpListLaunchArgs = (launchArgs?: string) =>
+  filterLaunchArgs(launchArgs, MCP_LIST_FILTER);

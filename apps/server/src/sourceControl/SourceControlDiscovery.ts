@@ -1,0 +1,152 @@
+import {
+  type SourceControlDiscoveryResult,
+  type VcsDiscoveryItem,
+  type VcsDriverKind,
+} from "@hanzodev/contracts";
+import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+
+import * as ServerConfig from "../config.ts";
+import { refreshPathFromLoginShell } from "../os-jank.ts";
+import * as VcsProcess from "../vcs/VcsProcess.ts";
+import {
+  detailFromCause,
+  failedProbeHint,
+  firstNonEmptyLine,
+} from "@hanzodev/source-control-core/server/discovery";
+import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
+
+interface DiscoveryProbe {
+  readonly label: string;
+  readonly executable?: string;
+  readonly versionArgs?: ReadonlyArray<string>;
+  readonly implemented: boolean;
+  readonly installHint: string;
+}
+
+type VcsProbe = DiscoveryProbe & {
+  readonly kind: VcsDriverKind;
+  readonly executable: string;
+  readonly versionArgs: ReadonlyArray<string>;
+};
+
+interface DiscoveryProbeResult<Kind extends string> {
+  readonly kind: Kind;
+  readonly label: string;
+  readonly executable?: string;
+  readonly implemented: boolean;
+  readonly status: "available" | "missing";
+  readonly version: Option.Option<string>;
+  readonly installHint: string;
+  readonly detail: Option.Option<string>;
+}
+
+const VCS_PROBES: ReadonlyArray<VcsProbe> = [
+  {
+    kind: "git",
+    label: "Git",
+    executable: "git",
+    versionArgs: ["--version"],
+    implemented: true,
+    installHint: "Install Git from https://git-scm.com/downloads or with your package manager.",
+  },
+  {
+    kind: "jj",
+    label: "Jujutsu",
+    executable: "jj",
+    versionArgs: ["--version"],
+    implemented: false,
+    installHint: "Install Jujutsu with `brew install jj` or from https://github.com/jj-vcs/jj.",
+  },
+];
+
+export class SourceControlDiscovery extends Context.Service<
+  SourceControlDiscovery,
+  {
+    readonly discover: Effect.Effect<SourceControlDiscoveryResult>;
+  }
+>()("hanzo/sourceControl/SourceControlDiscovery") {}
+
+/** @public */
+export const make = Effect.gen(function* () {
+  const config = yield* ServerConfig.ServerConfig;
+  const process = yield* VcsProcess.VcsProcess;
+  const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  // Discovery re-reads the login shell so a tool installed since launch
+  // resolves here and in every later spawn. Thread views, the palette and
+  // mobile also run discovery, so one interactive shell serves a short window.
+  const refreshPath = yield* refreshPathFromLoginShell().pipe(
+    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    Effect.cachedWithTTL(Duration.seconds(10)),
+  );
+
+  const probe = <Kind extends VcsDriverKind>(
+    input: VcsProbe & { readonly kind: Kind },
+  ): Effect.Effect<DiscoveryProbeResult<Kind>> => {
+    const executable = input.executable;
+    const versionArgs = input.versionArgs;
+
+    return process
+      .run({
+        operation: "source-control.discovery.probe",
+        command: executable,
+        args: versionArgs,
+        cwd: config.cwd,
+        timeoutMs: 5_000,
+        maxOutputBytes: 8_000,
+        appendTruncationMarker: true,
+      })
+      .pipe(
+        Effect.map(
+          (result) =>
+            ({
+              kind: input.kind,
+              label: input.label,
+              executable,
+              implemented: input.implemented,
+              status: "available" as const,
+              version: Option.orElse(firstNonEmptyLine(result.stdout), () =>
+                firstNonEmptyLine(result.stderr),
+              ),
+              installHint: input.installHint,
+              detail: Option.none<string>(),
+            }) satisfies DiscoveryProbeResult<Kind>,
+        ),
+        Effect.catch((cause) =>
+          Effect.gen(function* () {
+            const installHint = yield* failedProbeHint(input, cause);
+            return {
+              kind: input.kind,
+              label: input.label,
+              executable,
+              implemented: input.implemented,
+              status: "missing" as const,
+              version: Option.none<string>(),
+              installHint,
+              detail: detailFromCause(cause),
+            } satisfies DiscoveryProbeResult<Kind>;
+          }),
+        ),
+      );
+  };
+
+  return SourceControlDiscovery.of({
+    discover: Effect.andThen(
+      refreshPath,
+      Effect.all({
+        versionControlSystems: Effect.all(
+          VCS_PROBES.map((entry) => probe(entry)) as ReadonlyArray<Effect.Effect<VcsDiscoveryItem>>,
+          { concurrency: "unbounded" },
+        ),
+        sourceControlProviders: sourceControlProviders.discover,
+      }),
+    ),
+  });
+});
+
+export const layer = Layer.effect(SourceControlDiscovery, make);

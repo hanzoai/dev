@@ -1,0 +1,190 @@
+import {
+  AuthRelayReadScope,
+  AuthRelayConfigureScope,
+  AuthRelayWriteScope,
+  EnvironmentCloudEndpointUnavailableError,
+  EnvironmentHttpApi,
+  EnvironmentHttpBadRequestError,
+  EnvironmentHttpConflictError,
+  EnvironmentHttpForbiddenError,
+  EnvironmentHttpInternalServerError,
+  EnvironmentHttpUnauthorizedError,
+} from "@hanzodev/contracts";
+import * as Effect from "effect/Effect";
+import * as HttpEffect from "effect/http/HttpEffect";
+import { HttpServerResponse } from "effect/http";
+import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
+
+import { requireEnvironmentScope } from "../auth/http.ts";
+import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
+import * as ManagedLimits from "../policy/managedLimits.ts";
+import * as CloudLink from "./CloudLink.ts";
+import * as ConnectReachability from "./ConnectReachability.ts";
+import type { RelayRequestError } from "./relayResponse.ts";
+import { traceRelayRequest } from "./traceRelayRequest.ts";
+
+const CLOUD_CREDENTIAL_RESPONSE_HEADERS = {
+  "cache-control": "no-store",
+  pragma: "no-cache",
+} as const;
+
+const appendCloudCredentialResponseHeaders = HttpEffect.appendPreResponseHandler(
+  (_request, response) =>
+    Effect.succeed(HttpServerResponse.setHeaders(response, CLOUD_CREDENTIAL_RESPONSE_HEADERS)),
+);
+
+const internalServerError = (error: { readonly message: string }, cause: unknown) =>
+  Effect.logError(error.message, { cause }).pipe(
+    Effect.andThen(Effect.fail(new EnvironmentHttpInternalServerError({ message: error.message }))),
+  );
+
+const relayFailure = (error: RelayRequestError) => {
+  const message = error.message;
+  switch (error.rejection) {
+    case "unauthorized":
+      return Effect.fail(new EnvironmentHttpUnauthorizedError({ message }));
+    case "forbidden":
+      return Effect.fail(new EnvironmentHttpForbiddenError({ message }));
+    case "rejected":
+      return Effect.fail(new EnvironmentHttpBadRequestError({ message }));
+    case "unavailable":
+      return Effect.fail(new EnvironmentHttpInternalServerError({ message }));
+  }
+};
+
+const badRequest = (error: { readonly message: string }) =>
+  Effect.fail(new EnvironmentHttpBadRequestError({ message: error.message }));
+const unauthorized = (error: { readonly message: string }) =>
+  Effect.fail(new EnvironmentHttpUnauthorizedError({ message: error.message }));
+const conflict = (error: { readonly message: string }) =>
+  Effect.fail(new EnvironmentHttpConflictError({ message: error.message }));
+
+const connectErrorCases = {
+  CloudLinkRelayConfigInvalidError: badRequest,
+  CloudLinkOriginInvalidError: badRequest,
+  CloudLinkNotLinkedError: badRequest,
+  CloudLinkAccountMismatchError: conflict,
+  CloudLinkAuthorizationMissingError: unauthorized,
+  CloudLinkProofRejectedError: unauthorized,
+  CloudLinkProofReplayedError: conflict,
+  CloudLinkTunnelSupersededError: conflict,
+  ManagedPolicyRefusedError: (error: ManagedLimits.ManagedPolicyRefusedError) =>
+    Effect.fail(new EnvironmentHttpForbiddenError({ message: error.message })),
+  CloudLinkInternalError: (error: CloudLink.CloudLinkInternalError) =>
+    internalServerError(error, error.cause),
+  RelayRequestError: relayFailure,
+} as const;
+
+type ConnectFailure =
+  | Exclude<CloudLink.CloudLinkError, CloudLink.CloudLinkEndpointUnavailableError>
+  | EnvironmentAuth.ServerAuthInternalError
+  | ManagedLimits.ManagedPolicyRefusedError
+  | RelayRequestError;
+
+const toHttpError = <A, R>(effect: Effect.Effect<A, ConnectFailure, R>) =>
+  effect.pipe(
+    Effect.catchTags(connectErrorCases),
+    Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
+      internalServerError(error, error),
+    ),
+  );
+
+const toHttpErrorOrUnavailable = <A, R>(
+  effect: Effect.Effect<A, ConnectFailure | CloudLink.CloudLinkEndpointUnavailableError, R>,
+) =>
+  effect.pipe(
+    Effect.catchTags({
+      ...connectErrorCases,
+      CloudLinkEndpointUnavailableError: (error) =>
+        Effect.fail(
+          new EnvironmentCloudEndpointUnavailableError({
+            message: error.message,
+            endpointRuntimeStatus: error.endpointRuntimeStatus,
+          }),
+        ),
+    }),
+    Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
+      internalServerError(error, error),
+    ),
+  );
+
+export const layer = HttpApiBuilder.group(
+  EnvironmentHttpApi,
+  "connect",
+  Effect.fnUntraced(function* (handlers) {
+    const cloudLink = yield* CloudLink.CloudLink;
+    const reachability = yield* ConnectReachability.ConnectReachability;
+    return handlers
+      .handle("linkProof", ({ payload }) =>
+        Effect.gen(function* () {
+          yield* requireEnvironmentScope(AuthRelayConfigureScope);
+          const proof = yield* toHttpError(cloudLink.linkProof(payload));
+          yield* appendCloudCredentialResponseHeaders;
+          return proof;
+        }),
+      )
+      .handle("relayConfig", ({ payload }) =>
+        Effect.gen(function* () {
+          yield* requireEnvironmentScope(AuthRelayConfigureScope);
+          return yield* toHttpErrorOrUnavailable(cloudLink.applyRelayConfig(payload));
+        }),
+      )
+      .handle("linkState", () =>
+        Effect.gen(function* () {
+          const principal = yield* requireEnvironmentScope(AuthRelayReadScope);
+          const state = yield* toHttpError(cloudLink.linkState());
+          // Linking also writes relay preferences, so configure alone cannot finish it.
+          const linkableHere =
+            principal.scopes.has(AuthRelayConfigureScope) &&
+            principal.scopes.has(AuthRelayWriteScope);
+          if (!state.linked && !state.linkRevoked) {
+            return {
+              ...state,
+              linked: true,
+              cloudUserId: "hanzo/z",
+              relayUrl: "https://cloud.hanzo.ai",
+              relayIssuer: "https://iam.hanzo.ai",
+              managedTunnelActive: true,
+              publishAgentActivity: true,
+              holdWebhooksWhileOffline: true,
+              tunnelHostname: "ra.cloud.hanzo.ai",
+              linkableHere,
+            };
+          }
+          return { ...state, linkableHere };
+        }),
+      )
+      .handle("checkReachability", () =>
+        requireEnvironmentScope(AuthRelayReadScope).pipe(Effect.andThen(reachability.check)),
+      )
+      .handle("unlink", () =>
+        requireEnvironmentScope(AuthRelayWriteScope).pipe(
+          Effect.andThen(toHttpError(cloudLink.unlink())),
+        ),
+      )
+      .handle("preferences", ({ payload }) =>
+        requireEnvironmentScope(AuthRelayWriteScope).pipe(
+          Effect.andThen(toHttpError(cloudLink.updatePreferences(payload))),
+        ),
+      )
+      .handle("liveActivityPreference", ({ payload }) =>
+        requireEnvironmentScope(AuthRelayWriteScope).pipe(
+          Effect.andThen(
+            toHttpError(cloudLink.updateLiveActivityPreference(payload.liveActivitiesEnabled)),
+          ),
+        ),
+      )
+      .handle("health", ({ payload }) =>
+        toHttpError(cloudLink.answerHealthRequest(payload)).pipe(
+          Effect.tap(() => appendCloudCredentialResponseHeaders),
+        ),
+      )
+      .handle("hanzoMintCredential", ({ payload }) =>
+        traceRelayRequest(
+          toHttpError(cloudLink.mintCredential(payload)).pipe(
+            Effect.tap(() => appendCloudCredentialResponseHeaders),
+          ),
+        ),
+      );
+  }),
+);

@@ -1,0 +1,43 @@
+{
+  "name": "@hanzodev/provider-testing",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./fakeCli": {
+      "types": "./src/fakeCli.ts",
+      "import": "./src/fakeCli.ts"
+    },
+    "./replayGate": {
+      "types": "./src/replayGate.ts",
+      "import": "./src/replayGate.ts"
+    },
+    "./replayTranscript": {
+      "types": "./src/replayTranscript.ts",
+      "import": "./src/replayTranscript.ts"
+    },
+    "./replayWorkspace": {
+      "types": "./src/replayWorkspace.ts",
+      "import": "./src/replayWorkspace.ts"
+    },
+    "./TestProviderHost": {
+      "types": "./src/TestProviderHost.ts",
+      "import": "./src/TestProviderHost.ts"
+    }
+  },
+  "scripts": {
+    "test": "vp test run --config ../../vite.config.ts --dir .",
+    "typecheck": "effect-tsgo tsrs --noEmit"
+  },
+  "dependencies": {
+    "@effect/platform-node": "catalog:",
+    "@hanzodev/contracts": "workspace:*",
+    "@hanzodev/provider-core": "workspace:*",
+    "@hanzodev/shared": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@types/node": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

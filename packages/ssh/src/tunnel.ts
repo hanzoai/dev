@@ -1,0 +1,2151 @@
+import {
+  DESKTOP_UPDATE_IN_PROGRESS_MARKER_FILE,
+  DESKTOP_UPDATE_IN_PROGRESS_TTL_MS,
+} from "@hanzodev/contracts";
+import type {
+  DesktopSshEnvironmentBootstrap,
+  DesktopSshEnvironmentTarget,
+} from "@hanzodev/contracts";
+import { waitForHttpReady as waitForHttpReadyShared } from "@hanzodev/shared/httpReadiness";
+import { cliReleaseDownloadBaseUrl } from "@hanzodev/shared/cliRelease";
+import * as KeyedLock from "@hanzodev/shared/KeyedLock";
+import * as NetService from "@hanzodev/shared/Net";
+import { extractJsonObject, fromLenientJson } from "@hanzodev/shared/schemaJson";
+import { satisfiesSemverRange } from "@hanzodev/shared/semver";
+import * as Context from "effect/Context";
+import * as Digest from "effect/crypto/Digest";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
+import * as Schedule from "effect/Schedule";
+import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
+import { HttpClient } from "effect/http";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
+
+import * as SshAuth from "./auth.ts";
+import {
+  baseSshArgs,
+  buildSshHostSpecEffect,
+  getLastNonEmptyOutputLine,
+  remoteStateKey,
+  resolveSshCommand,
+  resolveSshTarget,
+  runSshCommand,
+  shellSingleQuote,
+  sshTargetLogFields,
+  targetConnectionKey,
+} from "./command.ts";
+import {
+  SshCommandError,
+  SshHttpBridgeError,
+  SshInvalidTargetError,
+  SshLaunchError,
+  SshPairingError,
+  SshPasswordPromptError,
+  SshReadinessError,
+} from "./errors.ts";
+
+const DEFAULT_REMOTE_PORT = 3773;
+const REMOTE_PORT_SCAN_WINDOW = 200;
+const SSH_READY_TIMEOUT_MS = 20_000;
+const SSH_READY_PROBE_TIMEOUT_MS = 1_000;
+// Probes through the forward pay several link round trips, about 4s at a 1s RTT.
+const SSH_TUNNEL_READY_PROBE_TIMEOUT_MS = 5_000;
+const TUNNEL_SHUTDOWN_TIMEOUT_MS = 2_000;
+const TUNNEL_STDERR_TAIL_CHARS = 16_384;
+const REMOTE_READY_TIMEOUT_MS = 60_000;
+const REMOTE_LAUNCH_BASE_TIMEOUT_MS = 90_000;
+// Matches the node-script launch command's ssh run without the launch lock wait.
+const SSH_TUNNEL_CONNECT_TIMEOUT_MS = REMOTE_LAUNCH_BASE_TIMEOUT_MS;
+const SSH_TUNNEL_FORWARD_PROBE_INTERVAL_MS = 100;
+// Cold archive launches download and extract ~70 MB and may wait on an install lock.
+// Lock waits must outlast both downloads and extraction; SSH must outlast install or wait plus readiness.
+// Leave slack for verification and extraction, which have no timeout.
+const REMOTE_ARCHIVE_CHECKSUMS_SECONDS = 30;
+const REMOTE_ARCHIVE_DOWNLOAD_SECONDS = 240;
+const REMOTE_ARCHIVE_LOCK_WAIT_SECONDS = 360;
+const REMOTE_ARCHIVE_LAUNCH_TIMEOUT_MS = 900_000;
+const REMOTE_REUSE_READY_TIMEOUT_MS = 2_000;
+const REMOTE_PID_EXIT_WAIT_MS = 2_000;
+// The server answers HTTP before it writes server-runtime.json, which is how
+// a launch for another alias finds it.
+const REMOTE_RUNTIME_RECORD_WAIT_SECONDS = 10;
+// The desktop update wait runs under the home lock. Its last poll and the
+// adoption after it each add a reuse probe, and the poll adds one sleep.
+const REMOTE_UPDATE_WAIT_MS =
+  DESKTOP_UPDATE_IN_PROGRESS_TTL_MS +
+  2 * (REMOTE_REUSE_READY_TIMEOUT_MS + SSH_READY_PROBE_TIMEOUT_MS) +
+  1_000;
+// A launch waits this long for a server that holds the home to answer; its
+// last poll adds a reuse probe.
+const REMOTE_OWNER_WAIT_MS =
+  REMOTE_READY_TIMEOUT_MS + REMOTE_REUSE_READY_TIMEOUT_MS + SSH_READY_PROBE_TIMEOUT_MS;
+// A launch holds the home lock through up to two reuse probes, readiness, two
+// server exit waits, the runtime record wait, the update wait, and the owner
+// wait; each probe may overrun its deadline by one request.
+const REMOTE_LAUNCH_LOCK_WAIT_SECONDS = Math.ceil(
+  (REMOTE_READY_TIMEOUT_MS +
+    2 * REMOTE_REUSE_READY_TIMEOUT_MS +
+    2 * REMOTE_PID_EXIT_WAIT_MS +
+    REMOTE_RUNTIME_RECORD_WAIT_SECONDS * 1000 +
+    4 * SSH_READY_PROBE_TIMEOUT_MS +
+    REMOTE_UPDATE_WAIT_MS +
+    REMOTE_OWNER_WAIT_MS) /
+    1000,
+);
+const REMOTE_LAUNCH_TIMEOUT_MS =
+  REMOTE_LAUNCH_LOCK_WAIT_SECONDS * 1000 +
+  REMOTE_UPDATE_WAIT_MS +
+  REMOTE_OWNER_WAIT_MS +
+  REMOTE_LAUNCH_BASE_TIMEOUT_MS;
+
+export interface RemoteHanzoRunnerOptions {
+  readonly nodeScriptPath?: string | null;
+  readonly nodeEngineRange?: string | null;
+  readonly archiveVersion?: string | null;
+  readonly releaseBaseUrl?: string | null;
+}
+
+export interface SshEnvironmentManagerOptions {
+  readonly resolveCliRunner?: Effect.Effect<RemoteHanzoRunnerOptions>;
+  // Identifies this install to the remote across edits of a connection; null when unknown.
+  readonly resolveLauncherId?: Effect.Effect<string | null>;
+}
+
+interface SshTunnelEntry {
+  readonly key: string;
+  readonly target: DesktopSshEnvironmentTarget;
+  readonly remotePort: number;
+  readonly remoteServerKind: "external" | "managed" | null;
+  readonly localPort: number;
+  readonly httpBaseUrl: string;
+  readonly wsBaseUrl: string;
+  readonly process: ChildProcessSpawner.ChildProcessHandle;
+  readonly scope: Scope.Closeable;
+}
+
+type SshEnvironmentEffectContext =
+  | ChildProcessSpawner.ChildProcessSpawner
+  | Digest.Digest
+  | FileSystem.FileSystem
+  | Path.Path
+  | HttpClient.HttpClient
+  | NetService.NetService
+  | SshAuth.SshPasswordPrompt;
+
+type SshEnvironmentEffectError =
+  | SshCommandError
+  | SshInvalidTargetError
+  | SshLaunchError
+  | SshPairingError
+  | SshReadinessError
+  | SshPasswordPromptError
+  | NetService.NetError;
+
+function isNodeScriptRunner(runner: RemoteHanzoRunnerOptions | undefined): boolean {
+  return Boolean(runner?.nodeScriptPath?.trim());
+}
+
+function sshRunnerLogFields(runner: RemoteHanzoRunnerOptions | undefined) {
+  if (runner?.nodeScriptPath?.trim()) {
+    return { runner: "node-script", nodeScriptPath: runner.nodeScriptPath.trim() };
+  }
+  if (runner?.archiveVersion?.trim()) {
+    return { runner: "archive", archiveVersion: runner.archiveVersion.trim() };
+  }
+  return { runner: "archive" };
+}
+
+interface SshAuthOperationInput<T> {
+  readonly key: string;
+  readonly target: DesktopSshEnvironmentTarget;
+  readonly operation: (
+    authOptions: SshAuth.SshAuthOptions,
+  ) => Effect.Effect<T, SshEnvironmentEffectError, SshEnvironmentEffectContext>;
+}
+
+interface SshAuthAttemptInput<T> extends SshAuthOperationInput<T> {
+  readonly promptCount: number;
+  readonly authSecret: string | null;
+}
+
+export interface SshEnvironmentManagerShape {
+  readonly ensureEnvironment: (
+    target: DesktopSshEnvironmentTarget,
+    options?: { readonly issuePairingToken?: boolean },
+  ) => Effect.Effect<
+    DesktopSshEnvironmentBootstrap,
+    SshEnvironmentEffectError,
+    SshEnvironmentEffectContext
+  >;
+  readonly disconnectEnvironment: (
+    target: DesktopSshEnvironmentTarget,
+  ) => Effect.Effect<void, SshEnvironmentEffectError, SshEnvironmentEffectContext>;
+  /** Closes every tunnel, as the manager's scope finalizer does. */
+  readonly closeAllTunnels: Effect.Effect<void>;
+}
+
+const RemoteLaunchResult = Schema.Struct({
+  remotePort: Schema.Number,
+  serverKind: Schema.optional(Schema.Literals(["external", "managed"])),
+});
+
+const RemotePairingResult = Schema.Struct({
+  credential: Schema.String,
+});
+
+const decodeRemoteLaunchResult = Schema.decodeEffect(fromLenientJson(RemoteLaunchResult));
+const decodeRemotePairingResult = Schema.decodeEffect(fromLenientJson(RemotePairingResult));
+
+const decodeRemoteJsonOutput = <A, E>(
+  stdout: string,
+  decode: (input: string) => Effect.Effect<A, E>,
+): Effect.Effect<A, E> =>
+  decode(stdout).pipe(
+    Effect.catch((error) =>
+      Effect.gen(function* () {
+        const jsonObject = extractJsonObject(stdout);
+        if (jsonObject === stdout.trim()) {
+          return yield* Effect.fail(error);
+        }
+        const exit = yield* Effect.exit(decode(jsonObject));
+        if (Exit.isSuccess(exit)) {
+          return exit.value;
+        }
+        return yield* Effect.fail(error);
+      }),
+    ),
+  );
+
+const decodeRemoteLaunchOutput = (stdout: string) =>
+  decodeRemoteJsonOutput(stdout, decodeRemoteLaunchResult);
+
+const decodeRemotePairingOutput = (stdout: string) =>
+  decodeRemoteJsonOutput(stdout, decodeRemotePairingResult);
+
+const remoteNodeEngineCheckMain = function remoteNodeEngineCheckMain() {
+  const range = process.argv[2] || "";
+  const rawVersion =
+    process.versions && process.versions.node ? process.versions.node : process.version;
+
+  if (!satisfiesSemverRange(rawVersion, range)) {
+    process.stderr.write(
+      "Remote node " + rawVersion + " does not satisfy required range " + range + ".\n",
+    );
+    process.exit(1);
+  }
+};
+
+function buildRemoteNodeEngineCheckScript(): string {
+  return `${satisfiesSemverRange.toString()}
+(${remoteNodeEngineCheckMain.toString()})();`;
+}
+
+function normalizeSshErrorMessage(stderr: string, fallbackMessage: string): string {
+  const cleaned = stderr.trim();
+  return cleaned.length > 0 ? cleaned : fallbackMessage;
+}
+
+function stripTrailingNewlines(value: string): string {
+  return value.replace(/\n+$/u, "");
+}
+
+function applyScriptPlaceholders(
+  template: string,
+  replacements: Readonly<Record<string, string>>,
+): string {
+  let result = template;
+  for (const [token, value] of Object.entries(replacements)) {
+    // A replacer function keeps `$$` and other `$` patterns in the value literal.
+    result = result.replaceAll(`@@${token}@@`, () => value);
+  }
+  return result;
+}
+
+const REMOTE_PICK_PORT_SCRIPT = `const fs = require("node:fs");
+const net = require("node:net");
+const filePath = process.argv[2] ?? "";
+const defaultPort = Number.parseInt(process.argv[3] ?? "", 10);
+const scanWindow = Number.parseInt(process.argv[4] ?? "", 10);
+const raw = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf8").trim() : "";
+const preferred = Number.parseInt(raw, 10);
+const start = Number.isInteger(preferred) ? preferred : defaultPort;
+const end = start + scanWindow;
+
+function canBind(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.unref();
+    server.once("error", () => resolve(false));
+    server.listen(port, "127.0.0.1", () => {
+      server.close((error) => resolve(!error));
+    });
+  });
+}
+
+// macOS lets the bind above succeed while another process listens on
+// *:<port>, so also skip any port that already answers on loopback.
+function answersOnLoopback(port) {
+  return new Promise((resolve) => {
+    const socket = net.connect({ port, host: "127.0.0.1" });
+    socket.setTimeout(1000);
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("timeout", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("error", () => resolve(false));
+  });
+}
+
+(async () => {
+  for (let port = start; port < end; port += 1) {
+    const available = (await canBind(port)) && !(await answersOnLoopback(port));
+    if (available) {
+      process.stdout.write(String(port));
+      return;
+    }
+  }
+  process.exit(1);
+})().catch(() => process.exit(1));
+`;
+
+const REMOTE_WAIT_READY_SCRIPT = `const http = require("node:http");
+const port = Number.parseInt(process.argv[2] ?? "", 10);
+const timeoutMs = Number.parseInt(process.argv[3] ?? "", 10);
+const probeTimeoutMs = Number.parseInt(process.argv[4] ?? "", 10);
+if (!Number.isInteger(port) || !Number.isInteger(timeoutMs) || !Number.isInteger(probeTimeoutMs)) {
+  process.exit(1);
+}
+const deadline = Date.now() + timeoutMs;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function probe() {
+  return new Promise((resolve) => {
+    const request = http.get(
+      {
+        hostname: "127.0.0.1",
+        port,
+        path: "/",
+        timeout: probeTimeoutMs,
+      },
+      (response) => {
+        response.resume();
+        response.once("end", () => {
+          resolve(response.statusCode >= 200 && response.statusCode < 300);
+        });
+      },
+    );
+    request.once("timeout", () => {
+      request.destroy();
+      resolve(false);
+    });
+    request.once("error", () => resolve(false));
+  });
+}
+
+(async () => {
+  while (Date.now() < deadline) {
+    if (await probe()) {
+      process.exit(0);
+    }
+    await sleep(100);
+  }
+  process.exit(1);
+})().catch(() => process.exit(1));
+`;
+
+const REMOTE_NODE_ENV_SCRIPT = `prepend_path_if_dir() {
+  if [ -d "$1" ]; then
+    case ":$PATH:" in
+      *":$1:"*) ;;
+      *) PATH="$1:$PATH" ;;
+    esac
+  fi
+}
+
+remote_node_satisfies_engine() {
+  HANZO_NODE_ENGINE_RANGE=@@HANZO_NODE_ENGINE_RANGE@@
+  if [ -z "$HANZO_NODE_ENGINE_RANGE" ]; then
+    return 0
+  fi
+  node - "$HANZO_NODE_ENGINE_RANGE" <<'NODE'
+@@HANZO_NODE_ENGINE_CHECK_SCRIPT@@
+NODE
+}
+
+ensure_remote_node_path() {
+  if command -v node >/dev/null 2>&1 && remote_node_satisfies_engine >/dev/null 2>&1; then
+    return 0
+  fi
+
+  prepend_path_if_dir "$HOME/.local/bin"
+  prepend_path_if_dir "$HOME/bin"
+  prepend_path_if_dir "/opt/homebrew/bin"
+  prepend_path_if_dir "/home/linuxbrew/.linuxbrew/bin"
+  prepend_path_if_dir "/usr/local/bin"
+  prepend_path_if_dir "/usr/bin"
+  prepend_path_if_dir "/bin"
+
+  if [ -z "\${VOLTA_HOME:-}" ]; then
+    VOLTA_HOME="$HOME/.volta"
+  fi
+  export VOLTA_HOME
+  prepend_path_if_dir "$VOLTA_HOME/bin"
+
+  prepend_path_if_dir "$HOME/.asdf/shims"
+  prepend_path_if_dir "$HOME/.asdf/bin"
+  if [ ! -x "$HOME/.asdf/shims/node" ] && [ -s "$HOME/.asdf/asdf.sh" ]; then
+    # shellcheck disable=SC1090
+    . "$HOME/.asdf/asdf.sh"
+  fi
+
+  prepend_path_if_dir "$HOME/.local/share/mise/shims"
+  prepend_path_if_dir "$HOME/.mise/shims"
+  if ! command -v node >/dev/null 2>&1 && command -v mise >/dev/null 2>&1; then
+    eval "$(mise activate sh)" >/dev/null 2>&1 || true
+  fi
+
+  if [ -z "\${FNM_DIR:-}" ]; then
+    FNM_DIR="$HOME/.local/share/fnm"
+  fi
+  export FNM_DIR
+  prepend_path_if_dir "$FNM_DIR"
+  prepend_path_if_dir "$HOME/.fnm"
+  if ! command -v node >/dev/null 2>&1 && command -v fnm >/dev/null 2>&1; then
+    eval "$(fnm env --shell bash)" >/dev/null 2>&1 || true
+    fnm use --silent-if-unchanged >/dev/null 2>&1 || fnm use default >/dev/null 2>&1 || true
+  fi
+
+  prepend_path_if_dir "$HOME/.nodenv/bin"
+  prepend_path_if_dir "$HOME/.nodenv/shims"
+  if ! command -v node >/dev/null 2>&1 && command -v nodenv >/dev/null 2>&1; then
+    eval "$(nodenv init -)" >/dev/null 2>&1 || true
+  fi
+
+  if [ -z "\${NVM_DIR:-}" ]; then
+    NVM_DIR="$HOME/.nvm"
+  fi
+  export NVM_DIR
+
+  if [ -s "$NVM_DIR/nvm.sh" ]; then
+    # shellcheck disable=SC1090
+    . "$NVM_DIR/nvm.sh"
+    if ! command -v node >/dev/null 2>&1 && command -v nvm >/dev/null 2>&1; then
+      nvm use --silent default >/dev/null 2>&1 || nvm use --silent node >/dev/null 2>&1 || nvm use --silent --lts >/dev/null 2>&1 || true
+    fi
+  fi
+
+  if ! command -v node >/dev/null 2>&1 && [ -d "$NVM_DIR/versions/node" ]; then
+    for HANZO_NODE_BIN in "$NVM_DIR"/versions/node/*/bin; do
+      if [ -x "$HANZO_NODE_BIN/node" ]; then
+        PATH="$HANZO_NODE_BIN:$PATH"
+        export PATH
+      fi
+    done
+  fi
+
+  command -v node >/dev/null 2>&1 && remote_node_satisfies_engine
+}
+`;
+
+const REMOTE_RUNNER_SCRIPT = `#!/bin/sh
+set -eu
+@@HANZO_NODE_ENV_SCRIPT@@
+HANZO_NODE_SCRIPT_PATH=@@HANZO_NODE_SCRIPT_PATH@@
+if [ -n "$HANZO_NODE_SCRIPT_PATH" ]; then
+  # Dev mode: a source checkout on the remote. This is the only path that
+  # needs Node, so Node discovery runs here and nowhere else.
+  ensure_remote_node_path || true
+  if ! command -v node >/dev/null 2>&1; then
+    printf 'Remote host is missing node on PATH. Install Node or configure a supported version manager for non-interactive shells.\\n' >&2
+    exit 1
+  fi
+  exec node "$HANZO_NODE_SCRIPT_PATH" "$@"
+fi
+HANZO_ARCHIVE_VERSION=@@HANZO_ARCHIVE_VERSION@@
+if [ -z "$HANZO_ARCHIVE_VERSION" ]; then
+  printf 'No hanzo release version was provided for the remote runtime.\\n' >&2
+  exit 1
+fi
+HANZO_SYSTEM_EXECUTABLE="$(command -v hanzo 2>/dev/null || true)"
+if [ -n "$HANZO_SYSTEM_EXECUTABLE" ] && HANZO_SYSTEM_VERSION="$("$HANZO_SYSTEM_EXECUTABLE" --version 2>/dev/null)" && [ "$HANZO_SYSTEM_VERSION" = "hanzo v$HANZO_ARCHIVE_VERSION" ]; then
+  # A matching host-provided runtime supports platforms such as musl Linux,
+  # where the portable release archive cannot run.
+  exec "$HANZO_SYSTEM_EXECUTABLE" "$@"
+fi
+# Self-contained release archive: no Node, npm, or compiler on the remote.
+# Unpacked into the pinned-runtime layout so \`hanzo service install\` reuses it.
+HANZO_RELEASE_BASE_URL=@@HANZO_RELEASE_BASE_URL@@
+HANZO_RUNTIME_DIR="$HOME/.hanzo-dev/runtime/versions/$HANZO_ARCHIVE_VERSION"
+hanzo_runtime_ready() {
+  [ -x "$HANZO_RUNTIME_DIR/hanzo" ] && [ "$(cat "$HANZO_RUNTIME_DIR/.install-complete" 2>/dev/null)" = "$HANZO_ARCHIVE_VERSION" ]
+}
+if ! hanzo_runtime_ready; then
+  mkdir -p "$HOME/.hanzo-dev/runtime/versions"
+  HANZO_LOCK="$HOME/.hanzo-dev/runtime/versions/.$HANZO_ARCHIVE_VERSION.install.lock"
+  # uutils mkdir can report success on EEXIST, so use shell noclobber.
+  # An empty lock gets a short grace period for its owner to publish a PID.
+  HANZO_LOCK_WAITED=0
+  HANZO_LOCK_UNOWNED=0
+  while ! (set -C; printf '%s\\n' "$$" > "$HANZO_LOCK") 2>/dev/null; do
+    HANZO_LOCK_OWNER="$(cat "$HANZO_LOCK" 2>/dev/null || true)"
+    if [ -n "$HANZO_LOCK_OWNER" ]; then
+      HANZO_LOCK_UNOWNED=0
+      if ! kill -0 "$HANZO_LOCK_OWNER" 2>/dev/null; then
+        rm -rf "$HANZO_LOCK"
+        continue
+      fi
+    else
+      HANZO_LOCK_UNOWNED=$((HANZO_LOCK_UNOWNED + 1))
+      if [ "$HANZO_LOCK_UNOWNED" -ge 5 ]; then
+        rm -rf "$HANZO_LOCK"
+        continue
+      fi
+    fi
+    if [ "$HANZO_LOCK_WAITED" -ge @@HANZO_ARCHIVE_LOCK_WAIT_SECONDS@@ ]; then
+      printf 'Another hanzo %s installation has held %s for too long.\\n' "$HANZO_ARCHIVE_VERSION" "$HANZO_LOCK" >&2
+      exit 1
+    fi
+    sleep 1
+    HANZO_LOCK_WAITED=$((HANZO_LOCK_WAITED + 1))
+  done
+  trap 'rm -rf "$HANZO_LOCK"' EXIT
+fi
+if ! hanzo_runtime_ready; then
+  # Keep aligned with CLI_ARCHIVE_PLATFORM_KEYS in packages/shared/src/cliRelease.ts.
+  case "$(uname -s) $(uname -m)" in
+    "Darwin arm64") HANZO_PLATFORM_KEY="darwin-arm64" ;;
+    "Linux arm64" | "Linux aarch64") HANZO_PLATFORM_KEY="linux-arm64" ;;
+    "Linux x86_64" | "Linux amd64") HANZO_PLATFORM_KEY="linux-x64" ;;
+    *) printf 'Remote host %s has no hanzo release archive.\\n' "$(uname -s) $(uname -m)" >&2; exit 1 ;;
+  esac
+  HANZO_ARCHIVE="hanzo-$HANZO_ARCHIVE_VERSION-$HANZO_PLATFORM_KEY.tar.gz"
+  HANZO_STAGING="$(mktemp -d "$HOME/.hanzo-dev/runtime/versions/.staging-XXXXXX")"
+  trap 'rm -rf "$HANZO_STAGING" "$HANZO_LOCK"' EXIT
+  hanzo_fetch() {
+    if command -v curl >/dev/null 2>&1; then curl -fsSL --connect-timeout 30 --max-time "$3" "$1" -o "$2"
+    elif command -v wget >/dev/null 2>&1; then wget -q --timeout=30 --tries=1 "$1" -O "$2"
+    else printf 'Remote host needs curl or wget to download %s.\\n' "$HANZO_ARCHIVE" >&2; exit 1
+    fi || {
+      printf 'Could not download hanzo %s from %s. If this host cannot reach it, install hanzo %s on it with https://dev.hanzo.ai/install.sh (HANZO_DEV_VERSION=%s; HANZO_DEV_RELEASE_BASE_URL selects a mirror).\\n' "$HANZO_ARCHIVE_VERSION" "$1" "$HANZO_ARCHIVE_VERSION" "$HANZO_ARCHIVE_VERSION" >&2
+      exit 1
+    }
+  }
+  hanzo_fetch "$HANZO_RELEASE_BASE_URL/v$HANZO_ARCHIVE_VERSION/SHA256SUMS" "$HANZO_STAGING/SHA256SUMS" @@HANZO_ARCHIVE_CHECKSUMS_SECONDS@@
+  hanzo_fetch "$HANZO_RELEASE_BASE_URL/v$HANZO_ARCHIVE_VERSION/$HANZO_ARCHIVE" "$HANZO_STAGING/$HANZO_ARCHIVE" @@HANZO_ARCHIVE_DOWNLOAD_SECONDS@@
+  HANZO_EXPECTED="$(grep " \\*\\{0,1\\}$HANZO_ARCHIVE$" "$HANZO_STAGING/SHA256SUMS" | cut -d' ' -f1)"
+  if command -v sha256sum >/dev/null 2>&1; then
+    HANZO_ACTUAL="$(sha256sum < "$HANZO_STAGING/$HANZO_ARCHIVE" | cut -d' ' -f1)"
+  else
+    HANZO_ACTUAL="$(shasum -a 256 < "$HANZO_STAGING/$HANZO_ARCHIVE" | cut -d' ' -f1)"
+  fi
+  if [ -z "$HANZO_EXPECTED" ] || [ "$HANZO_ACTUAL" != "$HANZO_EXPECTED" ]; then
+    printf 'Checksum mismatch for %s.\\n' "$HANZO_ARCHIVE" >&2; exit 1
+  fi
+  if ! HANZO_TAR_ERROR="$(tar -xzf "$HANZO_STAGING/$HANZO_ARCHIVE" -C "$HANZO_STAGING" --strip-components=1 2>&1)"; then
+    # Some tars (BusyBox) gunzip internally, so gzip is only blamed once extraction fails.
+    if command -v gzip >/dev/null 2>&1; then printf '%s\\n' "$HANZO_TAR_ERROR" >&2
+    else printf 'Remote host needs gzip to unpack %s. Install gzip on it and try again.\\n' "$HANZO_ARCHIVE" >&2
+    fi
+    exit 1
+  fi
+  rm -f "$HANZO_STAGING/$HANZO_ARCHIVE" "$HANZO_STAGING/SHA256SUMS"
+  # Prove the binary runs here (libc, arch) before marking it ready, or every
+  # later launch would exec a broken install instead of retrying.
+  if ! "$HANZO_STAGING/hanzo" --version >/dev/null 2>&1; then
+    printf 'The hanzo %s executable does not run on this host.\\n' "$HANZO_ARCHIVE_VERSION" >&2; exit 1
+  fi
+  printf '%s\\n' "$HANZO_ARCHIVE_VERSION" > "$HANZO_STAGING/.install-complete"
+  rm -rf "$HANZO_RUNTIME_DIR"
+  mv "$HANZO_STAGING" "$HANZO_RUNTIME_DIR"
+fi
+if [ -n "\${HANZO_LOCK:-}" ]; then
+  rm -rf "$HANZO_LOCK"
+  trap - EXIT
+fi
+exec "$HANZO_RUNTIME_DIR/hanzo" "$@"
+`;
+
+// kill -0 also passes for a zombie, a reused PID and, on Linux, a thread ID,
+// which ps does not list. Only the serve command the launcher started counts;
+// where ps cannot look up a PID at all, trust kill -0.
+const REMOTE_MANAGED_SERVER_RUNNING_SCRIPT = `managed_server_running() {
+  [ -n "$1" ] && kill -0 "$1" 2>/dev/null || return 1
+  if MANAGED_ARGS="$(ps -ww -o args= -p "$1" 2>/dev/null)"; then
+    case "$MANAGED_ARGS" in
+      *" serve --host 127.0.0.1 --port "[0-9]*) return 0 ;;
+    esac
+    return 1
+  fi
+  ! ps -ww -o args= -p "$$" >/dev/null 2>&1
+}`;
+
+const REMOTE_LAUNCH_SCRIPT = `set -eu
+@@HANZO_NODE_ENV_SCRIPT@@
+STATE_KEY="$1"
+LAUNCHER_ID="\${2:-}"
+STATE_DIR="$HOME/.hanzo-dev/ssh-launch/$STATE_KEY"
+DEFAULT_SERVER_HOME="$HOME/.hanzo-dev"
+DEFAULT_RUNTIME_FILE="$DEFAULT_SERVER_HOME/userdata/server-runtime.json"
+PORT_FILE="$STATE_DIR/port"
+PID_FILE="$STATE_DIR/pid"
+MANAGED_FILE="$STATE_DIR/managed"
+LOG_FILE="$STATE_DIR/server.log"
+RUNNER_FILE="$STATE_DIR/run-hanzo.sh"
+RUNNER_NEXT="$STATE_DIR/run-hanzo.next.$$"
+LAUNCH_LOCK="$DEFAULT_SERVER_HOME/ssh-launch/.launch.lock"
+LAUNCH_BREAK_LOCK="$LAUNCH_LOCK.break"
+mkdir -p "$STATE_DIR"
+cleanup_launch() {
+  rm -f "$RUNNER_NEXT"
+  for OWNED_LOCK in "$LAUNCH_LOCK" "$LAUNCH_BREAK_LOCK"; do
+    if [ "$(cat "$OWNED_LOCK" 2>/dev/null || true)" = "$$" ]; then
+      rm -f "$OWNED_LOCK"
+    fi
+  done
+}
+trap cleanup_launch EXIT
+# A dropped SSH session signals the launch (PIPE on its next write); exit so
+# the lock is released.
+trap 'exit 1' HUP INT PIPE TERM
+cat >"$RUNNER_NEXT" <<'SH'
+@@HANZO_RUNNER_SCRIPT@@
+SH
+chmod 700 "$RUNNER_NEXT"
+HANZO_ARCHIVE_MODE=@@HANZO_ARCHIVE_MODE@@
+if [ "$HANZO_ARCHIVE_MODE" = "1" ]; then
+  # The archive ships the helpers below inside the executable; the remote
+  # needs no Node at all. Resolving the runner once here also downloads the
+  # archive before the port and readiness probes rely on it.
+  "$RUNNER_NEXT" --version >/dev/null
+elif ! ensure_remote_node_path; then
+  if ! command -v node >/dev/null 2>&1; then
+    printf 'Remote host is missing node on PATH. Install Node or configure a supported version manager for non-interactive shells.\\n' >&2
+  fi
+  exit 1
+fi
+# Recovery runs under its own lock and re-reads the owner there, so a waiter
+# that judged an earlier lock stale cannot remove its successor's lock. No
+# launch removes another's recovery lock: only SIGKILL inside these lines
+# leaves one behind, and the wait below then fails naming it.
+discard_stale_launch_lock() {
+  (set -C; printf '%s\\n' "$$" >"$LAUNCH_BREAK_LOCK") 2>/dev/null || return 1
+  if [ "$(cat "$LAUNCH_LOCK" 2>/dev/null || true)" = "$1" ]; then
+    rm -f "$LAUNCH_LOCK"
+  fi
+  rm -f "$LAUNCH_BREAK_LOCK"
+}
+# Concurrent launches share this home's owner lock and may share this record.
+# Hold the lock from comparing the runner until the server is recorded and
+# ready, so a waiting launch reuses that server instead of starting or
+# replacing one.
+LAUNCH_LOCK_WAITED=0
+LAUNCH_LOCK_UNOWNED=0
+while ! (set -C; printf '%s\\n' "$$" >"$LAUNCH_LOCK") 2>/dev/null; do
+  LAUNCH_LOCK_OWNER="$(cat "$LAUNCH_LOCK" 2>/dev/null || true)"
+  if [ -n "$LAUNCH_LOCK_OWNER" ]; then
+    LAUNCH_LOCK_UNOWNED=0
+    if ! kill -0 "$LAUNCH_LOCK_OWNER" 2>/dev/null && discard_stale_launch_lock "$LAUNCH_LOCK_OWNER"; then
+      continue
+    fi
+  else
+    LAUNCH_LOCK_UNOWNED=$((LAUNCH_LOCK_UNOWNED + 1))
+    if [ "$LAUNCH_LOCK_UNOWNED" -ge 5 ] && discard_stale_launch_lock ""; then
+      LAUNCH_LOCK_UNOWNED=0
+      continue
+    fi
+  fi
+  if [ "$LAUNCH_LOCK_WAITED" -ge @@HANZO_LAUNCH_LOCK_WAIT_SECONDS@@ ]; then
+    if [ -e "$LAUNCH_BREAK_LOCK" ]; then
+      printf 'A Hanzo server launch stopped while recovering %s. If no launch is running, delete %s.\\n' "$LAUNCH_LOCK" "$LAUNCH_BREAK_LOCK" >&2
+    else
+      printf 'Another Hanzo server launch has held %s for too long.\\n' "$LAUNCH_LOCK" >&2
+    fi
+    exit 1
+  fi
+  sleep 1
+  LAUNCH_LOCK_WAITED=$((LAUNCH_LOCK_WAITED + 1))
+done
+RUNNER_CHANGED=0
+if [ ! -f "$RUNNER_FILE" ] || ! cmp -s "$RUNNER_NEXT" "$RUNNER_FILE"; then
+  RUNNER_CHANGED=1
+fi
+mv "$RUNNER_NEXT" "$RUNNER_FILE"
+if [ -n "$LAUNCHER_ID" ]; then
+  printf '%s\\n' "$LAUNCHER_ID" >"$STATE_DIR/launcher"
+fi
+pick_port() {
+  if [ "$HANZO_ARCHIVE_MODE" = "1" ]; then
+    "$RUNNER_FILE" __ssh-helper pick-port "$PORT_FILE" "@@HANZO_DEFAULT_REMOTE_PORT@@" "@@HANZO_REMOTE_PORT_SCAN_WINDOW@@"
+    return
+  fi
+  node - "$PORT_FILE" "@@HANZO_DEFAULT_REMOTE_PORT@@" "@@HANZO_REMOTE_PORT_SCAN_WINDOW@@" <<'NODE'
+@@HANZO_PICK_PORT_SCRIPT@@
+NODE
+}
+wait_ready() {
+  if [ "$HANZO_ARCHIVE_MODE" = "1" ]; then
+    "$RUNNER_FILE" __ssh-helper wait-ready "$REMOTE_PORT" "$1" "@@HANZO_READY_PROBE_TIMEOUT_MS@@"
+    return
+  fi
+  node - "$REMOTE_PORT" "$1" "@@HANZO_READY_PROBE_TIMEOUT_MS@@" <<'NODE'
+@@HANZO_WAIT_READY_SCRIPT@@
+NODE
+}
+wait_for_pid_exit() {
+  PID_TO_WAIT="$1"
+  WAIT_COUNT=0
+  while kill -0 "$PID_TO_WAIT" 2>/dev/null && [ "$WAIT_COUNT" -lt @@HANZO_PID_EXIT_WAIT_TICKS@@ ]; do
+    WAIT_COUNT=$((WAIT_COUNT + 1))
+    sleep 0.1
+  done
+}
+# kill -0 also succeeds for a server that exited but was not reaped yet, so
+# a zombie does not count as running. Without ps to tell, trust kill -0.
+server_running() {
+  [ -n "$1" ] && kill -0 "$1" 2>/dev/null || return 1
+  case "$(ps -o stat= -p "$1" 2>/dev/null || true)" in
+    *Z*) return 1 ;;
+  esac
+}
+# An older client replacing a same-or-newer server would run below the database's migrations.
+keeps_running_server() {
+  [ "$HANZO_ARCHIVE_MODE" = "1" ] &&
+    "$RUNNER_FILE" __ssh-helper keep-server "$DEFAULT_RUNTIME_FILE" "$REMOTE_PID" >/dev/null 2>&1
+}
+@@HANZO_MANAGED_SERVER_RUNNING_SCRIPT@@
+# Both are SQLite locks the OS drops with their holder: a server holds
+# server-owner.sqlite, and a boot service holds service-serving.lock from
+# before it starts a server, between two of them during its own update, until
+# it stops or idles behind another server.
+home_owned() {
+  if [ "$HANZO_ARCHIVE_MODE" = "1" ]; then
+    "$RUNNER_FILE" __ssh-helper home-owned "$DEFAULT_SERVER_HOME" 2>/dev/null
+    return
+  fi
+  node - "$DEFAULT_SERVER_HOME" 2>/dev/null <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const { DatabaseSync } = require("node:sqlite");
+const held = (file) => {
+  if (!fs.existsSync(file)) return false;
+  const db = new DatabaseSync(file);
+  try {
+    db.exec("PRAGMA busy_timeout = 0; BEGIN EXCLUSIVE;");
+    return false;
+  } catch (error) {
+    return error?.errcode === 5;
+  } finally {
+    db.close();
+  }
+};
+const home = process.argv[2];
+process.exitCode =
+  held(path.join(home, "runtime", "service-serving.lock")) ||
+  held(path.join(home, "userdata", "server-owner.sqlite"))
+    ? 0
+    : 1;
+NODE
+}
+resolve_default_runtime_port() {
+  if [ "$HANZO_ARCHIVE_MODE" = "1" ]; then
+    "$RUNNER_FILE" __ssh-helper runtime-port "$DEFAULT_RUNTIME_FILE"
+    return
+  fi
+  node - "$DEFAULT_RUNTIME_FILE" <<'NODE'
+const fs = require("node:fs");
+const runtimePath = process.argv[2] ?? "";
+try {
+	  const runtime = JSON.parse(fs.readFileSync(runtimePath, "utf8"));
+	  const pid = Number(runtime.pid);
+	  const port = Number(runtime.port);
+	  if (!Number.isInteger(pid) || pid <= 0 || !Number.isInteger(port)) {
+	    process.exit(1);
+	  }
+  const origin = new URL(String(runtime.origin ?? ""));
+  if (origin.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(origin.hostname)) {
+    process.exit(1);
+  }
+  process.kill(pid, 0);
+  process.stdout.write(\`\${pid} \${port}\`);
+} catch {
+  process.exit(1);
+}
+NODE
+}
+# This script ships with the SSH client; older clients do not honor this marker.
+update_remaining() {
+  if [ "$HANZO_ARCHIVE_MODE" = "1" ]; then
+    "$RUNNER_FILE" __ssh-helper update-remaining "$DEFAULT_SERVER_HOME/runtime/@@HANZO_UPDATE_MARKER_FILE@@"
+    return
+  fi
+  node - "$DEFAULT_SERVER_HOME/runtime/@@HANZO_UPDATE_MARKER_FILE@@" <<'NODE'
+const fs = require("node:fs");
+const path = process.argv[2];
+try {
+  const { startedAt, expiresAt } = JSON.parse(fs.readFileSync(path, "utf8"));
+  const now = Date.now();
+  if (Number.isFinite(startedAt) && Number.isFinite(expiresAt) &&
+      startedAt <= now && expiresAt > now && expiresAt > startedAt) {
+    process.stdout.write(String(Math.min(expiresAt - now, @@HANZO_UPDATE_TTL_MS@@)));
+  }
+} catch {}
+NODE
+}
+REMOTE_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
+REMOTE_PORT="$(cat "$PORT_FILE" 2>/dev/null || true)"
+REMOTE_MANAGED="$(cat "$MANAGED_FILE" 2>/dev/null || true)"
+adopt_default_server() {
+DEFAULT_RUNTIME_INFO="$(resolve_default_runtime_port 2>/dev/null || true)"
+DEFAULT_RUNTIME_PID=""
+DEFAULT_REMOTE_PORT=""
+ADOPTED_PID=""
+if [ -n "$DEFAULT_RUNTIME_INFO" ]; then
+  DEFAULT_RUNTIME_PID="\${DEFAULT_RUNTIME_INFO%% *}"
+  DEFAULT_REMOTE_PORT="\${DEFAULT_RUNTIME_INFO#* }"
+fi
+# The managed server runs on the default home, so it writes the default
+# runtime file too. When that file names the PID this launcher recorded as
+# managed, it describes our own server and its real port, not one to adopt.
+if [ -n "$DEFAULT_REMOTE_PORT" ] && [ "$REMOTE_MANAGED" = "managed" ] && [ "$DEFAULT_RUNTIME_PID" = "$REMOTE_PID" ]; then
+  REMOTE_PORT="$DEFAULT_REMOTE_PORT"
+  printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
+  return 0
+elif [ -n "$DEFAULT_REMOTE_PORT" ]; then
+  REMOTE_PORT="$DEFAULT_REMOTE_PORT"
+  if wait_ready "@@HANZO_REUSE_READY_TIMEOUT_MS@@"; then
+    ADOPTED_PID="$DEFAULT_RUNTIME_PID"
+    if [ "$REMOTE_MANAGED" = "managed" ]; then
+      if managed_server_running "$REMOTE_PID"; then
+        kill "$REMOTE_PID" 2>/dev/null || true
+        wait_for_pid_exit "$REMOTE_PID"
+      fi
+      REMOTE_PID=""
+      REMOTE_PORT="$DEFAULT_REMOTE_PORT"
+      REMOTE_MANAGED="external"
+      rm -f "$PID_FILE"
+      printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
+      printf 'external\\n' >"$MANAGED_FILE"
+    else
+      printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
+      printf 'external\\n' >"$MANAGED_FILE"
+      REMOTE_PID=""
+      REMOTE_MANAGED="external"
+    fi
+    return 0
+  else
+    REMOTE_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
+    REMOTE_PORT="$(cat "$PORT_FILE" 2>/dev/null || true)"
+    REMOTE_MANAGED="$(cat "$MANAGED_FILE" 2>/dev/null || true)"
+  fi
+fi
+return 1
+}
+# Editing a connection's alias, host, user or port changes its key, so the
+# adopted server may be one this desktop started under another key. Ownership
+# then moves here, leaving one managed record, so updates keep replacing it.
+# Another desktop's server stays external. Only this first adoption runs
+# before the replace decision, which the previous key's runner settles.
+if adopt_default_server && [ -n "$ADOPTED_PID" ] && [ -n "$LAUNCHER_ID" ]; then
+  for SIBLING_DIR in "$DEFAULT_SERVER_HOME"/ssh-launch/*; do
+    [ "$SIBLING_DIR" != "$STATE_DIR" ] && [ "$(cat "$SIBLING_DIR/managed" 2>/dev/null || true)" = "managed" ] || continue
+    [ "$(cat "$SIBLING_DIR/pid" 2>/dev/null || true)" = "$ADOPTED_PID" ] && managed_server_running "$ADOPTED_PID" || continue
+    [ "$(cat "$SIBLING_DIR/launcher" 2>/dev/null || true)" = "$LAUNCHER_ID" ] || break
+    REMOTE_PID="$ADOPTED_PID"
+    REMOTE_MANAGED="managed"
+    printf '%s\\n' "$REMOTE_PID" >"$PID_FILE"
+    printf 'managed\\n' >"$MANAGED_FILE"
+    printf 'external\\n' >"$SIBLING_DIR/managed"
+    rm -f "$SIBLING_DIR/pid"
+    RUNNER_CHANGED=1
+    if cmp -s "$RUNNER_FILE" "$SIBLING_DIR/run-hanzo.sh"; then
+      RUNNER_CHANGED=0
+    fi
+    break
+  done
+fi
+if [ "$REMOTE_MANAGED" = "external" ]; then
+  # A server adopted above has just answered. While it is still alive, probing
+  # it again could catch a momentary stall and launch a second server beside it.
+  if server_running "$ADOPTED_PID"; then
+    :
+  elif [ -z "$REMOTE_PORT" ] || ! wait_ready "@@HANZO_REUSE_READY_TIMEOUT_MS@@"; then
+    REMOTE_PID=""
+    REMOTE_PORT=""
+    REMOTE_MANAGED=""
+  fi
+elif [ -n "$REMOTE_PORT" ] && managed_server_running "$REMOTE_PID"; then
+  # Reconnect owns the local tunnel, not the lifetime of an already running
+  # server. A changed runner is the update path and replaces an older server.
+  if [ "$RUNNER_CHANGED" -eq 1 ] && ! keeps_running_server; then
+    kill "$REMOTE_PID" 2>/dev/null || true
+    wait_for_pid_exit "$REMOTE_PID"
+    REMOTE_PID=""
+    REMOTE_PORT=""
+    REMOTE_MANAGED=""
+  elif ! wait_ready "@@HANZO_READY_TIMEOUT_MS@@"; then
+    printf 'Remote Hanzo server is still running but did not become ready. Retry the connection; the server was left running.\\n' >&2
+    exit 1
+  fi
+else
+  REMOTE_PID=""
+  REMOTE_PORT=""
+  REMOTE_MANAGED=""
+fi
+# The server may answer long before it publishes its runtime record, or never
+# publish one; another alias's launch record still names it. Only one server
+# owns the home, so the first live one decides.
+if [ -z "$REMOTE_PORT" ] && [ -z "$DEFAULT_RUNTIME_INFO" ]; then
+  for SIBLING_DIR in "$DEFAULT_SERVER_HOME"/ssh-launch/*; do
+    [ "$SIBLING_DIR" != "$STATE_DIR" ] && [ "$(cat "$SIBLING_DIR/managed" 2>/dev/null || true)" = "managed" ] || continue
+    managed_server_running "$(cat "$SIBLING_DIR/pid" 2>/dev/null || true)" || continue
+    REMOTE_PORT="$(cat "$SIBLING_DIR/port" 2>/dev/null || true)"
+    if [ -n "$REMOTE_PORT" ] && wait_ready "@@HANZO_REUSE_READY_TIMEOUT_MS@@"; then
+      REMOTE_MANAGED="external"
+      rm -f "$PID_FILE"
+      printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
+      printf 'external\\n' >"$MANAGED_FILE"
+    else
+      REMOTE_PORT=""
+    fi
+    break
+  done
+fi
+if [ -z "$REMOTE_PORT" ]; then
+  # The sleep count bounds a host clock that stops advancing.
+  UPDATE_WAITED=0
+  UPDATE_SAW_MARKER=0
+  while [ "$UPDATE_WAITED" -le @@HANZO_UPDATE_TTL_SECONDS@@ ]; do
+    UPDATE_REMAINING="$(update_remaining 2>/dev/null || true)"
+    [ -n "$UPDATE_REMAINING" ] || break
+    UPDATE_SAW_MARKER=1
+    [ "$UPDATE_WAITED" -lt @@HANZO_UPDATE_TTL_SECONDS@@ ] || break
+    if adopt_default_server; then break; fi
+    REMOTE_PID=""
+    REMOTE_PORT=""
+    REMOTE_MANAGED=""
+    sleep 1
+    UPDATE_WAITED=$((UPDATE_WAITED + 1))
+  done
+  # The desktop clears the marker after publishing runtime, possibly before the first marker read,
+  # so refresh once more before falling back. A cleanly stopped server leaves no runtime file.
+  if { [ "$UPDATE_SAW_MARKER" -eq 1 ] || [ -f "$DEFAULT_RUNTIME_FILE" ]; } && [ -z "$REMOTE_PORT" ] && ! adopt_default_server; then
+    REMOTE_PID=""
+    REMOTE_PORT=""
+    REMOTE_MANAGED=""
+  fi
+fi
+# A server that holds the home without answering yet is still starting, and a
+# boot service holds it between two servers while it updates. A second server
+# would lose the home to it or take the home from it, so wait while the home is
+# held and start one only once it is free. The managed server an update just
+# stopped may still be exiting. The sleep count bounds a host clock that stops.
+OWNER_WAITED=0
+OWNER_DEADLINE=$(($(date +%s) + @@HANZO_READY_TIMEOUT_SECONDS@@))
+while [ -z "$REMOTE_PORT" ] && ! managed_server_running "$(cat "$PID_FILE" 2>/dev/null || true)" && home_owned; do
+  if adopt_default_server; then break; fi
+  REMOTE_PID=""
+  REMOTE_PORT=""
+  REMOTE_MANAGED=""
+  if [ "$OWNER_WAITED" -ge @@HANZO_READY_TIMEOUT_SECONDS@@ ] || [ "$(date +%s)" -ge "$OWNER_DEADLINE" ]; then
+    printf 'A Hanzo server or boot service holds %s but did not become ready, so no second server was started. Retry once it has started.\\n' "$DEFAULT_SERVER_HOME" >&2
+    exit 1
+  fi
+  sleep 1
+  OWNER_WAITED=$((OWNER_WAITED + 1))
+done
+if [ -z "$REMOTE_PORT" ]; then
+  REMOTE_PORT="$(pick_port)" || true
+  if [ -z "$REMOTE_PORT" ]; then
+    if [ "$HANZO_ARCHIVE_MODE" = "1" ]; then
+      printf 'Failed to find an available port on the remote host.\\n' >&2
+    else
+      printf 'Failed to find an available port on the remote host. Ensure node is available on PATH.\\n' >&2
+    fi
+    exit 1
+  fi
+  # Start this launch's log empty. Unlink rather than truncate: a process from an
+  # earlier launch can still hold the old log open and keep writing to it.
+  rm -f "$LOG_FILE"
+  nohup env HANZO_DEV_NO_BROWSER=1 "$RUNNER_FILE" serve --host 127.0.0.1 --port "$REMOTE_PORT" --base-dir "$DEFAULT_SERVER_HOME" >>"$LOG_FILE" 2>&1 < /dev/null &
+  REMOTE_PID="$!"
+  printf '%s\\n' "$REMOTE_PID" >"$PID_FILE"
+  printf '%s\\n' "$REMOTE_PORT" >"$PORT_FILE"
+  printf 'managed\\n' >"$MANAGED_FILE"
+  # A stop keeps the launcher file; it must not name this server's owner.
+  if [ -z "$LAUNCHER_ID" ]; then
+    rm -f "$STATE_DIR/launcher"
+  fi
+  if ! wait_ready "@@HANZO_READY_TIMEOUT_MS@@"; then
+    printf 'Remote Hanzo server did not become ready on 127.0.0.1:%s.\\n' "$REMOTE_PORT" >&2
+    if [ -s "$LOG_FILE" ]; then
+      tail -n 80 "$LOG_FILE" >&2 2>/dev/null || true
+    else
+      printf 'It wrote nothing to %s, so it exited before producing any output.\\n' "$LOG_FILE" >&2
+    fi
+    kill "$REMOTE_PID" 2>/dev/null || true
+    wait_for_pid_exit "$REMOTE_PID"
+    rm -f "$PID_FILE" "$PORT_FILE" "$MANAGED_FILE"
+    exit 1
+  fi
+  # Keep the lock until another alias's launch can find this server, or it
+  # would start a second one that loses the home's owner lock.
+  RECORD_DEADLINE=$(($(date +%s) + @@HANZO_RUNTIME_RECORD_WAIT_SECONDS@@))
+  while [ "$(date +%s)" -lt "$RECORD_DEADLINE" ]; do
+    DEFAULT_RUNTIME_INFO="$(resolve_default_runtime_port 2>/dev/null || true)"
+    [ "\${DEFAULT_RUNTIME_INFO%% *}" = "$REMOTE_PID" ] && break
+    # A host wrapper can spawn the server instead of replacing itself.
+    RUNTIME_PID="\${DEFAULT_RUNTIME_INFO%% *}"
+    if [ "\${DEFAULT_RUNTIME_INFO#* }" = "$REMOTE_PORT" ] && managed_server_running "$RUNTIME_PID"; then
+      RUNTIME_ANCESTOR="$RUNTIME_PID"
+      while [ -n "$RUNTIME_ANCESTOR" ] && [ "$RUNTIME_ANCESTOR" != "1" ] && [ "$RUNTIME_ANCESTOR" != "$REMOTE_PID" ]; do
+        RUNTIME_ANCESTOR="$(ps -o ppid= -p "$RUNTIME_ANCESTOR" 2>/dev/null | tr -d '[:space:]')"
+      done
+      if [ "$RUNTIME_ANCESTOR" = "$REMOTE_PID" ]; then
+        REMOTE_PID="$RUNTIME_PID"
+        printf '%s\\n' "$REMOTE_PID" >"$PID_FILE"
+        break
+      fi
+    fi
+    sleep 0.1
+  done
+fi
+printf '{"remotePort":%s,"serverKind":"%s"}\\n' "$REMOTE_PORT" "\${REMOTE_MANAGED:-managed}"
+`;
+
+const REMOTE_PAIRING_SCRIPT = `set -eu
+STATE_DIR="$HOME/.hanzo-dev/ssh-launch/@@HANZO_STATE_KEY@@"
+DEFAULT_SERVER_HOME="$HOME/.hanzo-dev"
+RUNNER_FILE="$STATE_DIR/run-hanzo.sh"
+mkdir -p "$STATE_DIR"
+cat >"$RUNNER_FILE" <<'SH'
+@@HANZO_RUNNER_SCRIPT@@
+SH
+chmod 700 "$RUNNER_FILE"
+PAIRING_BASE_DIR="$DEFAULT_SERVER_HOME"
+"$RUNNER_FILE" auth pairing create --base-dir "$PAIRING_BASE_DIR" --json
+`;
+
+const REMOTE_STOP_SCRIPT = `set -eu
+STATE_DIR="$HOME/.hanzo-dev/ssh-launch/@@HANZO_STATE_KEY@@"
+PID_FILE="$STATE_DIR/pid"
+PORT_FILE="$STATE_DIR/port"
+MANAGED_FILE="$STATE_DIR/managed"
+REMOTE_MANAGED="$(cat "$MANAGED_FILE" 2>/dev/null || true)"
+REMOTE_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
+@@HANZO_MANAGED_SERVER_RUNNING_SCRIPT@@
+if [ "$REMOTE_MANAGED" != "external" ] && managed_server_running "$REMOTE_PID"; then
+  kill "$REMOTE_PID" 2>/dev/null || true
+  WAIT_COUNT=0
+  while kill -0 "$REMOTE_PID" 2>/dev/null && [ "$WAIT_COUNT" -lt 20 ]; do
+    WAIT_COUNT=$((WAIT_COUNT + 1))
+    sleep 0.1
+  done
+  if kill -0 "$REMOTE_PID" 2>/dev/null; then
+    printf 'Remote Hanzo server with PID %s did not stop within 2 seconds. Its ownership files were kept.\\n' "$REMOTE_PID" >&2
+    exit 1
+  fi
+fi
+rm -f "$PID_FILE" "$PORT_FILE" "$MANAGED_FILE"
+printf '{"stopped":true}\\n'
+`;
+
+const REMOTE_LOG_TAIL_SCRIPT = `set -eu
+STATE_DIR="$HOME/.hanzo-dev/ssh-launch/@@HANZO_STATE_KEY@@"
+LOG_FILE="$STATE_DIR/server.log"
+if [ -f "$LOG_FILE" ]; then
+  tail -n 80 "$LOG_FILE" 2>/dev/null || true
+fi
+`;
+
+export class SshInvalidArchiveVersionError extends Schema.TaggedError<SshInvalidArchiveVersionError>()(
+  "SshInvalidArchiveVersionError",
+  { archiveVersion: Schema.String },
+) {
+  override get message(): string {
+    return `'${this.archiveVersion}' is not an exact hanzo version and cannot name a runtime directory.`;
+  }
+}
+
+// The version becomes a directory name the runner removes and recreates, so
+// it must be one exact SemVer segment: no separators, no `..`, no shell
+// metacharacters beyond what SemVer allows.
+const EXACT_ARCHIVE_VERSION =
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
+
+export class SshMissingRunnerError extends Schema.TaggedError<SshMissingRunnerError>()(
+  "SshMissingRunnerError",
+  {},
+) {
+  override get message(): string {
+    return "A remote hanzo runner needs an archive version or a node script path.";
+  }
+}
+
+export function buildRemoteHanzoRunnerScript(input?: RemoteHanzoRunnerOptions): string {
+  const nodeScriptPath = input?.nodeScriptPath?.trim() || "";
+  const archiveVersion = input?.archiveVersion?.trim() || "";
+  if (nodeScriptPath === "" && archiveVersion === "") {
+    throw new SshMissingRunnerError();
+  }
+  if (archiveVersion !== "" && !EXACT_ARCHIVE_VERSION.test(archiveVersion)) {
+    throw new SshInvalidArchiveVersionError({ archiveVersion });
+  }
+  const releaseBaseUrl = cliReleaseDownloadBaseUrl("", input?.releaseBaseUrl ?? undefined).replace(
+    /\/v$/u,
+    "",
+  );
+  return stripTrailingNewlines(
+    applyScriptPlaceholders(REMOTE_RUNNER_SCRIPT, {
+      HANZO_NODE_SCRIPT_PATH: shellSingleQuote(nodeScriptPath),
+      HANZO_ARCHIVE_VERSION: shellSingleQuote(archiveVersion),
+      HANZO_RELEASE_BASE_URL: shellSingleQuote(releaseBaseUrl),
+      HANZO_ARCHIVE_LOCK_WAIT_SECONDS: String(REMOTE_ARCHIVE_LOCK_WAIT_SECONDS),
+      HANZO_ARCHIVE_DOWNLOAD_SECONDS: String(REMOTE_ARCHIVE_DOWNLOAD_SECONDS),
+      HANZO_ARCHIVE_CHECKSUMS_SECONDS: String(REMOTE_ARCHIVE_CHECKSUMS_SECONDS),
+      HANZO_NODE_ENV_SCRIPT: buildRemoteNodeEnvScript(input),
+    }),
+  );
+}
+
+export function buildRemoteNodeEnvScript(input?: RemoteHanzoRunnerOptions): string {
+  return stripTrailingNewlines(
+    applyScriptPlaceholders(REMOTE_NODE_ENV_SCRIPT, {
+      HANZO_NODE_ENGINE_RANGE: shellSingleQuote(input?.nodeEngineRange?.trim() || ""),
+      HANZO_NODE_ENGINE_CHECK_SCRIPT: stripTrailingNewlines(buildRemoteNodeEngineCheckScript()),
+    }),
+  );
+}
+
+export function buildRemoteLaunchScript(input?: RemoteHanzoRunnerOptions): string {
+  return applyScriptPlaceholders(REMOTE_LAUNCH_SCRIPT, {
+    HANZO_UPDATE_MARKER_FILE: DESKTOP_UPDATE_IN_PROGRESS_MARKER_FILE,
+    HANZO_UPDATE_TTL_MS: String(DESKTOP_UPDATE_IN_PROGRESS_TTL_MS),
+    HANZO_UPDATE_TTL_SECONDS: String(DESKTOP_UPDATE_IN_PROGRESS_TTL_MS / 1000),
+    HANZO_ARCHIVE_MODE: isNodeScriptRunner(input) ? "0" : "1",
+    HANZO_NODE_ENV_SCRIPT: buildRemoteNodeEnvScript(input),
+    HANZO_RUNNER_SCRIPT: stripTrailingNewlines(buildRemoteHanzoRunnerScript(input)),
+    HANZO_PICK_PORT_SCRIPT: stripTrailingNewlines(REMOTE_PICK_PORT_SCRIPT),
+    HANZO_WAIT_READY_SCRIPT: stripTrailingNewlines(REMOTE_WAIT_READY_SCRIPT),
+    HANZO_MANAGED_SERVER_RUNNING_SCRIPT: REMOTE_MANAGED_SERVER_RUNNING_SCRIPT,
+    HANZO_DEFAULT_REMOTE_PORT: String(DEFAULT_REMOTE_PORT),
+    HANZO_REMOTE_PORT_SCAN_WINDOW: String(REMOTE_PORT_SCAN_WINDOW),
+    HANZO_READY_TIMEOUT_MS: String(REMOTE_READY_TIMEOUT_MS),
+    HANZO_READY_TIMEOUT_SECONDS: String(REMOTE_READY_TIMEOUT_MS / 1000),
+    HANZO_REUSE_READY_TIMEOUT_MS: String(REMOTE_REUSE_READY_TIMEOUT_MS),
+    HANZO_READY_PROBE_TIMEOUT_MS: String(SSH_READY_PROBE_TIMEOUT_MS),
+    HANZO_PID_EXIT_WAIT_TICKS: String(REMOTE_PID_EXIT_WAIT_MS / 100),
+    HANZO_LAUNCH_LOCK_WAIT_SECONDS: String(REMOTE_LAUNCH_LOCK_WAIT_SECONDS),
+    HANZO_RUNTIME_RECORD_WAIT_SECONDS: String(REMOTE_RUNTIME_RECORD_WAIT_SECONDS),
+  });
+}
+
+function buildRemotePairingScript(stateKey: string, input?: RemoteHanzoRunnerOptions): string {
+  return applyScriptPlaceholders(REMOTE_PAIRING_SCRIPT, {
+    HANZO_STATE_KEY: stateKey,
+    HANZO_RUNNER_SCRIPT: stripTrailingNewlines(buildRemoteHanzoRunnerScript(input)),
+  });
+}
+
+function buildRemoteStopScript(stateKey: string): string {
+  return applyScriptPlaceholders(REMOTE_STOP_SCRIPT, {
+    HANZO_STATE_KEY: stateKey,
+    HANZO_MANAGED_SERVER_RUNNING_SCRIPT: REMOTE_MANAGED_SERVER_RUNNING_SCRIPT,
+  });
+}
+
+function buildRemoteLogTailScript(stateKey: string): string {
+  return applyScriptPlaceholders(REMOTE_LOG_TAIL_SCRIPT, {
+    HANZO_STATE_KEY: stateKey,
+  });
+}
+
+// Shells known to take `-l -c` with a POSIX-style `exec` read their own login
+// profiles first; any other shell (csh, pwsh, ...) keeps the plain `sh -l` launch.
+const remoteLoginShellArgs = (args = "") => [
+  "sh",
+  "-c",
+  shellSingleQuote(
+    `case "\${SHELL##*/}" in bash|zsh|ksh|fish|nu) exec "$SHELL" -l -c "exec sh -s${args ? ` -- ${args}` : ""}" ;; *) exec sh -l -s${args ? ` -- ${args}` : ""} ;; esac`,
+  ),
+];
+
+export const launchOrReuseRemoteServer = Effect.fn("ssh/tunnel.launchOrReuseRemoteServer")(
+  function* (
+    target: DesktopSshEnvironmentTarget,
+    input?: SshAuth.SshAuthOptions,
+    runner?: RemoteHanzoRunnerOptions,
+    launcherId?: string | null,
+  ): Effect.fn.Return<
+    { readonly remotePort: number; readonly remoteServerKind: "external" | "managed" | null },
+    SshCommandError | SshInvalidTargetError | SshLaunchError,
+    ChildProcessSpawner.ChildProcessSpawner | Digest.Digest | FileSystem.FileSystem | Path.Path
+  > {
+    const stateKey = yield* remoteStateKey(target);
+    // The launcher ID is interpolated into the remote shell command, so only hex passes.
+    const launchArgs =
+      typeof launcherId === "string" && /^[0-9a-f]{32}$/u.test(launcherId)
+        ? `${stateKey} ${launcherId}`
+        : stateKey;
+    yield* Effect.logInfo("ssh.remoteServer.launch.start", {
+      ...sshTargetLogFields(target),
+      ...sshRunnerLogFields(runner),
+      stateKey,
+    });
+    const result = yield* runSshCommand(target, {
+      remoteCommandArgs: remoteLoginShellArgs(launchArgs),
+      stdin: buildRemoteLaunchScript(runner),
+      timeoutMs: isNodeScriptRunner(runner)
+        ? REMOTE_LAUNCH_TIMEOUT_MS
+        : REMOTE_ARCHIVE_LAUNCH_TIMEOUT_MS,
+      ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
+      ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
+      ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
+    });
+    if (!getLastNonEmptyOutputLine(result.stdout)) {
+      return yield* new SshLaunchError({
+        message: "SSH launch did not return a remote port.",
+        stdout: result.stdout,
+      });
+    }
+    const parsed = yield* decodeRemoteLaunchOutput(result.stdout).pipe(
+      Effect.mapError(
+        (cause) =>
+          new SshLaunchError({
+            message: "SSH launch returned unparseable output.",
+            stdout: result.stdout,
+            cause,
+          }),
+      ),
+    );
+    if (!Number.isInteger(parsed.remotePort)) {
+      return yield* new SshLaunchError({
+        message: `SSH launch returned an invalid remote port: ${String(parsed.remotePort)}.`,
+        stdout: result.stdout,
+      });
+    }
+    yield* Effect.logInfo("ssh.remoteServer.launch.ready", {
+      ...sshTargetLogFields(target),
+      remotePort: parsed.remotePort,
+      remoteServerKind: parsed.serverKind ?? null,
+      stateKey,
+    });
+    return {
+      remotePort: parsed.remotePort,
+      remoteServerKind: parsed.serverKind ?? null,
+    };
+  },
+);
+
+export const issueRemotePairingToken = Effect.fn("ssh/tunnel.issueRemotePairingToken")(function* (
+  target: DesktopSshEnvironmentTarget,
+  input?: SshAuth.SshAuthOptions,
+  runner?: RemoteHanzoRunnerOptions,
+): Effect.fn.Return<
+  {
+    readonly credential: string;
+  },
+  SshCommandError | SshInvalidTargetError | SshPairingError,
+  ChildProcessSpawner.ChildProcessSpawner | Digest.Digest | FileSystem.FileSystem | Path.Path
+> {
+  const stateKey = yield* remoteStateKey(target);
+  yield* Effect.logDebug("ssh.remoteServer.pairingToken.start", {
+    ...sshTargetLogFields(target),
+    stateKey,
+  });
+  const result = yield* runSshCommand(target, {
+    remoteCommandArgs: remoteLoginShellArgs(),
+    stdin: buildRemotePairingScript(stateKey, runner),
+    ...(isNodeScriptRunner(runner) ? {} : { timeoutMs: REMOTE_ARCHIVE_LAUNCH_TIMEOUT_MS }),
+    ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
+    ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
+    ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
+  });
+  if (!getLastNonEmptyOutputLine(result.stdout)) {
+    return yield* new SshPairingError({
+      message: "SSH pairing did not return a credential.",
+      stdout: result.stdout,
+    });
+  }
+  const parsed = yield* decodeRemotePairingOutput(result.stdout).pipe(
+    Effect.mapError(
+      (cause) =>
+        new SshPairingError({
+          message: "SSH pairing returned unparseable output.",
+          stdout: result.stdout,
+          cause,
+        }),
+    ),
+  );
+  if (parsed.credential.trim().length === 0) {
+    return yield* new SshPairingError({
+      message: "SSH pairing command returned an invalid credential.",
+      stdout: result.stdout,
+    });
+  }
+  yield* Effect.logDebug("ssh.remoteServer.pairingToken.created", {
+    ...sshTargetLogFields(target),
+    stateKey,
+  });
+  return {
+    credential: parsed.credential,
+  };
+});
+
+const stopRemoteServer = Effect.fn("ssh/tunnel.stopRemoteServer")(function* (
+  target: DesktopSshEnvironmentTarget,
+  input?: SshAuth.SshAuthOptions,
+): Effect.fn.Return<
+  void,
+  SshCommandError | SshInvalidTargetError,
+  ChildProcessSpawner.ChildProcessSpawner | Digest.Digest | FileSystem.FileSystem | Path.Path
+> {
+  const stateKey = yield* remoteStateKey(target);
+  yield* Effect.logInfo("ssh.remoteServer.stop.start", {
+    ...sshTargetLogFields(target),
+    stateKey,
+  });
+  yield* runSshCommand(target, {
+    remoteCommandArgs: ["sh", "-s"],
+    stdin: buildRemoteStopScript(stateKey),
+    ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
+    ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
+    ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
+  });
+  yield* Effect.logInfo("ssh.remoteServer.stop.succeeded", {
+    ...sshTargetLogFields(target),
+    stateKey,
+  });
+});
+
+const readRemoteServerLogTail = Effect.fn("ssh/tunnel.readRemoteServerLogTail")(function* (
+  target: DesktopSshEnvironmentTarget,
+  input?: SshAuth.SshAuthOptions,
+): Effect.fn.Return<
+  string,
+  SshCommandError | SshInvalidTargetError,
+  ChildProcessSpawner.ChildProcessSpawner | Digest.Digest | FileSystem.FileSystem | Path.Path
+> {
+  const result = yield* runSshCommand(target, {
+    remoteCommandArgs: ["sh", "-s"],
+    stdin: buildRemoteLogTailScript(yield* remoteStateKey(target)),
+    timeoutMs: 10_000,
+    ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
+    ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
+    ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
+  });
+  return result.stdout.trim();
+});
+
+const waitForHttpReady = (input: {
+  readonly baseUrl: string;
+  readonly timeoutMs?: number;
+  readonly intervalMs?: number;
+  readonly probeTimeoutMs?: number;
+  readonly path?: string;
+}): Effect.Effect<void, SshReadinessError, HttpClient.HttpClient> =>
+  waitForHttpReadyShared({
+    baseUrl: input.baseUrl,
+    ...(input.path === undefined ? {} : { path: input.path }),
+    ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+    ...(input.intervalMs === undefined ? {} : { intervalMs: input.intervalMs }),
+    probeTimeoutMs: input.probeTimeoutMs ?? SSH_TUNNEL_READY_PROBE_TIMEOUT_MS,
+    makeError: ({ requestUrl, probeTimeoutMs, cause }) => {
+      if (typeof cause === "object" && cause !== null && "kind" in cause) {
+        const kind = (cause as { readonly kind?: unknown }).kind;
+        if (kind === "probe-timeout") {
+          return new SshReadinessError({
+            message: `Backend readiness probe exceeded ${probeTimeoutMs}ms at ${requestUrl}.`,
+            cause,
+          });
+        }
+        if (kind === "overall-timeout") {
+          const overall = cause as unknown as {
+            readonly baseUrl: string;
+            readonly timeoutMs: number;
+            readonly lastFailure: unknown;
+          };
+          return new SshReadinessError({
+            message: `Timed out waiting ${overall.timeoutMs}ms for backend readiness at ${overall.baseUrl}.`,
+            cause: overall.lastFailure,
+          });
+        }
+      }
+      return new SshReadinessError({
+        message: `Backend readiness probe failed at ${requestUrl}.`,
+        cause,
+      });
+    },
+  });
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname
+    .trim()
+    .toLowerCase()
+    .replace(/^\[(.*)\]$/, "$1");
+  return normalized === "127.0.0.1" || normalized === "::1" || normalized === "localhost";
+}
+
+export const resolveLoopbackSshHttpBaseUrl = Effect.fn("ssh/tunnel.resolveLoopbackSshHttpBaseUrl")(
+  function* (rawHttpBaseUrl: unknown): Effect.fn.Return<string, SshHttpBridgeError> {
+    return yield* Effect.try({
+      try: () => {
+        if (typeof rawHttpBaseUrl !== "string" || rawHttpBaseUrl.trim().length === 0) {
+          throw new Error("Invalid SSH forwarded http base URL.");
+        }
+        const baseUrl = new URL(rawHttpBaseUrl);
+        if (!isLoopbackHostname(baseUrl.hostname)) {
+          throw new Error("SSH desktop bridge only supports loopback forwarded URLs.");
+        }
+        return baseUrl.toString();
+      },
+      catch: (cause) =>
+        new SshHttpBridgeError({
+          message: cause instanceof Error ? cause.message : "Invalid SSH forwarded http base URL.",
+          cause,
+        }),
+    });
+  },
+);
+
+const reserveLocalTunnelPort = Effect.fn("ssh/tunnel.reserveLocalTunnelPort")(function* () {
+  const net = yield* NetService.NetService;
+  return yield* net.reserveLoopbackPort();
+});
+
+// ssh only binds the forward after it connects, which can take ConnectTimeout per dead address.
+const waitForTunnelForward = Effect.fn("ssh/tunnel.waitForTunnelForward")(function* (input: {
+  readonly target: DesktopSshEnvironmentTarget;
+  readonly localPort: number;
+}) {
+  const net = yield* NetService.NetService;
+  yield* net.hasListenerOnHost(input.localPort, "127.0.0.1").pipe(
+    Effect.repeat({
+      schedule: Schedule.spaced(Duration.millis(SSH_TUNNEL_FORWARD_PROBE_INTERVAL_MS)),
+      until: (listening) => listening,
+    }),
+    Effect.timeoutOrElse({
+      duration: Duration.millis(SSH_TUNNEL_CONNECT_TIMEOUT_MS),
+      orElse: () =>
+        Effect.fail(
+          new SshReadinessError({
+            message: `SSH connection to ${input.target.alias} did not come up within ${SSH_TUNNEL_CONNECT_TIMEOUT_MS}ms.`,
+          }),
+        ),
+    }),
+  );
+});
+
+const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: {
+  readonly key: string;
+  readonly resolvedTarget: DesktopSshEnvironmentTarget;
+  readonly remotePort: number;
+  readonly localPort: number;
+  readonly httpBaseUrl: string;
+  readonly wsBaseUrl: string;
+  readonly authOptions: SshAuth.SshAuthOptions;
+  readonly remoteServerKind: "external" | "managed" | null;
+  readonly scope: Scope.Closeable;
+}): Effect.fn.Return<
+  SshTunnelEntry,
+  SshCommandError | SshInvalidTargetError | SshReadinessError,
+  | ChildProcessSpawner.ChildProcessSpawner
+  | Digest.Digest
+  | FileSystem.FileSystem
+  | Path.Path
+  | HttpClient.HttpClient
+  | NetService.NetService
+> {
+  const hostSpec = yield* buildSshHostSpecEffect(input.resolvedTarget);
+  const childEnvironment = yield* SshAuth.buildSshChildEnvironment({
+    ...(input.authOptions.authSecret === undefined
+      ? {}
+      : { authSecret: input.authOptions.authSecret }),
+    ...(input.authOptions.interactiveAuth === undefined
+      ? {}
+      : { interactiveAuth: input.authOptions.interactiveAuth }),
+  }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new SshCommandError({
+          command: ["ssh"],
+          exitCode: null,
+          stderr: "",
+          message: "Failed to prepare SSH authentication helpers.",
+          cause,
+        }),
+    ),
+  );
+  const args = [
+    ...baseSshArgs(input.resolvedTarget, {
+      batchMode: input.authOptions.batchMode ?? "no",
+    }),
+    "-o",
+    "ExitOnForwardFailure=yes",
+    "-o",
+    "ControlMaster=no",
+    "-o",
+    "ControlPath=none",
+    "-o",
+    "ControlPersist=no",
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=3",
+    "-n",
+    "-N",
+    "-L",
+    `${input.localPort}:127.0.0.1:${input.remotePort}`,
+    "--",
+    hostSpec,
+  ];
+  const sshCommand = yield* resolveSshCommand;
+  const tunnelCommand = [sshCommand, ...args];
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const { scope } = input;
+  yield* Effect.logDebug("ssh.tunnel.spawn.start", {
+    ...sshTargetLogFields(input.resolvedTarget),
+    command: tunnelCommand,
+    localPort: input.localPort,
+    remotePort: input.remotePort,
+    remoteServerKind: input.remoteServerKind,
+    httpBaseUrl: input.httpBaseUrl,
+  });
+  const child = yield* spawner
+    .spawn(
+      ChildProcess.make(sshCommand, args, {
+        env: childEnvironment,
+        extendEnv: true,
+        stdin: {
+          stream: Stream.empty,
+          endOnDone: true,
+        },
+      }),
+    )
+    .pipe(
+      Effect.provideService(Scope.Scope, scope),
+      Effect.mapError(
+        (cause) =>
+          new SshCommandError({
+            command: tunnelCommand,
+            exitCode: null,
+            stderr: "",
+            message:
+              cause instanceof Error
+                ? cause.message
+                : `Failed to spawn SSH tunnel for ${input.resolvedTarget.alias}.`,
+            cause,
+          }),
+      ),
+    );
+  yield* Effect.logDebug("ssh.tunnel.spawn.succeeded", {
+    ...sshTargetLogFields(input.resolvedTarget),
+    command: tunnelCommand,
+    pid: child.pid,
+    localPort: input.localPort,
+    remotePort: input.remotePort,
+    httpBaseUrl: input.httpBaseUrl,
+  });
+  const tunnelEntry: SshTunnelEntry = {
+    key: input.key,
+    target: input.resolvedTarget,
+    remotePort: input.remotePort,
+    remoteServerKind: input.remoteServerKind,
+    localPort: input.localPort,
+    httpBaseUrl: input.httpBaseUrl,
+    wsBaseUrl: input.wsBaseUrl,
+    process: child,
+    scope,
+  };
+  // Readiness cancels the exit waiter, but diagnostics must drain until the tunnel closes.
+  let stderrTail = "";
+  const stderrDrain = yield* child.stderr.pipe(
+    Stream.decodeText(),
+    Stream.runForEach((chunk) =>
+      Effect.sync(() => {
+        stderrTail = (stderrTail + chunk).slice(-TUNNEL_STDERR_TAIL_CHARS);
+      }),
+    ),
+    // Diagnostics are best-effort: a failed read must not hide the real exit.
+    Effect.ignore,
+    Effect.forkIn(scope),
+  );
+  const exitFailure = Effect.all(
+    [Fiber.join(stderrDrain), child.exitCode.pipe(Effect.map(Number))],
+    { concurrency: "unbounded" },
+  ).pipe(
+    Effect.mapError(
+      (cause) =>
+        new SshCommandError({
+          command: tunnelCommand,
+          exitCode: null,
+          stderr: "",
+          message:
+            cause instanceof Error
+              ? cause.message
+              : `Failed to monitor SSH tunnel for ${input.resolvedTarget.alias}.`,
+          cause,
+        }),
+    ),
+    Effect.flatMap(([, exitCode]) => {
+      const stderr = stderrTail;
+      const error = new SshCommandError({
+        command: tunnelCommand,
+        exitCode,
+        stderr,
+        message: normalizeSshErrorMessage(
+          stderr,
+          `SSH tunnel exited unexpectedly for ${input.resolvedTarget.alias} (exit ${exitCode}).`,
+        ),
+      });
+      return Effect.logWarning("ssh.tunnel.process.exited", {
+        ...sshTargetLogFields(input.resolvedTarget),
+        command: tunnelCommand,
+        pid: child.pid,
+        localPort: input.localPort,
+        remotePort: input.remotePort,
+        httpBaseUrl: input.httpBaseUrl,
+        exitCode,
+        stderr,
+      }).pipe(Effect.andThen(Effect.fail(error)));
+    }),
+  );
+  yield* Effect.raceFirst(
+    waitForTunnelForward({ target: input.resolvedTarget, localPort: input.localPort }).pipe(
+      Effect.andThen(
+        waitForHttpReady({
+          baseUrl: input.httpBaseUrl,
+          timeoutMs: SSH_READY_TIMEOUT_MS,
+        }),
+      ),
+    ),
+    exitFailure,
+  ).pipe(
+    Effect.tap(() =>
+      Effect.logInfo("ssh.tunnel.ready", {
+        ...sshTargetLogFields(input.resolvedTarget),
+        command: tunnelCommand,
+        pid: child.pid,
+        localPort: input.localPort,
+        remotePort: input.remotePort,
+        httpBaseUrl: input.httpBaseUrl,
+      }),
+    ),
+    Effect.tapError((cause) =>
+      Effect.gen(function* () {
+        const net = yield* NetService.NetService;
+        const processRunningExit = yield* Effect.exit(child.isRunning);
+        const localPortAvailableExit = yield* Effect.exit(
+          net.canListenOnHost(input.localPort, "127.0.0.1"),
+        );
+        const remoteLogTailExit = yield* Effect.exit(
+          readRemoteServerLogTail(input.resolvedTarget, input.authOptions),
+        );
+        const processRunning = Exit.isSuccess(processRunningExit) ? processRunningExit.value : null;
+        const localPortAvailable = Exit.isSuccess(localPortAvailableExit)
+          ? localPortAvailableExit.value
+          : null;
+        const remoteLogTail = Exit.isSuccess(remoteLogTailExit)
+          ? remoteLogTailExit.value || null
+          : null;
+        yield* Effect.logWarning("ssh.tunnel.ready.failed", {
+          ...sshTargetLogFields(input.resolvedTarget),
+          command: tunnelCommand,
+          pid: child.pid,
+          processRunning,
+          ...(Exit.isSuccess(processRunningExit)
+            ? {}
+            : { processRunningError: processRunningExit.cause }),
+          localPort: input.localPort,
+          localPortListening: localPortAvailable === null ? null : !localPortAvailable,
+          remotePort: input.remotePort,
+          httpBaseUrl: input.httpBaseUrl,
+          ...(Exit.isSuccess(localPortAvailableExit)
+            ? {}
+            : { localPortProbeError: localPortAvailableExit.cause }),
+          ...(remoteLogTail === null ? {} : { remoteLogTail }),
+          ...(Exit.isSuccess(remoteLogTailExit)
+            ? {}
+            : { remoteLogTailError: remoteLogTailExit.cause }),
+          cause,
+        });
+      }),
+    ),
+    Effect.onExit((exit) =>
+      Exit.isSuccess(exit)
+        ? Effect.void
+        : child
+            .kill({
+              killSignal: "SIGTERM",
+              forceKillAfter: TUNNEL_SHUTDOWN_TIMEOUT_MS,
+            })
+            .pipe(Effect.ignore),
+    ),
+  );
+  return tunnelEntry;
+});
+
+const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.make")(function* (
+  options: SshEnvironmentManagerOptions = {},
+): Effect.fn.Return<SshEnvironmentManagerShape, never, Scope.Scope> {
+  const managerScope = yield* Scope.Scope;
+  const tunnels = new Map<string, SshTunnelEntry>();
+  const targetLocks = yield* KeyedLock.make<string>();
+  const authSecrets = new Map<string, string>();
+
+  // Keep one lock per target so reconnect cannot reuse a server while stop is pending.
+  const withTargetLock = Effect.fn("ssh/tunnel.withTargetLock")(function* <A, E, R>(
+    key: string,
+    effect: Effect.Effect<A, E, R>,
+  ): Effect.fn.Return<A, E, R> {
+    return yield* targetLocks.withLock(key, effect);
+  });
+
+  const closeTunnelEntry = Effect.fn("ssh/tunnel.closeTunnelEntry")(function* (
+    entry: SshTunnelEntry,
+  ) {
+    yield* Effect.logDebug("ssh.tunnel.close.start", {
+      ...sshTargetLogFields(entry.target),
+      key: entry.key,
+      localPort: entry.localPort,
+      remotePort: entry.remotePort,
+    });
+    yield* Scope.close(entry.scope, Exit.void).pipe(Effect.ignore);
+    yield* Effect.logInfo("ssh.tunnel.close.succeeded", {
+      ...sshTargetLogFields(entry.target),
+      key: entry.key,
+      localPort: entry.localPort,
+      remotePort: entry.remotePort,
+    });
+  });
+
+  const closeAllTunnels = Effect.sync(() => [...tunnels.values()]).pipe(
+    Effect.flatMap((entries) =>
+      Effect.forEach(entries, closeTunnelEntry, { concurrency: "unbounded" }),
+    ),
+    Effect.ignore,
+  );
+
+  yield* Scope.addFinalizer(managerScope, closeAllTunnels);
+
+  const promptForPassword = Effect.fn("ssh/tunnel.promptForPassword")(function* (
+    target: DesktopSshEnvironmentTarget,
+    attempt: number,
+  ): Effect.fn.Return<
+    string,
+    SshInvalidTargetError | SshPasswordPromptError,
+    SshAuth.SshPasswordPrompt
+  > {
+    const promptService = yield* SshAuth.SshPasswordPrompt;
+    const hostSpec = yield* buildSshHostSpecEffect(target);
+    if (!promptService.isAvailable) {
+      yield* Effect.logWarning("ssh.auth.passwordPrompt.unavailable", {
+        ...sshTargetLogFields(target),
+        attempt,
+      });
+      return yield* new SshPasswordPromptError({
+        message: `SSH authentication failed for ${hostSpec}.`,
+      });
+    }
+
+    yield* Effect.logInfo("ssh.auth.passwordPrompt.request", {
+      ...sshTargetLogFields(target),
+      attempt,
+    });
+    const password = yield* promptService.request({
+      attempt,
+      destination: target.alias.trim() || target.hostname.trim(),
+      username: target.username,
+      prompt: `Enter the SSH password or verification code for ${hostSpec}.`,
+    });
+    if (password === null) {
+      yield* Effect.logWarning("ssh.auth.passwordPrompt.cancelled", {
+        ...sshTargetLogFields(target),
+        attempt,
+      });
+      return yield* new SshPasswordPromptError({
+        message: `SSH authentication cancelled for ${hostSpec}.`,
+      });
+    }
+    yield* Effect.logInfo("ssh.auth.passwordPrompt.received", {
+      ...sshTargetLogFields(target),
+      attempt,
+    });
+    return password;
+  });
+
+  const handleSshAuthFailure = Effect.fn("ssh/tunnel.runWithSshAuthAttempt.handleFailure")(
+    function* <T>(
+      input: SshAuthAttemptInput<T> & {
+        readonly error: SshEnvironmentEffectError;
+      },
+    ): Effect.fn.Return<T, SshEnvironmentEffectError, SshEnvironmentEffectContext> {
+      if (!SshAuth.isSshAuthFailure(input.error)) {
+        return yield* input.error;
+      }
+
+      yield* Effect.logWarning("ssh.auth.failed", {
+        ...sshTargetLogFields(input.target),
+        key: input.key,
+        promptCount: input.promptCount,
+        cause: input.error,
+      });
+      const promptService = yield* SshAuth.SshPasswordPrompt;
+      if (!promptService.isAvailable) {
+        return yield* input.error;
+      }
+      if (input.authSecret !== null) {
+        authSecrets.delete(input.key);
+      }
+      if (input.promptCount >= 2 || SshAuth.isSshAgentSigningFailure(input.error)) {
+        return yield* input.error;
+      }
+
+      const nextPromptCount = input.promptCount + 1;
+      const nextAuthSecret = yield* promptForPassword(input.target, nextPromptCount);
+      authSecrets.set(input.key, nextAuthSecret);
+      return yield* runWithSshAuthAttempt({
+        ...input,
+        promptCount: nextPromptCount,
+        authSecret: nextAuthSecret,
+      });
+    },
+  );
+
+  const runWithSshAuthAttempt = Effect.fn("ssh/tunnel.runWithSshAuthAttempt")(function* <T>(
+    input: SshAuthAttemptInput<T>,
+  ): Effect.fn.Return<T, SshEnvironmentEffectError, SshEnvironmentEffectContext> {
+    const promptService = yield* SshAuth.SshPasswordPrompt;
+    const authOptions =
+      input.authSecret === null
+        ? {
+            batchMode: promptService.isAvailable ? ("yes" as const) : ("no" as const),
+            interactiveAuth: !promptService.isAvailable,
+          }
+        : {
+            authSecret: input.authSecret,
+            batchMode: "no" as const,
+            interactiveAuth: true,
+          };
+
+    return yield* input
+      .operation(authOptions)
+      .pipe(Effect.catch((error) => handleSshAuthFailure({ ...input, error })));
+  });
+
+  const runWithSshAuth = Effect.fn("ssh/tunnel.runWithSshAuth")(function* <T>(
+    input: SshAuthOperationInput<T>,
+  ): Effect.fn.Return<T, SshEnvironmentEffectError, SshEnvironmentEffectContext> {
+    return yield* runWithSshAuthAttempt({
+      ...input,
+      promptCount: 0,
+      authSecret: authSecrets.get(input.key) ?? null,
+    });
+  });
+
+  const createTunnelEntry = Effect.fn("ssh/tunnel.ensureTunnelEntry.create")(function* (input: {
+    readonly key: string;
+    readonly resolvedTarget: DesktopSshEnvironmentTarget;
+    readonly runner?: RemoteHanzoRunnerOptions;
+  }): Effect.fn.Return<SshTunnelEntry, SshEnvironmentEffectError, SshEnvironmentEffectContext> {
+    yield* Effect.logDebug("ssh.environment.tunnel.create.start", {
+      ...sshTargetLogFields(input.resolvedTarget),
+      ...sshRunnerLogFields(input.runner),
+      key: input.key,
+    });
+    const launcherId =
+      options.resolveLauncherId === undefined ? null : yield* options.resolveLauncherId;
+    const remoteLaunch = yield* runWithSshAuth({
+      key: input.key,
+      target: input.resolvedTarget,
+      operation: (authOptions) =>
+        launchOrReuseRemoteServer(input.resolvedTarget, authOptions, input.runner, launcherId),
+    });
+    const remotePort = remoteLaunch.remotePort;
+    yield* Effect.logDebug("ssh.environment.remotePort.ready", {
+      ...sshTargetLogFields(input.resolvedTarget),
+      key: input.key,
+      remotePort,
+      remoteServerKind: remoteLaunch.remoteServerKind,
+    });
+    const localPort = yield* reserveLocalTunnelPort();
+    const httpBaseUrl = `http://127.0.0.1:${localPort}/`;
+    const wsBaseUrl = `ws://127.0.0.1:${localPort}/`;
+    yield* Effect.logDebug("ssh.environment.localPort.reserved", {
+      ...sshTargetLogFields(input.resolvedTarget),
+      key: input.key,
+      localPort,
+      remotePort,
+    });
+    const entryScope = yield* Scope.make("sequential");
+    const tunnelEntry = yield* runWithSshAuth({
+      key: input.key,
+      target: input.resolvedTarget,
+      operation: (authOptions) =>
+        startSshTunnel({
+          key: input.key,
+          resolvedTarget: input.resolvedTarget,
+          remotePort,
+          localPort,
+          httpBaseUrl,
+          wsBaseUrl,
+          authOptions,
+          remoteServerKind: remoteLaunch.remoteServerKind,
+          scope: entryScope,
+        }),
+    }).pipe(
+      Effect.onExit((exit) =>
+        Exit.isSuccess(exit) ? Effect.void : Scope.close(entryScope, Exit.void).pipe(Effect.ignore),
+      ),
+    );
+    tunnels.set(input.key, tunnelEntry);
+    const spawnerService = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const digestService = yield* Digest.Digest;
+    const fileSystemService = yield* FileSystem.FileSystem;
+    const pathService = yield* Path.Path;
+    yield* Scope.addFinalizer(
+      entryScope,
+      Effect.gen(function* () {
+        const stopRemote = tunnels.get(tunnelEntry.key) === tunnelEntry;
+        if (stopRemote) {
+          tunnels.delete(tunnelEntry.key);
+        }
+        yield* tunnelEntry.process
+          .kill({
+            killSignal: "SIGTERM",
+            forceKillAfter: TUNNEL_SHUTDOWN_TIMEOUT_MS,
+          })
+          .pipe(Effect.ignore);
+        if (!stopRemote) {
+          return;
+        }
+        yield* Effect.logDebug("ssh.environment.tunnel.finalizer.start", {
+          ...sshTargetLogFields(tunnelEntry.target),
+          key: tunnelEntry.key,
+          localPort: tunnelEntry.localPort,
+          remotePort: tunnelEntry.remotePort,
+        });
+        const authSecret = authSecrets.get(tunnelEntry.key) ?? null;
+        yield* stopRemoteServer(
+          tunnelEntry.target,
+          authSecret === null
+            ? {
+                batchMode: "yes",
+                interactiveAuth: false,
+              }
+            : {
+                authSecret,
+                batchMode: "no",
+                interactiveAuth: true,
+              },
+        ).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawnerService),
+          Effect.provideService(Digest.Digest, digestService),
+          Effect.provideService(FileSystem.FileSystem, fileSystemService),
+          Effect.provideService(Path.Path, pathService),
+        );
+        yield* Effect.logDebug("ssh.environment.tunnel.finalizer.succeeded", {
+          ...sshTargetLogFields(tunnelEntry.target),
+          key: tunnelEntry.key,
+          localPort: tunnelEntry.localPort,
+          remotePort: tunnelEntry.remotePort,
+        });
+      }).pipe(Effect.ignore),
+    );
+    yield* Effect.logDebug("ssh.environment.tunnel.create.succeeded", {
+      ...sshTargetLogFields(input.resolvedTarget),
+      key: input.key,
+      localPort,
+      remotePort,
+    });
+    return tunnelEntry;
+  });
+
+  const ensureTunnelEntry = Effect.fn("ssh/tunnel.ensureTunnelEntry")(function* (
+    key: string,
+    resolvedTarget: DesktopSshEnvironmentTarget,
+    runner?: RemoteHanzoRunnerOptions,
+  ): Effect.fn.Return<SshTunnelEntry, SshEnvironmentEffectError, SshEnvironmentEffectContext> {
+    const entry = tunnels.get(key) ?? null;
+
+    if (entry !== null) {
+      yield* Effect.logDebug("ssh.environment.tunnel.existing.check", {
+        ...sshTargetLogFields(resolvedTarget),
+        key,
+        localPort: entry.localPort,
+        remotePort: entry.remotePort,
+      });
+      const readinessExit = yield* Effect.exit(
+        waitForHttpReady({
+          baseUrl: entry.httpBaseUrl,
+          timeoutMs: SSH_TUNNEL_READY_PROBE_TIMEOUT_MS,
+        }),
+      );
+      if (Exit.isSuccess(readinessExit)) {
+        yield* Effect.logDebug("ssh.environment.tunnel.reused", {
+          ...sshTargetLogFields(resolvedTarget),
+          key,
+          localPort: entry.localPort,
+          remotePort: entry.remotePort,
+        });
+        return entry;
+      }
+      yield* Effect.logWarning("ssh.environment.tunnel.existing.stale", {
+        ...sshTargetLogFields(resolvedTarget),
+        key,
+        localPort: entry.localPort,
+        remotePort: entry.remotePort,
+        cause: readinessExit.cause,
+      });
+      // Closing a stale forward must not run the manager-owned remote stop.
+      tunnels.delete(key);
+      yield* closeTunnelEntry(entry);
+    }
+
+    return yield* createTunnelEntry({
+      key,
+      resolvedTarget,
+      ...(runner === undefined ? {} : { runner }),
+    }).pipe(
+      Effect.tapError((cause) =>
+        Effect.logWarning("ssh.environment.tunnel.create.failed", {
+          ...sshTargetLogFields(resolvedTarget),
+          key,
+          cause,
+        }),
+      ),
+    );
+  });
+
+  const ensureEnvironment = Effect.fn("ssh/tunnel.ensureEnvironment")(function* (
+    target: DesktopSshEnvironmentTarget,
+    requestOptions?: { readonly issuePairingToken?: boolean },
+  ): Effect.fn.Return<
+    DesktopSshEnvironmentBootstrap,
+    SshEnvironmentEffectError,
+    SshEnvironmentEffectContext
+  > {
+    yield* Effect.logInfo("ssh.environment.ensure.start", {
+      ...sshTargetLogFields(target),
+      issuePairingToken: requestOptions?.issuePairingToken === true,
+    });
+    const baseResolved = yield* resolveSshTarget(target.alias || target.hostname);
+    const resolvedTarget: DesktopSshEnvironmentTarget = {
+      ...baseResolved,
+      ...(target.username !== null ? { username: target.username } : {}),
+      ...(target.port !== null ? { port: target.port } : {}),
+    };
+    const key = targetConnectionKey(resolvedTarget);
+    yield* Effect.logDebug("ssh.environment.target.resolved", {
+      ...sshTargetLogFields(resolvedTarget),
+      key,
+    });
+    const runner =
+      options.resolveCliRunner === undefined ? undefined : yield* options.resolveCliRunner;
+    yield* Effect.logDebug("ssh.environment.runner.resolved", {
+      ...sshTargetLogFields(resolvedTarget),
+      ...sshRunnerLogFields(runner),
+      key,
+    });
+    return yield* withTargetLock(
+      key,
+      Effect.gen(function* () {
+        const entry = yield* ensureTunnelEntry(key, resolvedTarget, runner);
+
+        const pairingResult = requestOptions?.issuePairingToken
+          ? yield* runWithSshAuth({
+              key,
+              target: entry.target,
+              operation: (authOptions) =>
+                issueRemotePairingToken(entry.target, authOptions, runner),
+            })
+          : null;
+        const pairingToken = pairingResult?.credential ?? null;
+
+        yield* Effect.logInfo("ssh.environment.ensure.succeeded", {
+          ...sshTargetLogFields(entry.target),
+          key,
+          localPort: entry.localPort,
+          remotePort: entry.remotePort,
+          remoteServerKind: entry.remoteServerKind,
+          issuedPairingToken: pairingToken !== null,
+        });
+        return {
+          // Callers save this target; a port ssh -G resolved would pin the alias's current Port.
+          target: { ...entry.target, port: target.port },
+          httpBaseUrl: entry.httpBaseUrl,
+          wsBaseUrl: entry.wsBaseUrl,
+          pairingToken,
+          remotePort: entry.remotePort,
+          ...(entry.remoteServerKind ? { remoteServerKind: entry.remoteServerKind } : {}),
+        };
+      }),
+    );
+  });
+
+  const disconnectEnvironment = Effect.fn("ssh/tunnel.disconnectEnvironment")(function* (
+    target: DesktopSshEnvironmentTarget,
+  ): Effect.fn.Return<void, SshEnvironmentEffectError, SshEnvironmentEffectContext> {
+    yield* Effect.logInfo("ssh.environment.disconnect.start", sshTargetLogFields(target));
+    const baseResolved = yield* resolveSshTarget(target.alias || target.hostname);
+    const resolvedTarget: DesktopSshEnvironmentTarget = {
+      ...baseResolved,
+      ...(target.username !== null ? { username: target.username } : {}),
+      ...(target.port !== null ? { port: target.port } : {}),
+    };
+    const key = targetConnectionKey(resolvedTarget);
+    yield* withTargetLock(
+      key,
+      Effect.gen(function* () {
+        const entry = tunnels.get(key) ?? null;
+        yield* Effect.logDebug("ssh.environment.disconnect.targetResolved", {
+          ...sshTargetLogFields(resolvedTarget),
+          key,
+          hasTunnel: entry !== null,
+        });
+        if (entry !== null) {
+          // Explicit disconnect owns the remote stop so its failure reaches the caller.
+          yield* Effect.gen(function* () {
+            tunnels.delete(key);
+            yield* closeTunnelEntry(entry);
+          }).pipe(Effect.uninterruptible);
+        }
+        yield* runWithSshAuth({
+          key,
+          target: resolvedTarget,
+          operation: (authOptions) => stopRemoteServer(resolvedTarget, authOptions),
+        });
+        yield* Effect.logInfo("ssh.environment.disconnect.succeeded", {
+          ...sshTargetLogFields(resolvedTarget),
+          key,
+        });
+      }),
+    );
+  });
+
+  return SshEnvironmentManager.of({ ensureEnvironment, disconnectEnvironment, closeAllTunnels });
+});
+
+/**
+ * @effect-expect-leaking ChildProcessSpawner | Digest | FileSystem | HttpClient | NetService | Path | SshPasswordPrompt
+ */
+export class SshEnvironmentManager extends Context.Service<
+  SshEnvironmentManager,
+  SshEnvironmentManagerShape
+>()("@hanzodev/ssh/tunnel/SshEnvironmentManager") {
+  static readonly layer = (options: SshEnvironmentManagerOptions = {}) =>
+    Layer.effect(SshEnvironmentManager, makeSshEnvironmentManager(options));
+}

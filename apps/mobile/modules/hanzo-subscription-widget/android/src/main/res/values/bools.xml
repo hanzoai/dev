@@ -1,0 +1,3 @@
+<resources>
+  <bool name="hanzo_subscription_widget_enabled">false</bool>
+</resources>

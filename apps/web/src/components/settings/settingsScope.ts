@@ -1,0 +1,162 @@
+import type { EnvironmentId } from "@hanzodev/contracts";
+import { msg } from "gt-react";
+
+import type {
+  SidebarProjectGroupMember,
+  SidebarProjectSnapshot,
+} from "../../sidebarProjectGrouping";
+import { m, type MessageResolver } from "../../i18n/messages";
+import type { EnvironmentPresentation } from "../../state/environments";
+
+export interface SettingsScopeSearch {
+  project?: string | undefined;
+  machine?: string | undefined;
+  checkout?: string | undefined;
+}
+
+type ScopeTargets = {
+  label: string;
+  members: readonly SidebarProjectGroupMember[];
+  environmentIds: readonly EnvironmentId[];
+};
+
+export type ResolvedSettingsScope = ScopeTargets &
+  (
+    | { kind: "all" }
+    | { kind: "environment"; environmentId: EnvironmentId }
+    | {
+        kind: "project";
+        group: SidebarProjectSnapshot;
+        environmentId: EnvironmentId | null;
+      }
+    | {
+        kind: "checkout";
+        group: SidebarProjectSnapshot;
+        checkout: SidebarProjectGroupMember;
+        environmentId: EnvironmentId;
+      }
+    | {
+        kind: "unavailable";
+        reason: "project-required" | "project-missing" | "environment-missing" | "checkout-missing";
+        message: string;
+      }
+  );
+
+/** Stale IDs remain visible to the resolver so a removed target reads as unavailable, not as "all". */
+export function validateSettingsScopeSearch(raw: Record<string, unknown>): SettingsScopeSearch {
+  const stringValue = (value: unknown) =>
+    typeof value === "string" && value.trim().length > 0 ? value : undefined;
+  const project = stringValue(raw.project);
+  const machine = stringValue(raw.machine);
+  const checkout = stringValue(raw.checkout);
+  return {
+    ...(project === undefined ? {} : { project }),
+    ...(machine === undefined ? {} : { machine }),
+    ...(checkout === undefined ? {} : { checkout }),
+  };
+}
+
+/** An unavailable selection never broadens a subsequent write. */
+export function resolveSettingsScope(
+  search: SettingsScopeSearch,
+  groups: readonly SidebarProjectSnapshot[],
+  environments: readonly Pick<EnvironmentPresentation, "environmentId" | "label">[],
+  resolve: MessageResolver = m,
+): ResolvedSettingsScope {
+  const unavailable = (
+    reason: Extract<ResolvedSettingsScope, { kind: "unavailable" }>["reason"],
+    message: string,
+  ): ResolvedSettingsScope => ({
+    kind: "unavailable",
+    reason,
+    label: resolve(msg("Unavailable selection")),
+    message,
+    members: [],
+    environmentIds: [],
+  });
+
+  if (search.checkout && !search.project) {
+    return unavailable(
+      "project-required",
+      resolve(msg("Select a project to choose one of its checkouts.")),
+    );
+  }
+
+  const environment = environments.find((candidate) => candidate.environmentId === search.machine);
+  if (search.machine && !environment) {
+    return unavailable(
+      "environment-missing",
+      resolve(msg("This environment is no longer available.")),
+    );
+  }
+
+  if (search.project) {
+    const group = groups.find((candidate) => candidate.projectKey === search.project);
+    if (!group)
+      return unavailable("project-missing", resolve(msg("This project is no longer available.")));
+    const members = group.memberProjects.filter(
+      (member) =>
+        (search.machine === undefined || member.environmentId === search.machine) &&
+        (search.checkout === undefined || member.physicalProjectKey === search.checkout),
+    );
+    if (members.length === 0) {
+      return unavailable(
+        "checkout-missing",
+        search.checkout
+          ? resolve(
+              msg("This checkout is no longer available in the selected project and environment."),
+            )
+          : resolve(msg("This project has no checkout on this environment.")),
+      );
+    }
+    if (search.checkout) {
+      const checkout = members[0]!;
+      const checkoutEnvironment = environments.find(
+        (candidate) => candidate.environmentId === checkout.environmentId,
+      );
+      if (!checkoutEnvironment) {
+        return unavailable(
+          "environment-missing",
+          resolve(msg("This checkout's environment is no longer available.")),
+        );
+      }
+      const sharesEnvironment = group.memberProjects.some(
+        (member) =>
+          member.environmentId === checkout.environmentId &&
+          member.physicalProjectKey !== checkout.physicalProjectKey,
+      );
+      return {
+        kind: "checkout",
+        group,
+        checkout,
+        environmentId: checkout.environmentId,
+        label: `${group.displayName} / ${checkoutEnvironment.label}${sharesEnvironment ? ` · ${checkout.workspaceRoot}` : ""}`,
+        members,
+        environmentIds: [checkout.environmentId],
+      };
+    }
+    return {
+      kind: "project",
+      group,
+      environmentId: environment?.environmentId ?? null,
+      label: `${group.displayName} / ${environment?.label ?? resolve(msg("All checkouts"))}`,
+      members,
+      environmentIds: [...new Set(members.map((member) => member.environmentId))],
+    };
+  }
+  if (environment) {
+    return {
+      kind: "environment",
+      environmentId: environment.environmentId,
+      label: environment.label,
+      members: [],
+      environmentIds: [environment.environmentId],
+    };
+  }
+  return {
+    kind: "all",
+    label: resolve(msg("All environments")),
+    members: [],
+    environmentIds: environments.map((candidate) => candidate.environmentId),
+  };
+}

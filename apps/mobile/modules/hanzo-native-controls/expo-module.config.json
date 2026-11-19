@@ -1,0 +1,20 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["HanzoNativeControlsModule", "HanzoKeyboardCommandsModule"],
+    "appDelegateSubscribers": [
+      "HanzoWorkspaceOrientationSubscriber",
+      "HanzoMenuDismissTouchGateSubscriber",
+      "HanzoBackgroundGraceSubscriber"
+    ]
+  },
+  "android": {
+    "modules": [
+      "expo.modules.hanzonativecontrols.HanzoNativeControlsModule",
+      "expo.modules.hanzonativecontrols.HanzoWorkspaceNavigationModule",
+      "expo.modules.hanzonativecontrols.HanzoKeyboardCommandsModule",
+      "expo.modules.hanzonativecontrols.HanzoFoldPostureModule",
+      "expo.modules.hanzonativecontrols.HanzoSecretInputModule"
+    ]
+  }
+}

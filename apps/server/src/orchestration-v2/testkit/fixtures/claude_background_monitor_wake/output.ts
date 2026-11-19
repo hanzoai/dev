@@ -1,0 +1,75 @@
+import { assert } from "@effect/vitest";
+import type { ProviderReplayTranscript } from "@hanzodev/contracts";
+
+import type { OrchestratorV2ScenarioResult } from "../../OrchestratorScenario.ts";
+import {
+  assertBaseProjection,
+  assertSemanticProjectionIntegrity,
+  assertUserMessagesInclude,
+  backgroundNotifications,
+  projectionFor,
+} from "../shared.ts";
+import { CLAUDE_BACKGROUND_MONITOR_WAKE_PROMPT } from "./input.ts";
+
+const MONITOR_TASK_ID = "b1htjkjev";
+
+// Claude reports Monitors as local_bash; only the launching tool call distinguishes them from background Bash.
+export function assertClaudeBackgroundMonitorWakeOutput(
+  result: OrchestratorV2ScenarioResult,
+  transcript: ProviderReplayTranscript,
+) {
+  assertBaseProjection({
+    result,
+    transcript,
+    runCount: 2,
+    runStatuses: ["completed", "completed"],
+  });
+  const projection = projectionFor(result, transcript.scenario);
+  assertSemanticProjectionIntegrity(projection);
+  assertUserMessagesInclude(projection, [CLAUDE_BACKGROUND_MONITOR_WAKE_PROMPT]);
+  const monitorItem = projection.turnItems.find(
+    (item) => item.nativeItemRef?.nativeId === "toolu_019b4EUbhEcYP4TS7vZn27N1",
+  );
+  assert.isDefined(monitorItem);
+
+  const rosterTasks = result.domainEvents
+    .flatMap((event) =>
+      event.type === "provider-thread.updated" ? (event.payload.pendingBackgroundTasks ?? []) : [],
+    )
+    .filter((task) => task.taskId === MONITOR_TASK_ID);
+  // The first roster precedes task_started linking the Monitor call, so that entry reads command.
+  assert.isAbove(rosterTasks.length, 1);
+  for (const { runId, ...task } of rosterTasks.slice(1)) {
+    // Adapter rosters carry no run; server rewrites of the stored thread carry the projection's stamp.
+    if (runId !== undefined) assert.equal(runId, monitorItem?.runId);
+    assert.deepEqual(task, {
+      taskId: MONITOR_TASK_ID,
+      description: "Background monitor test",
+      kind: "monitor",
+      awaited: true,
+      nativeItemId: "toolu_019b4EUbhEcYP4TS7vZn27N1",
+      command: "sleep 8 && echo MONITOR_DONE",
+      itemId: monitorItem?.id,
+      sourceThreadId: monitorItem?.threadId,
+    });
+  }
+  assert.deepEqual(projection.providerThreads[0]?.pendingBackgroundTasks ?? [], []);
+
+  assert.deepEqual(backgroundNotifications(projection), [
+    {
+      summary: 'Monitor "Background monitor test" finished',
+      outcome: "completed",
+      source: { kind: "monitor" },
+    },
+  ]);
+
+  const [rootRun, wakeRun] = projection.runs;
+  const assistantTexts = (runId: string | undefined) =>
+    projection.turnItems.flatMap((item) =>
+      item.runId === runId && item.type === "assistant_message" ? [item.text.trim()] : [],
+    );
+  assert.deepEqual(assistantTexts(rootRun?.id), ["STARTED"]);
+  assert.deepEqual(assistantTexts(wakeRun?.id), ["WAKE_DONE"]);
+
+  assert.lengthOf(projection.subagents, 0);
+}

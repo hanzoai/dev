@@ -1,0 +1,24 @@
+{
+  "name": "@hanzodev/source-control-definitions",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./registry": {
+      "types": "./src/registry.ts",
+      "import": "./src/registry.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "effect-tsgo tsrs --noEmit"
+  },
+  "dependencies": {
+    "@hanzodev/source-control-azure-devops": "workspace:*",
+    "@hanzodev/source-control-bitbucket": "workspace:*",
+    "@hanzodev/source-control-core": "workspace:*",
+    "@hanzodev/source-control-cursor-origin": "workspace:*",
+    "@hanzodev/source-control-forgejo": "workspace:*",
+    "@hanzodev/source-control-gitcafe": "workspace:*",
+    "@hanzodev/source-control-github": "workspace:*",
+    "@hanzodev/source-control-gitlab": "workspace:*"
+  }
+}

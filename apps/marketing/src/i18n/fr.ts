@@ -1,0 +1,103 @@
+import type { Messages } from "./en";
+
+export const fr: Messages = {
+  layout: {
+    defaultTitle: "Hanzo Dev",
+    defaultDescription: "Hanzo Dev. Le poste de pilotage open source pour agents de codage.",
+    socialImageAlt:
+      "Hanzo Dev : le poste de pilotage open source pour agents de codage, avec Claude Code, Codex, Cursor, OpenCode, Grok et Antigravity.",
+    homeLabel: "Accueil Hanzo Dev",
+    download: "Télécharger",
+    starsLabel: "Mettre une étoile à Hanzo Dev sur GitHub, {stars} étoiles",
+    githubStars: "{stars} étoiles sur GitHub",
+    language: "Langue",
+    mitLicensed: "Licence MIT",
+    iosApp: "App iOS",
+    androidApp: "App Android",
+    terms: "Conditions",
+    privacy: "Confidentialité",
+    security: "Sécurité",
+  },
+  home: {
+    title: "Hanzo Dev | Le poste de pilotage open source pour agents de codage",
+    description: "Hanzo Dev. Le poste de pilotage open source pour agents de codage.",
+    heroTitle: ["Le poste de pilotage", "open source", "pour agents de codage."],
+    heroSub:
+      "Orchestrez Claude Code, Codex, Antigravity, OpenCode, Cursor et Grok depuis une seule interface. Utilisez votre propre abonnement. Forkez tout le projet.",
+    downloadForMac: "Télécharger pour macOS",
+    downloadForWindows: "Télécharger pour Windows",
+    downloadForLinux: "Télécharger pour Linux",
+    downloadForIos: "Télécharger pour iOS",
+    downloadForAndroid: "Télécharger pour Android",
+    sourceLink: "Volez notre code (légalement)",
+    alsoOnPhone: "Aussi sur votre téléphone :",
+    screenshotAlt:
+      "Hanzo Dev exécutant des sous-agents Claude, Codex, Muse et Gemini dans un même fil",
+    endorsementsTitle: "Toléré par plus de {users} devs",
+    endorsementsSub: "Certains en ont même parlé sur X.",
+    endorsementsLabel: "Avis de développeurs",
+    readPost: "Lire le post de {handle} sur X",
+    harnessTitle: "Apportez votre abonnement",
+    harnessBody:
+      "Hanzo Dev ne revend pas de tokens. Branchez Claude Code, Codex, Antigravity, OpenCode, Cursor ou Grok avec les identifiants que vous avez déjà. Nous les orchestrons, vous gardez votre abonnement.",
+    googleSignIn: "Connexion Google",
+    harnessPoints: [
+      "Aucune clé revendue. Aucun quota imposé.",
+      "Changez de modèle en cours de fil.",
+      "De nouveaux agents chaque semaine.",
+    ],
+    gitVisualLabel:
+      "Illustration du flux Git de Hanzo Dev : relire un diff, commiter et pousser les modifications, puis ouvrir une pull request.",
+    prReady: "Prête",
+    prCommits: "3 commits",
+    viewDiff: "Voir le diff",
+    openPullRequest: "Ouvrir la pull request",
+    commitPush: "Commit et push",
+    gitTitle: "Un bouton pour commiter, pousser et ouvrir une PR.",
+    gitBody:
+      "Chaque fil d'agent écrit dans sa propre branche. Quand c'est bon, un bouton ouvre la PR sur GitHub avec un titre, une description et un changelog générés. Plus besoin de jongler dans le terminal.",
+    gitPoints: [
+      "Titres et descriptions de PR générés automatiquement",
+      "Revue du diff intégrée avant de pousser",
+      "PR en brouillon, empilées ou amendées",
+      "Fonctionne avec votre authentification GitHub actuelle",
+    ],
+    openTitle: "Si quelque chose ne vous plaît pas, forkez-le.",
+    openPoints: [
+      { lead: "Changez l'interface.", rest: "Personnalisez chaque écran à votre goût." },
+      { lead: "Ajoutez un agent.", rest: "Branchez vos propres outils, modèles et workflows." },
+      {
+        lead: "Publiez votre propre version.",
+        rest: "Hébergez-la vous-même ou distribuez-la sous votre nom.",
+      },
+    ],
+    stars: "{stars} étoiles",
+    forkOnGithub: "Forker sur GitHub",
+    browseSource: "Parcourir le code",
+    ctaTitle: "Vos agents méritent mieux qu'un terminal.",
+    ctaSub:
+      "Hanzo Dev est gratuit, open source et rapide. Installez-le, branchez l'outil auquel vous êtes déjà abonné et laissez vos agents se mettre au travail.",
+    otherPlatforms: "Autres plateformes",
+  },
+  download: {
+    title: "Télécharger Hanzo Dev pour macOS, Windows et Linux | Hanzo Dev",
+    description:
+      "Téléchargez l'app de bureau officielle Hanzo Dev pour macOS, Windows ou Linux, ou les apps iOS et Android. dev.hanzo.ai est le seul site de téléchargement officiel.",
+    breadcrumb: "Télécharger",
+    heading: "Télécharger Hanzo Dev",
+    channelLabel: "Canal de publication",
+    stable: "Stable",
+    nightly: "Nightly",
+    intelNote: "Sur un Mac Intel ? {link}.",
+    intelLink: "Téléchargez la version x64",
+    armNote: "Sur ARM ? Téléchargez le {deb} ou l'{appimage} arm64.",
+    mobile: "Mobile",
+    iphoneIpad: "iPhone et iPad",
+    terminal: "Terminal",
+    tryOnce: "Ou essayez-le sans rien installer :",
+    allBuilds: "Toutes les versions sont sur la {link}",
+    releasesPage: "page des releases GitHub",
+    builtAgo: "Compilé {age}",
+    releasesFallback: "Versions",
+  },
+};

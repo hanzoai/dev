@@ -1,0 +1,224 @@
+import { thrownErrorMessage } from "@hanzodev/client-runtime/errors";
+import { m } from "~/i18n/messages";
+import { useScopedSettingsWriteAllowed } from "./useScopedSettings";
+import { AuthSettingsWriteScope } from "@hanzodev/contracts";
+import { EnvironmentId, type HanzoProjectFileScript } from "@hanzodev/contracts";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@hanzodev/client-runtime/state/runtime";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@hanzodev/shared/keybindings";
+import { ChevronDownIcon, PlusIcon } from "lucide-react";
+import { T, useGT } from "gt-react";
+import { useState } from "react";
+import { useHanzoProjectFileState } from "../../hooks/useHanzoProjectFileScripts";
+import { useEnvironments } from "../../state/environments";
+import {
+  EMPTY_PROJECT_SCRIPT_INPUT,
+  editorRequestForScript,
+  ProjectScriptEditorDialog,
+  ScriptIcon,
+  type NewProjectScriptInput,
+  type ProjectScriptEditorRequest,
+} from "../projectScriptEditor";
+import { Button } from "../ui/button";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
+import { ProjectActionsList } from "./ProjectActionsList";
+import { useProjectScriptSettings } from "./useProjectScriptSettings";
+import { SettingsRow, SettingsSection } from "./settingsLayout";
+import { useSettingsScope } from "./SettingsScopeContext";
+
+export function ProjectActionsSettings() {
+  const gt = useGT();
+  const { scope, targets, target } = useSettingsScope();
+  const { environments } = useEnvironments();
+  const isProjectScope = scope.kind === "project" || scope.kind === "checkout";
+  const representativeConfig = target
+    ? environments.find((environment) => environment.environmentId === target.environmentId)
+        ?.serverConfig
+    : undefined;
+  const scripts = target?.settings.defaultProjectScripts ?? [];
+  const keybindings = representativeConfig?.keybindings ?? DEFAULT_RESOLVED_KEYBINDINGS;
+  const mixed = targets.some(
+    (candidate) =>
+      JSON.stringify(candidate.settings.defaultProjectScripts) !== JSON.stringify(scripts),
+  );
+  const canWriteSettings = useScopedSettingsWriteAllowed();
+  const [request, setRequest] = useState<ProjectScriptEditorRequest | null>(null);
+  const memberById = new Map(
+    isProjectScope ? scope.members.map((member) => [member.id, member]) : [],
+  );
+  const { saving, persist, submit } = useProjectScriptSettings(
+    targets.flatMap((candidate) => {
+      const environment = environments.find(
+        (entry) => entry.environmentId === candidate.environmentId,
+      );
+      if (!environment?.serverConfig) return [];
+      const member = candidate.projectId ? memberById.get(candidate.projectId) : undefined;
+      return [
+        {
+          environmentId: candidate.environmentId,
+          settings: environment.serverConfig.settings,
+          keybindings: environment.serverConfig.keybindings,
+          ...(member ? { project: member } : {}),
+        },
+      ];
+    }),
+  );
+
+  const representativeMember = target?.projectId ? memberById.get(target.projectId) : undefined;
+  const hanzoFile = useHanzoProjectFileState(
+    representativeMember?.environmentId ?? EnvironmentId.make("none"),
+    representativeMember?.workspaceRoot ?? null,
+  );
+  const importableScripts = hanzoFile.scripts.filter(
+    (fileScript) =>
+      !scripts.some(
+        (script) =>
+          script.command === fileScript.command ||
+          script.name.toLowerCase() === fileScript.name.toLowerCase(),
+      ),
+  );
+  const importFileScript = async (fileScript: HanzoProjectFileScript) => {
+    const payload: NewProjectScriptInput = {
+      name: fileScript.name,
+      command: fileScript.command,
+      icon: fileScript.icon ?? "play",
+      runOnWorktreeCreate: fileScript.runOnWorktreeCreate ?? false,
+      waitForSetup: fileScript.runOnWorktreeCreate === true && fileScript.async === false,
+      runOnSettle: fileScript.runOnSettle ?? false,
+      stopOnSettle: fileScript.stopOnSettle ?? false,
+      keybinding: null,
+      previewUrl: fileScript.previewUrl ?? null,
+      autoOpenPreview: fileScript.previewUrl ? (fileScript.autoOpenPreview ?? false) : false,
+    };
+    const result = await submit(null, payload);
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      setRequest({
+        scriptId: null,
+        initial: payload,
+        error:
+          error instanceof Error
+            ? (thrownErrorMessage(error, m) ?? error.message)
+            : gt("Failed to import action."),
+      });
+    }
+  };
+
+  return (
+    <SettingsSection id="project-actions" title={gt("Actions")}>
+      <SettingsRow
+        serverScoped
+        settingKeys={["defaultProjectScripts"]}
+        mixed={mixed}
+        title={gt("Actions")}
+        description={gt(
+          "Commands that run in this project's checkout or its worktree, with optional shortcuts.",
+        )}
+        onResetOverride={() => void persist(() => null)}
+        control={
+          <div className="flex flex-wrap items-center gap-1.5">
+            {importableScripts.length > 0 ? (
+              <Menu>
+                <MenuTrigger
+                  render={
+                    <Button
+                      id="import-scripts"
+                      size="xs"
+                      variant="ghost"
+                      disabled={saving || !canWriteSettings}
+                      type="button"
+                    />
+                  }
+                >
+                  <T>Import scripts</T>
+                  <ChevronDownIcon className="size-3.5" />
+                </MenuTrigger>
+                <MenuPopup align="end">
+                  <MenuGroup>
+                    <MenuGroupLabel>
+                      <T>Import from hanzo.json</T>
+                    </MenuGroupLabel>
+                    <p className="px-2 pb-2 text-pretty text-sm text-muted-foreground">
+                      <T>Add actions declared by this checkout without editing them first.</T>
+                    </p>
+                  </MenuGroup>
+                  <MenuSeparator />
+                  {importableScripts.map((fileScript) => (
+                    <MenuItem
+                      key={`${fileScript.name} ${fileScript.command}`}
+                      onClick={() => void importFileScript(fileScript)}
+                    >
+                      <ScriptIcon icon={fileScript.icon ?? "play"} className="size-4 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium">{fileScript.name}</div>
+                        <div className="truncate font-mono text-muted-foreground">
+                          {fileScript.command}
+                        </div>
+                      </div>
+                    </MenuItem>
+                  ))}
+                </MenuPopup>
+              </Menu>
+            ) : null}
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={saving || !canWriteSettings || targets.length === 0}
+              onClick={() => setRequest({ scriptId: null, initial: EMPTY_PROJECT_SCRIPT_INPUT })}
+            >
+              <PlusIcon className="size-3.5" />
+              <T>Add action</T>
+            </Button>
+          </div>
+        }
+      />
+      {mixed ? (
+        <SettingsRow
+          title={gt("Different actions across checkouts")}
+          description={gt(
+            "Narrow the selection above to one checkout to edit its list. Adding an action here adds it to every selected checkout.",
+          )}
+        />
+      ) : (
+        <ProjectActionsList
+          scripts={scripts}
+          keybindings={keybindings}
+          disabled={saving || !canWriteSettings}
+          onEdit={(script) => setRequest(editorRequestForScript(script, keybindings))}
+        />
+      )}
+      {hanzoFile.status === "invalid" ? (
+        <SettingsRow
+          title={gt("hanzo.json is invalid")}
+          description={gt(
+            "A hanzo.json exists in this checkout but fails to parse, so every action and icon it declares is ignored. Check the JSON syntax and icon values.",
+          )}
+          className="text-warning"
+        />
+      ) : null}
+      {target && (
+        <ProjectScriptEditorDialog
+          environmentId={target.environmentId}
+          editScope={AuthSettingsWriteScope}
+          request={request}
+          scripts={scripts}
+          onSubmit={submit}
+          onDelete={(id) =>
+            void persist((current) => current.filter((script) => script.id !== id), id, null)
+          }
+          onClose={() => setRequest(null)}
+        />
+      )}
+    </SettingsSection>
+  );
+}
