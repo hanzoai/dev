@@ -61,7 +61,7 @@ jobs:
   android:
     name: Android ${{ matrix.abi }}
     if: github.repository == 'hanzoai/dev' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'android')
-    runs-on: blacksmith-32vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -144,7 +144,7 @@ jobs:
       # the runs holding the cache login restore.
       - name: Mount build cache
         if: github.event_name != 'pull_request'
-        uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           key: ${{ github.repository }}-android-dev-client-${{ matrix.abi }}
           path: ~/.cache/hanzo-android-dev-client
@@ -154,7 +154,7 @@ jobs:
           mkdir -p "$GRADLE_USER_HOME" "$CCACHE_DIR"
           # No daemon: nothing should hold the sticky disk open when it is committed.
           printf 'org.gradle.caching=true\norg.gradle.daemon=false\n' > "$GRADLE_USER_HOME/gradle.properties"
-          sudo sed -i 's|http://|https://|g' /etc/apt/blacksmith-ubuntu-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources
+          sudo sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources
           sudo apt-get update -qq && sudo apt-get install -y -qq ccache
           ccache --zero-stats
 
@@ -219,7 +219,7 @@ jobs:
   ios:
     name: iOS simulator
     if: github.repository == 'hanzoai/dev' && (github.event_name != 'workflow_dispatch' || inputs.platform == 'ios')
-    runs-on: blacksmith-12vcpu-macos-27
+    runs-on: macos-latest
     timeout-minutes: 60
     concurrency:
       group: mobile-dev-client-ios-${{ github.event_name == 'pull_request' && github.event.pull_request.number || inputs.fingerprint || github.sha }}

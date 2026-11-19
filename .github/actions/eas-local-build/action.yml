@@ -52,7 +52,7 @@ runs:
 
     - name: Mount Android build cache
       if: inputs.platform == 'android' && inputs.cache == 'true'
-      uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         key: ${{ github.repository }}-android-${{ inputs.environment == 'production' && 'store' || 'preview' }}-build
         path: ~/.cache/hanzo-android-${{ inputs.environment == 'production' && 'store' || 'preview' }}
@@ -65,7 +65,7 @@ runs:
         rm -rf "$EAS_LOCAL_BUILD_WORKINGDIR"
         # No daemon: nothing should hold the sticky disk open when it is committed.
         printf 'org.gradle.caching=true\norg.gradle.daemon=false\n' > "$GRADLE_USER_HOME/gradle.properties"
-        sudo sed -i 's|http://|https://|g' /etc/apt/blacksmith-ubuntu-mirrors.txt /etc/apt/sources.list.d/ubuntu.sources
+        sudo sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources
         sudo apt-get update -qq && sudo apt-get install -y -qq ccache
         ccache --zero-stats
 

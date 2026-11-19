@@ -73,7 +73,7 @@ jobs:
   production:
     name: EAS ${{ inputs.profile || 'production' }} ${{ github.event_name == 'push' && 'auto' || inputs.mode }}
     if: github.repository == 'hanzoai/dev'
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     # Serialize runs so OTAs publish in merge order. GitHub keeps at most one
     # queued job per group, so a burst of merges collapses into one run of the
     # newest commit — intermediate commits don't need their own OTA.
@@ -461,7 +461,7 @@ jobs:
     needs: production
     # Skipped when the production job failed: no store build after a failed OTA.
     if: needs.production.outputs.android_build == 'true'
-    runs-on: blacksmith-32vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     concurrency:
       group: mobile-android-store-build
@@ -551,7 +551,7 @@ jobs:
     needs: production
     # Skipped when the production job failed: no store build after a failed OTA.
     if: needs.production.outputs.ios_build == 'true'
-    runs-on: blacksmith-12vcpu-macos-27
+    runs-on: macos-latest
     timeout-minutes: 60
     concurrency:
       group: mobile-ios-store-build
