@@ -11,8 +11,10 @@ import {
 import { useLocation, useRouter, type AnyRouter } from "@tanstack/react-router";
 
 import { moveWorkspaceFocus, workspaceAreaProps } from "../lib/workspaceFocus";
-import { isCommandPaletteOpen } from "../commandPaletteBus";
+import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
+import { getHanzoWebAuthController } from "../cloud/hanzoWebAuth";
 import { isElectron } from "../env";
+import { openLocalAiManager } from "../localAi/localAiState";
 import {
   releaseThreadUndoShortcut,
   threadUndoClaimsShortcut,
@@ -298,6 +300,23 @@ function registerAppShellCommands(router: AnyRouter, shellElement: Element): () 
   const readSidebarVisible = () =>
     shellElement.closest('[data-slot="sidebar-wrapper"]')?.getAttribute("data-sidebar-state") ===
     "expanded";
+  const triggerNewChatAction = () => {
+    const mac = isMacPlatform(navigator.platform);
+    const dispatched = window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "n",
+        code: "KeyN",
+        metaKey: mac,
+        ctrlKey: !mac,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    // If no chat route claimed Mod+N (e.g. inside Settings), open the new-thread palette.
+    if (dispatched) {
+      openCommandPalette({ open: "new-thread-in" });
+    }
+  };
   const disposers = [
     registerThreadUndoCommands(router, readSidebarVisible),
     registerNavigationHistoryCommands(router),
@@ -307,6 +326,24 @@ function registerAppShellCommands(router: AnyRouter, shellElement: Element): () 
       if (!/^\/settings(\/|$)/.test(router.state.location.pathname))
         void router.navigate({ to: "/settings" });
     }),
+    registerMenuAction("open-keybindings", () => {
+      if (router.state.location.pathname !== "/settings/keybindings")
+        void router.navigate({ to: "/settings/keybindings" });
+    }),
+    registerMenuAction("open-account", () => {
+      getHanzoWebAuthController().openAccountModal("accounts");
+    }),
+    registerMenuAction("open-local-ai", () => {
+      openLocalAiManager("models");
+    }),
+    registerMenuAction("commandPalette.toggle", () => {
+      openCommandPalette();
+    }),
+    registerMenuAction("global-spotlight", () => {
+      openCommandPalette();
+    }),
+    registerMenuAction("chat.new", triggerNewChatAction),
+    registerMenuAction("global-new-chat", triggerNewChatAction),
   ];
   return () => {
     for (const dispose of disposers) dispose();

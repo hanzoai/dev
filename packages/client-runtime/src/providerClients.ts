@@ -2,6 +2,7 @@ import {
   AntigravitySettings,
   ClaudeSettings,
   CodexSettings,
+  HanzoGenSettings,
   HanzoSettings,
   isProviderDriverKind,
   ProviderDriverKind,
@@ -48,6 +49,14 @@ export const providerClients = makeProviderClientRegistry([
     modelFamilies: ["Enso", "Zen ", "Kai "],
     acpRegistryAgentIds: ["hanzo-dev", "hanzo-acp"],
     settingsSchema: HanzoSettings,
+  },
+  {
+    driverKind: ProviderDriverKind.make("hanzoGen"),
+    label: "Hanzo Gen",
+    icon: hanzoIcon,
+    modelFamilies: ["Enso", "Zen ", "Kai "],
+    acpRegistryAgentIds: ["hanzo-gen"],
+    settingsSchema: HanzoGenSettings,
   },
   {
     driverKind: ProviderDriverKind.make("codex"),

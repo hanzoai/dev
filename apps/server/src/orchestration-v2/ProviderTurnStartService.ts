@@ -948,6 +948,8 @@ export const layer: Layer.Layer<
       });
       // Native goal commands go verbatim; handoff history waits a turn.
       const goalDriver =
+        session.driver === "hanzo" ||
+        session.driver === "hanzoGen" ||
         session.driver === "codex" ||
         session.driver === "claudeAgent" ||
         session.providerSession.capabilities.turns.supportsNativeGoals === true;

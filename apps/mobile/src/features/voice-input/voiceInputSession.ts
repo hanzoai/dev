@@ -1,7 +1,9 @@
 import {
+  createMicLeaseArbitrator,
   VOICE_RECORDING_LIMIT_SECONDS,
   VoiceInputController,
   voiceInputBlocksSubmission,
+  type MicLeaseArbitrator,
   type VoiceDraftSnapshot,
   type VoiceInputControllerDependencies,
   type VoiceInputPhase,
@@ -69,6 +71,7 @@ export function createVoiceInputTarget(
  */
 export class VoiceInputSession {
   readonly controller: VoiceInputController;
+  private readonly micLease: MicLeaseArbitrator;
   private readonly dependencies: VoiceInputSessionDependencies;
   private target: VoiceInputTarget | null = null;
   private startText: string | null = null;
@@ -86,6 +89,13 @@ export class VoiceInputSession {
 
   constructor(dependencies: VoiceInputSessionDependencies) {
     this.dependencies = dependencies;
+    const instanceId = `hanzo-mobile-voice-${Math.random().toString(36).slice(2, 10)}`;
+    this.micLease = createMicLeaseArbitrator({
+      instanceId,
+      onPreempted: () => {
+        this.controller.cancel();
+      },
+    });
     this.controller = new VoiceInputController({
       resolve: m,
       ...dependencies,
@@ -123,7 +133,10 @@ export class VoiceInputSession {
   }
 
   cancel(ownerKey: string | null): void {
-    if (ownerKey !== null && this.ownerKey === ownerKey) this.controller.cancel();
+    if (ownerKey !== null && this.ownerKey === ownerKey) {
+      this.micLease.release();
+      this.controller.cancel();
+    }
   }
 
   retry(): Promise<void> {
@@ -132,18 +145,23 @@ export class VoiceInputSession {
 
   start(target: VoiceInputTarget): Promise<void> {
     if (voiceInputBlocksSubmission(this.controller.currentState)) return Promise.resolve();
+    this.micLease.claim();
     this.target = target;
     this.startText = target.readDraft()?.text ?? null;
     return this.controller.start();
   }
 
   dispose(): void {
+    this.micLease.dispose();
     this.controller.dispose();
     this.stopRecordingActivity();
     this.listeners.clear();
   }
 
   private handleStateChange(state: VoiceInputState): void {
+    if (state.phase === "idle" || state.phase === "error") {
+      this.micLease.release();
+    }
     const previousPhase = this.snapshot.state.phase;
     let elapsedSeconds = this.snapshot.elapsedSeconds;
     if (state.phase !== previousPhase) {

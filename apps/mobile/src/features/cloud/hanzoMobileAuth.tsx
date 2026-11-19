@@ -3,43 +3,75 @@ import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
 import type { CloudAccountSource } from "@hanzodev/client-runtime/relay";
 import {
+  buildHanzoApiHeaders,
   buildHanzoIamAccountFromTokens,
   buildHanzoIamAuthorizeUrl,
   createOAuthState,
   createPkceChallengeS256,
   createPkceVerifier,
+  EMPTY_HANZO_IAM_VAULT,
   exchangeHanzoIamAuthorizationCode,
+  fetchHanzoBillingSummary,
+  fetchHanzoIamOrganizations,
   fetchHanzoIamUserinfo,
   getHanzoIamBrand,
   HANZO_IAM_BRANDS,
+  type HanzoBillingSummary,
   type HanzoIamAccount,
   type HanzoIamBrandId,
+  type HanzoIamOrganization,
   type HanzoIamVaultState,
   isHanzoIamTokenExpiringSoon,
+  parseHanzoIamCallbackUrl,
+  parseHanzoIamVaultJson,
   refreshHanzoIamAccount,
   removeHanzoIamVaultAccount,
+  resolveAccountOrganizations,
+  resolveActiveHanzoAccount,
+  resolveActiveHanzoOrgId,
+  serializeHanzoIamVaultJson,
+  switchHanzoIamVaultOrg,
   upsertHanzoIamVaultAccount,
 } from "@hanzodev/shared/hanzoIamAuth";
-import { useCallback, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 
 WebBrowser.maybeCompleteAuthSession();
 
 const VAULT_STORAGE_KEY = "hanzo.dev.iam.vault.v1";
 
+interface PendingMobilePkce {
+  readonly state: string;
+  readonly verifier: string;
+  readonly redirectUri: string;
+  readonly brandId: HanzoIamBrandId;
+  readonly issuer: string;
+  readonly clientId: string;
+}
+
 export interface HanzoMobileAuthSnapshot {
   readonly isLoaded: boolean;
   readonly activeAccount: HanzoIamAccount | null;
   readonly accounts: ReadonlyArray<HanzoIamAccount>;
+  readonly activeOrgId: string | null;
+  readonly organizations: ReadonlyArray<HanzoIamOrganization>;
+  readonly billing: HanzoBillingSummary | null;
 }
 
 type AuthListener = () => void;
 type CloudSourceListener = Parameters<CloudAccountSource["addListener"]>[0];
 
 class HanzoMobileAuthController implements CloudAccountSource {
+  private vault: HanzoIamVaultState = EMPTY_HANZO_IAM_VAULT;
+  private organizationsByAccount = new Map<string, ReadonlyArray<HanzoIamOrganization>>();
+  private billingSummary: HanzoBillingSummary | null = null;
+  private pendingPkce: PendingMobilePkce | null = null;
   private snapshot: HanzoMobileAuthSnapshot = {
     isLoaded: false,
     activeAccount: null,
     accounts: [],
+    activeOrgId: null,
+    organizations: [],
+    billing: null,
   };
   private readonly listeners = new Set<AuthListener>();
   private readonly cloudListeners = new Set<CloudSourceListener>();
@@ -67,7 +99,25 @@ class HanzoMobileAuthController implements CloudAccountSource {
     };
   };
 
-  private emit(next: HanzoMobileAuthSnapshot): void {
+  private buildSnapshot(isLoaded: boolean): HanzoMobileAuthSnapshot {
+    const activeAccount = resolveActiveHanzoAccount(this.vault);
+    const activeOrgId = resolveActiveHanzoOrgId(this.vault);
+    const organizations = activeAccount
+      ? (this.organizationsByAccount.get(activeAccount.id) ??
+          resolveAccountOrganizations(activeAccount))
+      : [];
+    return {
+      isLoaded,
+      activeAccount,
+      accounts: this.vault.accounts,
+      activeOrgId,
+      organizations,
+      billing: activeAccount ? this.billingSummary : null,
+    };
+  }
+
+  private emit(isLoaded = true): void {
+    const next = this.buildSnapshot(isLoaded);
     this.snapshot = next;
     for (const listener of this.listeners) {
       listener();
@@ -83,28 +133,24 @@ class HanzoMobileAuthController implements CloudAccountSource {
   }
 
   private async persistVault(vault: HanzoIamVaultState): Promise<void> {
-    const activeAccount =
-      vault.accounts.find((entry) => entry.id === vault.activeAccountId) ??
-      vault.accounts[0] ??
-      null;
+    const activeAccount = resolveActiveHanzoAccount(vault);
     const normalized: HanzoIamVaultState = {
       activeAccountId: activeAccount?.id ?? null,
       accounts: vault.accounts,
+      activeOrgId: resolveActiveHanzoOrgId(vault),
+      orgByAccountId: vault.orgByAccountId ?? {},
     };
+    this.vault = normalized;
     try {
       if (normalized.accounts.length === 0) {
         await SecureStore.deleteItemAsync(VAULT_STORAGE_KEY);
       } else {
-        await SecureStore.setItemAsync(VAULT_STORAGE_KEY, JSON.stringify(normalized));
+        await SecureStore.setItemAsync(VAULT_STORAGE_KEY, serializeHanzoIamVaultJson(normalized));
       }
     } catch {
       // In-memory state still updates in simulator/test environments without keychain entitlements.
     }
-    this.emit({
-      isLoaded: true,
-      activeAccount,
-      accounts: normalized.accounts,
-    });
+    this.emit(true);
   }
 
   readonly hydrate = (): Promise<void> => {
@@ -112,29 +158,45 @@ class HanzoMobileAuthController implements CloudAccountSource {
     this.hydratePromise = (async () => {
       try {
         const raw = await SecureStore.getItemAsync(VAULT_STORAGE_KEY);
-        if (!raw) {
-          this.emit({ isLoaded: true, activeAccount: null, accounts: [] });
-          return;
+        this.vault = parseHanzoIamVaultJson(raw);
+        this.emit(true);
+        if (this.vault.accounts.length > 0) {
+          void this.refreshOrganizationsAndBilling();
         }
-        const parsed = JSON.parse(raw) as Partial<HanzoIamVaultState>;
-        const accounts = Array.isArray(parsed.accounts)
-          ? parsed.accounts.filter(
-              (entry): entry is HanzoIamAccount =>
-                Boolean(entry && typeof entry.id === "string" && typeof entry.accessToken === "string"),
-            )
-          : [];
-        const activeAccount =
-          accounts.find((entry) => entry.id === parsed.activeAccountId) ?? accounts[0] ?? null;
-        this.emit({
-          isLoaded: true,
-          activeAccount,
-          accounts,
-        });
       } catch {
-        this.emit({ isLoaded: true, activeAccount: null, accounts: [] });
+        this.vault = EMPTY_HANZO_IAM_VAULT;
+        this.emit(true);
       }
     })();
     return this.hydratePromise;
+  };
+
+  readonly getApiHeaders = (): Record<string, string> =>
+    buildHanzoApiHeaders({
+      accessToken: this.snapshot.activeAccount?.accessToken,
+      orgId: this.snapshot.activeOrgId,
+    });
+
+  readonly refreshOrganizationsAndBilling = async (): Promise<void> => {
+    const active = this.snapshot.activeAccount;
+    if (!active) {
+      this.billingSummary = null;
+      this.emit(true);
+      return;
+    }
+    const token = (await this.getToken(active.id)) ?? active.accessToken;
+    const orgId = this.snapshot.activeOrgId;
+    const [orgs, billing] = await Promise.all([
+      fetchHanzoIamOrganizations({ ...active, accessToken: token }).catch(() =>
+        resolveAccountOrganizations(active),
+      ),
+      fetchHanzoBillingSummary({ accessToken: token, orgId }).catch(() => null),
+    ]);
+    this.organizationsByAccount.set(active.id, orgs);
+    if (billing) {
+      this.billingSummary = billing;
+    }
+    this.emit(true);
   };
 
   readonly getToken = async (accountId?: string): Promise<string | null> => {
@@ -156,10 +218,7 @@ class HanzoMobileAuthController implements CloudAccountSource {
     try {
       const refreshed = await pending;
       const nextVault = upsertHanzoIamVaultAccount(
-        {
-          activeAccountId: this.snapshot.activeAccount?.id ?? refreshed.id,
-          accounts: this.snapshot.accounts,
-        },
+        this.vault,
         refreshed,
         this.snapshot.activeAccount?.id === target.id,
       );
@@ -170,6 +229,30 @@ class HanzoMobileAuthController implements CloudAccountSource {
     }
   };
 
+  readonly handleDeepLinkCallback = async (url: string): Promise<boolean> => {
+    const callback = parseHanzoIamCallbackUrl(url);
+    if (!callback) return false;
+    const pending = this.pendingPkce;
+    this.pendingPkce = null;
+    if (!pending || callback.error || !callback.code) {
+      return true;
+    }
+    if (callback.state && callback.state !== pending.state) {
+      return true;
+    }
+    const account = await exchangeHanzoIamAuthorizationCode({
+      brand: pending.brandId,
+      issuer: pending.issuer,
+      clientId: pending.clientId,
+      code: callback.code,
+      redirectUri: pending.redirectUri,
+      codeVerifier: pending.verifier,
+    });
+    await this.persistVault(upsertHanzoIamVaultAccount(this.vault, account, true));
+    void this.refreshOrganizationsAndBilling();
+    return true;
+  };
+
   readonly signInWithBrand = async (brandId: HanzoIamBrandId = "hanzo"): Promise<HanzoIamAccount> => {
     await this.hydrate();
     const brand = getHanzoIamBrand(brandId);
@@ -177,6 +260,14 @@ class HanzoMobileAuthController implements CloudAccountSource {
     const verifier = createPkceVerifier();
     const challenge = createPkceChallengeS256(verifier);
     const state = createOAuthState();
+    this.pendingPkce = {
+      state,
+      verifier,
+      redirectUri,
+      brandId: brand.id,
+      issuer: brand.issuer,
+      clientId: brand.clientId,
+    };
     const authUrl = buildHanzoIamAuthorizeUrl({
       issuer: brand.issuer,
       clientId: brand.clientId,
@@ -186,41 +277,34 @@ class HanzoMobileAuthController implements CloudAccountSource {
     });
 
     const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUri);
+    this.pendingPkce = null;
     if (result.type !== "success" || !result.url) {
       throw new Error("Sign-in was cancelled.");
     }
-    const callbackUrl = new URL(result.url);
-    const returnedState = callbackUrl.searchParams.get("state");
-    if (returnedState !== state) {
+    const callback = parseHanzoIamCallbackUrl(result.url);
+    if (!callback) {
+      throw new Error("Unrecognized OAuth callback URL during Hanzo ID sign-in.");
+    }
+    if (callback.state !== state) {
       throw new Error("OAuth state mismatch during Hanzo ID sign-in.");
     }
-    const code = callbackUrl.searchParams.get("code")?.trim();
-    if (!code) {
-      const errorDesc =
-        callbackUrl.searchParams.get("error_description") ??
-        callbackUrl.searchParams.get("error") ??
-        "Missing authorization code.";
-      throw new Error(errorDesc);
+    if (!callback.code) {
+      throw new Error(
+        callback.errorDescription ?? callback.error ?? "Missing authorization code.",
+      );
     }
 
     const account = await exchangeHanzoIamAuthorizationCode({
       brand: brand.id,
       issuer: brand.issuer,
       clientId: brand.clientId,
-      code,
+      code: callback.code,
       redirectUri,
       codeVerifier: verifier,
     });
 
-    const nextVault = upsertHanzoIamVaultAccount(
-      {
-        activeAccountId: this.snapshot.activeAccount?.id ?? null,
-        accounts: this.snapshot.accounts,
-      },
-      account,
-      true,
-    );
-    await this.persistVault(nextVault);
+    await this.persistVault(upsertHanzoIamVaultAccount(this.vault, account, true));
+    void this.refreshOrganizationsAndBilling();
     return account;
   };
 
@@ -246,38 +330,36 @@ class HanzoMobileAuthController implements CloudAccountSource {
         ...(input.label?.trim() ? { displayName: input.label.trim() } : {}),
       },
     });
-    const nextVault = upsertHanzoIamVaultAccount(
-      {
-        activeAccountId: this.snapshot.activeAccount?.id ?? null,
-        accounts: this.snapshot.accounts,
-      },
-      account,
-      true,
-    );
-    await this.persistVault(nextVault);
+    await this.persistVault(upsertHanzoIamVaultAccount(this.vault, account, true));
+    void this.refreshOrganizationsAndBilling();
     return account;
   };
 
   readonly switchAccount = async (accountId: string): Promise<void> => {
     await this.hydrate();
-    const exists = this.snapshot.accounts.some((entry) => entry.id === accountId);
-    if (!exists) return;
+    const target = this.vault.accounts.find((entry) => entry.id === accountId);
+    if (!target) return;
     await this.persistVault({
-      activeAccountId: accountId,
-      accounts: this.snapshot.accounts,
+      ...this.vault,
+      activeAccountId: target.id,
+      activeOrgId: this.vault.orgByAccountId?.[target.id] ?? target.owner,
     });
+    void this.refreshOrganizationsAndBilling();
+  };
+
+  readonly switchOrganization = async (orgId: string): Promise<void> => {
+    await this.hydrate();
+    const trimmed = orgId.trim();
+    if (!trimmed) return;
+    await this.persistVault(switchHanzoIamVaultOrg(this.vault, trimmed));
+    void this.refreshOrganizationsAndBilling();
   };
 
   readonly removeAccount = async (accountId: string): Promise<void> => {
     await this.hydrate();
-    const nextVault = removeHanzoIamVaultAccount(
-      {
-        activeAccountId: this.snapshot.activeAccount?.id ?? null,
-        accounts: this.snapshot.accounts,
-      },
-      accountId,
-    );
-    await this.persistVault(nextVault);
+    this.organizationsByAccount.delete(accountId);
+    await this.persistVault(removeHanzoIamVaultAccount(this.vault, accountId));
+    void this.refreshOrganizationsAndBilling();
   };
 
   readonly signOut = async (): Promise<void> => {
@@ -285,22 +367,47 @@ class HanzoMobileAuthController implements CloudAccountSource {
     if (this.snapshot.activeAccount) {
       await this.removeAccount(this.snapshot.activeAccount.id);
     } else {
-      await this.persistVault({ activeAccountId: null, accounts: [] });
+      await this.persistVault(EMPTY_HANZO_IAM_VAULT);
     }
   };
 
   readonly signOutAll = async (): Promise<void> => {
-    await this.persistVault({ activeAccountId: null, accounts: [] });
+    this.organizationsByAccount.clear();
+    this.billingSummary = null;
+    await this.persistVault(EMPTY_HANZO_IAM_VAULT);
   };
 
   /** Test helper to reset in-memory state deterministically. */
-  readonly resetForTesting = (initial?: Partial<HanzoMobileAuthSnapshot>): void => {
+  readonly resetForTesting = (
+    initial?: Partial<HanzoMobileAuthSnapshot> & { readonly pendingPkce?: PendingMobilePkce | null },
+  ): void => {
     this.hydratePromise = Promise.resolve();
-    this.emit({
+    this.organizationsByAccount.clear();
+    this.billingSummary = initial?.billing ?? null;
+    this.pendingPkce = initial?.pendingPkce ?? null;
+    const accounts = initial?.accounts ?? (initial?.activeAccount ? [initial.activeAccount] : []);
+    const activeAccount = initial?.activeAccount ?? accounts[0] ?? null;
+    const activeOrgId = initial?.activeOrgId ?? activeAccount?.owner ?? null;
+    this.vault = {
+      activeAccountId: activeAccount?.id ?? null,
+      accounts,
+      activeOrgId,
+      orgByAccountId: activeAccount && activeOrgId ? { [activeAccount.id]: activeOrgId } : {},
+    };
+    if (activeAccount && initial?.organizations) {
+      this.organizationsByAccount.set(activeAccount.id, initial.organizations);
+    }
+    this.snapshot = {
       isLoaded: initial?.isLoaded ?? true,
-      activeAccount: initial?.activeAccount ?? null,
-      accounts: initial?.accounts ?? (initial?.activeAccount ? [initial.activeAccount] : []),
-    });
+      activeAccount,
+      accounts,
+      activeOrgId,
+      organizations:
+        initial?.organizations ??
+        (activeAccount ? resolveAccountOrganizations(activeAccount) : []),
+      billing: activeAccount ? (initial?.billing ?? null) : null,
+    };
+    for (const listener of this.listeners) listener();
   };
 }
 
@@ -308,27 +415,25 @@ export const hanzoMobileAuthStore = new HanzoMobileAuthController();
 export type { HanzoMobileAuthController };
 export { HANZO_IAM_BRANDS, type HanzoIamAccount, type HanzoIamBrandId };
 
+const getAuthToken = async (_opts?: unknown) => await hanzoMobileAuthStore.getToken();
+const signOutActiveAccount = async () => {
+  await hanzoMobileAuthStore.signOut();
+};
+
 export function useAuth(_options?: { readonly treatPendingAsSignedOut?: boolean }) {
   const state = useSyncExternalStore(
     hanzoMobileAuthStore.subscribe,
     hanzoMobileAuthStore.getSnapshot,
     hanzoMobileAuthStore.getSnapshot,
   );
-  const getToken = useCallback(
-    async (_opts?: unknown) => await hanzoMobileAuthStore.getToken(),
-    [],
-  );
-  const signOut = useCallback(async () => {
-    await hanzoMobileAuthStore.signOut();
-  }, []);
 
   return {
     isLoaded: state.isLoaded,
     isSignedIn: state.isLoaded && state.activeAccount !== null,
     userId: state.activeAccount?.id ?? null,
-    orgId: state.activeAccount?.owner ?? null,
-    getToken,
-    signOut,
+    orgId: state.activeOrgId,
+    getToken: getAuthToken,
+    signOut: signOutActiveAccount,
   };
 }
 
@@ -367,6 +472,8 @@ export function useHanzoMobileAccounts() {
     signInWithBrand: hanzoMobileAuthStore.signInWithBrand,
     signInWithToken: hanzoMobileAuthStore.signInWithToken,
     switchAccount: hanzoMobileAuthStore.switchAccount,
+    switchOrganization: hanzoMobileAuthStore.switchOrganization,
+    refreshOrganizationsAndBilling: hanzoMobileAuthStore.refreshOrganizationsAndBilling,
     removeAccount: hanzoMobileAuthStore.removeAccount,
     signOut: hanzoMobileAuthStore.signOut,
     signOutAll: hanzoMobileAuthStore.signOutAll,

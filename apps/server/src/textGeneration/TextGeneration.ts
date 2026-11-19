@@ -68,7 +68,7 @@ const resolveInstance = (
   );
 
 // Review guides investigate the checkout read-only; the other drivers reject that request.
-const INVESTIGATING_DRIVERS = new Set(["codex", "claudeAgent"]);
+const INVESTIGATING_DRIVERS = new Set(["hanzo", "hanzoGen", "codex", "claudeAgent"]);
 
 /** @public */
 export const make = Effect.gen(function* () {

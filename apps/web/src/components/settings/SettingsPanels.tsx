@@ -123,6 +123,7 @@ import { AdvancedSettings } from "./AdvancedSettings";
 import { PullRequestLinksOpenInAppSetting } from "./IntegrationsSettings";
 import { StorageCleanupSections } from "./StorageSettings";
 import { UpdateTrackSwitchDialog } from "./UpdateTrackSwitchDialog";
+import { LocalAiSettingsSection } from "../local-ai/LocalAiManagerModal";
 import { environmentIdsKey } from "~/state/environmentAtomList";
 import { environmentSessionStatesAtom } from "~/state/session";
 import { useCheckProviderUpdates } from "../ProviderUpdatesAction";
@@ -838,6 +839,7 @@ export function GeneralSettingsPanel() {
 
   return (
     <SettingsPageContainer>
+      <LocalAiSettingsSection />
       <SettingsSection id="notifications" title={gt("Notifications")}>
         <NotificationSettings />
         <SettingsRow

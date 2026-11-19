@@ -140,6 +140,7 @@ function getAppStateFromPath(path: string, options: Parameters<typeof getStateFr
 const appLinking = {
   prefixes: [
     Linking.createURL("/"),
+    "hanzo://",
     "hanzodev://",
     "hanzo-dev://",
     "hanzo-preview://",

@@ -115,6 +115,7 @@ export const CustomModelSetting = Schema.Union([Schema.String, CustomModelEntry]
 export type CustomModelSetting = typeof CustomModelSetting.Type;
 
 export const HANZO_DRIVER_KIND = ProviderDriverKind.make("hanzo");
+export const HANZO_GEN_DRIVER_KIND = ProviderDriverKind.make("hanzoGen");
 const CODEX_DRIVER_KIND = ProviderDriverKind.make("codex");
 const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CURSOR_DRIVER_KIND = ProviderDriverKind.make("cursor");
@@ -160,6 +161,7 @@ export const MUSE_DEFAULT_MODEL = "default";
 
 export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, string>> = {
   [HANZO_DRIVER_KIND]: HANZO_DEFAULT_MODEL,
+  [HANZO_GEN_DRIVER_KIND]: HANZO_DEFAULT_MODEL,
   [CODEX_DRIVER_KIND]: DEFAULT_MODEL,
   [CLAUDE_DRIVER_KIND]: "claude-opus-5-5",
   [CURSOR_DRIVER_KIND]: "auto",
@@ -180,6 +182,7 @@ export const DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER: Partial<
   Record<ProviderDriverKind, string>
 > = {
   [HANZO_DRIVER_KIND]: HANZO_DEFAULT_TEXT_GENERATION_MODEL,
+  [HANZO_GEN_DRIVER_KIND]: HANZO_DEFAULT_TEXT_GENERATION_MODEL,
   [CODEX_DRIVER_KIND]: DEFAULT_TEXT_GENERATION_MODEL,
   [ProviderDriverKind.make("antigravity")]: ANTIGRAVITY_DEFAULT_MODEL,
   [CLAUDE_DRIVER_KIND]: "claude-haiku-5-5",
@@ -191,6 +194,12 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
   Record<ProviderDriverKind, Record<string, string>>
 > = {
   [HANZO_DRIVER_KIND]: {
+    enso: "enso-auto",
+    zen: "zen6-coder",
+    "zen-coder": "zen6-coder",
+    kai: "hanzo/kai",
+  },
+  [HANZO_GEN_DRIVER_KIND]: {
     enso: "enso-auto",
     zen: "zen6-coder",
     "zen-coder": "zen6-coder",
@@ -221,6 +230,7 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
 
 export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>> = {
   [HANZO_DRIVER_KIND]: "Hanzo",
+  [HANZO_GEN_DRIVER_KIND]: "Hanzo Gen",
   [ProviderDriverKind.make("antigravity")]: "Antigravity",
   [CODEX_DRIVER_KIND]: "Codex",
   [CLAUDE_DRIVER_KIND]: "Claude",

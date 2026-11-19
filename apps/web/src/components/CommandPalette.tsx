@@ -66,16 +66,19 @@ import {
   CheckIcon,
   ChevronRightIcon,
   CornerLeftUpIcon,
+  CpuIcon,
   FileSearchIcon,
   FolderGit2Icon,
   FolderIcon,
   FolderPlusIcon,
+  KeyboardIcon,
   MessageSquareDashedIcon,
   LinkIcon,
   MessageSquareIcon,
   PaletteIcon,
   RotateCcwIcon,
   SettingsIcon,
+  ShieldCheckIcon,
   MonitorIcon,
   PinIcon,
   PinOffIcon,
@@ -266,6 +269,8 @@ import { openLinkPullRequestDialog } from "./pullRequest/LinkPullRequestDialog";
 import { canShareWithGuestAtom } from "./chat/guestShareAvailability";
 import { openGuestShareDialog } from "./chat/guestShareDialogState";
 import { openUseInAnotherApp } from "./mcp/UseInAnotherAppDialog";
+import { getHanzoWebAuthController } from "../cloud/hanzoWebAuth";
+import { openLocalAiManager } from "../localAi/localAiState";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
 import { settingsForThisPlatform, SETTINGS_SECTION_LABELS } from "./settings/settingsSearch";
 import { primaryServerKeybindingsAtom } from "../state/server";
@@ -1765,10 +1770,68 @@ function OpenCommandPaletteDialog(props: {
 
   actionItems.push({
     kind: "action",
+    value: "action:local-ai",
+    searchTerms: [
+      "local ai",
+      "ollama",
+      "qwen3",
+      "zen4",
+      "hanzod",
+      "validator",
+      "node",
+      "engine",
+      "models",
+      "lan",
+    ],
+    title: gt("Local AI, Validator Node & Engine"),
+    icon: <CpuIcon className={ITEM_ICON_CLASS} />,
+    shortcutCommand: "localAi.open",
+    run: async () => {
+      openLocalAiManager("models");
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:hanzo-account",
+    searchTerms: [
+      "account",
+      "organization",
+      "org",
+      "iam",
+      "hanzo id",
+      "billing",
+      "plan",
+      "credits",
+      "surfaces",
+      "sign in",
+    ],
+    title: gt("Hanzo Account & Organization"),
+    icon: <ShieldCheckIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      getHanzoWebAuthController().openAccountModal("accounts");
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:keybindings",
+    searchTerms: ["keybindings", "keyboard", "shortcuts", "hotkeys"],
+    title: gt("Keyboard Shortcuts"),
+    icon: <KeyboardIcon className={ITEM_ICON_CLASS} />,
+    shortcutCommand: "keybindings.open",
+    run: async () => {
+      await navigate({ to: "/settings/keybindings" });
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
     value: "action:settings",
     searchTerms: ["settings", "preferences", "configuration", "keybindings"],
     title: gt("Open settings"),
     icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
+    shortcutCommand: "settings.open",
     run: async () => {
       await navigate({ to: "/settings" });
     },

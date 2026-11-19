@@ -15,6 +15,7 @@ export type HardwareKeyboardCommand =
   | "review"
   | "copyThreadReference"
   | "toggleSidebar"
+  | "toggleVoice"
   | "cycleHost";
 
 type CommandHandler = (command: HardwareKeyboardCommand) => boolean | void;

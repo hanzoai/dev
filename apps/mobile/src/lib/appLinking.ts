@@ -12,7 +12,10 @@ export function shouldHandleAppLink(url: string, cloudConfigured: boolean): bool
   return (
     !route.includes("expo-development-client") &&
     !route.includes("://expo-sharing") &&
-    !/^hanzodev(-dev|-preview)?:\/*$/.test(url) &&
+    !route.includes("/oauth/callback") &&
+    !route.includes("://oauth/callback") &&
+    !route.includes("://auth/callback") &&
+    !/^(?:hanzo|hanzodev(?:-dev|-preview)?):\/*$/.test(url) &&
     (cloudConfigured || !CLOUD_ONLY_LINK_PATH.test(route))
   );
 }

@@ -62,6 +62,8 @@ export function isModelSelectionProviderEnabled(
 }
 
 const TEXT_GENERATION_FALLBACK_DRIVERS = [
+  "hanzo",
+  "hanzoGen",
   "codex",
   "claudeAgent",
   "cursor",

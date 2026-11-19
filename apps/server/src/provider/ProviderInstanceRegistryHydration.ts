@@ -88,13 +88,14 @@ export const deriveProviderInstanceConfigMap = (
 
 export const DEV_REPLAY_INSTANCE_ID = ProviderInstanceId.make("devReplay");
 export const HANZO_DEFAULT_INSTANCE_ID = ProviderInstanceId.make("hanzo");
+export const HANZO_GEN_DEFAULT_INSTANCE_ID = ProviderInstanceId.make("hanzoGen");
 export const CODEX_DEFAULT_INSTANCE_ID = ProviderInstanceId.make("codex");
 export const OPENAI_CODEX_INSTANCE_ID = ProviderInstanceId.make("openai-codex");
 
 /**
- * Configures the primary default provider instance (`hanzo`) to use the native Hanzo CLI (`dev`)
- * and Hanzo Cloud (`~/.hanzo/dev` -> `https://api.hanzo.ai/v1`) when installed on the host,
- * while keeping OpenAI Codex cleanly configured on `codex`.
+ * Configures the primary default provider instances (`hanzo` and `hanzoGen`) to use the native
+ * Hanzo CLIs (`dev` and `gen`) when installed on the host, sets `hanzo` + `enso-auto` as the
+ * default model selection, and keeps OpenAI Codex cleanly configured on `codex`.
  */
 export const seedHanzoCloudDefaultInstance = Effect.fn(
   "ProviderInstanceRegistryHydration.seedHanzoCloudDefaultInstance",
@@ -103,12 +104,9 @@ export const seedHanzoCloudDefaultInstance = Effect.fn(
   const path = yield* Path.Path;
   const home = yield* HostProcess.HomeDirectory;
   const candidates = [
-    path.join(home, ".local", "bin", "hanzo-dev"),
     path.join(home, ".local", "bin", "dev"),
     path.join(home, ".hanzo", "bin", "dev"),
-    "/opt/homebrew/bin/hanzo-dev",
     "/opt/homebrew/bin/dev",
-    "/usr/local/bin/hanzo-dev",
     "/usr/local/bin/dev",
   ];
   let devBinaryPath: string | null = null;
@@ -120,6 +118,20 @@ export const seedHanzoCloudDefaultInstance = Effect.fn(
   }
   if (!devBinaryPath) return;
 
+  const genCandidates = [
+    path.join(home, ".local", "bin", "gen"),
+    path.join(home, ".local", "bin", "hanzo-gen"),
+    "/opt/homebrew/bin/gen",
+    "/usr/local/bin/gen",
+  ];
+  let genBinaryPath: string | null = null;
+  for (const candidate of genCandidates) {
+    if (yield* fs.exists(candidate).pipe(Effect.orElseSucceed(() => false))) {
+      genBinaryPath = candidate;
+      break;
+    }
+  }
+
   const hanzoDevHome = path.join(home, ".hanzo", "dev");
   const serverSettings = yield* Settings.ServerSettingsService;
   const currentSettings = yield* serverSettings.getSettings;
@@ -129,10 +141,15 @@ export const seedHanzoCloudDefaultInstance = Effect.fn(
   const existingHanzoBinary =
     typeof existingHanzoConfig.binaryPath === "string" ? existingHanzoConfig.binaryPath : "";
 
-  if (!existingHanzo || !existingHanzoBinary) {
+  if (
+    !existingHanzo ||
+    !existingHanzoBinary ||
+    existingHanzo.displayName === "Hanzo Cloud" ||
+    existingHanzoBinary.endsWith("/hanzo-dev")
+  ) {
     const hanzoInstance: ProviderInstanceConfig = {
       ...existingHanzo,
-      displayName: existingHanzo?.displayName ?? "Hanzo",
+      displayName: "Hanzo",
       driver: ProviderDriverKind.make("hanzo"),
       enabled: existingHanzo?.enabled ?? true,
       config: {
@@ -150,7 +167,28 @@ export const seedHanzoCloudDefaultInstance = Effect.fn(
     });
   }
 
-  // Migrate any earlier `codex` slot that had been repurposed as "Hanzo Cloud" back to clean OpenAI Codex.
+  if (genBinaryPath) {
+    const existingGen = currentSettings.providerInstances[HANZO_GEN_DEFAULT_INSTANCE_ID];
+    if (!existingGen) {
+      yield* serverSettings.updateProviderInstance({
+        operation: "upsert",
+        instanceId: HANZO_GEN_DEFAULT_INSTANCE_ID,
+        instance: {
+          displayName: "Hanzo Gen",
+          driver: ProviderDriverKind.make("hanzoGen"),
+          enabled: true,
+          config: {
+            setupMode: "existing",
+            enabled: true,
+            binaryPath: genBinaryPath,
+            homePath: hanzoDevHome,
+          },
+        },
+      });
+    }
+  }
+
+  // Migrate any earlier `codex` slot or stale `Hanzo Cloud` custom instance.
   const existingCodex = currentSettings.providerInstances[CODEX_DEFAULT_INSTANCE_ID];
   if (existingCodex?.displayName === "Hanzo Cloud") {
     const codexBinary = (yield* fs
@@ -174,21 +212,43 @@ export const seedHanzoCloudDefaultInstance = Effect.fn(
       },
     });
   }
-  if (OPENAI_CODEX_INSTANCE_ID in currentSettings.providerInstances) {
-    yield* serverSettings.updateProviderInstance({
-      operation: "remove",
-      instanceId: OPENAI_CODEX_INSTANCE_ID,
-    });
+  for (const [id, entry] of Object.entries(currentSettings.providerInstances)) {
+    if (
+      id === OPENAI_CODEX_INSTANCE_ID ||
+      (id !== HANZO_DEFAULT_INSTANCE_ID &&
+        id !== CODEX_DEFAULT_INSTANCE_ID &&
+        entry.displayName === "Hanzo Cloud")
+    ) {
+      yield* serverSettings.updateProviderInstance({
+        operation: "remove",
+        instanceId: ProviderInstanceId.make(id),
+      });
+    }
   }
 
-  // Enable unified cross-machine & device remote control when a local Hanzo environment is present.
-  if (
+  // Default new threads to Hanzo (`enso-auto`) and repair any stale `{ instanceId: "codex", model: "enso-*" }` pairing.
+  const currentDefault = currentSettings.defaultModelSelection;
+  const pointsHanzoModelAtCodex =
+    currentDefault?.instanceId === CODEX_DEFAULT_INSTANCE_ID &&
+    (currentDefault.model.startsWith("enso") ||
+      currentDefault.model.startsWith("zen") ||
+      currentDefault.model.startsWith("hanzo/"));
+  const needsRemoteDefaults =
     !currentSettings.linkedEnvironmentsEnabled ||
     !currentSettings.enableDeviceSupport ||
-    !currentSettings.enableAgentDeviceAccess
-  ) {
+    !currentSettings.enableAgentDeviceAccess;
+
+  if (!currentDefault || pointsHanzoModelAtCodex || needsRemoteDefaults) {
     yield* serverSettings
       .updateSettings({
+        ...(!currentDefault || pointsHanzoModelAtCodex
+          ? {
+              defaultModelSelection: {
+                instanceId: HANZO_DEFAULT_INSTANCE_ID,
+                model: currentDefault?.model && pointsHanzoModelAtCodex ? currentDefault.model : "enso-auto",
+              },
+            }
+          : {}),
         linkedEnvironmentsEnabled: true,
         enableDeviceSupport: true,
         enableAgentDeviceAccess: true,

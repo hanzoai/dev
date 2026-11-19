@@ -212,6 +212,41 @@ export const mergeCuratedHanzoModels = (
   return Array.from(bySlug.values());
 };
 
+export const isHanzoModelSlug = (slug: string | null | undefined): boolean => {
+  if (!slug) return false;
+  const normalized = slug.trim().toLowerCase();
+  return (
+    normalized.startsWith("enso") ||
+    normalized.startsWith("zen") ||
+    normalized.startsWith("hanzo/") ||
+    normalized === "kai" ||
+    CURATED_HANZO_MODELS.some((model) => model.slug === normalized)
+  );
+};
+
+export const resolveDefaultHanzoGenBinary = Effect.fn(
+  "hanzoLocalIdentity.resolveDefaultHanzoGenBinary",
+)(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const home = yield* HostProcess.HomeDirectory;
+  const candidates = [
+    path.join(home, ".local", "bin", "gen"),
+    path.join(home, ".local", "bin", "hanzo-gen"),
+    path.join(home, ".hanzo", "bin", "gen"),
+    "/opt/homebrew/bin/gen",
+    "/opt/homebrew/bin/hanzo-gen",
+    "/usr/local/bin/gen",
+    "/usr/local/bin/hanzo-gen",
+  ];
+  for (const candidate of candidates) {
+    if (yield* fs.exists(candidate).pipe(Effect.orElseSucceed(() => false))) {
+      return candidate;
+    }
+  }
+  return null;
+});
+
 export const resolveDefaultHanzoDevBinary = Effect.fn(
   "hanzoLocalIdentity.resolveDefaultHanzoDevBinary",
 )(function* () {

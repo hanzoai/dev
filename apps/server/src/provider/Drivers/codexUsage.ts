@@ -558,6 +558,7 @@ export const codexUsageReader: ProviderUsageReader<
         : config,
     );
     const primarySessionsDir = path.resolve(layout.sharedHomePath, "sessions");
+    // @effect-diagnostics-next-line processEnvInEffect:off
     const homeDir = process.env.HOME?.trim() || "";
     if (!homeDir) {
       return [{ dir: primarySessionsDir }];

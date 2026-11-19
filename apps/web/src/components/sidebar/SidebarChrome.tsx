@@ -1,12 +1,21 @@
-import { ArrowLeftIcon, ArrowRightIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  ChartNoAxesColumnIcon,
+  CpuIcon,
+  SettingsIcon,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { T, useGT } from "gt-react";
 import { memo } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useAtomValue } from "@effect/atom-react";
+import { useHanzoWebAccounts } from "../../cloud/hanzoWebAuth";
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { shortcutLabelForCommand } from "../../keybindings";
+import { openLocalAiManager } from "../../localAi/localAiState";
+import { useResolvedHanzoConnectAccountPages } from "../clerk/HanzoConnectAccountPages";
 import {
   navigateHistory,
   useCanNavigateHistory,
@@ -14,8 +23,6 @@ import {
 } from "../../navigationHistory";
 import {
   primaryServerKeybindingsAtom,
-  primaryServerProvidersAtom,
-  primaryServerWelcomeAtom,
 } from "../../state/server";
 import { cn } from "../../lib/utils";
 import { useIssuesSupported, usePullRequestsSupported } from "../../state/environments";
@@ -189,13 +196,12 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
 
 function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
   return (
-    <span className="inline-flex min-w-0 items-baseline gap-1.5 text-sm font-semibold tracking-tight">
-      <Wordmark aria-hidden className="h-[1cap] w-auto shrink-0" />
-      <span>{"Hanzo"}</span>
+    <span className="inline-flex min-w-0 items-center gap-1.5 text-sm font-semibold tracking-tight">
+      <Wordmark aria-hidden className="size-3.5 shrink-0" />
       <span
         className={cn(
           "truncate [text-box:trim-both_cap_alphabetic] supports-[text-box:trim-both_cap_alphabetic]:py-1",
-          onBackdrop ? "text-white/70" : "text-muted-foreground",
+          onBackdrop ? "text-white" : "text-foreground",
         )}
       >
         {/* oxlint-disable-next-line hanzo/no-untranslated-copy -- product wordmark */}
@@ -318,23 +324,33 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   );
 });
 
-const SidebarHanzoCloudBar = memo(function SidebarHanzoCloudBar() {
-  const navigate = useNavigate();
+function SidebarHanzoCloudBar() {
   const gt = useGT();
   const providers = useAtomValue(primaryServerProvidersAtom);
   const welcome = useAtomValue(primaryServerWelcomeAtom);
+  const { activeAccount, activeOrgId, billing, openModal } = useHanzoWebAccounts();
+  const resolvedPages = useResolvedHanzoConnectAccountPages();
+
   const hanzoProvider = providers.find((provider) => provider.driver === "hanzo");
-  const isAuthenticated = hanzoProvider?.auth.status === "authenticated";
-  const accountLabel = hanzoProvider?.auth.label || gt("Hanzo Cloud");
+  const isAuthenticated = Boolean(activeAccount) || hanzoProvider?.auth.status === "authenticated";
+  const accountLabel =
+    activeAccount?.displayName ??
+    activeAccount?.email ??
+    activeAccount?.id ??
+    hanzoProvider?.auth.label ??
+    gt("Sign in to Hanzo ID");
   const hostLabel = welcome?.environment.label;
+  const orgBadge = activeOrgId ?? activeAccount?.owner ?? null;
+  const planBadge = billing?.planName ?? (activeAccount ? "Hanzo ID" : null);
 
   return (
     <div className="mb-1 flex flex-col gap-1 rounded-lg border border-border/70 bg-accent/30 px-2.5 py-2 text-xs">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center justify-between gap-1.5">
         <button
           type="button"
-          onClick={() => void navigate({ to: "/settings/connections" })}
-          className="flex min-w-0 items-center gap-1.5 text-left font-medium text-sidebar-foreground hover:opacity-80"
+          onClick={() => openModal("accounts", resolvedPages)}
+          aria-label={gt("Open Hanzo Account and Organization Control Center")}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left font-medium text-sidebar-foreground hover:opacity-80"
         >
           <span
             className={cn(
@@ -344,25 +360,50 @@ const SidebarHanzoCloudBar = memo(function SidebarHanzoCloudBar() {
           />
           <span className="truncate">{accountLabel}</span>
         </button>
-        <button
-          type="button"
-          onClick={() => void navigate({ to: "/usage" })}
-          className="shrink-0 rounded bg-accent px-1.5 py-0.5 text-3xs font-medium text-sidebar-foreground/80 hover:text-sidebar-foreground"
-        >
-          <T>Usage</T>
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          {planBadge ? (
+            <button
+              type="button"
+              onClick={() => openModal("billing", resolvedPages)}
+              className="rounded bg-accent px-1.5 py-0.5 text-3xs font-medium text-sidebar-foreground/80 hover:text-sidebar-foreground"
+            >
+              {planBadge}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => openLocalAiManager("models")}
+            aria-label={gt("Open Local AI, Validator Node and Engine Manager")}
+            className="inline-flex items-center gap-1 rounded bg-accent px-1.5 py-0.5 text-3xs font-medium text-sidebar-foreground/80 hover:text-sidebar-foreground"
+          >
+            <CpuIcon className="size-2.5" />
+            <span>
+              <T>Local AI</T>
+            </span>
+          </button>
+        </div>
       </div>
-      <div className="flex items-center justify-between gap-2 text-2xs text-muted-foreground">
+      <button
+        type="button"
+        onClick={() => openModal(activeAccount ? "surfaces" : "accounts", resolvedPages)}
+        className="flex items-center justify-between gap-2 text-left text-2xs text-muted-foreground hover:text-sidebar-foreground"
+      >
         <span className="truncate">
-          {hostLabel ? gt("Local: {host}", { host: hostLabel }) : <T>Hanzo Cloud</T>}
+          {orgBadge
+            ? `X-Org-Id: ${orgBadge}`
+            : hostLabel
+              ? gt("Local: {host}", { host: hostLabel })
+              : gt("Unified IAM & Surfaces")}
         </span>
-        <span className={cn("shrink-0", isAuthenticated ? "text-success" : "text-muted-foreground")}>
-          {"api.hanzo.ai"}
+        <span
+          className={cn("shrink-0", isAuthenticated ? "text-success" : "text-muted-foreground")}
+        >
+          {activeAccount ? "hanzo.id" : "api.hanzo.ai"}
         </span>
-      </div>
+      </button>
     </div>
   );
-});
+}
 
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   return (

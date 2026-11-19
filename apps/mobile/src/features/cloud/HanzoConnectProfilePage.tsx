@@ -1,31 +1,41 @@
-import { errorDisplayMessage } from "@hanzodev/client-runtime/errors";
-import { msg, T, useGT, useMessages } from "gt-react-native";
-import { findErrorTraceId } from "@hanzodev/client-runtime/errors";
+import { errorDisplayMessage, findErrorTraceId } from "@hanzodev/client-runtime/errors";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@hanzodev/client-runtime/state/runtime";
-import type { MenuAction } from "@react-native-menu/menu";
 import type { EnvironmentId } from "@hanzodev/contracts";
 import type { RelayClientEnvironmentRecord } from "@hanzodev/contracts/relay";
+import {
+  buildHanzoSurfaceLaunchUrl,
+  HANZO_BILLING_PORTAL_URL,
+  HANZO_ECOSYSTEM_SURFACES,
+  HANZO_SUBSCRIPTION_PLANS,
+} from "@hanzodev/shared/hanzoIamAuth";
+import type { MenuAction } from "@react-native-menu/menu";
+import { msg, T, useGT, useMessages } from "gt-react-native";
 import { type ReactNode, useRef, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
-import { RefreshControl } from "../../components/ui/RefreshControl";
+import { Linking, Pressable, ScrollView, Text, View } from "react-native";
 
 import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import * as Dialog from "../../components/ui/Dialog";
 import { Menu } from "../../components/ui/Menu";
+import { RefreshControl } from "../../components/ui/RefreshControl";
 import { m, type MessageResolver } from "../../i18n/messages";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { relayEnvironmentDiscovery } from "../../state/relay";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useHanzoMobileAccounts } from "./hanzoMobileAuth";
 import {
   deregisterManagedRelayEnvironmentCommand,
   useManagedRelayEnvironments,
 } from "./managedRelayState";
 
 const linkedAtFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+
+function formatUsdCents(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`;
+}
 
 function linkedAtLabel(value: string, resolve: MessageResolver): string {
   const linkedAt = new Date(value);
@@ -63,6 +73,14 @@ function confirmDeregister(environment: RelayClientEnvironmentRecord, onConfirm:
 export function HanzoConnectProfilePage() {
   const gt = useGT();
   const m = useMessages();
+  const {
+    activeAccount,
+    activeOrgId,
+    organizations,
+    billing,
+    switchOrganization,
+    refreshOrganizationsAndBilling,
+  } = useHanzoMobileAccounts();
   const environmentsState = useManagedRelayEnvironments();
   const deregisterEnvironment = useAtomCommand(deregisterManagedRelayEnvironmentCommand, {
     reportFailure: false,
@@ -131,6 +149,16 @@ export function HanzoConnectProfilePage() {
     );
   };
 
+  const handleRefreshAll = () => {
+    environmentsState.refresh();
+    void refreshOrganizationsAndBilling();
+  };
+
+  const openSurfaceUrl = (url: string) => {
+    const targetUrl = buildHanzoSurfaceLaunchUrl(url, { orgId: activeOrgId });
+    void Linking.openURL(targetUrl).catch(() => {});
+  };
+
   const removedEnvironmentLinkedAt =
     removedEnvironments.accountId === environmentsState.accountId
       ? removedEnvironments.linkedAtById
@@ -151,6 +179,11 @@ export function HanzoConnectProfilePage() {
     },
   ] satisfies MenuAction[];
 
+  const activePlanLabel = billing?.planName ?? "Hanzo Go ($8/mo)";
+  const creditSummary = billing
+    ? `${formatUsdCents(billing.creditBalanceCents)} credits · ${formatUsdCents(billing.monthlyUsedCents)} used`
+    : "$25.00 credits · Unified Hanzo Cloud";
+
   return (
     <ScrollView
       className="flex-1 bg-clerk-page"
@@ -159,10 +192,92 @@ export function HanzoConnectProfilePage() {
       refreshControl={
         <RefreshControl
           refreshing={environmentsState.isPending && environmentsState.data !== null}
-          onRefresh={environmentsState.refresh}
+          onRefresh={handleRefreshAll}
         />
       }
     >
+      {activeAccount ? (
+        <>
+          <ClerkSectionHeader>{gt("Organization context (X-Org-Id)")}</ClerkSectionHeader>
+          <View className="border-b border-clerk-border px-6 py-4">
+            <Text className="text-sm text-clerk-foreground-muted">
+              {gt("Active org header: X-Org-Id = {org}", {
+                org: activeOrgId ?? activeAccount.owner,
+              })}
+            </Text>
+            <View className="mt-3 flex-row flex-wrap gap-2">
+              {organizations.map((org) => {
+                const selected = org.id === (activeOrgId ?? activeAccount.owner);
+                return (
+                  <Pressable
+                    key={org.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={gt("Switch organization to {org}", {
+                      org: org.displayName,
+                    })}
+                    onPress={() => {
+                      void switchOrganization(org.id);
+                    }}
+                    className={`rounded-full border px-3.5 py-1.5 ${
+                      selected
+                        ? "border-clerk-foreground bg-clerk-foreground"
+                        : "border-clerk-border bg-transparent"
+                    }`}
+                  >
+                    <Text
+                      className={`text-xs font-semibold ${
+                        selected ? "text-clerk-page" : "text-clerk-foreground"
+                      }`}
+                    >
+                      {`${org.displayName} (${org.id})`}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
+          <ClerkSectionHeader>{gt("Subscription plan & usage")}</ClerkSectionHeader>
+          <ClerkRow title={activePlanLabel} subtitle={creditSummary} />
+          <View className="border-b border-clerk-border px-6 py-3">
+            <Text className="text-xs text-clerk-foreground-muted">
+              {HANZO_SUBSCRIPTION_PLANS.filter((p) => p.id !== "free")
+                .map((p) => `${p.name} (${p.priceLabel})`)
+                .join(" · ")}
+            </Text>
+          </View>
+          <ClerkButtonRow
+            label={gt("Open Billing Portal (billing.hanzo.ai)")}
+            onPress={() => openSurfaceUrl(HANZO_BILLING_PORTAL_URL)}
+          />
+
+          <ClerkSectionHeader>{gt("Connected Hanzo surfaces")}</ClerkSectionHeader>
+          {HANZO_ECOSYSTEM_SURFACES.filter((s) => s.id !== "hanzo-billing").map((surface) => (
+            <Pressable
+              key={surface.id}
+              accessibilityRole="link"
+              onPress={() => openSurfaceUrl(surface.url)}
+              className="flex-row items-center justify-between border-b border-clerk-border px-6 py-3.5 active:opacity-60"
+            >
+              <View className="min-w-0 flex-1 gap-0.5">
+                <Text className="text-base text-clerk-foreground" numberOfLines={1}>
+                  {surface.label}
+                </Text>
+                <Text className="text-xs text-clerk-foreground-muted" numberOfLines={1}>
+                  {`${surface.hostname} · ${surface.description}`}
+                </Text>
+              </View>
+              <SymbolView
+                name="arrow.up.right"
+                size={14}
+                tintColorClassName="accent-clerk-foreground-muted"
+                type="monochrome"
+              />
+            </Pressable>
+          ))}
+        </>
+      ) : null}
+
       <ClerkSectionHeader>{gt("Registered servers")}</ClerkSectionHeader>
 
       {environmentsState.error ? (

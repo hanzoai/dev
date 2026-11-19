@@ -32,7 +32,7 @@ import {
   makeCodexSkillsProbe,
   withCodexAppServerClient,
 } from "../CodexProvider.ts";
-import { resolveCodexLaunchArgs } from "../codexLaunchArgs.ts";
+import { isHanzoDevBinary, resolveCodexLaunchArgs } from "../codexLaunchArgs.ts";
 import { makeManagedServerProvider } from "@hanzodev/provider-core/server/managedProvider";
 import * as ModelCatalog from "@hanzodev/provider-core/server/ModelCatalog";
 import { applyCodexModelCatalog } from "../codexModelCatalog.ts";
@@ -254,7 +254,9 @@ export const CodexDriver: ProviderDriver<
         models: Effect.suspend(() => snapshot.getSnapshot).pipe(
           Effect.map((value) => value.models),
         ),
-        compatibility: installation.compatibility,
+        compatibility: isHanzoDevBinary(effectiveConfig.binaryPath)
+          ? () => Effect.undefined
+          : installation.compatibility,
       },
     ).pipe(
       Effect.mapError(

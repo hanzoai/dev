@@ -8,6 +8,7 @@ import {
 import type { EnvironmentId, ScopedThreadRef } from "@hanzodev/contracts";
 import { sourceControlClients } from "@hanzodev/client-runtime/source-control-clients";
 import { promptLinkAppPath } from "@hanzodev/shared/promptLinks";
+import { parseHanzoIamCallbackUrl } from "@hanzodev/shared/hanzoIamAuth";
 import { readPairingAppLink, resolveRemotePairingTarget } from "@hanzodev/shared/remote";
 import { useRouter } from "@tanstack/react-router";
 import * as Effect from "effect/Effect";
@@ -18,6 +19,7 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { openFileInPreview, openUrlInPreview } from "../../browser/openFileInPreview";
 import { isPreviewAvailableFor } from "../../browser/previewRuntime";
+import { getHanzoWebAuthController } from "../../cloud/hanzoWebAuth";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { connectPairing } from "../../connection/onboarding";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
@@ -206,6 +208,10 @@ export function DesktopWebLinkCoordinator() {
   });
 
   const openLink = useEffectEvent(async (url: string) => {
+    if (parseHanzoIamCallbackUrl(url) !== null) {
+      await getHanzoWebAuthController().handleDeepLinkCallback(url);
+      return;
+    }
     const pairingUrl = readPairingAppLink(url);
     if (pairingUrl !== null) {
       await pairFromLink(pairingUrl);

@@ -28,6 +28,13 @@ function enrichHanzoSnapshot(
   snapshot: ServerProvider,
   fallbackAuth: ServerProvider["auth"],
 ): ServerProvider {
+  const {
+    compatibilityAdvisory: _compat,
+    versionAdvisory: _versionAdv,
+    updateRequiredModels: _updateReq,
+    message: rawMessage,
+    ...cleanSnapshot
+  } = snapshot;
   const models = mergeCuratedHanzoModels(
     snapshot.models.length > 0 ? snapshot.models : CURATED_HANZO_MODELS,
   );
@@ -42,12 +49,14 @@ function enrichHanzoSnapshot(
       ? ("ready" as const)
       : snapshot.status;
   return {
-    ...snapshot,
+    ...cleanSnapshot,
     driver: HANZO_DRIVER_KIND,
     displayName: snapshot.displayName ?? "Hanzo",
     status,
     auth,
     models,
+    updateRequiredModels: [],
+    ...(status === "ready" ? {} : rawMessage ? { message: rawMessage } : {}),
   };
 }
 
@@ -115,7 +124,6 @@ export const HanzoDriver: ProviderDriver<
       ...baseInstance.snapshot,
       getSnapshot: wrapSnapshotEffect(baseInstance.snapshot.getSnapshot),
       refresh: wrapSnapshotEffect(baseInstance.snapshot.refresh),
-      applyUsageLimits: (limits) => wrapSnapshotEffect(baseInstance.snapshot.applyUsageLimits(limits)),
       streamChanges: baseInstance.snapshot.streamChanges.pipe(
         Stream.map((snap) => enrichHanzoSnapshot(snap, resolvedAuth)),
       ),
@@ -126,6 +134,10 @@ export const HanzoDriver: ProviderDriver<
       driverKind: HANZO_DRIVER_KIND,
       displayName: displayName ?? "Hanzo",
       snapshot: wrappedSnapshot,
+      orchestrationAdapter: {
+        ...baseInstance.orchestrationAdapter,
+        driver: HANZO_DRIVER_KIND,
+      },
       ...(baseInstance.snapshotForCwd
         ? {
             snapshotForCwd: (cwd: string) =>

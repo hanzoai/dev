@@ -1604,7 +1604,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const capabilities = yield* adapter.getCapabilities().pipe(mapDispatchError(command));
       return capabilities.turns.supportsNativeGoals === true ? driver : undefined;
     }
-    return driver === "codex" || driver === "claudeAgent" ? driver : undefined;
+    return driver === "hanzo" ||
+      driver === "hanzoGen" ||
+      driver === "codex" ||
+      driver === "claudeAgent"
+      ? driver
+      : undefined;
   });
 
   /** Unsupported goal controls can become new objectives in native providers. */

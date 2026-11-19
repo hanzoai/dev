@@ -6,6 +6,7 @@ import { AntigravityDriver, type AntigravityDriverEnv } from "./Drivers/Antigrav
 import { ClaudeDriver, type ClaudeDriverEnv } from "./Drivers/ClaudeDriver.ts";
 import { CodexDriver, type CodexDriverEnv } from "./Drivers/CodexDriver.ts";
 import { HanzoDriver, type HanzoDriverEnv } from "./Drivers/HanzoDriver.ts";
+import { HanzoGenDriver, type HanzoGenDriverEnv } from "./Drivers/HanzoGenDriver.ts";
 import { CursorDriver, type CursorDriverEnv } from "@hanzodev/provider-cursor/server";
 import { FxDriver, type FxDriverEnv } from "@hanzodev/provider-fx/server";
 import { GrokDriver, type GrokDriverEnv } from "@hanzodev/provider-grok/server";
@@ -24,6 +25,7 @@ export type BuiltInDriversEnv =
   | ClaudeDriverEnv
   | CodexDriverEnv
   | HanzoDriverEnv
+  | HanzoGenDriverEnv
   | CursorDriverEnv
   | FxDriverEnv
   | GrokDriverEnv
@@ -34,6 +36,7 @@ export type BuiltInDriversEnv =
 
 export const BUILT_IN_DRIVERS: ReadonlyArray<AnyProviderDriver<BuiltInDriversEnv>> = [
   HanzoDriver,
+  HanzoGenDriver,
   CodexDriver,
   ClaudeDriver,
   CursorDriver,

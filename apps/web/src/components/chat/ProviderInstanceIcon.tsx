@@ -18,6 +18,7 @@ import {
 } from "../Icons";
 
 import { cn } from "~/lib/utils";
+import { Wordmark } from "../Wordmark";
 import { providerClients } from "../settings/providerDriverMeta";
 import { ProviderPackageIcon } from "./ProviderPackageIcon";
 import {
@@ -27,6 +28,8 @@ import {
 } from "../settings/AcpRegistryIcon";
 
 const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>> = {
+  [ProviderDriverKind.make("hanzo")]: Wordmark,
+  [ProviderDriverKind.make("hanzoGen")]: Wordmark,
   [ProviderDriverKind.make("codex")]: OpenAI,
   [ProviderDriverKind.make("claudeAgent")]: ClaudeAI,
   [ProviderDriverKind.make("antigravity")]: AntigravityIcon,

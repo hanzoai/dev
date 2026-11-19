@@ -241,6 +241,26 @@ const SOURCE_CONTROL_HOST_TERMS = sourceControlClients.definitions
 
 export const SETTINGS_SEARCH_ITEMS = [
   {
+    id: "local-ai-models",
+    title: msg("Zen & Qwen3+ local models"),
+    to: "/settings/general",
+    searchTerms: [
+      msg("local ai ollama qwen3 zen4 zen4-mini zen4-coder weights download offline inference"),
+    ],
+  },
+  {
+    id: "local-ai-validator",
+    title: msg("Hanzo validator node (hanzod)"),
+    to: "/settings/general",
+    searchTerms: [msg("hanzod validator node rpc 9630 staking 9631 block height chain")],
+  },
+  {
+    id: "local-ai-engine",
+    title: msg("Embedded engine & LAN discovery"),
+    to: "/settings/general",
+    searchTerms: [msg("hanzo engine 36900 gguf huggingface metal cuda lan discovery inference")],
+  },
+  {
     id: "storage-worktree-keep-when",
     targetId: "storage-worktrees",
     title: msg("Keep worktrees with local changes"),

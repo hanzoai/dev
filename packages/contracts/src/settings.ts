@@ -761,6 +761,63 @@ export const HanzoSettings = makeProviderSettingsSchema(
 );
 export type HanzoSettings = typeof HanzoSettings.Type;
 
+export const HanzoGenSettings = makeProviderSettingsSchema(
+  {
+    setupMode: Schema.optionalKey(Schema.Literals(["managed", "existing"])).pipe(
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    enabled: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(true)),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    binaryPath: makeBinaryPathSetting("gen").pipe(
+      Schema.annotateKey({
+        title: "Binary path",
+        description: "Path to the Hanzo Gen CLI binary (`gen` / `hanzo-gen`).",
+        providerSettingsForm: { placeholder: "~/.local/bin/gen", clearWhenEmpty: "omit" },
+      }),
+    ),
+    homePath: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "HANZO_HOME path",
+        description: "Custom Hanzo Gen home and config directory.",
+        providerSettingsForm: {
+          placeholder: "~/.hanzo/dev",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    shadowHomePath: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Shadow home path",
+        description:
+          "Account-specific Hanzo Gen home. Keeps auth.json separate while sharing state.",
+        providerSettingsForm: {
+          placeholder: "~/.hanzo/accounts/personal",
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    launchArgs: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Launch arguments",
+        description: "Additional CLI arguments passed on session start.",
+      }),
+    ),
+    customModels: Schema.Array(CustomModelSetting).pipe(
+      Schema.withDecodingDefault(Effect.succeed([])),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+  },
+  {
+    order: ["binaryPath", "homePath", "shadowHomePath", "launchArgs"],
+  },
+);
+export type HanzoGenSettings = typeof HanzoGenSettings.Type;
+
 export const CodexSettings = makeProviderSettingsSchema(
   {
     setupMode: Schema.optionalKey(Schema.Literals(["managed", "existing"])).pipe(
@@ -1680,8 +1737,10 @@ const DEFAULT_DISABLED_PROVIDER_DRIVERS: ReadonlySet<ProviderDriverKind> = new S
   ),
 );
 
-const DEFAULT_ENABLED_DEFAULT_INSTANCES: ReadonlySet<ProviderInstanceId> = new Set(
-  ["hanzo", "codex", "claudeAgent"].map((instanceId) => ProviderInstanceId.make(instanceId)),
+export const DEFAULT_ENABLED_DEFAULT_INSTANCES: ReadonlySet<ProviderInstanceId> = new Set(
+  ["hanzo", "hanzoGen", "codex", "claudeAgent"].map((instanceId) =>
+    ProviderInstanceId.make(instanceId),
+  ),
 );
 
 export const isUnconfiguredDefaultInstanceEnabled = (instanceId: ProviderInstanceId): boolean =>

@@ -1,7 +1,9 @@
 import {
+  createMicLeaseArbitrator,
   postProcessEnvironmentTranscript,
   VoiceInputController,
   voiceInputBlocksSubmission,
+  type MicLeaseArbitrator,
   type VoiceDraftSnapshot,
   type VoiceInputControllerDependencies,
   type VoiceInputState,
@@ -98,6 +100,7 @@ function cleanupContext({ text, selection }: DraftInput): DraftInput {
 export class VoiceInputSession {
   readonly key: SessionKey;
   private readonly controller: VoiceInputController;
+  private readonly micLease: MicLeaseArbitrator;
   private target: VoiceInputTarget | null = null;
   private snapshot: VoiceInputSessionSnapshot = {
     state: IDLE_VOICE_STATE,
@@ -111,6 +114,13 @@ export class VoiceInputSession {
 
   constructor(key: SessionKey) {
     this.key = key;
+    const instanceId = `hanzo-web-voice-${Math.random().toString(36).slice(2, 10)}`;
+    this.micLease = createMicLeaseArbitrator({
+      instanceId,
+      onPreempted: () => {
+        if (!this.disposed) this.controller.cancel();
+      },
+    });
     const hasAudioConsent = bindAudioGrant(key.grantId);
     let recordingPreferences:
       | {
@@ -220,6 +230,9 @@ export class VoiceInputSession {
       commitDraft: (text, selection) => this.target?.commitDraft(text, selection),
       onStateChange: (state) => {
         if (this.disposed) return;
+        if (state.phase === "idle" || state.phase === "error") {
+          this.micLease.release();
+        }
         const recordingStartedAt =
           state.phase !== "recording" ? null : (this.snapshot.recordingStartedAt ?? Date.now());
         this.publish({ ...this.snapshot, state, recordingStartedAt });
@@ -258,6 +271,7 @@ export class VoiceInputSession {
       voiceInputBlocksSubmission(this.controller.currentState) &&
       this.target?.ownerKey !== target.ownerKey;
     if (busyElsewhere) return Promise.resolve();
+    this.micLease.claim();
     this.target = target;
     this.publishActivity(SILENT_ACTIVITY);
     this.publish({ ...this.snapshot, target });
@@ -276,6 +290,7 @@ export class VoiceInputSession {
   }
 
   cancel(): void {
+    this.micLease.release();
     this.controller.cancel();
   }
 
@@ -291,6 +306,7 @@ export class VoiceInputSession {
 
   dispose(): void {
     this.disposed = true;
+    this.micLease.dispose();
     this.controller.dispose();
     this.listeners.clear();
     this.activityListeners.clear();

@@ -1,4 +1,7 @@
-import type { VoiceInputState } from "@hanzodev/client-runtime/voice-input";
+import {
+  createFnVoiceController,
+  type VoiceInputState,
+} from "@hanzodev/client-runtime/voice-input";
 import type { ResolvedKeybindingsConfig } from "@hanzodev/contracts";
 import { useEffect, useRef, type RefObject } from "react";
 
@@ -109,6 +112,32 @@ export function useDictationShortcut(input: ShortcutInput) {
     if (typeof window === "undefined") return;
     let disposed = false;
     shortcutTargets.set(id.current, () => current.current);
+    const toggleVoiceForTarget = () => {
+      const { speech, disabled } = current.current;
+      if (speech.state.phase === "recording") {
+        void speech.stop();
+        return;
+      }
+      if ((speech.state.phase === "idle" || speech.state.phase === "error") && speech.available && !disabled) {
+        void speech.start();
+      }
+    };
+    const fnController = createFnVoiceController({
+      enableToggleChord: false,
+      isListening: () => {
+        const phase = current.current.speech.state.phase;
+        return phase !== "idle" && phase !== "error";
+      },
+      start: () => {
+        const { speech, disabled } = current.current;
+        if (!speech.available || disabled) return;
+        void speech.start();
+      },
+      stop: () => {
+        void current.current.speech.stop();
+      },
+      toggle: toggleVoiceForTarget,
+    });
     const finish = (event: KeyboardEvent | null) => {
       const press = pressed.current;
       if (!press) return;
@@ -138,10 +167,12 @@ export function useDictationShortcut(input: ShortcutInput) {
         event.preventDefault();
         event.stopImmediatePropagation();
         pressed.current = null;
+        fnController.cancelHold();
         generation.current += 1;
         speech.cancel();
         return;
       }
+      if (fnController.onKeyDown(event)) return;
       const { keybindings, terminalOpen, modelPickerOpen, disabled } = current.current;
       const previewFocus = current.current.previewFocus ?? false;
       const command = resolveShortcutCommand(event, keybindings, {
@@ -176,7 +207,14 @@ export function useDictationShortcut(input: ShortcutInput) {
         starting: speech.start(),
       };
     };
-    const onBlur = () => finish(null);
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (ownsShortcut(id.current) && fnController.onKeyUp(event)) return;
+      finish(event);
+    };
+    const onBlur = () => {
+      fnController.cancelHold();
+      finish(null);
+    };
     const relay = (event: KeyboardEvent) => {
       relayedFrom.set(event, id.current);
       window.dispatchEvent(event);
@@ -186,16 +224,23 @@ export function useDictationShortcut(input: ShortcutInput) {
       keyup: relay,
       blur: onBlur,
     });
+    const unsubscribeMenu = window.desktopBridge?.onMenuAction((action) => {
+      if (action === "voice.toggle" && ownsShortcut(id.current)) {
+        toggleVoiceForTarget();
+      }
+    });
     window.addEventListener("keydown", onKeyDown, true);
-    window.addEventListener("keyup", finish, true);
+    window.addEventListener("keyup", onKeyUp, true);
     window.addEventListener("blur", onBlur);
     return () => {
       disposed = true;
       pressed.current = null;
+      fnController.dispose();
       shortcutTargets.delete(id.current);
       unsubscribe?.();
+      unsubscribeMenu?.();
       window.removeEventListener("keydown", onKeyDown, true);
-      window.removeEventListener("keyup", finish, true);
+      window.removeEventListener("keyup", onKeyUp, true);
       window.removeEventListener("blur", onBlur);
     };
   }, [mode, subscribeKeys]);

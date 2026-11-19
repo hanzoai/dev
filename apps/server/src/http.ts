@@ -425,6 +425,7 @@ export const layerHanzoIdentitiesRoute = HttpRouter.add(
   Effect.gen(function* () {
     yield* authenticateRawRouteWithScope(AuthOrchestrationReadScope);
     const snapshot = yield* readLocalHanzoIdentities();
+    // @effect-diagnostics-next-line globalJsonInEffect:off
     return HttpServerResponse.text(JSON.stringify(snapshot), {
       contentType: "application/json; charset=utf-8",
       headers: {

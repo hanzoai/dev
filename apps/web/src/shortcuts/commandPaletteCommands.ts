@@ -12,6 +12,7 @@ import { toggleThemeEditorForTheme } from "../components/settings/themeEditorSto
 import { toastManager } from "../components/ui/toast";
 import { getThemeSnapshot, setAppearanceMode } from "../hooks/useTheme";
 import { m } from "../i18n/messages";
+import { openLocalAiManager } from "../localAi/localAiState";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { type CommandHandler, type CommandScopeOptions, registerCommands } from "./dispatcher";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
@@ -98,6 +99,25 @@ export function installCommandPaletteCommands(
         consume(event);
         dispatchCommandPalette({ _tag: "SetOpen", open: false });
         void router.navigate({ to: "/usage" });
+      },
+      "settings.open": (event) => {
+        consume(event);
+        dispatchCommandPalette({ _tag: "SetOpen", open: false });
+        if (!/^\/settings(\/|$)/.test(router.state.location.pathname)) {
+          void router.navigate({ to: "/settings" });
+        }
+      },
+      "keybindings.open": (event) => {
+        consume(event);
+        dispatchCommandPalette({ _tag: "SetOpen", open: false });
+        if (router.state.location.pathname !== "/settings/keybindings") {
+          void router.navigate({ to: "/settings/keybindings" });
+        }
+      },
+      "localAi.open": (event) => {
+        consume(event);
+        dispatchCommandPalette({ _tag: "SetOpen", open: false });
+        openLocalAiManager("models");
       },
       "commandPalette.toggle": toggleOverlay("commandPalette.toggle"),
       "filePicker.toggle": toggleOverlay("filePicker.toggle"),

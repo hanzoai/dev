@@ -29,6 +29,7 @@ const mergeProviderModels = (
 
 const BUILT_IN_DRIVER_ORDER: ReadonlyArray<string> = [
   "hanzo",
+  "hanzoGen",
   "codex",
   "claudeAgent",
   "cursor",

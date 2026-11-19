@@ -3,6 +3,8 @@ import {
   ClaudeSettings,
   CloudSpeechCredentials,
   CodexSettings,
+  HanzoGenSettings,
+  HanzoSettings,
   EasDeviceHostConfig,
   type ProviderInstanceConfig,
   type ServerSettings,
@@ -30,6 +32,8 @@ import {
 export const SECRET_REDACTED = "\u2022\u2022\u2022\u2022\u2022\u2022";
 
 const providerSecretFields = new Map([
+  ["hanzo", secretSettingsFields(HanzoSettings)],
+  ["hanzoGen", secretSettingsFields(HanzoGenSettings)],
   ["codex", secretSettingsFields(CodexSettings)],
   ["claudeAgent", secretSettingsFields(ClaudeSettings)],
   ["antigravity", secretSettingsFields(AntigravitySettings)],

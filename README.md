@@ -27,7 +27,11 @@ git clone https://github.com/hanzoai/dev-desktop.git
 cd dev-desktop
 COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm install
 
-# Launch the native Hanzo Dev desktop app + local orchestration backend
+# Build & launch the production-bundled native desktop app (fastest, zero HMR lag)
+COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm run build:desktop
+COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm run start:desktop
+
+# Or launch with live Vite HMR watchers for UI development
 COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm run dev:desktop
 
 # Or run web + orchestration server directly in your browser (http://127.0.0.1:5733)

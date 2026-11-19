@@ -82,6 +82,7 @@ function providerDisplayLabel(provider: {
 }): string {
   if (provider.displayName) return provider.displayName;
   if (provider.driver === "hanzo") return "Hanzo";
+  if (provider.driver === "hanzoGen") return "Hanzo Gen";
   if (provider.driver === "codex") return "Codex";
   if (provider.driver === "claudeAgent") return "Claude";
   if (provider.driver === "pi") return "Pi";
