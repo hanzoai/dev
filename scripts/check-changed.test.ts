@@ -222,7 +222,9 @@ describe("check:changed", () => {
       assert.isFalse(launches(file), file);
     }
     // A script-only change still builds the app it opens.
-    assert.isTrue(decide(["apps/desktop/scripts/stage-tauri-resources.mjs"], packages, false).outputs.build);
+    assert.isTrue(
+      decide(["apps/desktop/scripts/stage-tauri-resources.mjs"], packages, false).outputs.build,
+    );
   });
 
   it.each([

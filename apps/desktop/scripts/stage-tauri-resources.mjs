@@ -10,6 +10,11 @@ const serverDir = NodePath.join(repoRoot, "apps", "server");
 const webDistDir = NodePath.join(repoRoot, "apps", "web", "dist");
 const serverDistDir = NodePath.join(serverDir, "dist");
 const resourcesRoot = NodePath.join(desktopDir, "src-tauri", "resources");
+// oxlint-disable-next-line hanzo/no-global-process-runtime -- standalone Node build script outside Effect runtime
+const hostPlatform = NodeOS.platform();
+// oxlint-disable-next-line hanzo/no-global-process-runtime -- standalone Node build script outside Effect runtime
+const hostArch = NodeOS.arch();
+const isWindows = hostPlatform === "win32";
 
 const EXTERNAL_RUNTIME_PREFIXES = [
   "@cursor/sdk",
@@ -45,16 +50,11 @@ function isExternalDep(name) {
 }
 
 function runVp(args) {
-  const vpBin = NodePath.join(
-    repoRoot,
-    "node_modules",
-    ".bin",
-    NodeOS.platform() === "win32" ? "vp.cmd" : "vp",
-  );
+  const vpBin = NodePath.join(repoRoot, "node_modules", ".bin", isWindows ? "vp.cmd" : "vp");
   NodeChildProcess.execFileSync(vpBin, args, {
     cwd: repoRoot,
     stdio: "inherit",
-    shell: NodeOS.platform() === "win32",
+    shell: isWindows,
   });
 }
 
@@ -102,7 +102,7 @@ if (
 }
 
 // 3. Ensure native resource-monitor binary exists
-const exeSuffix = NodeOS.platform() === "win32" ? ".exe" : "";
+const exeSuffix = isWindows ? ".exe" : "";
 const monitorBinaryName = `hanzo-resource-monitor${exeSuffix}`;
 const monitorManifest = NodePath.join(repoRoot, "native", "resource-monitor", "Cargo.toml");
 const monitorReleaseBin = NodePath.join(
@@ -130,6 +130,7 @@ const stagedDistDir = NodePath.join(stagedServerDir, "dist");
 const stagedNodeModulesDir = NodePath.join(stagedServerDir, "node_modules");
 NodeFS.mkdirSync(stagedDistDir, { recursive: true });
 NodeFS.mkdirSync(stagedNodeModulesDir, { recursive: true });
+NodeFS.writeFileSync(NodePath.join(resourcesRoot, ".keep"), "");
 
 const serverPkgJsonPath = NodePath.join(serverDir, "package.json");
 const serverPkg = JSON.parse(NodeFS.readFileSync(serverPkgJsonPath, "utf8"));
@@ -165,7 +166,7 @@ const standaloneExe = NodePath.join(serverDir, "dist-exe", `hanzo${exeSuffix}`);
 if (NodeFS.existsSync(standaloneExe)) {
   const destExe = NodePath.join(stagedServerDir, `hanzo${exeSuffix}`);
   NodeFS.copyFileSync(standaloneExe, destExe);
-  if (NodeOS.platform() !== "win32") {
+  if (!isWindows) {
     NodeFS.chmodSync(destExe, 0o755);
   }
 }
@@ -174,13 +175,13 @@ if (NodeFS.existsSync(standaloneExe)) {
 if (NodeFS.existsSync(monitorReleaseBin)) {
   const destMonitor = NodePath.join(resourcesRoot, monitorBinaryName);
   NodeFS.copyFileSync(monitorReleaseBin, destMonitor);
-  if (NodeOS.platform() !== "win32") {
+  if (!isWindows) {
     NodeFS.chmodSync(destMonitor, 0o755);
   }
 }
 
 // Stage dereferenced runtime external node_modules via BFS from apps/server/package.json
-const hostPlatformArch = `${NodeOS.platform()}-${NodeOS.arch()}`;
+const hostPlatformArch = `${hostPlatform}-${hostArch}`;
 const visited = new Set();
 const queue = [];
 
@@ -207,7 +208,12 @@ while (queue.length > 0) {
       // Strip foreign node-pty prebuilds so macOS codesign never encounters Linux/Windows binaries.
       const rel = NodePath.relative(pkgRoot, src);
       const parts = rel.split(NodePath.sep);
-      if (depName === "node-pty" && parts[0] === "prebuilds" && parts[1] && parts[1] !== hostPlatformArch) {
+      if (
+        depName === "node-pty" &&
+        parts[0] === "prebuilds" &&
+        parts[1] &&
+        parts[1] !== hostPlatformArch
+      ) {
         return false;
       }
       if (parts.includes(".bin")) return false;
