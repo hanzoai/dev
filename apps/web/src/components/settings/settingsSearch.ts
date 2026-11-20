@@ -412,6 +412,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [msg("latex tex katex equations formulas markdown")],
   },
   {
+    id: "dock-icon",
+    title: msg("Dock icon"),
+    to: "/settings/appearance",
+    searchTerms: [msg("macos app icon badge branded minimal dock")],
+    desktopOnly: true,
+    macOnly: true,
+  },
+  {
     id: "panel-animations",
     title: msg("Panel animations"),
     to: "/settings/appearance",

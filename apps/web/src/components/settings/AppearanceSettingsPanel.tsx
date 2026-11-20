@@ -34,6 +34,7 @@ import {
 } from "./settingsLayout";
 import { useSearchableSetting } from "./settingsSearch";
 import { AdvancedSettings } from "./AdvancedSettings";
+import { DockIconSettingsRow } from "./DockIconSettingsRow";
 import { PanelAnimationsPreview } from "./PanelAnimationsPreview";
 import { TypographySection } from "./TypographySettings";
 import { ThreadDetailsItemsRow } from "./ThreadDetailsItemsRow";
@@ -361,6 +362,7 @@ export function AppearanceSettingsPanel() {
             />
           }
         />
+        <DockIconSettingsRow />
         <AdvancedSettings
           targetIds={[
             searchableSetting("panel-animations").id,

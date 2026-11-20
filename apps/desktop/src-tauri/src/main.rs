@@ -4,6 +4,7 @@ mod auth;
 mod backend;
 mod bridge;
 mod commands;
+mod dock_icon;
 mod menu;
 mod snapshot;
 mod ssh;
@@ -154,6 +155,7 @@ fn main() {
             menu::handle_menu_event(app, event.id().as_ref());
         })
         .setup(move |app| {
+            dock_icon::apply_saved_mode_on_startup(app.handle());
             let supervisor = BackendSupervisor::start(runtime_config.clone(), local_enabled);
             let snapshots = SnapshotManager::new();
             let shortcut_manager = app.global_shortcut();
@@ -270,6 +272,8 @@ fn main() {
             commands::desktop_preview_save_recording,
             commands::desktop_web_links_set_ready,
             commands::desktop_show_context_menu,
+            dock_icon::get_dock_icon_mode,
+            dock_icon::set_dock_icon_mode,
         ]);
 
     let app = builder

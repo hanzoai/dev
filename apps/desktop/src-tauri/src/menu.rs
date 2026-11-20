@@ -1,6 +1,12 @@
 use crate::commands::AppState;
+use crate::dock_icon::{self, DockIconMode};
+#[cfg(target_os = "macos")]
+use tauri::menu::{CheckMenuItem, MenuItemKind};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
+
+pub const MENU_ID_DOCK_ICON_BRANDED: &str = "dock-icon:branded";
+pub const MENU_ID_DOCK_ICON_MINIMAL: &str = "dock-icon:minimal";
 
 pub fn build_app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let menu = Menu::new(app)?;
@@ -42,6 +48,26 @@ pub fn build_app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             true,
             Some("CmdOrCtrl+Shift+M"),
         )?)?;
+        app_menu.append(&PredefinedMenuItem::separator(app)?)?;
+        let active_dock_mode = dock_icon::load_mode(app);
+        let dock_icon_menu = Submenu::new(app, "Dock Icon", true)?;
+        dock_icon_menu.append(&CheckMenuItem::with_id(
+            app,
+            MENU_ID_DOCK_ICON_BRANDED,
+            "Branded (H badge)",
+            true,
+            active_dock_mode == DockIconMode::Branded,
+            None::<&str>,
+        )?)?;
+        dock_icon_menu.append(&CheckMenuItem::with_id(
+            app,
+            MENU_ID_DOCK_ICON_MINIMAL,
+            "Minimal (No badge)",
+            true,
+            active_dock_mode == DockIconMode::Minimal,
+            None::<&str>,
+        )?)?;
+        app_menu.append(&dock_icon_menu)?;
         app_menu.append(&PredefinedMenuItem::separator(app)?)?;
         app_menu.append(&PredefinedMenuItem::services(app, None)?)?;
         app_menu.append(&PredefinedMenuItem::separator(app)?)?;
@@ -131,6 +157,40 @@ pub fn build_app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     Ok(menu)
 }
 
+#[cfg(target_os = "macos")]
+fn sync_dock_icon_menu_items<R: Runtime>(items: &[MenuItemKind<R>], mode: DockIconMode) {
+    for item in items {
+        match item {
+            MenuItemKind::Submenu(submenu) => {
+                if let Ok(children) = submenu.items() {
+                    sync_dock_icon_menu_items(&children, mode);
+                }
+            }
+            MenuItemKind::Check(check) => {
+                let id = check.id().as_ref();
+                if id == MENU_ID_DOCK_ICON_BRANDED {
+                    let _ = check.set_checked(mode == DockIconMode::Branded);
+                } else if id == MENU_ID_DOCK_ICON_MINIMAL {
+                    let _ = check.set_checked(mode == DockIconMode::Minimal);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub fn sync_dock_icon_menu<R: Runtime>(app: &AppHandle<R>, mode: DockIconMode) {
+    if let Some(menu) = app.menu() {
+        if let Ok(items) = menu.items() {
+            sync_dock_icon_menu_items(&items, mode);
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn sync_dock_icon_menu<R: Runtime>(_app: &AppHandle<R>, _mode: DockIconMode) {}
+
 pub fn handle_menu_event(app: &AppHandle, raw_id: &str) {
     if let Some(rest) = raw_id.strip_prefix("ctx:") {
         if let Some((token, selected_id)) = rest.split_once(':') {
@@ -143,6 +203,20 @@ pub fn handle_menu_event(app: &AppHandle, raw_id: &str) {
                     }
                 }
             }
+        }
+        return;
+    }
+
+    if raw_id == MENU_ID_DOCK_ICON_BRANDED {
+        if let Err(err) = dock_icon::set_and_persist_mode(app, DockIconMode::Branded) {
+            log::warn!("Failed to set Branded Dock icon from menu: {err}");
+        }
+        return;
+    }
+
+    if raw_id == MENU_ID_DOCK_ICON_MINIMAL {
+        if let Err(err) = dock_icon::set_and_persist_mode(app, DockIconMode::Minimal) {
+            log::warn!("Failed to set Minimal Dock icon from menu: {err}");
         }
         return;
     }

@@ -311,6 +311,11 @@ pub fn build_initialization_script(config: &BackendRuntimeConfig, local_enabled:
     pickProjectFavicon: (initialPath) => invoke("desktop_pick_project_favicon", {{ initialPath: initialPath || null }}),
     pickThemeFiles: () => invoke("desktop_pick_theme_files"),
     setTheme: (theme) => invoke("desktop_set_theme", {{ theme }}),
+    getDockIconMode: () => invoke("get_dock_icon_mode"),
+    setDockIconMode: (mode) => invoke("set_dock_icon_mode", {{ mode }}),
+    onDockIconModeChange: (listener) => listenEvent("desktop:dock-icon-mode-changed", (mode) => {{
+      if (mode === "branded" || mode === "minimal") listener(mode);
+    }}),
     showContextMenu: (items, position) => invoke("desktop_show_context_menu", {{ items, position: position || null }}),
     receiveProviderAuthCallback: async () => "",
     cancelProviderAuthCallback: async () => undefined,
@@ -542,6 +547,8 @@ mod tests {
         assert!(script.contains("desktop_ensure_ssh_environment"));
         assert!(script.contains("desktop_check_for_update"));
         assert!(script.contains("desktop_cli_install"));
+        assert!(script.contains("get_dock_icon_mode"));
+        assert!(script.contains("set_dock_icon_mode"));
         assert!(script.contains("data-tauri-preview-iframe"));
         assert!(script.contains("/v1/auth/session"));
         assert!(script.contains("/oauth/token"));
