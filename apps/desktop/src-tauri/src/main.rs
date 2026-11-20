@@ -209,7 +209,7 @@ fn main() {
                 win_builder = win_builder
                     .title_bar_style(TitleBarStyle::Overlay)
                     .hidden_title(true)
-                    .traffic_light_position(LogicalPosition::new(18.0, 18.0));
+                    .traffic_light_position(LogicalPosition::new(16.0, 26.0));
             }
 
             let window = win_builder.build()?;

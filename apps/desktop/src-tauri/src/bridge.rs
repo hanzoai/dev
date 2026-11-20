@@ -50,7 +50,7 @@ pub fn build_initialization_script(config: &BackendRuntimeConfig, local_enabled:
   if (__STATE__.clientPlatform === "darwin") {{
     const applyInset = () => {{
       if (document.documentElement) {{
-        document.documentElement.style.setProperty("--desktop-window-controls-inset", "90px");
+        document.documentElement.style.setProperty("--desktop-window-controls-inset", "84px");
       }}
     }};
     applyInset();

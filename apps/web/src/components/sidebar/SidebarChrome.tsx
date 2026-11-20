@@ -2,7 +2,7 @@ import { ArrowLeftIcon, ArrowRightIcon, ChartNoAxesColumnIcon, SettingsIcon } fr
 import type { ReactNode } from "react";
 import { T, useGT } from "gt-react";
 import { memo } from "react";
-import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import { useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useAtomValue } from "@effect/atom-react";
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
@@ -15,7 +15,6 @@ import {
 import { primaryServerKeybindingsAtom } from "../../state/server";
 import { cn } from "../../lib/utils";
 import { useIssuesSupported, usePullRequestsSupported } from "../../state/environments";
-import { Wordmark } from "../Wordmark";
 import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarStageBackdropVariant,
@@ -75,15 +74,10 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           aria-label={gt("Toggle main sidebar")}
         />
       </div>
-      <div className="relative z-10 flex h-8 min-w-0 flex-1 flex-wrap content-start items-center gap-x-2 overflow-hidden py-0.5">
-        <div className="flex shrink-0 items-center gap-1">
-          <SidebarBrand onBackdrop={backdropVariant !== null} />
-          {isElectron ? (
-            <div className="hidden items-center md:flex">
-              <HistoryNavigationButton direction="back" onBackdrop={backdropVariant !== null} />
-              <HistoryNavigationButton direction="forward" onBackdrop={backdropVariant !== null} />
-            </div>
-          ) : null}
+      <div className="relative z-10 flex h-full min-w-0 flex-1 items-center gap-x-2 overflow-hidden">
+        <div className="ml-[var(--workspace-titlebar-content-left)] hidden shrink-0 items-center gap-0.5 md:flex">
+          <HistoryNavigationButton direction="back" onBackdrop={backdropVariant !== null} />
+          <HistoryNavigationButton direction="forward" onBackdrop={backdropVariant !== null} />
         </div>
         {pillLabel ? (
           <div className="ml-1 flex h-7 items-center">
@@ -116,8 +110,7 @@ export function SidebarBrandWidthProbe({
       className="pointer-events-none invisible fixed top-0 left-0 flex w-max border-r border-transparent pr-3"
       ref={observeWidth}
     >
-      <div className="ml-[var(--workspace-titlebar-content-left)] flex gap-1">
-        <SidebarBrandMark onBackdrop={false} />
+      <div className="ml-[var(--workspace-titlebar-content-left)] flex gap-0.5">
         {isElectron ? <div className="w-[calc(2*var(--workspace-titlebar-control-size))]" /> : null}
       </div>
     </div>
@@ -164,39 +157,6 @@ function HistoryNavigationButton({
         {shortcutLabel ? ` (${shortcutLabel})` : ""}
       </TooltipPopup>
     </Tooltip>
-  );
-}
-
-function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
-  const gt = useGT();
-  return (
-    <Link
-      aria-label={gt("Hanzo Dev home")}
-      className={cn(
-        "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 focus-visible:ring-inset md:flex",
-        onBackdrop ? "text-white" : "text-foreground",
-      )}
-      to="/"
-    >
-      <SidebarBrandMark onBackdrop={onBackdrop} />
-    </Link>
-  );
-}
-
-function SidebarBrandMark({ onBackdrop }: { onBackdrop: boolean }) {
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1.5 text-sm font-semibold tracking-tight">
-      <Wordmark aria-hidden className="size-3.5 shrink-0" />
-      <span
-        className={cn(
-          "truncate [text-box:trim-both_cap_alphabetic] supports-[text-box:trim-both_cap_alphabetic]:py-1",
-          onBackdrop ? "text-white" : "text-foreground",
-        )}
-      >
-        {/* oxlint-disable-next-line hanzo/no-untranslated-copy -- product wordmark */}
-        {"Dev"}
-      </span>
-    </span>
   );
 }
 
