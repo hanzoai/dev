@@ -18,13 +18,14 @@ import {
 import { orderProviderSnapshots } from "./providerStatusCache.ts";
 
 describe("Native Hanzo Agent & Local IAM Multi-Account Identity", () => {
-  it("registers HanzoDriver and HanzoGenDriver as the #1 and #2 built-in drivers", () => {
+  it("registers HanzoDriver as default #1 and hides HanzoGenDriver from default instances", () => {
     expect(BUILT_IN_DRIVERS[0]?.driverKind).toBe("hanzo");
     expect(BUILT_IN_DRIVERS[0]?.metadata.displayName).toBe("Hanzo");
     expect(BUILT_IN_DRIVERS[1]?.driverKind).toBe("hanzoGen");
     expect(BUILT_IN_DRIVERS[1]?.metadata.displayName).toBe("Hanzo Gen");
+    expect(BUILT_IN_DRIVERS[1]?.metadata.hasDefaultInstance).toBe(false);
     expect(DEFAULT_ENABLED_DEFAULT_INSTANCES.has(ProviderInstanceId.make("hanzo"))).toBe(true);
-    expect(DEFAULT_ENABLED_DEFAULT_INSTANCES.has(ProviderInstanceId.make("hanzoGen"))).toBe(true);
+    expect(DEFAULT_ENABLED_DEFAULT_INSTANCES.has(ProviderInstanceId.make("hanzoGen"))).toBe(false);
     expect(CURATED_HANZO_MODELS[0]?.slug).toBe("enso-auto");
     expect(CURATED_HANZO_MODELS.some((m) => m.slug === "zen6-coder")).toBe(true);
   });

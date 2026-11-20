@@ -249,6 +249,30 @@ export const resolveDefaultHanzoGenBinary = Effect.fn(
   return null;
 });
 
+export const resolveDefaultHanzoBinary = Effect.fn(
+  "hanzoLocalIdentity.resolveDefaultHanzoBinary",
+)(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const home = yield* HostProcess.HomeDirectory;
+  const candidates = [
+    path.join(home, ".local", "bin", "hanzo"),
+    path.join(home, ".hanzo", "bin", "hanzo"),
+    "/opt/homebrew/bin/hanzo",
+    "/usr/local/bin/hanzo",
+  ];
+  for (const candidate of candidates) {
+    if (yield* fs.exists(candidate).pipe(Effect.orElseSucceed(() => false))) {
+      const resolved = yield* fs.realPath(candidate).pipe(Effect.orElseSucceed(() => candidate));
+      if (/\.(?:m|c)?js$/iu.test(resolved)) {
+        continue;
+      }
+      return candidate;
+    }
+  }
+  return "hanzo";
+});
+
 export const resolveDefaultHanzoDevBinary = Effect.fn(
   "hanzoLocalIdentity.resolveDefaultHanzoDevBinary",
 )(function* () {

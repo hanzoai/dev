@@ -19,6 +19,7 @@ import { codexUsageReader } from "./codexUsage.ts";
 import {
   CURATED_HANZO_MODELS,
   mergeCuratedHanzoModels,
+  resolveDefaultHanzoBinary,
   resolveDefaultHanzoDevBinary,
   resolveHanzoProviderAuth,
 } from "../hanzoLocalIdentity.ts";
@@ -102,19 +103,43 @@ export const HanzoDriver: ProviderDriver<
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const home = yield* HostProcess.HomeDirectory;
+    const platform = yield* HostProcess.Platform;
 
     const configuredBinary = config.binaryPath.trim();
-    const resolvedBinary =
-      !configuredBinary || configuredBinary === "dev" || configuredBinary === "hanzo-dev"
-        ? yield* resolveDefaultHanzoDevBinary()
+    const baseName = configuredBinary.replace(/\\/g, "/").split("/").pop()?.toLowerCase() ?? "";
+    const usesHanzoCli =
+      !configuredBinary ||
+      baseName === "hanzo" ||
+      baseName === "hanzo.exe" ||
+      configuredBinary === "dev" ||
+      configuredBinary === "hanzo-dev";
+    const hanzoCliBinary =
+      !configuredBinary || baseName === "hanzo" || baseName === "hanzo.exe"
+        ? configuredBinary.includes("/") || configuredBinary.includes("\\")
+          ? configuredBinary
+          : yield* resolveDefaultHanzoBinary()
         : configuredBinary;
+
+    // `hanzo` is the unified CLI; its JSON-RPC agent protocol backend is the sibling `dev` engine.
+    let appServerBinary = configuredBinary;
+    if (usesHanzoCli) {
+      const siblingDev =
+        hanzoCliBinary.includes("/") || hanzoCliBinary.includes("\\")
+          ? path.join(path.dirname(hanzoCliBinary), platform === "win32" ? "dev.exe" : "dev")
+          : null;
+      if (siblingDev && (yield* fs.exists(siblingDev).pipe(Effect.orElseSucceed(() => false)))) {
+        appServerBinary = siblingDev;
+      } else {
+        appServerBinary = yield* resolveDefaultHanzoDevBinary();
+      }
+    }
     const resolvedHome = config.homePath.trim() || path.join(home, ".hanzo", "dev");
 
     const codexCompatibleConfig: CodexSettings = {
       ...config,
       setupMode: "existing",
       enabled,
-      binaryPath: resolvedBinary,
+      binaryPath: appServerBinary,
       homePath: resolvedHome,
     };
 
@@ -128,7 +153,10 @@ export const HanzoDriver: ProviderDriver<
       instanceId,
       displayName: displayName ?? "Hanzo",
       accentColor,
-      environment,
+      environment: [
+        ...(environment ?? []),
+        ...(hanzoCliBinary ? [{ name: "HANZO_BINARY", value: hanzoCliBinary, sensitive: false }] : []),
+      ],
       enabled,
       config: codexCompatibleConfig,
     });

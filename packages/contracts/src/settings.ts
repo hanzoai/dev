@@ -713,18 +713,18 @@ export const HanzoSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed(true)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
-    binaryPath: makeBinaryPathSetting("dev").pipe(
+    binaryPath: makeBinaryPathSetting("hanzo").pipe(
       Schema.annotateKey({
         title: "Binary path",
-        description: "Path to the Hanzo Dev CLI binary (`dev` / `hanzo-dev`).",
-        providerSettingsForm: { placeholder: "~/.local/bin/dev", clearWhenEmpty: "omit" },
+        description: "Path to the Hanzo CLI binary (`hanzo`).",
+        providerSettingsForm: { placeholder: "~/.local/bin/hanzo", clearWhenEmpty: "omit" },
       }),
     ),
     homePath: TrimmedString.pipe(
       Schema.withDecodingDefault(Effect.succeed("")),
       Schema.annotateKey({
-        title: "DEV_HOME path",
-        description: "Custom Hanzo Dev home and config directory.",
+        title: "HANZO_HOME path",
+        description: "Custom Hanzo home and config directory.",
         providerSettingsForm: {
           placeholder: "~/.hanzo/dev",
           clearWhenEmpty: "omit",
@@ -736,7 +736,7 @@ export const HanzoSettings = makeProviderSettingsSchema(
       Schema.annotateKey({
         title: "Shadow home path",
         description:
-          "Account-specific Hanzo home. Keeps auth.json separate while sharing state from DEV_HOME.",
+          "Account-specific Hanzo home. Keeps auth.json separate while sharing state from HANZO_HOME.",
         providerSettingsForm: {
           placeholder: "~/.hanzo/accounts/personal",
           clearWhenEmpty: "omit",
@@ -747,7 +747,7 @@ export const HanzoSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed("")),
       Schema.annotateKey({
         title: "Launch arguments",
-        description: "Additional CLI arguments passed to `dev serve` on session start.",
+        description: "Additional CLI arguments passed to the Hanzo CLI on session start.",
       }),
     ),
     customModels: Schema.Array(CustomModelSetting).pipe(
@@ -767,7 +767,7 @@ export const HanzoGenSettings = makeProviderSettingsSchema(
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
     enabled: Schema.Boolean.pipe(
-      Schema.withDecodingDefault(Effect.succeed(true)),
+      Schema.withDecodingDefault(Effect.succeed(false)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
     binaryPath: makeBinaryPathSetting("gen").pipe(
@@ -1732,15 +1732,13 @@ export const providerInstanceConfigEnabledFlag = (config: unknown): boolean | un
 
 // Must match each driver's enabled decoding default.
 const DEFAULT_DISABLED_PROVIDER_DRIVERS: ReadonlySet<ProviderDriverKind> = new Set(
-  ["cursor", "grok", "fx", "kiro", "muse", "pi", "opencode", "antigravity"].map((driver) =>
-    ProviderDriverKind.make(driver),
+  ["hanzoGen", "cursor", "grok", "fx", "kiro", "muse", "pi", "opencode", "antigravity"].map(
+    (driver) => ProviderDriverKind.make(driver),
   ),
 );
 
 export const DEFAULT_ENABLED_DEFAULT_INSTANCES: ReadonlySet<ProviderInstanceId> = new Set(
-  ["hanzo", "hanzoGen", "codex", "claudeAgent"].map((instanceId) =>
-    ProviderInstanceId.make(instanceId),
-  ),
+  ["hanzo", "codex", "claudeAgent"].map((instanceId) => ProviderInstanceId.make(instanceId)),
 );
 
 export const isUnconfiguredDefaultInstanceEnabled = (instanceId: ProviderInstanceId): boolean =>

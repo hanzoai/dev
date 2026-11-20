@@ -93,48 +93,45 @@ const CODEX_DEFAULT_INSTANCE_ID = ProviderInstanceId.make("codex");
 const OPENAI_CODEX_INSTANCE_ID = ProviderInstanceId.make("openai-codex");
 
 /**
- * Configures the primary default provider instances (`hanzo` and `hanzoGen`) to use the native
- * Hanzo CLIs (`dev` and `gen`) when installed on the host, sets `hanzo` + `enso-auto` as the
- * default model selection, and keeps OpenAI Codex cleanly configured on `codex`.
+ * Configures the primary default `hanzo` provider instance to use the unified `hanzo` CLI
+ * (never `dev` or `gen`), removes any legacy auto-seeded `hanzoGen` duplicate slot, sets
+ * `hanzo` + `enso-auto` as the default model selection, and keeps OpenAI Codex cleanly configured
+ * on `codex`.
  */
-const seedHanzoCloudDefaultInstance = Effect.fn(
+export const seedHanzoCloudDefaultInstance = Effect.fn(
   "ProviderInstanceRegistryHydration.seedHanzoCloudDefaultInstance",
 )(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const home = yield* HostProcess.HomeDirectory;
-  const candidates = [
-    path.join(home, ".local", "bin", "dev"),
-    path.join(home, ".hanzo", "bin", "dev"),
-    "/opt/homebrew/bin/dev",
-    "/usr/local/bin/dev",
-  ];
-  let devBinaryPath: string | null = null;
-  for (const candidate of candidates) {
-    if (yield* fs.exists(candidate).pipe(Effect.orElseSucceed(() => false))) {
-      devBinaryPath = candidate;
-      break;
-    }
-  }
-  if (!devBinaryPath) return;
-
-  const genCandidates = [
-    path.join(home, ".local", "bin", "gen"),
-    path.join(home, ".local", "bin", "hanzo-gen"),
-    "/opt/homebrew/bin/gen",
-    "/usr/local/bin/gen",
-  ];
-  let genBinaryPath: string | null = null;
-  for (const candidate of genCandidates) {
-    if (yield* fs.exists(candidate).pipe(Effect.orElseSucceed(() => false))) {
-      genBinaryPath = candidate;
-      break;
-    }
-  }
-
-  const hanzoDevHome = path.join(home, ".hanzo", "dev");
   const serverSettings = yield* Settings.ServerSettingsService;
   const currentSettings = yield* serverSettings.getSettings;
+
+  // Hide legacy auto-seeded `hanzoGen` duplicate slot from the provider rail.
+  const existingHanzoGen = currentSettings.providerInstances[HANZO_GEN_DEFAULT_INSTANCE_ID];
+  if (existingHanzoGen?.driver === "hanzoGen") {
+    yield* serverSettings.updateProviderInstance({
+      operation: "remove",
+      instanceId: HANZO_GEN_DEFAULT_INSTANCE_ID,
+    });
+  }
+
+  const candidates = [
+    path.join(home, ".local", "bin", "hanzo"),
+    path.join(home, ".hanzo", "bin", "hanzo"),
+    "/opt/homebrew/bin/hanzo",
+    "/usr/local/bin/hanzo",
+  ];
+  let hanzoBinaryPath: string | null = null;
+  for (const candidate of candidates) {
+    if (yield* fs.exists(candidate).pipe(Effect.orElseSucceed(() => false))) {
+      hanzoBinaryPath = candidate;
+      break;
+    }
+  }
+  if (!hanzoBinaryPath) return;
+
+  const hanzoDevHome = path.join(home, ".hanzo", "dev");
 
   const existingHanzo = currentSettings.providerInstances[HANZO_DEFAULT_INSTANCE_ID];
   const existingHanzoConfig = (existingHanzo?.config as Record<string, unknown> | undefined) ?? {};
@@ -145,7 +142,11 @@ const seedHanzoCloudDefaultInstance = Effect.fn(
     !existingHanzo ||
     !existingHanzoBinary ||
     existingHanzo.displayName === "Hanzo Cloud" ||
-    existingHanzoBinary.endsWith("/hanzo-dev")
+    existingHanzoBinary === "dev" ||
+    existingHanzoBinary === "hanzo-dev" ||
+    existingHanzoBinary.endsWith("/dev") ||
+    existingHanzoBinary.endsWith("/hanzo-dev") ||
+    existingHanzoBinary.endsWith("/gen")
   ) {
     const hanzoInstance: ProviderInstanceConfig = {
       ...existingHanzo,
@@ -156,7 +157,7 @@ const seedHanzoCloudDefaultInstance = Effect.fn(
         ...existingHanzoConfig,
         setupMode: "existing",
         enabled: existingHanzo?.enabled ?? true,
-        binaryPath: devBinaryPath,
+        binaryPath: hanzoBinaryPath,
         homePath: hanzoDevHome,
       },
     };
@@ -165,27 +166,6 @@ const seedHanzoCloudDefaultInstance = Effect.fn(
       instanceId: HANZO_DEFAULT_INSTANCE_ID,
       instance: hanzoInstance,
     });
-  }
-
-  if (genBinaryPath) {
-    const existingGen = currentSettings.providerInstances[HANZO_GEN_DEFAULT_INSTANCE_ID];
-    if (!existingGen) {
-      yield* serverSettings.updateProviderInstance({
-        operation: "upsert",
-        instanceId: HANZO_GEN_DEFAULT_INSTANCE_ID,
-        instance: {
-          displayName: "Hanzo Gen",
-          driver: ProviderDriverKind.make("hanzoGen"),
-          enabled: true,
-          config: {
-            setupMode: "existing",
-            enabled: true,
-            binaryPath: genBinaryPath,
-            homePath: hanzoDevHome,
-          },
-        },
-      });
-    }
   }
 
   // Migrate any earlier `codex` slot or stale `Hanzo Cloud` custom instance.
@@ -226,28 +206,36 @@ const seedHanzoCloudDefaultInstance = Effect.fn(
     }
   }
 
-  // Default new threads to Hanzo (`enso-auto`) and repair any stale `{ instanceId: "codex", model: "enso-*" }` pairing.
+  // Default new threads to Hanzo (`enso-auto`) and repair any stale `{ instanceId: "codex", model: "enso-*" }`
+  // or removed `hanzoGen` default pairing.
   const currentDefault = currentSettings.defaultModelSelection;
   const pointsHanzoModelAtCodex =
     currentDefault?.instanceId === CODEX_DEFAULT_INSTANCE_ID &&
     (currentDefault.model.startsWith("enso") ||
       currentDefault.model.startsWith("zen") ||
       currentDefault.model.startsWith("hanzo/"));
+  const pointsAtHiddenHanzoGen = currentDefault?.instanceId === HANZO_GEN_DEFAULT_INSTANCE_ID;
   const needsDarkDefault = currentSettings.defaultAppearance === "";
   const needsRemoteDefaults =
     !currentSettings.linkedEnvironmentsEnabled ||
     !currentSettings.enableDeviceSupport ||
     !currentSettings.enableAgentDeviceAccess;
 
-  if (!currentDefault || pointsHanzoModelAtCodex || needsDarkDefault || needsRemoteDefaults) {
+  if (
+    !currentDefault ||
+    pointsHanzoModelAtCodex ||
+    pointsAtHiddenHanzoGen ||
+    needsDarkDefault ||
+    needsRemoteDefaults
+  ) {
     yield* serverSettings
       .updateSettings({
-        ...(!currentDefault || pointsHanzoModelAtCodex
+        ...(!currentDefault || pointsHanzoModelAtCodex || pointsAtHiddenHanzoGen
           ? {
               defaultModelSelection: {
                 instanceId: HANZO_DEFAULT_INSTANCE_ID,
                 model:
-                  currentDefault?.model && pointsHanzoModelAtCodex
+                  currentDefault?.model && (pointsHanzoModelAtCodex || pointsAtHiddenHanzoGen)
                     ? currentDefault.model
                     : "enso-auto",
               },
@@ -264,6 +252,157 @@ const seedHanzoCloudDefaultInstance = Effect.fn(
         enableAgentDeviceAccess: true,
       })
       .pipe(Effect.ignore);
+  }
+});
+
+interface AutoDiscoverableCliProvider {
+  readonly driver: ProviderDriverKind;
+  readonly displayName: string;
+  readonly binaries: ReadonlyArray<string>;
+  readonly extraDirs?: ReadonlyArray<(home: string, path: Path.Path) => string>;
+  readonly persistBinaryPath: boolean;
+}
+
+const AUTO_DISCOVERABLE_CLI_PROVIDERS: ReadonlyArray<AutoDiscoverableCliProvider> = [
+  {
+    driver: ProviderDriverKind.make("antigravity"),
+    displayName: "Antigravity",
+    binaries: ["agy", "antigravity", "agy_acp_server.par", "agy.exe", "agy_acp_server.exe"],
+    extraDirs: [(home, p) => p.join(home, ".antigravity", "antigravity", "bin")],
+    persistBinaryPath: true,
+  },
+  {
+    driver: ProviderDriverKind.make("opencode"),
+    displayName: "OpenCode",
+    binaries: ["opencode", "opencode.exe"],
+    extraDirs: [(home, p) => p.join(home, ".opencode", "bin")],
+    persistBinaryPath: true,
+  },
+  {
+    driver: ProviderDriverKind.make("cursor"),
+    displayName: "Cursor",
+    binaries: ["cursor-agent", "cursor", "cursor-agent.exe", "cursor.exe"],
+    persistBinaryPath: false,
+  },
+  {
+    driver: ProviderDriverKind.make("grok"),
+    displayName: "Grok",
+    binaries: ["grok", "grok.exe"],
+    persistBinaryPath: true,
+  },
+  {
+    driver: ProviderDriverKind.make("fx"),
+    displayName: "fx",
+    binaries: ["fx", "fx.exe"],
+    persistBinaryPath: true,
+  },
+  {
+    driver: ProviderDriverKind.make("kiro"),
+    displayName: "Kiro",
+    binaries: ["kiro-cli", "kiro", "kiro-cli.exe", "kiro.exe"],
+    persistBinaryPath: true,
+  },
+  {
+    driver: ProviderDriverKind.make("pi"),
+    displayName: "Pi",
+    binaries: ["pi", "pi.exe"],
+    persistBinaryPath: true,
+  },
+  {
+    driver: ProviderDriverKind.make("muse"),
+    displayName: "Muse Code",
+    binaries: ["muse", "muse.exe"],
+    persistBinaryPath: true,
+  },
+];
+
+/**
+ * Discovers installed local agent CLIs (Antigravity, OpenCode, Cursor, Grok, fx, Kiro, Pi, Muse)
+ * and automatically enables their default provider instances unless the user explicitly disabled them.
+ */
+export const seedInstalledCliProviderInstances = Effect.fn(
+  "ProviderInstanceRegistryHydration.seedInstalledCliProviderInstances",
+)(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const home = yield* HostProcess.HomeDirectory;
+  const env = yield* HostProcess.Environment;
+  const platform = yield* HostProcess.Platform;
+  const serverSettings = yield* Settings.ServerSettingsService;
+  const currentSettings = yield* serverSettings.getSettings;
+
+  const pathSep = platform === "win32" ? ";" : ":";
+  const envPathEntries = (env.PATH ?? "")
+    .split(pathSep)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  const baseSearchDirs = [
+    path.join(home, ".local", "bin"),
+    path.join(home, ".hanzo", "bin"),
+    path.join(home, ".cargo", "bin"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    ...envPathEntries,
+  ];
+
+  const findBinary = Effect.fn("ProviderInstanceRegistryHydration.findInstalledCliBinary")(
+    function* (spec: AutoDiscoverableCliProvider) {
+      const dirs = [
+        ...(spec.extraDirs?.map((resolve) => resolve(home, path)) ?? []),
+        ...baseSearchDirs,
+      ];
+      const seen = new Set<string>();
+      for (const dir of dirs) {
+        if (!dir || seen.has(dir)) continue;
+        seen.add(dir);
+        for (const binary of spec.binaries) {
+          const candidate = path.join(dir, binary);
+          const stats = yield* fs.stat(candidate).pipe(Effect.option);
+          if (stats._tag === "Some" && stats.value.type === "File") {
+            return candidate;
+          }
+        }
+      }
+      return null;
+    },
+  );
+
+  for (const spec of AUTO_DISCOVERABLE_CLI_PROVIDERS) {
+    const instanceId = defaultInstanceIdForDriver(spec.driver);
+    const existing = currentSettings.providerInstances[instanceId];
+    // Respect explicit user disablement.
+    if (
+      existing?.enabled === false ||
+      providerInstanceConfigEnabledFlag(existing?.config) === false
+    ) {
+      continue;
+    }
+
+    const binaryPath = yield* findBinary(spec);
+    if (!binaryPath) continue;
+
+    const existingConfig = (existing?.config as Record<string, unknown> | undefined) ?? {};
+    const existingBinary =
+      typeof existingConfig.binaryPath === "string" ? existingConfig.binaryPath.trim() : "";
+
+    if (!existing || (spec.persistBinaryPath && existingBinary.length === 0)) {
+      const nextConfig: Record<string, unknown> = {
+        ...existingConfig,
+        enabled: true,
+        ...(spec.persistBinaryPath && existingBinary.length === 0 ? { binaryPath } : {}),
+      };
+      yield* serverSettings.updateProviderInstance({
+        operation: "upsert",
+        instanceId,
+        instance: {
+          ...existing,
+          displayName: existing?.displayName ?? spec.displayName,
+          driver: spec.driver,
+          enabled: true,
+          config: nextConfig,
+        },
+      });
+    }
   }
 });
 
@@ -358,6 +497,11 @@ export const layer: Layer.Layer<
     yield* seedHanzoCloudDefaultInstance().pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("Hanzo Cloud default seed unavailable", cause),
+      ),
+    );
+    yield* seedInstalledCliProviderInstances().pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Installed CLI provider auto-discovery unavailable", cause),
       ),
     );
     yield* seedDevReplayInstance().pipe(

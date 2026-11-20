@@ -1,6 +1,6 @@
 {
   "$schema": "https://dev.hanzo.ai/schema/hanzo.json",
-  "iconPath": "assets/dev/blueprint-web-apple-touch-180.png",
+  "iconPath": "assets/prod/hanzo-logo.svg",
   "scripts": [
     {
       "name": "Dev",

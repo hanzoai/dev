@@ -72,6 +72,8 @@ export const providerClients = makeProviderClientRegistry([
     driverKind: ProviderDriverKind.make("hanzoGen"),
     label: "Hanzo Gen",
     icon: hanzoGenIcon,
+    hasDefaultInstance: false,
+    featured: false,
     modelFamilies: ["Enso", "Zen ", "Kai "],
     acpRegistryAgentIds: ["hanzo-gen"],
     settingsSchema: HanzoGenSettings,

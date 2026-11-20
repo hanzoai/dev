@@ -7,10 +7,13 @@ import {
   SecretProviderKind,
   type ServerSettings,
 } from "@hanzodev/contracts";
+import * as HostProcess from "@hanzodev/shared/HostProcess";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it as effectIt } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import { describe, expect, it } from "vite-plus/test";
@@ -22,6 +25,8 @@ import {
   deriveProviderInstanceConfigMap,
   layerSettingsWatcher,
   seedDevReplayInstance,
+  seedHanzoCloudDefaultInstance,
+  seedInstalledCliProviderInstances,
 } from "./ProviderInstanceRegistryHydration.ts";
 import { ProviderInstanceRegistryMutator } from "./ProviderInstanceRegistryMutator.ts";
 
@@ -211,5 +216,144 @@ describe("layerSettingsWatcher", () => {
 
         expect(reloads()).toBe(1);
       }).pipe(Effect.scoped, Effect.provide(ServerSettingsService.layerTest())),
+  );
+});
+
+describe("seedHanzoCloudDefaultInstance", () => {
+  effectIt.effect(
+    "finds only the unified hanzo CLI, migrates legacy dev binaryPath, and removes hanzoGen",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const tmpHome = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-seed-home-" });
+        const localBin = path.join(tmpHome, ".local", "bin");
+        yield* fs.makeDirectory(localBin, { recursive: true });
+        const hanzoPath = path.join(localBin, "hanzo");
+        yield* fs.writeFileString(hanzoPath, "#!/bin/sh\n");
+        yield* fs.writeFileString(path.join(localBin, "dev"), "#!/bin/sh\n");
+        yield* fs.writeFileString(path.join(localBin, "gen"), "#!/bin/sh\n");
+
+        yield* seedHanzoCloudDefaultInstance().pipe(
+          Effect.provideService(HostProcess.HomeDirectory, tmpHome),
+        );
+
+        const settings = yield* (yield* ServerSettingsService).getSettings;
+        expect(settings.providerInstances[ProviderInstanceId.make("hanzo")]).toMatchObject({
+          driver: "hanzo",
+          displayName: "Hanzo",
+          enabled: true,
+          config: { binaryPath: hanzoPath },
+        });
+        expect(settings.providerInstances[ProviderInstanceId.make("hanzoGen")]).toBeUndefined();
+        expect(settings.defaultModelSelection).toEqual({
+          instanceId: ProviderInstanceId.make("hanzo"),
+          model: "enso-auto",
+        });
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            ServerSettingsService.layerTest({
+              defaultModelSelection: {
+                instanceId: ProviderInstanceId.make("hanzoGen"),
+                model: "enso-auto",
+              },
+              providerInstances: {
+                [ProviderInstanceId.make("hanzo")]: {
+                  driver: ProviderDriverKind.make("hanzo"),
+                  displayName: "Hanzo",
+                  enabled: true,
+                  config: { setupMode: "existing", binaryPath: "/Users/z/.local/bin/dev" },
+                },
+                [ProviderInstanceId.make("hanzoGen")]: {
+                  driver: ProviderDriverKind.make("hanzoGen"),
+                  displayName: "Hanzo Gen",
+                  enabled: true,
+                  config: { setupMode: "existing", binaryPath: "/tmp/gen" },
+                },
+              },
+            }),
+            NodeServices.layer,
+          ),
+        ),
+      ),
+  );
+});
+
+describe("seedInstalledCliProviderInstances", () => {
+  effectIt.effect(
+    "auto-discovers and enables installed CLIs (antigravity, opencode, cursor, grok) while respecting explicit disablement",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const tmpHome = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-cli-discover-" });
+        const localBin = path.join(tmpHome, ".local", "bin");
+        const opencodeBin = path.join(tmpHome, ".opencode", "bin");
+        yield* fs.makeDirectory(localBin, { recursive: true });
+        yield* fs.makeDirectory(opencodeBin, { recursive: true });
+
+        const agyPath = path.join(localBin, "agy");
+        const opencodePath = path.join(opencodeBin, "opencode");
+        const cursorAgentPath = path.join(localBin, "cursor-agent");
+        const grokPath = path.join(localBin, "grok");
+        const kiroPath = path.join(localBin, "kiro-cli");
+        yield* fs.writeFileString(agyPath, "#!/bin/sh\n");
+        yield* fs.writeFileString(opencodePath, "#!/bin/sh\n");
+        yield* fs.writeFileString(cursorAgentPath, "#!/bin/sh\n");
+        yield* fs.writeFileString(grokPath, "#!/bin/sh\n");
+        yield* fs.writeFileString(kiroPath, "#!/bin/sh\n");
+
+        yield* seedInstalledCliProviderInstances().pipe(
+          Effect.provideService(HostProcess.HomeDirectory, tmpHome),
+          Effect.provideService(HostProcess.Environment, { PATH: "" }),
+        );
+
+        const settings = yield* (yield* ServerSettingsService).getSettings;
+        expect(settings.providerInstances[ProviderInstanceId.make("antigravity")]).toMatchObject({
+          driver: "antigravity",
+          displayName: "Antigravity",
+          enabled: true,
+          config: { binaryPath: agyPath },
+        });
+        expect(settings.providerInstances[ProviderInstanceId.make("opencode")]).toMatchObject({
+          driver: "opencode",
+          displayName: "OpenCode",
+          enabled: true,
+          config: { binaryPath: opencodePath },
+        });
+        expect(settings.providerInstances[ProviderInstanceId.make("cursor")]).toMatchObject({
+          driver: "cursor",
+          displayName: "Cursor",
+          enabled: true,
+        });
+        expect(settings.providerInstances[ProviderInstanceId.make("grok")]).toMatchObject({
+          driver: "grok",
+          displayName: "Grok",
+          enabled: true,
+          config: { binaryPath: grokPath },
+        });
+        // Explicitly disabled provider stays disabled even when its CLI is installed.
+        expect(settings.providerInstances[ProviderInstanceId.make("kiro")]?.enabled).toBe(false);
+        // Uninstalled provider is not seeded.
+        expect(settings.providerInstances[ProviderInstanceId.make("muse")]).toBeUndefined();
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            ServerSettingsService.layerTest({
+              providerInstances: {
+                [ProviderInstanceId.make("kiro")]: {
+                  driver: ProviderDriverKind.make("kiro"),
+                  displayName: "Kiro",
+                  enabled: false,
+                },
+              },
+            }),
+            NodeServices.layer,
+          ),
+        ),
+      ),
   );
 });

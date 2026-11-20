@@ -91,6 +91,10 @@ pub fn augmented_path() -> String {
     let mut entries: Vec<String> = vec![
         home.join(".local/bin").to_string_lossy().into_owned(),
         home.join(".hanzo/bin").to_string_lossy().into_owned(),
+        home.join(".opencode/bin").to_string_lossy().into_owned(),
+        home.join(".antigravity/antigravity/bin")
+            .to_string_lossy()
+            .into_owned(),
         home.join(".cargo/bin").to_string_lossy().into_owned(),
         "/opt/homebrew/bin".to_string(),
         "/opt/homebrew/sbin".to_string(),

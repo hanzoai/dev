@@ -69,9 +69,11 @@ import { useSecretSources } from "./SecretSourceInput";
 const INSTANCE_ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 const ACP_REGISTRY_DRIVER_KIND = ProviderDriverKind.make("acpRegistry");
+const HANZO_GEN_DRIVER_KIND = ProviderDriverKind.make("hanzoGen");
 const DEFAULT_DRIVER_OPTION = providerClients.definitions[0]!;
 const DRIVER_OPTIONS = providerClients.definitions.filter(
-  (option) => option.driverKind !== ACP_REGISTRY_DRIVER_KIND,
+  (option) =>
+    option.driverKind !== ACP_REGISTRY_DRIVER_KIND && option.driverKind !== HANZO_GEN_DRIVER_KIND,
 );
 const FEATURED_DRIVER_OPTIONS = DRIVER_OPTIONS.filter((option) => option.featured !== false);
 const MORE_DRIVER_OPTIONS = DRIVER_OPTIONS.filter((option) => option.featured === false);

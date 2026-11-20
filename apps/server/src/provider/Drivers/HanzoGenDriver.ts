@@ -74,6 +74,7 @@ export const HanzoGenDriver: ProviderDriver<
   driverKind: HANZO_GEN_DRIVER_KIND,
   metadata: {
     displayName: "Hanzo Gen",
+    hasDefaultInstance: false,
     supportsMultipleInstances: true,
   },
   configSchema: HanzoGenSettings,
