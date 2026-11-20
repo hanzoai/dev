@@ -14,7 +14,9 @@ use crate::backend::{
     pick_available_port, resolve_hanzo_home, BackendRuntimeConfig, BackendSupervisor,
 };
 use crate::bridge::build_initialization_script;
-use crate::commands::{read_persisted_local_env_enabled, AppState, UpdateTrackerState};
+use crate::commands::{
+    purge_legacy_iam_vault_file, read_persisted_local_env_enabled, AppState, UpdateTrackerState,
+};
 use crate::snapshot::{spawn_interactive_snapshot, SnapshotManager};
 use crate::ssh::SshTunnelSupervisor;
 use std::env;
@@ -104,6 +106,7 @@ fn main() {
 
     let hanzo_home = resolve_hanzo_home();
     let state_dir = hanzo_home.join(if is_dev { "dev" } else { "userdata" });
+    purge_legacy_iam_vault_file(&state_dir);
     let bootstrap_secret = generate_random_hex(32);
     let host_scope = read_or_create_host_scope(&state_dir);
     let local_enabled = read_persisted_local_env_enabled(&state_dir);
@@ -167,6 +170,7 @@ fn main() {
             app.manage(AppState {
                 supervisor,
                 bearer_token: tokio::sync::Mutex::new(None),
+                iam_vault: tokio::sync::Mutex::new(None),
                 local_env_enabled: Mutex::new(local_enabled),
                 exposure_mode: Mutex::new("local-only".to_string()),
                 update_tracker: Mutex::new(UpdateTrackerState::default()),

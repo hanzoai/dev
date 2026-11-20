@@ -1,6 +1,7 @@
 import {
   buildHanzoIamAccountFromTokens,
   EMPTY_HANZO_IAM_VAULT,
+  HANZO_IAM_VAULT_STORAGE_KEY,
   type HanzoIamAccount,
   upsertHanzoIamVaultAccount,
 } from "@hanzodev/shared/hanzoIamAuth";
@@ -127,8 +128,8 @@ describe("HanzoWebAuthController IAM, Org Switcher & Local AI guard", () => {
     vi.restoreAllMocks();
   });
 
-  it("persists active X-Org-Id per account and syncs to OS Keychain via desktopBridge", () => {
-    let keychainPayload: string | null = null;
+  it("persists active X-Org-Id per account, syncs via Hanzo KMS desktopBridge, and keeps desktop tokens out of localStorage", async () => {
+    let vaultPayload: string | null = null;
     (
       globalThis.window as unknown as {
         desktopBridge?: {
@@ -137,13 +138,15 @@ describe("HanzoWebAuthController IAM, Org Switcher & Local AI guard", () => {
         };
       }
     ).desktopBridge = {
-      getIamVault: vi.fn(async () => keychainPayload),
+      getIamVault: vi.fn(async () => vaultPayload),
       setIamVault: vi.fn(async (payload: string | null) => {
-        keychainPayload = payload;
-        return true;
+        vaultPayload = payload;
+        return payload !== null;
       }),
     };
 
+    // Seed a legacy plaintext localStorage entry to ensure desktop mode purges it
+    window.localStorage.setItem(HANZO_IAM_VAULT_STORAGE_KEY, '{"accounts":[{"id":"legacy"}]}');
     globalThis.fetch = vi.fn(async () => new Response("{}", { status: 404 })) as typeof fetch;
 
     const controller = new HanzoWebAuthController();
@@ -172,12 +175,22 @@ describe("HanzoWebAuthController IAM, Org Switcher & Local AI guard", () => {
     controller.switchOrganization("lux");
     expect(controller.activeOrgId).toBe("lux");
     expect(controller.getApiHeaders()["X-Org-Id"]).toBe("lux");
-    expect(keychainPayload).toContain('"activeOrgId":"lux"');
+    expect(vaultPayload).toContain('"activeOrgId":"lux"');
+    expect(window.localStorage.getItem(HANZO_IAM_VAULT_STORAGE_KEY)).toBeNull();
+    expect(window.sessionStorage.getItem(HANZO_IAM_VAULT_STORAGE_KEY)).toContain(
+      '"activeOrgId":"lux"',
+    );
 
     controller.switchAccount("zoo/research");
     expect(controller.activeOrgId).toBe("zoo");
     controller.switchAccount("hanzo/z");
     expect(controller.activeOrgId).toBe("lux");
+
+    await controller.signOut();
+    await controller.signOut();
+    expect(window.localStorage.getItem(HANZO_IAM_VAULT_STORAGE_KEY)).toBeNull();
+    expect(window.sessionStorage.getItem(HANZO_IAM_VAULT_STORAGE_KEY)).toBeNull();
+    expect(vaultPayload).toBeNull();
   });
 
   it("completes desktop PKCE sign-in from hanzo://oauth/callback and hanzodev://oauth/callback deep links", async () => {

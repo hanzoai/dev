@@ -105,9 +105,34 @@ interface ModalState {
   readonly pages: ReadonlyArray<HanzoCustomAccountPage>;
 }
 
+function isDesktopSession(): boolean {
+  return typeof window !== "undefined" && window.desktopBridge !== undefined;
+}
+
 function readBrowserVault(): HanzoIamVaultState {
   if (typeof window === "undefined") return EMPTY_HANZO_IAM_VAULT;
   try {
+    if (isDesktopSession()) {
+      const sessionRaw = window.sessionStorage?.getItem(HANZO_IAM_VAULT_STORAGE_KEY);
+      const legacyRaw = window.localStorage?.getItem(HANZO_IAM_VAULT_STORAGE_KEY);
+      if (legacyRaw !== null && legacyRaw !== undefined) {
+        window.localStorage?.removeItem(HANZO_IAM_VAULT_STORAGE_KEY);
+      }
+      if (sessionRaw) {
+        return parseHanzoIamVaultJson(sessionRaw);
+      }
+      if (legacyRaw) {
+        const migrated = parseHanzoIamVaultJson(legacyRaw);
+        if (migrated.accounts.length > 0) {
+          window.sessionStorage?.setItem(
+            HANZO_IAM_VAULT_STORAGE_KEY,
+            serializeHanzoIamVaultJson(migrated),
+          );
+        }
+        return migrated;
+      }
+      return EMPTY_HANZO_IAM_VAULT;
+    }
     return parseHanzoIamVaultJson(window.localStorage.getItem(HANZO_IAM_VAULT_STORAGE_KEY));
   } catch {
     return EMPTY_HANZO_IAM_VAULT;
@@ -117,7 +142,20 @@ function readBrowserVault(): HanzoIamVaultState {
 function writeBrowserVault(vault: HanzoIamVaultState): void {
   if (typeof window === "undefined") return;
   try {
+    if (isDesktopSession()) {
+      window.localStorage?.removeItem(HANZO_IAM_VAULT_STORAGE_KEY);
+      if (vault.accounts.length === 0) {
+        window.sessionStorage?.removeItem(HANZO_IAM_VAULT_STORAGE_KEY);
+      } else {
+        window.sessionStorage?.setItem(
+          HANZO_IAM_VAULT_STORAGE_KEY,
+          serializeHanzoIamVaultJson(vault),
+        );
+      }
+      return;
+    }
     if (vault.accounts.length === 0) {
+      window.sessionStorage?.removeItem(HANZO_IAM_VAULT_STORAGE_KEY);
       window.localStorage.removeItem(HANZO_IAM_VAULT_STORAGE_KEY);
     } else {
       window.localStorage.setItem(HANZO_IAM_VAULT_STORAGE_KEY, serializeHanzoIamVaultJson(vault));
@@ -188,7 +226,7 @@ export class HanzoWebAuthController implements CloudAccountSource {
   private vault: HanzoIamVaultState = EMPTY_HANZO_IAM_VAULT;
   private loaded = false;
   private busy = false;
-  private keychainBacked = false;
+  private kmsBacked = false;
   private lastError: string | null = null;
   private organizationsByAccount = new Map<string, ReadonlyArray<HanzoIamOrganization>>();
   private billingSummary: HanzoBillingSummary | null = null;
@@ -209,8 +247,8 @@ export class HanzoWebAuthController implements CloudAccountSource {
     return this.busy;
   }
 
-  get isKeychainBacked(): boolean {
-    return this.keychainBacked;
+  get isKmsBacked(): boolean {
+    return this.kmsBacked;
   }
 
   get pendingOAuthAuthorizeUrl(): string | null {
@@ -304,8 +342,8 @@ export class HanzoWebAuthController implements CloudAccountSource {
       void window.desktopBridge
         .setIamVault(payload)
         .then((saved) => {
-          if (saved !== this.keychainBacked) {
-            this.keychainBacked = saved;
+          if (saved !== this.kmsBacked) {
+            this.kmsBacked = saved;
             this.emit();
           }
         })
@@ -320,21 +358,21 @@ export class HanzoWebAuthController implements CloudAccountSource {
       let initialVault = readBrowserVault();
       if (typeof window !== "undefined" && window.desktopBridge?.getIamVault) {
         try {
-          const keychainRaw = await window.desktopBridge.getIamVault();
-          if (keychainRaw) {
-            const keychainVault = parseHanzoIamVaultJson(keychainRaw);
-            if (keychainVault.accounts.length > 0) {
-              initialVault = keychainVault;
-              this.keychainBacked = true;
+          const cloudVaultRaw = await window.desktopBridge.getIamVault();
+          if (cloudVaultRaw) {
+            const cloudVault = parseHanzoIamVaultJson(cloudVaultRaw);
+            if (cloudVault.accounts.length > 0) {
+              initialVault = cloudVault;
+              this.kmsBacked = true;
               writeBrowserVault(initialVault);
             }
           } else if (initialVault.accounts.length > 0 && window.desktopBridge.setIamVault) {
-            this.keychainBacked = await window.desktopBridge.setIamVault(
+            this.kmsBacked = await window.desktopBridge.setIamVault(
               serializeHanzoIamVaultJson(initialVault),
             );
           }
         } catch {
-          // Fall back to browser storage when safeStorage is unavailable
+          // Fall back to in-memory session storage when Hanzo KMS vault bridge is unavailable
         }
       }
       this.vault = initialVault;
@@ -771,9 +809,9 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
     () => controller.isBusy,
     () => false,
   );
-  const isKeychainBacked = useSyncExternalStore(
+  const isKmsBacked = useSyncExternalStore(
     controller.subscribe,
-    () => controller.isKeychainBacked,
+    () => controller.isKmsBacked,
     () => false,
   );
   const pendingAuthorizeUrl = useSyncExternalStore(
@@ -1162,10 +1200,15 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                           <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-2xs text-muted-foreground">
                             {activeAccount.id}
                           </span>
-                          {isKeychainBacked && (
+                          {isKmsBacked ? (
                             <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-3xs font-medium text-success-foreground">
                               <ShieldCheckIcon className="size-3" />
-                              <T>OS Keychain</T>
+                              <T>Hanzo KMS</T>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-3xs font-medium text-muted-foreground">
+                              <ShieldCheckIcon className="size-3" />
+                              <T>Cloud session</T>
                             </span>
                           )}
                         </div>
@@ -1504,7 +1547,7 @@ function HanzoManagedRelayBridge({ children }: { readonly children: ReactNode })
 export function HanzoManagedAuthShell({ children }: { readonly children: ReactNode }) {
   const [controller] = useState(getHanzoWebAuthController);
 
-  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- hydrates persisted IAM vault, OS Keychain tokens, and local CLI accounts once on startup
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- hydrates IAM session vault, Hanzo KMS cloud secrets, and local CLI accounts once on startup
   useEffect(() => {
     void controller.hydrate();
   }, [controller]);

@@ -16,9 +16,10 @@ use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, LogicalPosition, Manager, Runtime, State, Theme};
 use tauri_plugin_dialog::DialogExt;
 
-const KEYCHAIN_SERVICE: &str = "ai.hanzo.dev";
-const KEYCHAIN_ACCOUNT: &str = "iam-vault";
 const GITHUB_RELEASES_API: &str = "https://api.github.com/repos/hanzoai/dev-desktop/releases";
+const DEFAULT_HANZO_KMS_URL: &str = "https://kms.hanzo.ai";
+const HANZO_KMS_IAM_VAULT_SECRET_PATH: &str = "/v1/kms/secrets/hanzo-dev-iam-vault";
+const LEGACY_IAM_VAULT_FILENAME: &str = "iam-vault.json";
 
 #[derive(Debug, Clone)]
 pub struct UpdateTrackerState {
@@ -60,6 +61,7 @@ impl Default for UpdateTrackerState {
 pub struct AppState {
     pub supervisor: BackendSupervisor,
     pub bearer_token: tokio::sync::Mutex<Option<String>>,
+    pub iam_vault: tokio::sync::Mutex<Option<String>>,
     pub local_env_enabled: Mutex<bool>,
     pub exposure_mode: Mutex<String>,
     pub update_tracker: Mutex<UpdateTrackerState>,
@@ -155,8 +157,210 @@ fn write_persisted_local_env_enabled(state_dir: &Path, enabled: bool) {
     );
 }
 
-fn iam_vault_fallback_path(state_dir: &Path) -> PathBuf {
-    state_dir.join("iam-vault.json")
+pub fn purge_legacy_iam_vault_file(state_dir: &Path) {
+    let legacy_path = state_dir.join(LEGACY_IAM_VAULT_FILENAME);
+    if legacy_path.symlink_metadata().is_ok() {
+        let _ = fs::remove_file(&legacy_path);
+    }
+}
+
+fn resolve_hanzo_kms_vault_url() -> String {
+    let base = std::env::var("HANZO_KMS_URL")
+        .ok()
+        .map(|s| s.trim().trim_end_matches('/').to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_HANZO_KMS_URL.to_string());
+    format!("{base}{HANZO_KMS_IAM_VAULT_SECRET_PATH}")
+}
+
+fn extract_iam_vault_auth(vault_json: &str) -> Option<(String, Option<String>)> {
+    let parsed: Value = serde_json::from_str(vault_json).ok()?;
+    let accounts = parsed.get("accounts")?.as_array()?;
+    let active_id = parsed.get("activeAccountId").and_then(Value::as_str);
+    let active_account = active_id
+        .and_then(|id| {
+            accounts
+                .iter()
+                .find(|entry| entry.get("id").and_then(Value::as_str) == Some(id))
+        })
+        .or_else(|| accounts.first())?;
+
+    let token = active_account
+        .get("accessToken")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?
+        .to_string();
+
+    let org_id = parsed
+        .get("activeOrgId")
+        .and_then(Value::as_str)
+        .or_else(|| active_account.get("owner").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
+    Some((token, org_id))
+}
+
+async fn sync_iam_vault_to_kms(
+    kms_url: &str,
+    bearer_token: &str,
+    org_id: Option<&str>,
+    vault_json: &str,
+) -> bool {
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(Duration::from_secs(4))
+        .user_agent(format!("Hanzo-Dev-Desktop/{}", env!("CARGO_PKG_VERSION")))
+        .build()
+    else {
+        return false;
+    };
+
+    let mut req = client
+        .put(kms_url)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .bearer_auth(bearer_token)
+        .json(&json!({
+            "secretValue": vault_json,
+            "value": vault_json,
+        }));
+    if let Some(org) = org_id {
+        req = req.header("X-Org-Id", org);
+    }
+
+    match req.send().await {
+        Ok(resp) => resp.status().is_success(),
+        Err(_) => false,
+    }
+}
+
+async fn delete_iam_vault_from_kms(
+    kms_url: &str,
+    bearer_token: &str,
+    org_id: Option<&str>,
+) -> bool {
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(Duration::from_secs(4))
+        .user_agent(format!("Hanzo-Dev-Desktop/{}", env!("CARGO_PKG_VERSION")))
+        .build()
+    else {
+        return false;
+    };
+
+    let mut req = client
+        .delete(kms_url)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .bearer_auth(bearer_token);
+    if let Some(org) = org_id {
+        req = req.header("X-Org-Id", org);
+    }
+
+    match req.send().await {
+        Ok(resp) => resp.status().is_success() || resp.status().as_u16() == 404,
+        Err(_) => false,
+    }
+}
+
+async fn fetch_iam_vault_from_kms(
+    kms_url: &str,
+    bearer_token: &str,
+    org_id: Option<&str>,
+) -> Option<String> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(4))
+        .user_agent(format!("Hanzo-Dev-Desktop/{}", env!("CARGO_PKG_VERSION")))
+        .build()
+        .ok()?;
+
+    let mut req = client
+        .get(kms_url)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .bearer_auth(bearer_token);
+    if let Some(org) = org_id {
+        req = req.header("X-Org-Id", org);
+    }
+
+    let resp = req.send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body = resp.json::<Value>().await.ok()?;
+    let value = body
+        .get("secretValue")
+        .and_then(Value::as_str)
+        .or_else(|| body.get("value").and_then(Value::as_str))
+        .or_else(|| {
+            body.get("secret")
+                .and_then(|s| s.get("secretValue").or_else(|| s.get("value")))
+                .and_then(Value::as_str)
+        })?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+async fn get_iam_vault_internal(
+    vault_slot: &tokio::sync::Mutex<Option<String>>,
+    state_dir: &Path,
+    kms_url: Option<&str>,
+) -> Option<String> {
+    purge_legacy_iam_vault_file(state_dir);
+
+    let cached = {
+        let guard = vault_slot.lock().await;
+        guard.clone().filter(|s| !s.trim().is_empty())
+    };
+    if let Some(payload) = cached {
+        if let (Some(url), Some((token, org_id))) = (kms_url, extract_iam_vault_auth(&payload)) {
+            if let Some(remote) = fetch_iam_vault_from_kms(url, &token, org_id.as_deref()).await {
+                let mut guard = vault_slot.lock().await;
+                *guard = Some(remote.clone());
+                return Some(remote);
+            }
+        }
+        return Some(payload);
+    }
+    None
+}
+
+async fn set_iam_vault_internal(
+    vault_slot: &tokio::sync::Mutex<Option<String>>,
+    state_dir: &Path,
+    vault_json: Option<String>,
+    kms_url: Option<&str>,
+) -> bool {
+    purge_legacy_iam_vault_file(state_dir);
+
+    let normalized = vault_json.filter(|s| !s.trim().is_empty());
+    let previous = {
+        let mut guard = vault_slot.lock().await;
+        let prev = guard.clone();
+        *guard = normalized.clone();
+        prev
+    };
+
+    match normalized {
+        Some(payload) => {
+            if let (Some(url), Some((token, org_id))) = (kms_url, extract_iam_vault_auth(&payload))
+            {
+                sync_iam_vault_to_kms(url, &token, org_id.as_deref(), &payload).await
+            } else {
+                false
+            }
+        }
+        None => {
+            if let (Some(url), Some(prev_payload)) = (kms_url, previous) {
+                if let Some((token, org_id)) = extract_iam_vault_auth(&prev_payload) {
+                    let _ = delete_iam_vault_from_kms(url, &token, org_id.as_deref()).await;
+                }
+            }
+            false
+        }
+    }
 }
 
 fn now_iso8601() -> String {
@@ -250,18 +454,13 @@ fn matches_platform_asset(name: &str) -> bool {
 
 #[tauri::command]
 pub async fn desktop_get_iam_vault(state: State<'_, AppState>) -> Result<Option<String>, String> {
-    if let Ok(entry) = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
-        if let Ok(secret) = entry.get_password() {
-            if !secret.trim().is_empty() {
-                return Ok(Some(secret));
-            }
-        }
-    }
-    let fallback = iam_vault_fallback_path(&state.supervisor.config.state_dir);
-    match fs::read_to_string(fallback) {
-        Ok(contents) if !contents.trim().is_empty() => Ok(Some(contents)),
-        _ => Ok(None),
-    }
+    let kms_url = resolve_hanzo_kms_vault_url();
+    Ok(get_iam_vault_internal(
+        &state.iam_vault,
+        &state.supervisor.config.state_dir,
+        Some(&kms_url),
+    )
+    .await)
 }
 
 #[tauri::command]
@@ -269,38 +468,14 @@ pub async fn desktop_set_iam_vault(
     state: State<'_, AppState>,
     vault_json: Option<String>,
 ) -> Result<bool, String> {
-    let mut stored_in_keychain = false;
-    if let Ok(entry) = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT) {
-        match &vault_json {
-            Some(payload) if !payload.trim().is_empty() => {
-                if entry.set_password(payload).is_ok() {
-                    stored_in_keychain = true;
-                }
-            }
-            _ => {
-                let _ = entry.delete_credential();
-                stored_in_keychain = true;
-            }
-        }
-    }
-
-    let fallback = iam_vault_fallback_path(&state.supervisor.config.state_dir);
-    let _ = fs::create_dir_all(&state.supervisor.config.state_dir);
-    match vault_json {
-        Some(payload) if !payload.trim().is_empty() => {
-            let _ = fs::write(&fallback, payload);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = fs::set_permissions(&fallback, fs::Permissions::from_mode(0o600));
-            }
-        }
-        _ => {
-            let _ = fs::remove_file(&fallback);
-        }
-    }
-
-    Ok(stored_in_keychain)
+    let kms_url = resolve_hanzo_kms_vault_url();
+    Ok(set_iam_vault_internal(
+        &state.iam_vault,
+        &state.supervisor.config.state_dir,
+        vault_json,
+        Some(&kms_url),
+    )
+    .await)
 }
 
 #[tauri::command]
@@ -1559,5 +1734,148 @@ mod tests {
             compare_semver("0.2.0-nightly.2", "0.2.0-nightly.1"),
             Ordering::Greater
         );
+    }
+
+    fn temp_state_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "hanzo-dev-iam-vault-test-{label}-{}-{}",
+            std::process::id(),
+            generate_random_hex(6)
+        ));
+        fs::create_dir_all(&dir).expect("create temp state dir");
+        dir
+    }
+
+    #[tokio::test]
+    async fn iam_vault_stores_and_clears_in_memory_without_disk_writes_or_keychain() {
+        let state_dir = temp_state_dir("in-memory");
+        let slot = tokio::sync::Mutex::new(None);
+        let legacy_file = state_dir.join(LEGACY_IAM_VAULT_FILENAME);
+        let payload = json!({
+            "activeAccountId": "hanzo/z",
+            "activeOrgId": "hanzo",
+            "accounts": [{
+                "id": "hanzo/z",
+                "accessToken": "tok_in_memory_123",
+                "owner": "hanzo"
+            }]
+        })
+        .to_string();
+
+        assert_eq!(get_iam_vault_internal(&slot, &state_dir, None).await, None);
+
+        let kms_synced =
+            set_iam_vault_internal(&slot, &state_dir, Some(payload.clone()), None).await;
+        assert!(!kms_synced);
+        assert!(
+            !legacy_file.exists(),
+            "iam-vault.json must never be created on disk"
+        );
+
+        let loaded = get_iam_vault_internal(&slot, &state_dir, None).await;
+        assert_eq!(loaded.as_deref(), Some(payload.as_str()));
+
+        let cleared_kms = set_iam_vault_internal(&slot, &state_dir, None, None).await;
+        assert!(!cleared_kms);
+        assert_eq!(get_iam_vault_internal(&slot, &state_dir, None).await, None);
+        assert!(!legacy_file.exists());
+
+        let _ = fs::remove_dir_all(&state_dir);
+    }
+
+    #[tokio::test]
+    async fn iam_vault_purges_legacy_disk_file_on_startup_get_and_set() {
+        let state_dir = temp_state_dir("purge-legacy");
+        let legacy_file = state_dir.join(LEGACY_IAM_VAULT_FILENAME);
+        let slot = tokio::sync::Mutex::new(None);
+
+        // Startup purge removes pre-existing plaintext vault file
+        fs::write(&legacy_file, r#"{"accounts":[{"id":"legacy","accessToken":"secret"}]}"#)
+            .expect("seed legacy iam-vault.json");
+        assert!(legacy_file.exists());
+        purge_legacy_iam_vault_file(&state_dir);
+        assert!(!legacy_file.exists());
+
+        // Get purges any re-introduced legacy file and never returns its plaintext contents
+        fs::write(&legacy_file, r#"{"accounts":[{"id":"legacy","accessToken":"secret"}]}"#)
+            .expect("seed legacy iam-vault.json for get");
+        assert_eq!(get_iam_vault_internal(&slot, &state_dir, None).await, None);
+        assert!(!legacy_file.exists());
+
+        // Set purges any legacy file and never writes a new file
+        fs::write(&legacy_file, r#"{"accounts":[{"id":"legacy","accessToken":"secret"}]}"#)
+            .expect("seed legacy iam-vault.json for set");
+        let payload = r#"{"activeAccountId":"hanzo/z","accounts":[{"id":"hanzo/z","accessToken":"tok_abc","owner":"hanzo"}]}"#;
+        let _ = set_iam_vault_internal(&slot, &state_dir, Some(payload.to_string()), None).await;
+        assert!(!legacy_file.exists());
+        assert_eq!(
+            get_iam_vault_internal(&slot, &state_dir, None).await.as_deref(),
+            Some(payload)
+        );
+
+        let _ = fs::remove_dir_all(&state_dir);
+    }
+
+    #[tokio::test]
+    async fn iam_vault_syncs_with_hanzo_kms_and_falls_back_safely_to_memory() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let state_dir = temp_state_dir("kms-sync");
+        let legacy_file = state_dir.join(LEGACY_IAM_VAULT_FILENAME);
+        let slot = tokio::sync::Mutex::new(None);
+
+        let payload = json!({
+            "activeAccountId": "hanzo/z",
+            "activeOrgId": "lux",
+            "accounts": [{
+                "id": "hanzo/z",
+                "accessToken": "tok_kms_bearer_123",
+                "owner": "hanzo"
+            }]
+        })
+        .to_string();
+
+        assert_eq!(
+            extract_iam_vault_auth(&payload),
+            Some(("tok_kms_bearer_123".to_string(), Some("lux".to_string())))
+        );
+
+        // Start a local mock KMS server accepting PUT
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock kms listener");
+        let addr = listener.local_addr().expect("mock kms local addr");
+        let kms_url = format!("http://{addr}{HANZO_KMS_IAM_VAULT_SECRET_PATH}");
+
+        let server_task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept mock kms request");
+            let mut buf = vec![0u8; 4096];
+            let n = stream.read(&mut buf).await.unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            let resp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"ok\":true}";
+            let _ = stream.write_all(resp.as_bytes()).await;
+            req
+        });
+
+        let synced =
+            set_iam_vault_internal(&slot, &state_dir, Some(payload.clone()), Some(&kms_url)).await;
+        assert!(synced);
+        assert!(!legacy_file.exists());
+
+        let captured_req = server_task.await.expect("join mock kms server");
+        assert!(captured_req.starts_with("PUT /v1/kms/secrets/hanzo-dev-iam-vault "));
+        assert!(captured_req.contains("authorization: Bearer tok_kms_bearer_123")
+            || captured_req.contains("Authorization: Bearer tok_kms_bearer_123"));
+        assert!(captured_req.contains("x-org-id: lux") || captured_req.contains("X-Org-Id: lux"));
+
+        // When KMS is unreachable, get/set fall back safely to in-memory without writing to disk
+        let dead_kms_url = format!("http://{addr}{HANZO_KMS_IAM_VAULT_SECRET_PATH}");
+        let fallback_loaded =
+            get_iam_vault_internal(&slot, &state_dir, Some(&dead_kms_url)).await;
+        assert_eq!(fallback_loaded.as_deref(), Some(payload.as_str()));
+        assert!(!legacy_file.exists());
+
+        let _ = fs::remove_dir_all(&state_dir);
     }
 }
