@@ -196,8 +196,8 @@ fn main() {
             };
             let mut win_builder = WebviewWindowBuilder::new(app, "main", webview_url)
                 .title(title)
-                .inner_size(1400.0, 900.0)
-                .min_inner_size(840.0, 560.0)
+                .inner_size(1440.0, 900.0)
+                .min_inner_size(900.0, 600.0)
                 .initialization_script(&init_script);
 
             #[cfg(target_os = "macos")]
