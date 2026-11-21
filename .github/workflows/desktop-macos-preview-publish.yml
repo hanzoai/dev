@@ -48,9 +48,6 @@ jobs:
       pr_number: ${{ steps.pr.outputs.pr_number }}
       head_sha: ${{ steps.pr.outputs.head_sha }}
       version: ${{ steps.version.outputs.version }}
-      clerk_publishable_key: ${{ steps.version.outputs.clerk_publishable_key }}
-      clerk_jwt_template: ${{ steps.version.outputs.clerk_jwt_template }}
-      clerk_cli_oauth_client_id: ${{ steps.version.outputs.clerk_cli_oauth_client_id }}
       relay_url: ${{ steps.version.outputs.relay_url }}
     steps:
       - id: pr
@@ -226,7 +223,7 @@ jobs:
           echo "version=${base_version}-pr.${PR_NUMBER}.${BUILD_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
           head_file .env.example > "$RUNNER_TEMP/head.env.example"
-          for key in clerk_publishable_key:HANZO_DEV_CLERK_PUBLISHABLE_KEY clerk_jwt_template:HANZO_DEV_CLERK_JWT_TEMPLATE clerk_cli_oauth_client_id:HANZO_DEV_CLERK_CLI_OAUTH_CLIENT_ID relay_url:HANZO_DEV_RELAY_URL; do
+          for key in relay_url:HANZO_DEV_RELAY_URL; do
             output="${key%%:*}"
             name="${key##*:}"
             value="$(sed -n "s/^${name}=//p" "$RUNNER_TEMP/head.env.example" | head -n 1)"
@@ -304,9 +301,6 @@ jobs:
       ref: ${{ github.sha }}
       release_channel: preview
       relay_client_tracing: false
-      clerk_publishable_key: ${{ needs.resolve.outputs.clerk_publishable_key }}
-      clerk_jwt_template: ${{ needs.resolve.outputs.clerk_jwt_template }}
-      clerk_cli_oauth_client_id: ${{ needs.resolve.outputs.clerk_cli_oauth_client_id }}
       relay_url: ${{ needs.resolve.outputs.relay_url }}
       label: macOS arm64 preview
       runner: macos-latest

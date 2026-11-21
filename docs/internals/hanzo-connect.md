@@ -1,6 +1,6 @@
 # Hanzo Connect
 
-Hanzo Connect uses Clerk for cloud identity. The relay manages environment links,
+Hanzo Connect uses Hanzo IAM (`hanzo.id`) for cloud identity. The relay verifies IAM access tokens against the issuer's JWKS (found through OIDC discovery) and checks `iss` and `aud`. The relay manages environment links,
 credentials for reaching environments, and managed tunnel allocations. After
 bootstrap, clients send application traffic through the environment's tunnel
 hostname; the relay Worker does not proxy their HTTP or WebSocket sessions.
@@ -38,7 +38,7 @@ read-once bodies of up to 1 MiB that need per-link order, caps, and retry
 timing. Queues cap messages at 128 KB and cannot hold one link's requests back
 while its environment is away.
 
-Clerk, deployment, and native authentication setup live in the
+Deployment and authentication setup live in the
 [Connect setup runbook](../operations/connect-setup.md).
 
 ## The relay is a trusted broker
@@ -162,10 +162,10 @@ host that reconnects mid-sweep wins.
 
 ## A paid Hanzo Chat plan raises the tunnel cap
 
-Hanzo Chat uses WorkOS, not Clerk, so the two accounts are linked by consent
+Hanzo Chat has its own accounts, so the two are linked by consent
 rather than by a shared identity. The relay and Hanzo Chat share one secret
 (`HANZOCHAT_LINK_SECRET` here, `HANZO_DEV_LINK_SECRET` there). The relay signs a
-short-lived token naming the Clerk user and email; the user confirms it while
+short-lived token naming the IAM user and email; the user confirms it while
 signed in to Hanzo Chat, and Hanzo Chat stores the link. Hanzo Chat owns the link and the
 plan, so the relay keeps no copy. It asks Hanzo Chat only when an account reaches
 its normal cap for a new environment, and any failure keeps the normal cap.
@@ -202,20 +202,18 @@ a new flag is added.
 
 ## OAuth traps
 
-Interactive clients and the headless CLI use the same Clerk application but
-different credentials. The relay accepts both session-template JWTs and CLI
-OAuth tokens; requiring a JWT template for the CLI would reject valid logins.
-The CLI is a public OAuth client using PKCE and stores no client secret.
+Interactive clients and the headless CLI use the same Hanzo IAM application (`hanzo-app`). The relay
+accepts any access token that IAM signed for it. The CLI is a public OAuth client using PKCE and
+stores no client secret.
 
 Loopback CLI authorization starts on the hosted `/connect` page so sign-in
-completes before entering Clerk's authorize endpoint. Sending a signed-out
+completes before entering IAM's authorize endpoint. Sending a signed-out
 browser straight to that endpoint loses the authorize parameters during the
 sign-in redirect. The [shared flow](../../packages/shared/src/connectAuth.ts)
 preserves PKCE and state for the loopback callback.
 
-SSH and headless sessions use Clerk's OAuth device authorization grant because
+SSH and headless sessions use IAM's OAuth device authorization grant (`/oauth/device`) because
 the browser cannot ordinarily reach a listener on the remote machine. The CLI
-polls Clerk's token endpoint directly while the user approves a short code on
-Clerk's hosted device page; the hosted app plays no part and there is no
-redirect URI or PKCE. The grant must be enabled on the CLI OAuth application
-or the device endpoint returns an error before any prompt is shown.
+polls IAM's token endpoint directly while the user approves a short code on
+IAM's device page; the hosted app plays no part and there is no
+redirect URI or PKCE.
