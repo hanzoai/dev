@@ -709,7 +709,11 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   layerThreadPullRequestWorker,
   KeepAwake.layer,
   BrowserSources.layer,
-  DesktopLink.layer.pipe(Layer.provide(SourceUsageSummary.layer)),
+  DesktopLink.layer.pipe(
+    Layer.provide(SourceUsageSummary.layer),
+    // Signing in is linking: its auto-link reads the machine identity itself.
+    Layer.provide(MachineIdentity.layer),
+  ),
   ProviderAccounts.layer,
   DelegatedTaskAnalytics.layer,
   Layer.effectDiscard(
