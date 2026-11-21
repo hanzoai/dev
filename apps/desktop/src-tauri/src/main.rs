@@ -6,9 +6,9 @@ mod bridge;
 mod commands;
 mod dock_icon;
 mod menu;
+mod menubar;
 mod snapshot;
 mod ssh;
-mod usage_tray;
 
 use crate::auth::{generate_random_hex, read_or_create_host_scope};
 use crate::backend::{
@@ -213,7 +213,7 @@ fn main() {
             }
 
             let window = win_builder.build()?;
-            usage_tray::start(app.handle())?;
+            menubar::start(app.handle());
 
             let win_clone = window.clone();
             let app_for_events = app.handle().clone();

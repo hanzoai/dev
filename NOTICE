@@ -4,7 +4,8 @@ Hanzo Dev includes material derived from the following third-party project.
 
 CodexBar (https://github.com/steipete/CodexBar)
 Portions of packages/usage (provider catalog data, usage endpoint request shapes,
-local session-log parsing and per-model token accounting) are derived from CodexBar
+local session-log parsing and per-model token accounting) and of apps/desktop/menubar
+(usage bar, provider switcher and menu card layout) are derived from CodexBar
 version 0.84.0.
 
 MIT License
