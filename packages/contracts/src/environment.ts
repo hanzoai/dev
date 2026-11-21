@@ -205,11 +205,6 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   voiceTranscription: Schema.optionalKey(Schema.Boolean),
   cloudVoiceTranscription: Schema.optionalKey(Schema.Boolean),
   /**
-   * Server lists the machine's local models at `GET /v1/local-ai/models` and streams a reply from
-   * one at `POST /v1/local-ai/chat`, so a phone can chat with them over its connection.
-   */
-  localChat: Schema.optionalKey(Schema.Boolean),
-  /**
    * The server config's flags of the same names. A server that names them here lets a client
    * load the shell snapshot before the socket opens, and answers its `resumeFrom`.
    */

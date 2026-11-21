@@ -263,8 +263,7 @@ function PickerToggle({
         instance: pickerInstance(status),
       });
     }
-    // Only a new probe result re-syncs; persisting is not itself a trigger.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- only a new probe result re-syncs; persisting is not a trigger.
   }, [status]);
   return (
     <Button
