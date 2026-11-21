@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { ENSO_MAX_GAP, ensoRingGap, ensoRingPath, isEnsoModel } from "./ensoRing.ts";
+import { ENSO_MAX_GAP, ensoRingDot, ensoRingGap, ensoRingPath, isEnsoModel } from "./ensoRing.ts";
 
 const LEVELS = ["low", "medium", "high"];
 
@@ -33,11 +33,21 @@ describe("ensoRingPath", () => {
     expect(ensoRingPath(0, 16, 2)).toMatch(/^M1 8a7 7 0 1 0 14 0a7 7 0 1 0 -14 0$/);
   });
 
-  it("leaves the gap at the top", () => {
-    const [, x1] = /^M([\d.]+) /.exec(ensoRingPath(0.25, 16, 2))!;
-    const [, x2] = /A.* ([\d.]+) [\d.]+$/.exec(ensoRingPath(0.25, 16, 2))!;
-    expect(Number(x1)).toBeGreaterThan(8);
-    expect(Number(x2)).toBeLessThan(8);
+  it("leaves the gap at the upper right", () => {
+    const d = ensoRingPath(0.125, 16, 2);
+    const [, sx, sy] = /^M([\d.]+) ([\d.]+)/.exec(d)!;
+    const [, ex, ey] = /([\d.]+) ([\d.]+)$/.exec(d)!;
+    // The stroke starts below the gap on the right and ends along the top, left of it.
+    expect(Number(sx)).toBeGreaterThan(8);
+    expect(Number(sy)).toBeGreaterThan(Number(ey));
+    expect(Number(ex)).toBeGreaterThan(8);
+  });
+});
+
+describe("ensoRingDot", () => {
+  it("marks Max alone, so Auto stays a plain closed ring", () => {
+    expect(ensoRingDot("max")).toBe(true);
+    expect([null, "auto", "default", "high"].some(ensoRingDot)).toBe(false);
   });
 });
 

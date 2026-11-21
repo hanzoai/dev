@@ -1121,12 +1121,12 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                     <CpuIcon className="size-4 text-foreground" />
                     <div>
                       <div className="text-sm font-semibold">
-                        <T>Local AI, Validator Node &amp; Embedded Engine</T>
+                        <T>Local AI engines</T>
                       </div>
                       <div className="text-xs text-muted-foreground">
                         <T>
-                          Manage local Zen models (:11434), Hanzo Engine (:36900), and hanzod
-                          (:9630)
+                          Run models on this Mac or your network: Hanzo Engine, Ollama, LM Studio,
+                          or any OpenAI-compatible endpoint.
                         </T>
                       </div>
                     </div>
@@ -1135,7 +1135,7 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                     type="button"
                     onClick={() => {
                       controller.closeModal();
-                      openLocalAiManager("models");
+                      openLocalAiManager("engines");
                     }}
                     className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold hover:bg-muted"
                   >

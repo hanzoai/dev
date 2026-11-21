@@ -20,6 +20,8 @@ type ProviderIconProps = {
   readonly size?: number;
   /** With provider "enso": the ring's open share, 0 (closed) by default. */
   readonly ensoGap?: number;
+  /** With provider "enso": the center dot of Max. */
+  readonly ensoDot?: boolean;
 };
 
 function AcpRegistryFallbackIcon(props: { readonly color: string; readonly size: number }) {
@@ -88,7 +90,9 @@ export function ProviderIcon(props: ProviderIconProps) {
     );
   }
   if (props.provider === "enso") {
-    return <EnsoRing color={mono} gap={props.ensoGap ?? 0} size={size} />;
+    return (
+      <EnsoRing color={mono} gap={props.ensoGap ?? 0} dot={props.ensoDot ?? false} size={size} />
+    );
   }
   if (props.provider === "acpRegistry") {
     return <AcpRegistryProviderIcon color={mono} iconUrl={props.iconUrl} size={size} />;

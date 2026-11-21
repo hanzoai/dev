@@ -1,3 +1,5 @@
+// Hermes has no crypto global; it must exist before anything generates a PKCE verifier or state.
+import "./src/lib/crypto-polyfill";
 // Must stay first: the render counter and behavior probe wrap the DevTools hook before any React commit.
 import "./src/features/development/render-counter-entry";
 import "./src/features/development/behavior-probe-entry";

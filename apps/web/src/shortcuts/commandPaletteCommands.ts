@@ -117,7 +117,7 @@ export function installCommandPaletteCommands(
       "localAi.open": (event) => {
         consume(event);
         dispatchCommandPalette({ _tag: "SetOpen", open: false });
-        openLocalAiManager("models");
+        openLocalAiManager("engines");
       },
       "commandPalette.toggle": toggleOverlay("commandPalette.toggle"),
       "filePicker.toggle": toggleOverlay("filePicker.toggle"),

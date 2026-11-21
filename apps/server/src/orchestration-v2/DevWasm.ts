@@ -1,5 +1,5 @@
-import * as NodeFS from "node:fs";
 import * as NodeWasi from "node:wasi";
+import { devWasmBytes } from "./devWasmBytes.ts";
 
 /**
  * The Dev engine's pure decide functions, loaded from `dev.wasm` (crates/ffi) with Node's built-in
@@ -20,14 +20,12 @@ interface Exports {
   ) => number;
 }
 
-const wasmUrl = new URL("../../../../go/dev.wasm", import.meta.url);
-
 let loaded: Exports | undefined;
 const engine = (): Exports => {
   if (loaded) return loaded;
   const wasi = new NodeWasi.WASI({ version: "preview1" });
   const instance = new WebAssembly.Instance(
-    new WebAssembly.Module(NodeFS.readFileSync(wasmUrl)),
+    new WebAssembly.Module(devWasmBytes() as BufferSource),
     wasi.getImportObject() as WebAssembly.Imports,
   );
   wasi.initialize(instance as never);
