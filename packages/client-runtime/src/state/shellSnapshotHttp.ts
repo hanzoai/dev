@@ -11,6 +11,8 @@ import { HttpClient, HttpClientError, type HttpClientResponse } from "effect/htt
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import type { PreparedConnection } from "../connection/model.ts";
 import * as ManagedRelay from "../relay/managedRelay.ts";
+import { executeEnvironmentHttpRequest } from "../rpc/http.ts";
+import { isZapUrl, ZAP_SHELL_METHOD, zapBearer, zapCallJson } from "../rpc/zapCalls.ts";
 import {
   executeAuthenticatedEnvironmentHttpRequest,
   withOrchestrationProtocolHeader,
@@ -58,6 +60,17 @@ export const fetchEnvironmentShellSnapshot = Effect.fn(
       ...(input.resumeFrom === undefined ? {} : { resumeFrom: String(input.resumeFrom) }),
     },
   };
+  if (isZapUrl(input.prepared.socketUrl)) {
+    // The runtime answers the same body over its ZAP session, and the same cursor answer.
+    return yield* executeEnvironmentHttpRequest(
+      input.prepared.socketUrl,
+      input.timeoutMs ?? DEFAULT_SHELL_SNAPSHOT_TIMEOUT_MS,
+      zapCallJson(input.prepared.socketUrl, ZAP_SHELL_METHOD, {
+        bearer: zapBearer(input.prepared.httpAuthorization),
+        query: endpoint.query,
+      }).pipe(Effect.flatMap(decodeShellSnapshotJson)),
+    );
+  }
   return yield* executeAuthenticatedEnvironmentHttpRequest({
     ...input,
     group: "orchestration",
@@ -81,6 +94,22 @@ const decodeEnvironmentHttpCommonError = Schema.decodeUnknownEffect(
 
 const isShellResumable = Schema.is(OrchestrationV2ShellResumable);
 
+/** The body of a 200 answer, over HTTP or over the runtime's ZAP session. */
+const decodeShellSnapshotJson = (
+  json: unknown,
+): Effect.Effect<ShellHttpAnswer, Schema.SchemaError> => {
+  if (isShellResumable(json)) return Effect.succeed(json);
+  const projectIdentities =
+    Predicate.isObject(json) && typeof json.projectIdentities === "string"
+      ? json.projectIdentities
+      : undefined;
+  return decodeShellSnapshotDeferringPullRequests(json).pipe(
+    Effect.map((snapshot) =>
+      projectIdentities === undefined ? snapshot : { ...snapshot, projectIdentities },
+    ),
+  );
+};
+
 const decodeShellSnapshotResponse = (
   response: HttpClientResponse.HttpClientResponse,
 ): Effect.Effect<
@@ -88,20 +117,7 @@ const decodeShellSnapshotResponse = (
   HttpClientError.HttpClientError | Schema.SchemaError | EnvironmentHttpCommonError
 > => {
   if (response.status === 200) {
-    return response.json.pipe(
-      Effect.flatMap((json): Effect.Effect<ShellHttpAnswer, Schema.SchemaError> => {
-        if (isShellResumable(json)) return Effect.succeed(json);
-        const projectIdentities =
-          Predicate.isObject(json) && typeof json.projectIdentities === "string"
-            ? json.projectIdentities
-            : undefined;
-        return decodeShellSnapshotDeferringPullRequests(json).pipe(
-          Effect.map((snapshot) =>
-            projectIdentities === undefined ? snapshot : { ...snapshot, projectIdentities },
-          ),
-        );
-      }),
-    );
+    return response.json.pipe(Effect.flatMap(decodeShellSnapshotJson));
   }
   const statusError = new HttpClientError.HttpClientError({
     reason: new HttpClientError.StatusCodeError({ request: response.request, response }),

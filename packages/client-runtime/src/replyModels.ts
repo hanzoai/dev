@@ -1,9 +1,7 @@
 /**
- * Which catalog models may write a conversation's replies. `/v1/models` says what each one
- * returns: a chat model lists `text` in `outputs` and answers at the chat-completions endpoint;
- * a decision model (Kai) lists `decision` and answers at `/v1/decisions`. Decision models run
- * inside the product (gate scoring, routing) and are never the model a person picks.
- * One predicate for /chat, /dev and the desktop app.
+ * Which catalog models may write a conversation's replies: a chat model lists `text` in its
+ * `/v1/models` outputs; a decision model (Kai) lists `decision`, runs inside the product (gate
+ * scoring, routing) and is never picked by a person. One predicate for /chat, /dev and desktop.
  */
 export interface CatalogModelKind {
   readonly endpoint?: string | undefined;

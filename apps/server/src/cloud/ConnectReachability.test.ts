@@ -449,7 +449,7 @@ describe("ConnectReachability DNS failures", () => {
   );
 });
 
-describe("Hanzo Connect troubleshooting links", () => {
+describe("Hanzo Link troubleshooting links", () => {
   it("each section names a heading in the user guide", () => {
     const guide = NodeFS.readFileSync(
       new URL("../../../../docs/user/hanzo-connect-troubleshooting.md", import.meta.url),

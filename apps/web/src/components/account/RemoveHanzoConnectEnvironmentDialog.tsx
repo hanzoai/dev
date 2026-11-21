@@ -48,10 +48,10 @@ export function RemoveHanzoConnectEnvironmentDialog({
         openAccountPage();
       }}
     >
-      <T>Hanzo Connect settings</T>
+      <T>Hanzo Link settings</T>
     </InlineButton>
   ) : (
-    gt("Hanzo Connect settings")
+    gt("Hanzo Link settings")
   );
 
   return (
@@ -75,14 +75,14 @@ export function RemoveHanzoConnectEnvironmentDialog({
             <AlertDialogDescription>
               {shown.registration === "registered" ? (
                 <T>
-                  It stays on your Hanzo Connect account and keeps its host space. Deregister it in{" "}
+                  It stays on your Hanzo Link account and keeps its host space. Deregister it in{" "}
                   <Var>{accountPageLink}</Var> to free it.
                 </T>
               ) : shown.registration === "unregistered" ? (
-                gt("It's no longer on your Hanzo Connect account.")
+                gt("It's no longer on your Hanzo Link account.")
               ) : (
                 <T>
-                  This doesn't change your Hanzo Connect account. To deregister it there, use{" "}
+                  This doesn't change your Hanzo Link account. To deregister it there, use{" "}
                   <Var>{accountPageLink}</Var>.
                 </T>
               )}

@@ -33,7 +33,7 @@ function readEnvironmentId(): EnvironmentId | null {
   return value ? EnvironmentId.make(value) : null;
 }
 
-/** Sends each call with the owner's Hanzo Connect session and remembers where the environment is. */
+/** Sends each call with the owner's Hanzo Link session and remembers where the environment is. */
 function connectTransport(
   environmentId: EnvironmentId,
   onEnvironment: (environment: { readonly url: string; readonly label: string }) => void,
@@ -72,8 +72,8 @@ function connectTransport(
 }
 
 /**
- * The consent screen for an agent sign-in on a Hanzo Connect environment: the owner signs in to
- * Hanzo Connect here and approves with that session, so no sign-in code is needed.
+ * The consent screen for an agent sign-in on a Hanzo Link environment: the owner signs in to
+ * Hanzo Link here and approves with that session, so no sign-in code is needed.
  */
 export function ApproveAgentSurface() {
   const gt = useGT();
@@ -126,7 +126,7 @@ export function ApproveAgentSurface() {
       <StandalonePage>
         <StandalonePageHeader
           context={gt("Agent sign-in")}
-          title={gt("Connecting to Hanzo Connect")}
+          title={gt("Connecting to Hanzo Link")}
           description={gt("One moment while your account loads.")}
         />
         <Spinner className="mt-6" size="lg" tone="muted" />
@@ -138,7 +138,7 @@ export function ApproveAgentSurface() {
     return (
       <Message
         title={gt("Sign in to approve")}
-        description={gt("Sign in to Hanzo Connect with the account this environment is linked to.")}
+        description={gt("Sign in to Hanzo Link with the account this environment is linked to.")}
       >
         <div className="mt-6">
           <Button type="button" onClick={openSignIn}>

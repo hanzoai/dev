@@ -78,8 +78,8 @@ export function ConnectCliAuthorizeSurface() {
         title={gt("Connecting your terminal")}
         description={
           isSignedIn
-            ? gt("Redirecting to authorize Hanzo Connect for your CLI…")
-            : gt("Sign in to continue authorizing Hanzo Connect for your CLI.")
+            ? gt("Redirecting to authorize Hanzo Link for your CLI…")
+            : gt("Sign in to continue authorizing Hanzo Link for your CLI.")
         }
       />
       {isLoaded && !isSignedIn ? (

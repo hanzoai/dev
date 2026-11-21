@@ -16,7 +16,7 @@ import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { m, type MessageResolver } from "../../i18n/messages";
 
-const HANZO_CONNECT_NAME = "Hanzo Connect";
+const HANZO_CONNECT_NAME = "Hanzo Link";
 
 export function formatDesktopSshTarget(target: DesktopSshEnvironmentTarget): string {
   const authority = target.username ? `${target.username}@${target.hostname}` : target.hostname;

@@ -1,5 +1,5 @@
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import type { EnvironmentId } from "@hanzodev/contracts";
 import { startAppServices } from "../appInit";
@@ -39,6 +39,7 @@ function Pair({ runtime, children }: { runtime: DevRuntime; children: ReactNode 
   const pair = useAtomCommand(connectPairing, { reportFailure: false });
   const [failure, setFailure] = useState<string | null>(null);
   const [ready, setReady] = useState(paired.has(runtime.id));
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- redeems the pairing credential with the runtime once per session
   useEffect(() => {
     if (paired.has(runtime.id)) return;
     let live = true;
@@ -71,10 +72,11 @@ function Pair({ runtime, children }: { runtime: DevRuntime; children: ReactNode 
  * atom registry, so a thread opened in the list is the one the workspace shows.
  */
 export function DevProvider({ runtime, children }: { runtime: DevRuntime; children: ReactNode }) {
-  const router = useMemo(() => start(), []);
-  const slots = useMemo(() => ({ threads: createSlot(), workspace: createSlot() }), []);
-  const state = useMemo(() => ({ runtime, router, slots }), [runtime, router, slots]);
+  const router = start();
+  const slots = { threads: createSlot(), workspace: createSlot() };
+  const state = { runtime, router, slots };
   const [ready, setReady] = useState(false);
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- waits on the router's load and the locale catalog while mounted
   useEffect(() => {
     let live = true;
     void router

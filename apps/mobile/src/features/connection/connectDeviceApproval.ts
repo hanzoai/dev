@@ -41,7 +41,7 @@ export function connectDeviceApprovalPrompts(input: {
           {
             device: describeConnectDevice(device),
             environment: input.environmentLabel,
-            product: "Hanzo Connect",
+            product: "Hanzo Link",
             code: verificationCode,
           },
         ),

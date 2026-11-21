@@ -170,13 +170,13 @@ export function CloudEnvironmentConnectRows({
       toastManager.add({
         type: "success",
         title: savedWithoutRelay.has(environment.environmentId)
-          ? gt("Hanzo Connect route added")
+          ? gt("Hanzo Link route added")
           : gt("Environment added"),
         description: savedWithoutRelay.has(environment.environmentId)
-          ? gt("{environment} falls back to Hanzo Connect when its other routes are unreachable.", {
+          ? gt("{environment} falls back to Hanzo Link when its other routes are unreachable.", {
               environment: environment.label,
             })
-          : gt("Connecting to {environment} through Hanzo Connect.", {
+          : gt("Connecting to {environment} through Hanzo Link.", {
               environment: environment.label,
             }),
       });
@@ -187,7 +187,7 @@ export function CloudEnvironmentConnectRows({
     }
     const cause = squashAtomCommandFailure(result);
     const message =
-      thrownErrorMessage(cause, m) ?? gt("Could not connect the Hanzo Connect environment.");
+      thrownErrorMessage(cause, m) ?? gt("Could not connect the Hanzo Link environment.");
     const traceId = findErrorTraceId(cause);
     console.error("[hanzo-connect] Could not connect environment", { message, traceId, cause });
     toastManager.add({
@@ -206,7 +206,7 @@ export function CloudEnvironmentConnectRows({
     return false;
   };
 
-  // Omit machines saved over other routes; onboarding selection must not add a Hanzo Connect route.
+  // Omit machines saved over other routes; onboarding selection must not add a Hanzo Link route.
   const isVisibleEnvironment = (environmentId: EnvironmentId) =>
     environmentId !== primaryEnvironmentId &&
     !desktopLocalIds.has(environmentId) &&
@@ -310,7 +310,7 @@ export function CloudEnvironmentConnectRows({
       return (
         <div className={ITEM_ROW_CLASSNAME}>
           <p className="text-sm font-medium text-destructive">
-            <T>Could not load Hanzo Connect environments</T>
+            <T>Could not load Hanzo Link environments</T>
           </p>
           <p className="mt-1 text-xs text-muted-foreground">{discoveryProblem}</p>
           <Button
@@ -373,23 +373,23 @@ export function CloudEnvironmentConnectRows({
             ? "bg-warning"
             : "bg-muted-foreground/35";
     const notAdded = savedWithoutRelay.has(environment.environmentId)
-      ? gt("Saved without Hanzo Connect")
+      ? gt("Saved without Hanzo Link")
       : gt("Not added");
     const statusText =
       unsupported && !savedEnvironment
-        ? `Hanzo Connect · ${notAdded} · ${gt("Client not supported")}`
+        ? `Hanzo Link · ${notAdded} · ${gt("Client not supported")}`
         : offlineReason !== null
           ? offlineReason
           : savedConnection
             ? savedConnection.statusText
             : availability === "online"
-              ? `Hanzo Connect · ${notAdded} · ${gt("Relay online")}`
+              ? `Hanzo Link · ${notAdded} · ${gt("Relay online")}`
               : availability === "offline"
-                ? `Hanzo Connect · ${notAdded} · ${gt("Relay offline")}`
+                ? `Hanzo Link · ${notAdded} · ${gt("Relay offline")}`
                 : availability === "checking"
-                  ? `Hanzo Connect · ${notAdded} · ${gt("Checking relay status…")}`
+                  ? `Hanzo Link · ${notAdded} · ${gt("Checking relay status…")}`
                   : (errorDisplayMessage(Option.getOrNull(error), m) ??
-                    `Hanzo Connect · ${notAdded} · ${gt("Relay status unavailable")}`);
+                    `Hanzo Link · ${notAdded} · ${gt("Relay status unavailable")}`);
     if (selection) {
       return (
         <label

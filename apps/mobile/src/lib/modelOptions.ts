@@ -539,6 +539,7 @@ export function groupByProvider(options: ReadonlyArray<ModelOption>): ReadonlyAr
       existing.subProviders ??= option.providerSubProviders;
     } else {
       groups.set(providerKey, {
+        // oxlint-disable-next-line hanzo/no-untranslated-copy -- product name
         providerLabel: isEnso ? "Enso" : option.providerLabel,
         models: [option],
         updateRequired: option.providerUpdateRequired,

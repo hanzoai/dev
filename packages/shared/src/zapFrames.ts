@@ -5,6 +5,21 @@
 /** The Dev session service's one method: a frame of the environment protocol. */
 export const ZAP_FRAME_METHOD = 0;
 
+/**
+ * The session's other methods are the questions a client asks before it opens the stream. Each is
+ * what the Dev server answers over HTTP, as a call on the session: the request payload is the
+ * route's query as a JSON object, the response body the route's JSON (frame.Method* in go/frame).
+ */
+export const ZAP_DESCRIPTOR_METHOD = 1; // GET /.well-known/hanzo/environment
+export const ZAP_SESSION_METHOD = 2; // GET /v1/auth/session
+export const ZAP_SHELL_METHOD = 3; // GET /v1/event/shell
+
+/**
+ * A call's promise id has this bit set, and a frame's never does, so a response says which it
+ * answers. Responses to frames carry the id of the last frame; responses to calls carry their own.
+ */
+export const ZAP_CALL_ID_BASE = 0x4000_0000;
+
 /** A ZAP message on a stream: u32 little-endian length, then the router envelope. */
 export function lengthPrefixed(envelope: Uint8Array): Uint8Array {
   const out = new Uint8Array(4 + envelope.byteLength);

@@ -11,7 +11,7 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 
 const connectMcpApproval = createConnectMcpApprovalCommand(connectionAtomRuntime);
 
-/** One agent sign-in call to `environmentId`, sent with this account's Hanzo Connect session. */
+/** One agent sign-in call to `environmentId`, sent with this account's Hanzo Link session. */
 export async function runConnectMcpApproval(
   environmentId: EnvironmentId,
   call: ConnectMcpApprovalCall,

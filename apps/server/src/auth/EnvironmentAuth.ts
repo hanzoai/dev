@@ -59,7 +59,7 @@ import { requestUrl } from "../requestUrl.ts";
 
 const DEFAULT_SESSION_SUBJECT = "cli-issued-session";
 export const INTERNAL_ADMINISTRATIVE_BOOTSTRAP_SUBJECT = "administrative-bootstrap";
-/** Sessions and pairing links Hanzo Connect minted for a device signed in to the linked account. */
+/** Sessions and pairing links Hanzo Link minted for a device signed in to the linked account. */
 export const CLOUD_CONNECT_SUBJECT = "cloud-connect";
 
 export interface IssuedPairingLink {
@@ -356,7 +356,7 @@ export class ServerAuthConnectDevicesError extends Schema.TaggedError<ServerAuth
   },
 ) {
   override get message(): string {
-    return "Failed to update Hanzo Connect devices.";
+    return "Failed to update Hanzo Link devices.";
   }
 }
 
@@ -455,13 +455,13 @@ export const serverAuthInvalidRequestReason = (
 ): "invalid_scope" | "scope_not_granted" =>
   error._tag === "ServerAuthInvalidScopeError" ? "invalid_scope" : "scope_not_granted";
 
-/** The credential is fine, but the host has not approved this Hanzo Connect device yet. */
+/** The credential is fine, but the host has not approved this Hanzo Link device yet. */
 export class ServerAuthConnectApprovalPendingError extends Schema.TaggedError<ServerAuthConnectApprovalPendingError>()(
   "ServerAuthConnectApprovalPendingError",
   {},
 ) {
   override get message(): string {
-    return "This Hanzo Connect device is waiting for approval.";
+    return "This Hanzo Link device is waiting for approval.";
   }
 }
 
@@ -543,7 +543,7 @@ export class EnvironmentAuth extends Context.Service<
       ServerAuthInternalError | ManagedLimits.ManagedPolicyRefusedError
     >;
     /**
-     * The one-time credential Hanzo Connect hands a device. With approval required, an untrusted
+     * The one-time credential Hanzo Link hands a device. With approval required, an untrusted
      * device key gets one that waits for approval, and keeps it across retries.
      */
     readonly issueConnectCredential: (input: {
@@ -1002,7 +1002,7 @@ export const make = Effect.gen(function* () {
       readonly requestedScopes?: ReadonlyArray<AuthEnvironmentScope>;
       readonly requiredScopes?: ReadonlyArray<AuthEnvironmentScope>;
       readonly allowedSubject?: string;
-      /** Shown to approvers when the credential waits on Hanzo Connect device approval. */
+      /** Shown to approvers when the credential waits on Hanzo Link device approval. */
       readonly requestMetadata?: AuthClientMetadata;
     },
   ): Effect.Effect<
@@ -1049,7 +1049,7 @@ export const make = Effect.gen(function* () {
     );
   };
 
-  // Hanzo Connect credential issuance, DPoP exchanges and device revocation take turns. Two mints
+  // Hanzo Link credential issuance, DPoP exchanges and device revocation take turns. Two mints
   // at once would open two requests with one code, and a revoke landing between an exchange
   // spending its credential and trusting the key would be undone by that exchange.
   const connectTrustLock = yield* Semaphore.make(1);
@@ -1098,7 +1098,7 @@ export const make = Effect.gen(function* () {
         requestMetadata,
         ...(requestedScopes !== undefined ? { requestedScopes } : {}),
       }).pipe(
-        // Every Hanzo Connect key that gets in is remembered, so turning approval on later
+        // Every Hanzo Link key that gets in is remembered, so turning approval on later
         // keeps the devices already in use and lists them for review.
         Effect.tap((grant) =>
           grant.subject === CLOUD_CONNECT_SUBJECT && input?.proofKeyThumbprint
@@ -1116,7 +1116,7 @@ export const make = Effect.gen(function* () {
             if (grantedScopes.length === 0) {
               return yield* new ServerAuthScopeNotGrantedError({});
             }
-            // Only plain pairing links renew. Hanzo Connect, CLI, desktop and peer sessions keep
+            // Only plain pairing links renew. Hanzo Link, CLI, desktop and peer sessions keep
             // their own lifetimes, so unlinking Connect or rotating a credential still cuts off.
             const renewable =
               input?.proofKeyThumbprint !== undefined &&
@@ -1264,7 +1264,7 @@ export const make = Effect.gen(function* () {
       subject: CLOUD_CONNECT_SUBJECT,
       // Long enough for someone to notice the request and approve it.
       ttl: mustWait ? Duration.minutes(10) : Duration.minutes(2),
-      label: "Hanzo Connect",
+      label: "Hanzo Link",
       proofKeyThumbprint,
       ...(mustWait ? { requiresConnectApproval: true } : {}),
     });
@@ -1446,7 +1446,7 @@ export const make = Effect.gen(function* () {
     const proofKeyThumbprint = yield* sessions
       .proofKeyThumbprintOf(targetSessionId)
       .pipe(Effect.mapError((cause) => new ServerAuthSessionRevocationError({ cause })));
-    // A Hanzo Connect device would otherwise mint itself a new session right away.
+    // A Hanzo Link device would otherwise mint itself a new session right away.
     if (Option.isSome(proofKeyThumbprint)) {
       const currentProofKey = yield* sessions
         .proofKeyThumbprintOf(currentSessionId)

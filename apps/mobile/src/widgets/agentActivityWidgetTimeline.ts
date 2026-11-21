@@ -76,9 +76,9 @@ export function agentActivityWidgetTimeline(
       title: "Hanzo Dev",
       subtitle:
         source.kind === "signed-out"
-          ? resolve(msg("Sign in to {product} to see agents", { product: "Hanzo Connect" }))
+          ? resolve(msg("Sign in to {product} to see agents", { product: "Hanzo Link" }))
           : source.kind === "unavailable"
-            ? resolve(msg("Couldn't reach {product}", { product: "Hanzo Connect" }))
+            ? resolve(msg("Couldn't reach {product}", { product: "Hanzo Link" }))
             : source.kind === "loading"
               ? resolve(msg("Loading agents…"))
               : resolve(msg("No active agents")),

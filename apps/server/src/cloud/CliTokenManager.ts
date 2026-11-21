@@ -26,7 +26,10 @@ import * as HttpRouter from "effect/http/HttpRouter";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 
-import { buildConnectAuthorizeRequestUrl } from "@hanzodev/shared/connectAuth";
+import {
+  buildConnectAuthorizeRequestUrl,
+  buildConnectAuthorizeUrl,
+} from "@hanzodev/shared/connectAuth";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ExternalLauncher from "../process/externalLauncher.ts";
@@ -51,7 +54,7 @@ const boldTerminalText = (value: string): string => `\u001b[1m${value}\u001b[22m
 
 function formatLoopbackAuthorizationPrompt(authorizationUrl: string): string {
   return [
-    "Open this URL to authorize Hanzo Connect:",
+    "Open this URL to authorize Hanzo Link:",
     `  ${authorizationUrl}`,
     "",
     `Press ${boldTerminalText("Enter")} to open it in your browser.`,
@@ -198,7 +201,7 @@ export class CloudCliCredentialRemovalError extends Schema.TaggedError<CloudCliC
   { cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return "Could not remove the stored Hanzo Connect CLI credential.";
+    return "Could not remove the stored Hanzo Link CLI credential.";
   }
 }
 
@@ -216,10 +219,10 @@ export class CloudCliCredentialRefreshError extends Schema.TaggedError<CloudCliC
 
   override get message(): string {
     return this.requiresLogin
-      ? `Could not refresh the Hanzo Connect CLI credential${
+      ? `Could not refresh the Hanzo Link CLI credential${
           this.oauthErrorCode === undefined ? "" : ` (OAuth error: ${this.oauthErrorCode})`
         }. Run \`hanzo connect login\` to authorize again.`
-      : "Could not refresh the Hanzo Connect CLI credential.";
+      : "Could not refresh the Hanzo Link CLI credential.";
   }
 }
 
@@ -230,7 +233,7 @@ export class CloudCliCredentialReadError extends Schema.TaggedError<CloudCliCred
   { cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return "Could not read the stored Hanzo Connect CLI credential.";
+    return "Could not read the stored Hanzo Link CLI credential.";
   }
 }
 
@@ -239,7 +242,7 @@ export class CloudCliAuthorizationError extends Schema.TaggedError<CloudCliAutho
   { cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return "Could not authorize the Hanzo Connect CLI.";
+    return "Could not authorize the Hanzo Link CLI.";
   }
 }
 
@@ -248,7 +251,7 @@ export class CloudCliAuthorizationTimeoutError extends Schema.TaggedError<CloudC
   { cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return "Timed out waiting for Hanzo Connect authorization.";
+    return "Timed out waiting for Hanzo Link authorization.";
   }
 }
 
@@ -257,7 +260,7 @@ export class CloudCliAuthorizationDeniedError extends Schema.TaggedError<CloudCl
   {},
 ) {
   override get message(): string {
-    return "Hanzo Connect authorization was denied in the browser.";
+    return "Hanzo Link authorization was denied in the browser.";
   }
 }
 
@@ -282,6 +285,12 @@ export class CloudCliTokenManager extends Context.Service<
     readonly getExisting: Effect.Effect<Option.Option<PersistedToken>, CloudCliTokenManagerError>;
     readonly hasCredential: Effect.Effect<boolean, CloudCliTokenManagerError>;
     readonly store: (token: PersistedToken) => Effect.Effect<void, CloudCliTokenManagerError>;
+    /** Opens the browser at the discovered authorization endpoint and waits for the loopback redirect. */
+    readonly signInWithBrowser: Effect.Effect<PersistedToken, CloudCliTokenManagerError>;
+    /** RFC 8628: `show` gets the code to display while this waits for the grant. */
+    readonly signInWithDeviceCode: (
+      show: (prompt: DeviceAuthorizationPrompt) => Effect.Effect<void>,
+    ) => Effect.Effect<PersistedToken, CloudCliTokenManagerError>;
     readonly clear: Effect.Effect<void, CloudCliTokenManagerError>;
   }
 >()("hanzo/cloud/CliTokenManager/CloudCliTokenManager") {}
@@ -514,11 +523,12 @@ export const make = Effect.gen(function* () {
       : refreshed;
   });
 
-  const login = Effect.fn("cloud.cli_token.login")(function* () {
-    const metadata = yield* cloudCliOAuthConfig;
-    const hostedAppUrl = yield* hostedAppUrlConfig;
-    const { verifier, challenge, state } = yield* makePkceRequest;
-    const callback = yield* Deferred.make<string>();
+  // Serves the loopback redirect until the scope closes; the code reaches `callback` once.
+  const startCallbackServer = Effect.fn("cloud.cli_token.start_callback_server")(function* (
+    metadata: CloudCliOAuthConfig,
+    state: string,
+    callback: Deferred.Deferred<string>,
+  ) {
     const layerCallbackRoute = HttpRouter.add(
       "GET",
       "/callback",
@@ -527,7 +537,7 @@ export const make = Effect.gen(function* () {
         const url = new URL(request.originalUrl, metadata.redirectUri);
         const code = url.searchParams.get("code");
         if (url.searchParams.get("state") !== state || !code) {
-          return HttpServerResponse.text("Invalid Hanzo Connect authorization callback.", {
+          return HttpServerResponse.text("Invalid Hanzo Link authorization callback.", {
             status: 400,
           });
         }
@@ -548,6 +558,14 @@ export const make = Effect.gen(function* () {
       ),
       Layer.build,
     );
+  });
+
+  const login = Effect.fn("cloud.cli_token.login")(function* () {
+    const metadata = yield* cloudCliOAuthConfig;
+    const hostedAppUrl = yield* hostedAppUrlConfig;
+    const { verifier, challenge, state } = yield* makePkceRequest;
+    const callback = yield* Deferred.make<string>();
+    yield* startCallbackServer(metadata, state, callback);
     // /connect establishes an IAM session first; /oauth/authorize loses parameters across sign-in.
     const authorizationUrl = buildConnectAuthorizeRequestUrl({
       hostedAppUrl,
@@ -578,6 +596,38 @@ export const make = Effect.gen(function* () {
       code_verifier: verifier,
     });
     return { _tag: "Authorized", token } as const;
+  });
+
+  // Browser sign-in for a client with no terminal: loopback PKCE at the discovered authorization endpoint.
+  const signInWithBrowser = Effect.fn("cloud.cli_token.sign_in_with_browser")(function* () {
+    const metadata = yield* cloudCliOAuthConfig;
+    const { verifier, challenge, state } = yield* makePkceRequest;
+    const callback = yield* Deferred.make<string>();
+    yield* startCallbackServer(metadata, state, callback);
+    yield* externalLauncher.launchBrowser(
+      buildConnectAuthorizeUrl({
+        authorizationEndpoint: metadata.authorizationEndpoint,
+        clientId: metadata.clientId,
+        redirectUri: metadata.redirectUri,
+        scopes: metadata.scopes,
+        state,
+        challenge,
+      }),
+    );
+    const code = yield* Deferred.await(callback).pipe(
+      Effect.timeout(CLOUD_CLI_OAUTH_CALLBACK_TIMEOUT),
+      Effect.catchTags({
+        TimeoutError: (cause) => Effect.fail(new CloudCliAuthorizationTimeoutError({ cause })),
+      }),
+    );
+    const { token } = yield* exchangeToken(metadata, {
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: metadata.redirectUri,
+      client_id: metadata.clientId,
+      code_verifier: verifier,
+    });
+    return yield* persist(token);
   });
 
   const getExistingNoLock = Effect.fn("cloud.cli_token.get_existing_no_lock")(function* () {
@@ -644,7 +694,35 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  return CloudCliTokenManager.of({ get, getExisting, hasCredential, store, clear });
+  const signInWithDevice = Effect.fn("cloud.cli_token.sign_in_with_device_code")(function* (
+    show: (prompt: DeviceAuthorizationPrompt) => Effect.Effect<void>,
+  ) {
+    return yield* persist((yield* deviceAuthorizationLogin(show)).token);
+  });
+
+  return CloudCliTokenManager.of({
+    get,
+    getExisting,
+    hasCredential,
+    store,
+    clear,
+    signInWithBrowser: semaphore.withPermits(1)(
+      Effect.scoped(signInWithBrowser()).pipe(
+        Effect.mapError((cause) => new CloudCliAuthorizationError({ cause })),
+        Effect.provide(services),
+      ),
+    ),
+    signInWithDeviceCode: Effect.fn("cloud.cli_token.sign_in_with_device_code_locked")(function* (
+      show: (prompt: DeviceAuthorizationPrompt) => Effect.Effect<void>,
+    ) {
+      return yield* semaphore.withPermits(1)(
+        signInWithDevice(show).pipe(
+          Effect.mapError((cause) => new CloudCliAuthorizationError({ cause })),
+          Effect.provide(services),
+        ),
+      );
+    }),
+  });
 });
 
 export const layer = Layer.effect(CloudCliTokenManager, make);

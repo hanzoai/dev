@@ -39,6 +39,8 @@ export default defineConfig({
       formats: ["es"],
       cssFileName: "index",
     },
-    rollupOptions: { external: ["react", "react-dom", "react/jsx-runtime", "react-dom/client"] },
+    // React stays the host's, all of it: `react/compiler-runtime` and `react/jsx-runtime` too. A bundled
+    // copy of any of them calls `require("react")`, which a host's ES-module bundler cannot answer.
+    rollupOptions: { external: (id: string) => /^react(-dom)?(\/|$)/.test(id) },
   },
 });

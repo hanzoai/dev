@@ -12,7 +12,19 @@ import { spawn } from "node:child_process";
 const [framed, port, upstream, ...flags] = process.argv.slice(2);
 const target = new URL(upstream);
 
+// The three questions a client asks before it opens the stream are the
+// adapter's to answer, as they are a ZAP session's (frame.Method*).
+const calls = { "/.well-known/hanzo/environment": 1, "/v1/auth/session": 2, "/v1/event/shell": 3 };
+
 const server = http.createServer((req, res) => {
+  const method = calls[new URL(req.url, "http://x").pathname];
+  if (method) {
+    const child = spawn(framed, ["-call", String(method), ...flags], { stdio: ["ignore", "pipe", "inherit"] });
+    const chunks = [];
+    child.stdout.on("data", (d) => chunks.push(d));
+    child.on("close", () => res.writeHead(200, { "content-type": "application/json" }).end(Buffer.concat(chunks)));
+    return;
+  }
   const up = http.request({ host: target.hostname, port: target.port, path: req.url, method: req.method, headers: req.headers }, (r) => {
     res.writeHead(r.statusCode, r.headers);
     r.pipe(res);

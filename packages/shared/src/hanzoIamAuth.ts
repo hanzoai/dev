@@ -125,7 +125,7 @@ export const HANZO_SUBSCRIPTION_PLANS: ReadonlyArray<HanzoSubscriptionPlan> = [
     name: "Pro",
     priceLabel: "$15/mo",
     monthlyAllowanceCents: 2_500,
-    summary: "Frontier coding agents, Hanzo Connect tunnels & sandboxes",
+    summary: "Frontier coding agents, Hanzo Link tunnels & sandboxes",
   },
   {
     id: "team",

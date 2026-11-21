@@ -54,6 +54,11 @@ export function createDesktopEnvironmentAtoms<R, E>(
       tag: WS_METHODS.desktopsSetSendNothing,
       onSuccess: refresh,
     }),
+    setShared: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:desktops:set-shared",
+      tag: WS_METHODS.desktopsSetShared,
+      onSuccess: refresh,
+    }),
     addAccount: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:provider-accounts:add",
       tag: WS_METHODS.providerAccountsAdd,

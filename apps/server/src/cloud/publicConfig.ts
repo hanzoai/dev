@@ -130,7 +130,7 @@ export const apiBaseUrlConfig = makePublicValueConfig(
 const NIGHTLY_HOSTED_APP_URL = "https://nightly.hanzo.bot";
 
 /**
- * Where agent sign-ins on the Hanzo Connect address are approved. A nightly build defaults to the
+ * Where agent sign-ins on the Hanzo Link address are approved. A nightly build defaults to the
  * nightly hosted app, which ships the same approval page; hanzo.bot serves stable.
  */
 export const agentApprovalAppUrlConfig = makePublicValueConfig(
@@ -182,6 +182,7 @@ export const loginUrlConfig = makePublicValueConfig(
 ).pipe(Config.mapEffect(validateOriginUrl));
 
 export interface CloudCliOAuthConfig {
+  readonly authorizationEndpoint: string;
   readonly tokenEndpoint: string;
   readonly deviceAuthorizationEndpoint: string | null;
   readonly clientId: string;
@@ -215,6 +216,7 @@ export const makeCloudCliOAuthConfig = Effect.fn("cloud.cli_oauth.config")(funct
   const loginUrl = yield* loginUrlConfig;
   const endpoints = yield* discoverIamEndpoints(loginUrl);
   return {
+    authorizationEndpoint: endpoints.authorizationEndpoint,
     tokenEndpoint: endpoints.tokenEndpoint,
     deviceAuthorizationEndpoint: endpoints.deviceAuthorizationEndpoint,
     clientId: iamClientId,

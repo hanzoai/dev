@@ -11,7 +11,7 @@ import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 
-const HANZO_CONNECT_NAME = "Hanzo Connect";
+const HANZO_CONNECT_NAME = "Hanzo Link";
 
 /**
  * Shown wherever a link goes to an address this app does not already have for a
@@ -61,7 +61,7 @@ function MachineName({ machine }: { readonly machine: LinkableMachine }) {
   );
 }
 
-/** The user's other machines, including those on their Hanzo Connect account, then an address. */
+/** The user's other machines, including those on their Hanzo Link account, then an address. */
 export function LinkMachineSelect({
   machines,
   value,

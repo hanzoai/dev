@@ -39,8 +39,8 @@ export function cloudChangeReplacesLink(
 const TUNNEL_HOSTNAME = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
 
 /**
- * An environment's MCP URL on its Hanzo Connect tunnel, or null. This machine reports its own
- * tunnel hostname; a saved machine's comes from Hanzo Connect, and only a tunnel counts there,
+ * An environment's MCP URL on its Hanzo Link tunnel, or null. This machine reports its own
+ * tunnel hostname; a saved machine's comes from Hanzo Link, and only a tunnel counts there,
  * since a publish-only link registers its local address as `manual`.
  */
 export function hanzoConnectMcpUrl(input: {
@@ -58,7 +58,7 @@ export function hanzoConnectMcpUrl(input: {
     : null;
 }
 
-/** Where Hanzo Connect can be turned on for an environment: from here, only by policy, or on its host. */
+/** Where Hanzo Link can be turned on for an environment: from here, only by policy, or on its host. */
 export type HanzoConnectTurnOn =
   | { readonly kind: "here" }
   | { readonly kind: "policy"; readonly reason: string }

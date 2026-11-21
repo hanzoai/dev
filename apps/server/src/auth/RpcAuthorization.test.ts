@@ -322,7 +322,7 @@ describe("settings mutation authorization", () => {
   );
 
   it.effect(
-    "does not let a settings grant manage providers or turn off Hanzo Connect device approval",
+    "does not let a settings grant manage providers or turn off Hanzo Link device approval",
     () =>
       Effect.gen(function* () {
         let handled = false;

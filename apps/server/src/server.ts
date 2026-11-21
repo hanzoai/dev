@@ -339,7 +339,7 @@ const layerRelayClient = Layer.unwrap(
     const policy = yield* ManagedPolicy.ManagedPolicy;
     const layerCloudflared = RelayClient.layerCloudflared({ baseDir: config.baseDir });
     if (ManagedLimits.allowsConnect(policy)) return layerCloudflared;
-    // The connector only carries Hanzo Connect, so a policy without Connect never installs one.
+    // The connector only carries Hanzo Link, so a policy without Connect never installs one.
     const refused = Effect.fn("RelayClient.installRefusedByPolicy")(function* () {
       return yield* new RelayClient.RelayClientInstallError({
         reason: "managed_by_policy",
@@ -1179,13 +1179,13 @@ const layerMakeServer = Layer.unwrap(
               runManagedTunnelRecovery(config).pipe(
                 Effect.tap((recovered) =>
                   recovered
-                    ? Effect.logInfo("Hanzo Connect managed tunnel recovered")
+                    ? Effect.logInfo("Hanzo Link managed tunnel recovered")
                     : Effect.void,
                 ),
                 Effect.catchCause((cause) =>
                   Cause.hasInterrupts(cause)
                     ? Effect.interrupt
-                    : Effect.logWarning("Failed to recover the Hanzo Connect managed tunnel", {
+                    : Effect.logWarning("Failed to recover the Hanzo Link managed tunnel", {
                         cause,
                       }),
                 ),
@@ -1219,7 +1219,7 @@ const layerMakeServer = Layer.unwrap(
             const wantsCliLink = hasCloudPublicConfig
               ? yield* CloudCliState.readCliDesiredCloudLink.pipe(
                   Effect.catch((cause) =>
-                    Effect.logWarning("Failed to read the desired Hanzo Connect link", {
+                    Effect.logWarning("Failed to read the desired Hanzo Link link", {
                       cause,
                     }).pipe(Effect.as(false)),
                   ),
@@ -1229,7 +1229,7 @@ const layerMakeServer = Layer.unwrap(
             const desiredCliLinkMode = wantsCliLink
               ? yield* CloudCliState.readCliDesiredLinkMode.pipe(
                   Effect.catch((cause) =>
-                    Effect.logWarning("Failed to read the desired Hanzo Connect link mode", {
+                    Effect.logWarning("Failed to read the desired Hanzo Link link mode", {
                       cause,
                     }).pipe(Effect.as("managed" as const)),
                   ),
@@ -1241,7 +1241,7 @@ const layerMakeServer = Layer.unwrap(
                 ? false
                 : yield* cloudLink.startManagedTunnelIfOriginConfirmed(localOrigin).pipe(
                     Effect.catch((cause) =>
-                      Effect.logWarning("Failed to start the confirmed Hanzo Connect tunnel", {
+                      Effect.logWarning("Failed to start the confirmed Hanzo Link tunnel", {
                         cause,
                       }).pipe(Effect.as(false)),
                     ),
@@ -1254,12 +1254,12 @@ const layerMakeServer = Layer.unwrap(
                 Effect.tap((started) =>
                   started
                     ? Effect.logWarning(
-                        "Hanzo Connect started the stored tunnel without relay confirmation",
+                        "Hanzo Link started the stored tunnel without relay confirmation",
                       )
                     : Effect.void,
                 ),
                 Effect.catch((cause) =>
-                  Effect.logWarning("Failed to start the stored Hanzo Connect tunnel", { cause }),
+                  Effect.logWarning("Failed to start the stored Hanzo Link tunnel", { cause }),
                 ),
                 Effect.asVoid,
               );
@@ -1274,13 +1274,13 @@ const layerMakeServer = Layer.unwrap(
             ).pipe(
               Effect.tap((result) =>
                 result.status === "ready"
-                  ? Effect.logInfo("Hanzo Connect managed tunnel recovery registered")
+                  ? Effect.logInfo("Hanzo Link managed tunnel recovery registered")
                   : Effect.void,
               ),
               Effect.catchCause((cause) =>
                 Cause.hasInterrupts(cause)
                   ? Effect.interrupt
-                  : Effect.logWarning("Failed to register Hanzo Connect managed tunnel recovery", {
+                  : Effect.logWarning("Failed to register Hanzo Link managed tunnel recovery", {
                       cause,
                     }).pipe(Effect.as({ status: "unavailable" as const })),
               ),
@@ -1311,17 +1311,17 @@ const layerMakeServer = Layer.unwrap(
                   (reconcile) =>
                     retryDesiredLinkReconcile(reconcile, CloudLink.shouldRetryCloudLink, (cause) =>
                       Effect.logWarning(
-                        "Hanzo Connect relay is still unavailable; retrying the desired link in the background",
+                        "Hanzo Link relay is still unavailable; retrying the desired link in the background",
                         { cause },
                       ),
                     ),
                   Effect.tap((mode) =>
                     mode === null
                       ? Effect.void
-                      : Effect.logInfo("Hanzo Connect desired link reconciled on startup"),
+                      : Effect.logInfo("Hanzo Link desired link reconciled on startup"),
                   ),
                   Effect.catch((cause) =>
-                    Effect.logWarning("Failed to reconcile Hanzo Connect desired link on startup", {
+                    Effect.logWarning("Failed to reconcile Hanzo Link desired link on startup", {
                       cause,
                     }).pipe(Effect.as(null)),
                   ),

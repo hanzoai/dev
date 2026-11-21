@@ -71,7 +71,7 @@ function setup(discoveredEnvironments: Array<Discovery.RelayDiscoveredEnvironmen
 }
 
 describe("CloudEnvironmentConnectRows", () => {
-  it("does not offer a Hanzo Connect route for the desktop's own WSL backend", async () => {
+  it("does not offer a Hanzo Link route for the desktop's own WSL backend", async () => {
     setup([
       discovered(primaryEnvironmentId, "This PC"),
       discovered(wslEnvironmentId, "Ubuntu (WSL)"),

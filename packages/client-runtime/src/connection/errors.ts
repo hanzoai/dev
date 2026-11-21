@@ -232,7 +232,7 @@ export function mapRemoteEnvironmentError(
       ? { detail: `${cause.message} ${NETWORK_BLOCKING_HINT}` }
       : translatableDetail(...text, NETWORK_BLOCKING_HINT);
   };
-  // Over Hanzo Connect the relay already reached the host, so a request that never
+  // Over Hanzo Link the relay already reached the host, so a request that never
   // arrives was blocked between this device and the tunnel.
   const unreachableHop = connectionMethod === "relay" ? "tunnel" : "server";
   const via = connectionMethod === "relay" ? "relay" : "direct";

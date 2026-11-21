@@ -101,7 +101,8 @@ func newRig(t *testing.T, query string) *rig {
 	q, _ := url.ParseQuery(query)
 	r.a, err = New(Config{
 		Core: core, Effects: r.fx, Environment: Environment{ID: "ec08e842-07b8-4297-87c9-3b1f4a91df02", Label: "Hanzo Cloud"}, Query: q,
-		Send: r.recv,
+		SessionExpires: time.Date(2026, 12, 21, 9, 0, 0, 0, time.UTC),
+		Send:           r.recv,
 		Now: func() time.Time {
 			r.mu.Lock()
 			defer r.mu.Unlock()
@@ -327,6 +328,26 @@ func TestChat(t *testing.T) {
 	}
 
 	compare(t, r.log)
+	// The three calls a client makes before it opens the stream.
+	for _, m := range []struct {
+		method int
+		name   string
+	}{{MethodDescriptor, "descriptor"}, {MethodSession, "session"}, {MethodShell, "shell"}} {
+		b, err := r.a.Call(m.method, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, _ := parse(b)
+		r.log = append(r.log, logged{m.name, "call", v.(*O)})
+		compareCall(t, m.name, v.(*O))
+	}
+	if b, seq, err := r.a.Snapshot(); err != nil || seq != int64(r.a.st.Seq) || len(b) == 0 {
+		t.Fatalf("snapshot: %v %d", err, seq)
+	}
+	if _, err := r.a.Call(99, nil); !errors.Is(err, ErrMethod) {
+		t.Fatalf("an unknown method answered %v", err)
+	}
+
 	// The read side of an empty workspace answers as the Dev server does.
 	for m, payload := range map[string]*O{
 		"vcs.listRefs":      obj("cwd", scratch, "limit", 100),

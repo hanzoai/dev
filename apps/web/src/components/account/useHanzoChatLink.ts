@@ -33,7 +33,7 @@ function reportFailure(title: string, cause: unknown) {
   });
 }
 
-/** Starts and removes the Hanzo Chat link that raises the Hanzo Connect tunnel cap. */
+/** Starts and removes the Hanzo Chat link that raises the Hanzo Link tunnel cap. */
 export function useHanzoChatLink() {
   const linkState = useManagedRelayHanzoChatLink();
   const createLinkRequest = useAtomCommand(createManagedRelayHanzoChatLinkRequestCommand, {

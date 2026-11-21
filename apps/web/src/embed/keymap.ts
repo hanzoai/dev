@@ -1,8 +1,7 @@
-// THE one keymap, for Dev and for any host that draws it. The table is Dev's
-// (`@hanzodev/shared/keybindings` DEFAULT_KEYBINDINGS, with `when` clauses), extended with
-// the host's window commands (sections, focus jumps); the resolver is Dev's; a person's
-// rebindings are one list, kept in this browser. A host resolves its window-level keys here
-// and lets Dev's own scopes keep the commands that act inside a thread.
+// The one keymap for Dev and any host that draws it: Dev's DEFAULT_KEYBINDINGS (with `when`
+// clauses) plus the host's window commands, resolved by Dev's resolver. A person's rebindings
+// are one list kept in this browser; a host resolves window-level keys here and leaves
+// in-thread commands to Dev's own scopes.
 import type { KeybindingCommand, KeybindingRule } from "@hanzodev/contracts";
 import {
   compileResolvedKeybindingsConfig,
@@ -62,7 +61,9 @@ export interface KeymapRow {
   readonly label: string;
 }
 
-/** What the shortcuts overlay lists: every command a person reaches by key, grouped. */
+/** What the shortcuts overlay lists: every command a person reaches by key, grouped. Labels are
+ *  English: a host translates them in its own catalog. */
+/* oxlint-disable hanzo/no-untranslated-copy -- host-facing labels, translated by the host */
 export const KEYMAP_ROWS: ReadonlyArray<KeymapRow> = [
   { group: "Go", command: "commandPalette.toggle", label: "Command palette" },
   { group: "Go", command: "chat.new", label: "New chat or thread" },
@@ -93,3 +94,4 @@ export const KEYMAP_ROWS: ReadonlyArray<KeymapRow> = [
   { group: "Panels", command: "diff.toggle", label: "Diff" },
   { group: "Panels", command: "filePicker.toggle", label: "Open file" },
 ];
+/* oxlint-enable hanzo/no-untranslated-copy */

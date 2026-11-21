@@ -242,7 +242,7 @@ export function ConnectionEnvironmentRow(props: {
           {props.environment.isRelayManaged ? (
             <Text className="text-sm text-foreground-muted">
               {gt("Managed by {product}. Tunnel details update automatically.", {
-                product: "Hanzo Connect",
+                product: "Hanzo Link",
               })}
             </Text>
           ) : (

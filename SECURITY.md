@@ -7,7 +7,7 @@ The rest of this file is for agents and maintainers auditing Hanzo Dev or triagi
 a report. It says who is trusted with what, which boundaries a real finding
 crosses, and what is intended. The reasoning behind each boundary lives in
 [environment auth](docs/internals/environment-auth.md),
-[Hanzo Connect](docs/internals/hanzo-connect.md), and
+[Hanzo Link](docs/internals/hanzo-connect.md), and
 [remote environments](docs/internals/remote.md). Read those before you report a
 finding in their area.
 
@@ -27,14 +27,14 @@ once it has one.
 | Principal                                                                                              | How it gets in                              | What it may do                                                                                                                                                                             |
 | ------------------------------------------------------------------------------------------------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Anyone who reaches the port                                                                            | Network                                     | Read the environment descriptor, pair with a valid one-time credential, run OAuth flows. Nothing else.                                                                                     |
-| Full-scope client (desktop, paired browser or phone, `hanzo auth session issue`, Hanzo Connect device) | Pairing, token exchange, Connect mint       | Everything the server's OS user can do. This is the default grant.                                                                                                                         |
+| Full-scope client (desktop, paired browser or phone, `hanzo auth session issue`, Hanzo Link device) | Pairing, token exchange, Link mint          | Everything the server's OS user can do. This is the default grant.                                                                                                                         |
 | Narrow client                                                                                          | Pairing link with explicit scopes           | Only the RPCs and routes its scopes allow. Can never widen its own grant.                                                                                                                  |
 | MCP client (outside agent, subject `mcp-client`)                                                       | OAuth on `/mcp`                             | Only `/mcp`, within a read-only grant or a runtime-mode ceiling. Every other route rejects it.                                                                                             |
 | Linked environment (peer link)                                                                         | OAuth client `hanzodev-peer-link`           | Work it starts carries an immutable `linkOrigin` and never exceeds the access it was paired with.                                                                                          |
 | Agent run by Hanzo                                                                                     | Thread's runtime mode and thread credential | Within its runtime mode, managed policy, and the MCP access declared per tool.                                                                                                             |
 | Guest link                                                                                             | HMAC token for one share                    | Read one thread and propose messages. Never a session; no RPC, WebSocket, or MCP path accepts it.                                                                                          |
 | Signed asset URL                                                                                       | Minted with `filesystem:read`               | One file, by device and inode identity, until it expires.                                                                                                                                  |
-| Hanzo Connect relay                                                                                    | Environment link                            | Trusted broker for mint requests. It never sees environment session tokens. With `requireConnectDeviceApproval` on, a new device key also needs approval from someone with `access:write`. |
+| Hanzo Link relay                                                                                    | Environment link                            | Trusted broker for mint requests. It never sees environment session tokens. With `requireConnectDeviceApproval` on, a new device key also needs approval from someone with `access:write`. |
 | Managed policy                                                                                         | Admin-deployed file, read at startup        | Ceilings and locks the server enforces for every client.                                                                                                                                   |
 | Preview pages, HTML renders, file previews, agent output                                               | Rendered by clients                         | Untrusted content. It must never run script in the app's origin or reach Electron IPC or Node.                                                                                             |
 
@@ -98,7 +98,7 @@ once it has one.
 - Guest links: [`guest/GuestShareService.ts`](apps/server/src/guest/GuestShareService.ts)
 - Files and assets: [`workspace/WorkspaceFileSystem.ts`](apps/server/src/workspace/WorkspaceFileSystem.ts), [`assets/AssetAccess.ts`](apps/server/src/assets/AssetAccess.ts)
 - Managed policy: [`apps/server/src/policy`](apps/server/src/policy)
-- Hanzo Connect: [`cloud/CloudLink.ts`](apps/server/src/cloud/CloudLink.ts), [`EnvironmentConnector.ts`](infra/relay/src/environments/EnvironmentConnector.ts)
+- Hanzo Link: [`cloud/CloudLink.ts`](apps/server/src/cloud/CloudLink.ts), [`EnvironmentConnector.ts`](infra/relay/src/environments/EnvironmentConnector.ts)
 - Desktop preview isolation: [`preview/WebviewPreferences.ts`](apps/desktop/src/preview/WebviewPreferences.ts)
 
 ## How to audit and triage

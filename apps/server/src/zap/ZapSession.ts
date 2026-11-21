@@ -1,9 +1,18 @@
-import { lengthPrefixed, splitMessages, ZAP_FRAME_METHOD } from "@hanzodev/shared/zapFrames";
+import {
+  lengthPrefixed,
+  splitMessages,
+  ZAP_DESCRIPTOR_METHOD,
+  ZAP_FRAME_METHOD,
+  ZAP_SESSION_METHOD,
+  ZAP_SHELL_METHOD,
+} from "@hanzodev/shared/zapFrames";
 import { buildResponse, parseRequest, Status } from "@zap-proto/zap";
 import * as Clock from "effect/Clock";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Queue from "effect/Queue";
+import * as Schema from "effect/Schema";
 import * as Socket from "effect/socket/Socket";
 import * as DateTime from "effect/DateTime";
 
@@ -48,65 +57,123 @@ const messageReader = (stream: ZapStream) => {
       if (split.rest.byteLength > ZAP_MAX_MESSAGE_BYTES + 4)
         throw new Error("ZAP message too large");
       rest = split.rest;
-      ready.push(...split.messages);
+      ready.push(...split.messages.map((message) => message.slice()));
     }
     return ready.shift()!;
   };
 };
 
-/** A frame request: the method must be the Dev frame method, its payload is the frame. */
-const frameOf = (message: Uint8Array) => {
-  const call = parseRequest(message);
-  if (call.method !== ZAP_FRAME_METHOD) throw new Error("unknown ZAP method");
-  return call;
-};
+/** The shell snapshot could not be built; the caller is told the call failed. */
+export class ZapShellError extends Schema.TaggedError<ZapShellError>()("ZapShellError", {
+  cause: Schema.Defect(),
+}) {}
 
 /**
- * Serves one ZAP stream. The first envelope's cap is the IAM bearer; it is verified before any
- * frame reaches the environment protocol. `serve` runs the protocol over the socket this returns
- * to it, and the session ends when the stream ends, the token expires, or `serve` finishes.
+ * What a session answers besides frames: the three questions a client asks before it opens the
+ * stream, as the environment's HTTP routes answer them (`/.well-known/hanzo/environment`,
+ * `/v1/auth/session`, `/v1/event/shell`). Each is the route's JSON body.
+ */
+export interface ZapCalls {
+  /** Public: answered before the stream holds a credential. */
+  readonly descriptor: Effect.Effect<unknown>;
+  readonly session: (session: AuthenticatedSession) => Effect.Effect<unknown>;
+  /** `query` is the route's query as a JSON object. */
+  readonly shell: (
+    session: AuthenticatedSession,
+    query: Record<string, unknown>,
+  ) => Effect.Effect<unknown, ZapShellError>;
+}
+
+/**
+ * Serves one ZAP stream. The bearer is the `cap` of an envelope, any envelope: it is verified
+ * as an IAM bearer, and until it has been, only the descriptor is answered. `serve` runs the
+ * protocol over the socket this returns to it, and the session ends when the stream ends, the
+ * token expires, or `serve` finishes.
  */
 export const serveZapStream = Effect.fn("ZapSession.serve")(function* <E, R>(
   stream: ZapStream,
+  calls: ZapCalls,
   serve: (session: AuthenticatedSession, socket: Socket.Socket) => Effect.Effect<void, E, R>,
 ) {
   const auth = yield* ZapAuth;
   const next = messageReader(stream);
-  const refuse = (status: number) =>
-    Effect.promise(() => stream.write(lengthPrefixed(buildResponse(status, 0, new Uint8Array(0)))));
+  const reply = (status: number, id: number, body: Uint8Array) =>
+    Effect.promise(() => stream.write(lengthPrefixed(buildResponse(status, id, body))));
+  const refuse = (status: number, id = 0) => reply(status, id, new Uint8Array(0));
 
-  const first = yield* Effect.tryPromise({ try: next, catch: readError }).pipe(
-    Effect.timeout(ZAP_AUTH_TIMEOUT),
-    Effect.map((message) => (message === null ? null : frameOf(message))),
-    Effect.orElseSucceed(() => null),
-  );
-  if (first === null || first.cap.byteLength === 0) return yield* refuse(Status.Unauthorized);
-  const session = yield* auth.authenticate(decoder.decode(first.cap)).pipe(Effect.option);
-  if (session._tag === "None") return yield* refuse(Status.Unauthorized);
-
-  const run = Effect.runPromiseWith(yield* Effect.context<never>());
   const frames = yield* Queue.bounded<string, Socket.SocketError>(64);
-  yield* Queue.offer(frames, decoder.decode(first.payload));
-  let promiseID = first.promiseID;
-  yield* Effect.tryPromise({
-    try: async () => {
-      for (;;) {
-        const message = await next();
-        if (message === null) return;
-        const call = frameOf(message);
-        promiseID = call.promiseID;
-        // A full queue stalls this loop, which stalls the stream's flow control.
-        await run(Queue.offer(frames, decoder.decode(call.payload)));
+  const authenticated = yield* Deferred.make<AuthenticatedSession | null>();
+  let session: AuthenticatedSession | null = null;
+  // Responses to frames name the last frame; responses to calls name their own call.
+  let promiseID = 0;
+
+  const answer = Effect.fn("ZapSession.answer")(function* (
+    call: ReturnType<typeof parseRequest>,
+    caller: AuthenticatedSession | null,
+  ) {
+    const json = (value: unknown) =>
+      reply(Status.OK, call.promiseID, encoder.encode(JSON.stringify(value)));
+    if (call.method === ZAP_DESCRIPTOR_METHOD)
+      return yield* calls.descriptor.pipe(Effect.flatMap(json));
+    if (caller === null) return yield* refuse(Status.Unauthorized, call.promiseID);
+    if (call.method === ZAP_SESSION_METHOD)
+      return yield* calls.session(caller).pipe(Effect.flatMap(json));
+    if (call.method === ZAP_SHELL_METHOD) {
+      const query = JSON.parse(decoder.decode(call.payload) || "{}") as Record<string, unknown>;
+      return yield* calls.shell(caller, query).pipe(
+        Effect.flatMap(json),
+        Effect.catch(() => refuse(Status.Internal, call.promiseID)),
+      );
+    }
+    return yield* refuse(Status.NotFound, call.promiseID);
+  });
+
+  // One envelope: authenticates the stream when it carries a bearer, then is a frame or a call.
+  const dispatch = Effect.fn("ZapSession.dispatch")(function* (message: Uint8Array) {
+    const call = parseRequest(message);
+    if (call.method === ZAP_FRAME_METHOD) promiseID = call.promiseID;
+    if (session === null && call.cap.byteLength > 0) {
+      const verified = yield* auth.authenticate(decoder.decode(call.cap)).pipe(Effect.option);
+      if (verified._tag === "None") {
+        yield* refuse(Status.Unauthorized, call.promiseID);
+        return yield* Effect.fail(closed());
       }
-    },
-    catch: readError,
+      session = verified.value;
+      yield* Deferred.succeed(authenticated, session);
+    }
+    if (call.method !== ZAP_FRAME_METHOD) return yield* answer(call, session);
+    if (session === null) {
+      yield* refuse(Status.Unauthorized, call.promiseID);
+      return yield* Effect.fail(closed());
+    }
+    // A full queue stalls the reader, which stalls the stream's flow control.
+    yield* Queue.offer(frames, decoder.decode(call.payload));
+  });
+
+  yield* Effect.gen(function* () {
+    for (;;) {
+      const message = yield* Effect.tryPromise({ try: next, catch: readError });
+      if (message === null) return;
+      yield* dispatch(message);
+    }
   }).pipe(
     Effect.matchCauseEffect({
       onSuccess: () => Queue.fail(frames, closed()),
       onFailure: (cause) => Queue.failCause(frames, cause),
     }),
+    Effect.ensuring(Deferred.succeed(authenticated, null)),
     Effect.forkScoped,
   );
+
+  // The bearer has this long to arrive, on whichever envelope carries it.
+  const verified = yield* Deferred.await(authenticated).pipe(
+    Effect.timeout(ZAP_AUTH_TIMEOUT),
+    Effect.orElseSucceed(() => null),
+  );
+  if (verified === null) {
+    yield* Effect.sync(() => stream.close());
+    return;
+  }
 
   const send = (chunk: string | Uint8Array) =>
     Effect.tryPromise({
@@ -137,12 +204,12 @@ export const serveZapStream = Effect.fn("ZapSession.serve")(function* <E, R>(
   });
 
   const now = yield* Clock.currentTimeMillis;
-  const expiresAt = session.value.expiresAt;
+  const expiresAt = verified.expiresAt;
   const expiry =
     expiresAt === undefined
       ? Effect.never
       : Effect.sleep(Duration.millis(Math.max(0, DateTime.toEpochMillis(expiresAt) - now)));
-  yield* Effect.raceFirst(serve(session.value, socket), expiry).pipe(
+  yield* Effect.raceFirst(serve(verified, socket), expiry).pipe(
     Effect.ensuring(Effect.sync(() => stream.close())),
   );
 });

@@ -19,7 +19,7 @@ import {
   createApprovalPromptQueue,
 } from "./connectDeviceApproval";
 
-/** Asks to approve Hanzo Connect devices waiting on hosts that require it and this phone manages. */
+/** Asks to approve Hanzo Link devices waiting on hosts that require it and this phone manages. */
 export function ConnectDeviceApprovalCoordinator() {
   const { environments } = useEnvironments();
   const requiring = environments.filter(

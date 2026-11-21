@@ -12,12 +12,12 @@ Open the command palette (`Cmd/Ctrl+K`) and choose **Use Hanzo Dev in another
 app (MCP)**, or use the button in **Settings → Sharing & access**. Pick the
 app and follow the step for that app. Assistants like
 Poke and Claude run in the cloud, so the wizard first asks you to sign in to Hanzo
-Connect and turn it on for the environment. To reach your other machines through
+Link and turn it on for the environment. To reach your other machines through
 the same connection, turn on **Linked environments** in Labs and
 [link them](./remote-access.md#link-another-environment).
 
 When the app opens the sign-in page, choose what it may do and approve with your
-Hanzo Connect account. On an older environment, the wizard asks for the level and
+Hanzo Link account. On an older environment, the wizard asks for the level and
 gives you a code to paste instead. A code works once, for 5 minutes, and
 approves only that level.
 
@@ -35,26 +35,26 @@ example:
 https://<environment-address>/mcp
 ```
 
-When Hanzo Connect serves the environment, the copied URL is its Hanzo Connect
+When Hanzo Link serves the environment, the copied URL is its Hanzo Link
 address, which agents can reach from anywhere. Otherwise it uses the route this
 device is connected over, so an agent on the same device can reach it.
 
 - **An agent on your own computers** can use `localhost` on the host, Hanzo
-  Connect, or any `https` address, such as
+  Link, or any `https` address, such as
   [Tailscale HTTPS](./remote-access.md#tailscale-https). Signing in sends the
   agent's credentials to the environment, and agents only do that over `https`
   or to `localhost`. A plain-`http` LAN or Tailscale address, like
   `http://100.x.y.z:3773`, lets an agent find the environment but not finish
   signing in.
 - **A hosted agent**, such as ChatGPT or a bot running in the cloud, must reach
-  the environment from the internet. Use the Hanzo Connect address. A Tailscale
+  the environment from the internet. Use the Hanzo Link address. A Tailscale
   address only works from your own tailnet.
 
 ## Approve a sign-in
 
 The first time an agent connects, it opens a sign-in page. When the agent
-reaches the environment through Hanzo Connect, the page opens on the Hanzo Dev web
-app: sign in with the Hanzo Connect account the environment is linked to and
+reaches the environment through Hanzo Link, the page opens on the Hanzo Dev web
+app: sign in with the Hanzo Link account the environment is linked to and
 approve there, without a code. Otherwise the page opens on the environment.
 Either page names the agent and where its access goes:
 
@@ -124,7 +124,7 @@ Add the environment as a custom MCP app in ChatGPT's apps settings:
 
 1. Create a new app or plugin with a custom MCP server.
 2. Set the server URL to `https://<environment-address>/mcp`, using the Hanzo
-   Connect address.
+   Link address.
 3. Choose **OAuth** for authentication. ChatGPT discovers the rest; you do not
    need a client ID or secret.
 4. Create the app, then approve the sign-in page that opens.

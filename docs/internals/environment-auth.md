@@ -2,7 +2,7 @@
 
 The environment issues its own sessions and enforces their capabilities. Cloud
 identity and relay credentials belong to a separate trust boundary, described in
-[Hanzo Connect](./hanzo-connect.md). A relay token is never an environment login.
+[Hanzo Link](./hanzo-connect.md). A relay token is never an environment login.
 
 ## Authority survives transport changes
 
@@ -33,8 +33,8 @@ proof from the same key moves the session's expiry 30 days out and returns a
 fresh token for the same session. The session itself must still be unexpired
 and unrevoked, so a device idle past the window pairs again. Renewal stays in place rather than issuing a
 successor, so live sockets keep their session, Sharing & access shows one row
-per device for its whole renewal window, and one revoke ends it. Hanzo Connect,
-CLI, desktop and peer sessions never renew, so unlinking Connect or rotating
+per device for its whole renewal window, and one revoke ends it. Hanzo Link,
+CLI, desktop and peer sessions never renew, so unlinking Hanzo Link or rotating
 their credential still cuts a device off.
 
 ### Guest links are not sessions
@@ -46,7 +46,7 @@ so nothing secret is stored. The share in the thread projection is the only
 state: replacing, closing, or archiving it revokes every token, and the
 orchestrator's serial commands make redeeming and sending happen once. Guest
 tokens never enter `SessionStore`, so no RPC, WebSocket, or MCP path can accept
-one. Guest routes also require Hanzo Connect to still serve the link's hostname;
+one. Guest routes also require Hanzo Link to still serve the link's hostname;
 the request's Host header is not checked, because a LAN client can forge it.
 
 ### MCP clients are a separate audience
@@ -60,7 +60,7 @@ approval page names the host access goes to and approving stays the owner's
 call. Every client is public and proves itself with PKCE; a client that asks
 for a secret is registered without one. Client registration is stateless, so an unauthenticated caller cannot grow server
 state. Approval spends a one-time pairing code, or uses a browser session with
-`access:write`; proof-bound Hanzo Connect codes are refused without being spent.
+`access:write`; proof-bound Hanzo Link codes are refused without being spent.
 
 The user grants either read-only access or a runtime-mode ceiling, not a
 scope list: MCP tools are all orchestration, and `orchestration:operate`
@@ -83,7 +83,7 @@ outside agent that needs a secret starts a thread and lets that agent ask.
 
 Issuer and resource URLs come from the request's Host and
 `X-Forwarded-Proto`, so one server answers over loopback, Tailscale Serve and a
-Hanzo Connect tunnel. A proxy that rewrites Host or drops the protocol header
+Hanzo Link tunnel. A proxy that rewrites Host or drops the protocol header
 breaks sign-in.
 
 Bearer and DPoP clients obtain short-lived WebSocket tickets through authenticated

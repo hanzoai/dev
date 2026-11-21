@@ -204,6 +204,7 @@ describe("command permissions", () => {
     { method: WS_METHODS.desktopsRename, scope: AuthRelayWriteScope },
     { method: WS_METHODS.desktopsRevoke, scope: AuthRelayWriteScope },
     { method: WS_METHODS.desktopsSetSendNothing, scope: AuthRelayWriteScope },
+    { method: WS_METHODS.desktopsSetShared, scope: AuthRelayConfigureScope },
     { method: WS_METHODS.providerAccountsAdd, scope: AuthRelayConfigureScope },
     { method: WS_METHODS.providerAccountsRemove, scope: AuthRelayConfigureScope },
   ])("requires the destination relay grant for $method", ({ method, scope }) =>

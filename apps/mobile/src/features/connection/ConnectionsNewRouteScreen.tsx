@@ -399,7 +399,7 @@ function HanzoConnectSection() {
         />
       ) : (
         <ListRow
-          label={gt("Sign in to {product}", { product: "Hanzo Connect" })}
+          label={gt("Sign in to {product}", { product: "Hanzo Link" })}
           description={gt("Reach your machines from anywhere, no network setup.")}
           disabled={!isLoaded}
           onPress={() => navigation.navigate("SettingsAuth")}

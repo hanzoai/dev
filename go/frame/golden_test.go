@@ -167,3 +167,31 @@ func compare(t *testing.T, got []logged) {
 	}
 	fmt.Fprintf(os.Stderr, "golden: %d frame kinds compared\n", checked)
 }
+
+// compareCall holds a body the session's calls answer to the one the Dev server
+// answers over HTTP.
+func compareCall(t *testing.T, name string, got *O) {
+	t.Helper()
+	b, err := os.ReadFile("testdata/http.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := parse(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{}
+	paths("", v.(*O).Obj(name), want)
+	have := map[string]bool{}
+	paths("", got, have)
+	for p := range have {
+		if !want[p] {
+			t.Errorf("%s: %s is not in the recording", name, p)
+		}
+	}
+	for p := range want {
+		if !have[p] && !strings.Contains(p, "[]") {
+			t.Errorf("%s: %s is missing", name, p)
+		}
+	}
+}

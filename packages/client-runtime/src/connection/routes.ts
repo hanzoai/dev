@@ -188,7 +188,7 @@ function routeAddressKey(route: ConnectionRoute): string | null {
   }
 }
 
-const HANZO_CONNECT_NAME = "Hanzo Connect";
+const HANZO_CONNECT_NAME = "Hanzo Link";
 
 /** The route's label in English. Display sites use `connectionRouteLabelText`. */
 export function connectionRouteLabel(route: ConnectionRoute): string {
@@ -452,7 +452,7 @@ export function isLearned(route: ConnectionRoute): boolean {
 
 /**
  * A learned route borrows the credential of the route it was learned over, so
- * it cannot outlive that route: removing Hanzo Connect also removes routes learned
+ * it cannot outlive that route: removing Hanzo Link also removes routes learned
  * through it, and removing a paired address removes routes that borrow its
  * token.
  */
