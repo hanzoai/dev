@@ -32,6 +32,7 @@ import * as RpcClientError from "effect/rpc/RpcClientError";
 import * as RpcSerialization from "effect/rpc/RpcSerialization";
 import * as Socket from "effect/socket/Socket";
 
+import { layerZapSocket } from "./zapSocket.ts";
 import { makeWsRpcProtocolClient, PING_TIMEOUT, type WsRpcProtocolClient } from "./protocol.ts";
 import { NETWORK_BLOCKING_HINT, UNRESPONSIVE_HOST_HINT } from "../errors/network.ts";
 import type {
@@ -52,6 +53,12 @@ import { environmentMismatchError } from "../connection/errors.ts";
 import { recordServerClock } from "../clock.ts";
 
 const SOCKET_OPEN_TIMEOUT = "15 seconds";
+
+function withFrameParts(socketUrl: string): string {
+  const url = new URL(socketUrl);
+  url.searchParams.set(SOCKET_FRAME_PARTS_QUERY_PARAM, "1");
+  return url.toString();
+}
 
 export interface RpcSession {
   readonly client: WsRpcProtocolClient;
@@ -248,19 +255,28 @@ export const make = Effect.fn("RpcSessionFactory.make")(function* (
       });
       return socket;
     };
-    const socketUrl = new URL(connection.socketUrl);
-    socketUrl.searchParams.set(SOCKET_FRAME_PARTS_QUERY_PARAM, "1");
-    const layerSocket = Layer.effect(
-      Socket.Socket,
-      Effect.map(Effect.service(Socket.Socket), joinSocketFrameParts),
-    ).pipe(
-      Layer.provide(
-        Socket.layerWebSocket(socketUrl.toString(), {
+    // `zaps:` is ZAP over WebTransport (HTTP/3), the one carrier that is not a WebSocket;
+    // anything else is the environment's own WebSocket protocol, until its server speaks ZAP.
+    const zap = new URL(connection.socketUrl).protocol === "zaps:";
+    const layerSocket = zap
+      ? layerZapSocket(connection.socketUrl.replace(/^zaps:/, "https:"), {
           openTimeout: SOCKET_OPEN_TIMEOUT,
-        }),
-      ),
-      Layer.provide(Layer.succeed(Socket.WebSocketConstructor, countingWebSocketConstructor)),
-    );
+          bearer:
+            connection.httpAuthorization?._tag === "Bearer"
+              ? connection.httpAuthorization.token
+              : (connection.httpAuthorization?.accessToken ?? null),
+        })
+      : Layer.effect(
+          Socket.Socket,
+          Effect.map(Effect.service(Socket.Socket), joinSocketFrameParts),
+        ).pipe(
+          Layer.provide(
+            Socket.layerWebSocket(withFrameParts(connection.socketUrl), {
+              openTimeout: SOCKET_OPEN_TIMEOUT,
+            }),
+          ),
+          Layer.provide(Layer.succeed(Socket.WebSocketConstructor, countingWebSocketConstructor)),
+        );
     const layerProtocol = Layer.effect(
       RpcClient.Protocol,
       RpcClient.makeProtocolSocket({

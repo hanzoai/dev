@@ -32,7 +32,7 @@ function Pair({ runtime, children }: { runtime: DevRuntime; children: ReactNode 
     if (paired.has(runtime.id)) return;
     let live = true;
     void (async () => {
-      const result = await pair({ host: runtime.host, pairingCode: await runtime.token() });
+      const result = await pair({ host: runtime.zap.replace(/^https:/, "zaps:"), pairingCode: await runtime.token() });
       if (!live) return;
       if (result._tag === "Success") {
         paired.add(runtime.id);

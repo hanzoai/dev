@@ -286,6 +286,9 @@ export const resolveRemoteWebSocketConnectionUrl = Effect.fn(
   readonly connectionMethod?: ClientConnectionMethod;
   readonly timeoutMs?: number;
 }) {
+  // A ZAP session carries the bearer itself, as the cap of its first envelope, so there is
+  // no ticket to issue and no query to put it in.
+  if (input.wsBaseUrl.startsWith("zaps:")) return input.wsBaseUrl;
   const issued = yield* issueRemoteWebSocketTicket({
     httpBaseUrl: input.httpBaseUrl,
     bearerToken: input.bearerToken,

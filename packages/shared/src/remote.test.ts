@@ -159,4 +159,17 @@ describe("remote", () => {
       readPairingAppLink(`https://pair?pairingUrl=${encodeURIComponent(pairingUrl)}`),
     ).toBeNull();
   });
+
+  it("keeps a ZAP endpoint's path as the socket address and reaches HTTP on its origin", () => {
+    expect(
+      resolveRemotePairingTarget({
+        host: "zaps://api.hanzo.ai/v1/dev/zap/abc",
+        pairingCode: "iam-token",
+      }),
+    ).toEqual({
+      credential: "iam-token",
+      httpBaseUrl: "https://api.hanzo.ai/",
+      wsBaseUrl: "zaps://api.hanzo.ai/v1/dev/zap/abc",
+    });
+  });
 });

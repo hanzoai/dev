@@ -7,7 +7,7 @@ const HOSTED_PAIRING_HOST_PARAM = "host";
 const HOSTED_PAIRING_LABEL_PARAM = "label";
 const PAIRING_APP_LINK_PARAM = "pairingUrl";
 const APP_LINK_PROTOCOL = /^(?:hanzodev|hanzo)(?:-[a-z]+)?:$/;
-const SUPPORTED_REMOTE_BACKEND_PROTOCOLS = new Set(["http:", "https:", "ws:", "wss:"]);
+const SUPPORTED_REMOTE_BACKEND_PROTOCOLS = new Set(["http:", "https:", "ws:", "wss:", "zaps:"]);
 
 export const readHashParams = (url: URL): URLSearchParams =>
   new URLSearchParams(url.hash.startsWith("#") ? url.hash.slice(1) : url.hash);
@@ -101,14 +101,16 @@ const normalizeRemoteBaseUrl = (
       protocol: url.protocol,
     });
   }
-  url.pathname = "/";
+  // A ZAP endpoint's path is the runtime's address, used as given.
+  if (url.protocol !== "zaps:") url.pathname = "/";
   url.search = "";
   url.hash = "";
   return url;
 };
 
 const toHttpBaseUrl = (url: URL): string => {
-  const next = new URL(url.toString());
+  // `zaps:` is not a special scheme, so only a rebuilt URL can become https.
+  const next = new URL(url.toString().replace(/^zaps:/, "https:"));
   if (next.protocol === "ws:") {
     next.protocol = "http:";
   } else if (next.protocol === "wss:") {
@@ -122,6 +124,8 @@ const toHttpBaseUrl = (url: URL): string => {
 
 const toWsBaseUrl = (url: URL): string => {
   const next = new URL(url.toString());
+  // A ZAP endpoint's path names the runtime's session; it is the address, not a base.
+  if (next.protocol === "zaps:") return next.toString();
   if (next.protocol === "http:") {
     next.protocol = "ws:";
   } else if (next.protocol === "https:") {

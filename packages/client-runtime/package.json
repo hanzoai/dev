@@ -649,6 +649,7 @@
     "@hanzodev/source-control-core": "workspace:*",
     "@hanzodev/source-control-definitions": "workspace:*",
     "@pierre/diffs": "catalog:",
+    "@zap-proto/zap": "1.6.0",
     "effect": "catalog:",
     "gt-i18n": "1.0.40",
     "jszip": "3.10.1",

@@ -4,7 +4,7 @@ export interface DevRuntime {
   readonly kind: "machine" | "cell";
   readonly id: string;
   readonly label: string;
-  readonly host: string;
+  readonly zap: string;
   readonly token: () => Promise<string>;
   readonly sandbox?: string;
 }
