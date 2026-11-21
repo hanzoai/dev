@@ -181,6 +181,7 @@ import * as EnvironmentAuthPolicy from "./auth/EnvironmentAuthPolicy.ts";
 import * as CloudHttp from "./cloud/http.ts";
 import * as GuestHttp from "./guest/http.ts";
 import * as CloudLink from "./cloud/CloudLink.ts";
+import * as BrowserSources from "./browser/BrowserSources.ts";
 import * as DesktopLink from "./cloud/DesktopLink.ts";
 import * as ProviderAccounts from "./cloud/ProviderAccounts.ts";
 import * as SourceUsageSummary from "./cloud/SourceUsageSummary.ts";
@@ -705,6 +706,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   ),
   layerThreadPullRequestWorker,
   KeepAwake.layer,
+  BrowserSources.layer,
   DesktopLink.layer.pipe(Layer.provide(SourceUsageSummary.layer)),
   ProviderAccounts.layer,
   DelegatedTaskAnalytics.layer,
@@ -1178,9 +1180,7 @@ const layerMakeServer = Layer.unwrap(
             const recoverManagedTunnel = (config: RelayManagedEndpointRuntimeConfig) =>
               runManagedTunnelRecovery(config).pipe(
                 Effect.tap((recovered) =>
-                  recovered
-                    ? Effect.logInfo("Hanzo Link managed tunnel recovered")
-                    : Effect.void,
+                  recovered ? Effect.logInfo("Hanzo Link managed tunnel recovered") : Effect.void,
                 ),
                 Effect.catchCause((cause) =>
                   Cause.hasInterrupts(cause)

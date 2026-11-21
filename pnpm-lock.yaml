@@ -750,6 +750,9 @@ importers:
       '@ff-labs/fff-node':
         specifier: 0.11.0
         version: 0.11.0(patch_hash=93f62a76399b435a76588b2bef237db0a1e85880c1ac0d0759c416e9cc579252)
+      '@hanzo/browser':
+        specifier: 0.1.0
+        version: 0.1.0
       '@hanzodev/issue-tracker-linear':
         specifier: workspace:*
         version: link:../../packages/issue-tracker-linear
@@ -4312,6 +4315,11 @@ packages:
   '@handy-computer/models@0.2.3':
     resolution: {integrity: sha512-EcyPojMY8hG5adDZGR/2h/m9jniqAnSND00gmiAErRLB1BQqMD9jrJaqsfoYF/UfPC8ocKZFUNSkTegoYqjF5w==}
     engines: {node: '>=20.10'}
+
+  '@hanzo/browser@0.1.0':
+    resolution: {integrity: sha512-NLnxoM8+xewLlAhDUqjHsqDeK6jvHWonuYMrzrkz+ZzCcsRufgEm7pMfkMHWP/SntNcHxN62QHhMPPPYY54apg==}
+    engines: {node: '>=18.0.0'}
+    hasBin: true
 
   '@hanzo/font@1.11.0':
     resolution: {integrity: sha512-aZVL3k4ub3PP2WmwB9jKaTtfxXZ0wTpNaJR1HoCjpLiCaDBrg993081yVctRCIp89qcFHQkAptP8j3lYu1edjQ==}
@@ -13988,6 +13996,8 @@ snapshots:
       - supports-color
 
   '@handy-computer/models@0.2.3': {}
+
+  '@hanzo/browser@0.1.0': {}
 
   '@hanzo/font@1.11.0': {}
 

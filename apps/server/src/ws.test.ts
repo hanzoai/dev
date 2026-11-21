@@ -132,6 +132,7 @@ import * as IssueTrackerConnections from "./issue/IssueTrackerConnections.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReactor.ts";
 import * as RelayClient from "@hanzodev/shared/relayClient";
+import * as BrowserSources from "./browser/BrowserSources.ts";
 import * as DesktopLink from "./cloud/DesktopLink.ts";
 import * as ProviderAccounts from "./cloud/ProviderAccounts.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
@@ -880,6 +881,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(IssueTrackerConnections.IssueTrackerConnections)({}),
   Layer.mock(PullRequestSyncReactor.PullRequestSyncReactor)({}),
   Layer.mock(RelayClient.RelayClient)({}),
+  Layer.mock(BrowserSources.BrowserSources)({}),
   Layer.mock(DesktopLink.DesktopLink)({}),
   Layer.mock(ProviderAccounts.ProviderAccounts)({}),
   Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({}),

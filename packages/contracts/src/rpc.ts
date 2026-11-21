@@ -16,6 +16,7 @@ import {
   McpAppToolInfoInput,
   McpAppUpdateModelContextInput,
 } from "./mcpApps.ts";
+import { BrowserSourceError, BrowserSourceListResult } from "./browserSources.ts";
 import {
   DesktopLinkError,
   DesktopLinkInput,
@@ -608,6 +609,7 @@ export const WS_METHODS = {
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
 
+  browserSourcesList: "browserSources.list",
   desktopsStatus: "desktops.status",
   desktopsLink: "desktops.link",
   desktopsUnlink: "desktops.unlink",
@@ -1122,6 +1124,12 @@ const WsCloudInstallRelayClientRpc = Rpc.make(WS_METHODS.cloudInstallRelayClient
   success: RelayClientInstallProgressEventSchema,
   error: Schema.Union([RelayClientInstallFailedError, EnvironmentAuthorizationError]),
   stream: true,
+});
+
+const WsBrowserSourcesListRpc = Rpc.make(WS_METHODS.browserSourcesList, {
+  payload: Schema.Struct({}),
+  success: BrowserSourceListResult,
+  error: Schema.Union([BrowserSourceError, EnvironmentAuthorizationError]),
 });
 
 const desktopsError = Schema.Union([DesktopLinkError, EnvironmentAuthorizationError]);
@@ -2445,6 +2453,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerReportClientActivityRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
+  WsBrowserSourcesListRpc,
   WsDesktopsStatusRpc,
   WsDesktopsLinkRpc,
   WsDesktopsUnlinkRpc,
