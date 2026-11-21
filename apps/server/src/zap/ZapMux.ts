@@ -31,6 +31,23 @@ const record = (session: number, kind: number, payload: Uint8Array): Uint8Array 
   return out;
 };
 
+/** Session 0 is the worker speaking to hanzod itself: `{"link": "<zap address>"}`. */
+const CONTROL = 0;
+
+let sendLink: ((url: string) => void) | undefined;
+let announced: string | undefined;
+
+/**
+ * Tells hanzod the ZAP address this machine's source reports to the cloud, so hanzod serves it
+ * there over its own outbound session. Asked again with the same address, it does nothing; with
+ * no hanzod (no mux descriptor) it waits for one that never comes and costs nothing.
+ */
+export const announceLink = (url: string): void => {
+  if (announced === url) return;
+  announced = url;
+  sendLink?.(url);
+};
+
 /**
  * Reads mux records off the descriptor and hands each opened session to
  * `onStream` as a ZAP stream. Returns a function that closes the descriptor.
@@ -38,6 +55,12 @@ const record = (session: number, kind: number, payload: Uint8Array): Uint8Array 
 export const serveMux = (fd: number, onStream: (stream: ZapStream) => void): (() => void) => {
   const socket = new NodeNet.Socket({ fd, readable: true, writable: true });
   const sessions = new Map<number, Session>();
+  sendLink = (url) => {
+    socket.write(
+      record(CONTROL, KIND_DATA, new TextEncoder().encode(JSON.stringify({ link: url }))),
+    );
+  };
+  if (announced !== undefined) sendLink(announced);
   let buffered: Uint8Array = new Uint8Array(0);
 
   const end = (session: Session) => {
@@ -108,5 +131,8 @@ export const serveMux = (fd: number, onStream: (stream: ZapStream) => void): (()
   };
   socket.on("close", finish);
   socket.on("error", () => socket.destroy());
-  return () => socket.destroy();
+  return () => {
+    sendLink = undefined;
+    socket.destroy();
+  };
 };

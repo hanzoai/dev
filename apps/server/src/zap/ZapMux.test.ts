@@ -41,4 +41,34 @@ describe("ZapMux", () => {
     expect(new DataView(got.buffer, got.byteOffset).getUint32(0, true)).toBe(1);
     child.kill();
   });
+
+  it("tells hanzod the address its source reports, once, on session 0", async () => {
+    const announcer = `
+      const { serveMux, announceLink } = await import(${JSON.stringify(NodeURL.pathToFileURL(`${import.meta.dirname}/ZapMux.ts`).href)});
+      announceLink("https://zap.hanzo.ai/v1/dev/zap/src_1");
+      announceLink("https://zap.hanzo.ai/v1/dev/zap/src_1");
+      serveMux(3, () => {});
+    `;
+    const child = NodeChildProcess.spawn(
+      process.execPath,
+      ["--input-type=module", "-e", announcer],
+      {
+        stdio: ["ignore", "inherit", "inherit", "pipe"],
+      },
+    );
+    const pair = child.stdio[3];
+    if (pair === null || pair === undefined || !("write" in pair))
+      throw new Error("no descriptor 3");
+    const got = await new Promise<Uint8Array>((resolve) =>
+      pair.once("data", (d) => resolve(new Uint8Array(d))),
+    );
+    const view = new DataView(got.buffer, got.byteOffset);
+    expect(view.getUint32(0, true)).toBe(0);
+    expect(view.getUint8(4)).toBe(0);
+    expect(JSON.parse(new TextDecoder().decode(got.slice(9)))).toEqual({
+      link: "https://zap.hanzo.ai/v1/dev/zap/src_1",
+    });
+    expect(got.byteLength).toBe(9 + view.getUint32(5, true));
+    child.kill();
+  });
 });
