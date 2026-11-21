@@ -1,6 +1,6 @@
 # Hanzo Connect
 
-Hanzo Connect uses Hanzo IAM (`hanzo.id`) for cloud identity. The relay verifies IAM access tokens against the issuer's JWKS (found through OIDC discovery) and checks `iss` and `aud`. The relay manages environment links,
+Hanzo Connect uses Hanzo IAM for cloud identity; sign-in starts at hanzo.ai and the issuer is whatever its discovery document names. The relay verifies IAM access tokens against the issuer's JWKS (found through OIDC discovery) and checks `iss` and `aud`. The relay manages environment links,
 credentials for reaching environments, and managed tunnel allocations. After
 bootstrap, clients send application traffic through the environment's tunnel
 hostname; the relay Worker does not proxy their HTTP or WebSocket sessions.

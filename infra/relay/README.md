@@ -147,7 +147,7 @@ The `production` GitHub environment must define these Actions variables:
   creates no monitors or health dashboard. See
   [Relay alerts](../../docs/operations/relay-observability.md#alerts).
 - `RELAY_WARNING_NOTIFIER_ID`, optional, the Axiom notifier for relay warnings
-- `HANZO_IAM_ISSUER` and `HANZO_IAM_AUDIENCE`, optional (defaults `https://hanzo.id` and `hanzo-app`)
+- `HANZO_IAM_ORIGIN` (where discovery is read; the issuer and keys are what that document names) and `HANZO_IAM_AUDIENCE`, optional (defaults `https://hanzo.ai` and `hanzo-app`)
 - `APNS_ENVIRONMENT`
 - `APNS_TEAM_ID`
 - `APNS_KEY_ID`

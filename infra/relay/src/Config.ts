@@ -61,7 +61,7 @@ export class RelayConfiguration extends Context.Service<
     readonly apns: ApnsCredentials | null;
     readonly fcmServiceAccount?: Redacted.Redacted<string>;
     /** Hanzo IAM issuer whose access tokens the relay accepts (JWKS from its OIDC discovery). */
-    readonly iamIssuer: string;
+    readonly iamOrigin: string;
     readonly iamAudience: string;
     readonly apnsDeliveryJobSigningSecret: Redacted.Redacted<string>;
     readonly cloudMintPrivateKey: Redacted.Redacted<string>;

@@ -124,7 +124,7 @@ const main = Effect.gen(function* () {
           relayIssuer: "http://localhost",
           apns: null,
           fcmServiceAccount: Redacted.make(credentials),
-          iamIssuer: "",
+          iamOrigin: "",
           iamAudience: "",
           apnsDeliveryJobSigningSecret: Redacted.make(""),
           cloudMintPrivateKey: Redacted.make(""),

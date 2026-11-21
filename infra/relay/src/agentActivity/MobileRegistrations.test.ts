@@ -144,7 +144,7 @@ const config = RelayConfiguration.RelayConfiguration.of({
     bundleId: "codes.hanzo.mobile",
     privateKey: Redacted.make("apns-private-key"),
   },
-  iamIssuer: "https://hanzo.id",
+  iamOrigin: "https://hanzo.id",
   iamAudience: "hanzo-dev-relay",
   apnsDeliveryJobSigningSecret: Redacted.make("apns-job-secret"),
   cloudMintPrivateKey: Redacted.make("cloud-private-key"),

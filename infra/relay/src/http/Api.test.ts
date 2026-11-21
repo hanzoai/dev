@@ -77,7 +77,7 @@ const relaySettings: RelayConfiguration.RelayConfiguration["Service"] = {
     bundleId: "com.example.hanzo",
     environment: "sandbox",
   },
-  iamIssuer: "https://iam.example.test",
+  iamOrigin: "https://iam.example.test",
   iamAudience: "hanzo-dev-relay",
   apnsDeliveryJobSigningSecret: Redacted.make("apns-delivery-secret"),
   cloudMintPrivateKey: Redacted.make("cloud-mint-private-key"),
@@ -379,6 +379,8 @@ describe("Cloudflare rate-limit retry hint", () => {
   );
 });
 
+const IAM_ISSUER = "https://id.example.test";
+
 describe("relay client authentication", () => {
   const signIamToken = async (claims: { readonly aud: string; readonly iss?: string }) => {
     const { publicKey, privateKey } = await generateKeyPair("ES256");
@@ -388,7 +390,8 @@ describe("relay client authentication", () => {
       vi.fn(async (input: string | URL | Request) => {
         const url = String(input instanceof Request ? input.url : input);
         if (url.endsWith("/.well-known/openid-configuration")) {
-          return Response.json({ jwks_uri: "https://iam.example.test/jwks" });
+          // The document is served from the origin and names another issuer, as hanzo.ai does.
+          return Response.json({ issuer: IAM_ISSUER, jwks_uri: "https://keys.example.test/jwks" });
         }
         return Response.json({ keys: [jwk] });
       }),
@@ -397,7 +400,7 @@ describe("relay client authentication", () => {
       .setProtectedHeader({ alg: "ES256", kid: "test-key" })
       .setSubject("user_iam")
       .setAudience(claims.aud)
-      .setIssuer(claims.iss ?? relaySettings.iamIssuer)
+      .setIssuer(claims.iss ?? IAM_ISSUER)
       .setExpirationTime("5m")
       .sign(privateKey);
   };

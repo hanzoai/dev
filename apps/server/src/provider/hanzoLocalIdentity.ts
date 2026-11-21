@@ -2,6 +2,7 @@ import type { ServerProvider, ServerProviderModel } from "@hanzodev/contracts";
 import { createModelCapabilities } from "@hanzodev/shared/model";
 import {
   buildHanzoIamAccountFromTokens,
+  DEFAULT_HANZO_IAM_ISSUER,
   type HanzoIamAccount,
 } from "@hanzodev/shared/hanzoIamAuth";
 import * as HostProcess from "@hanzodev/shared/HostProcess";
@@ -136,7 +137,7 @@ function parseLocalHanzoIdentitiesRaw(raw: string): LocalHanzoIdentitySnapshot {
     const issuer =
       typeof entry.issuer === "string" && entry.issuer.trim()
         ? entry.issuer.trim()
-        : "https://hanzo.id";
+        : DEFAULT_HANZO_IAM_ISSUER;
     const email = typeof entry.email === "string" && entry.email.trim() ? entry.email.trim() : null;
     const account = buildHanzoIamAccountFromTokens({
       issuer,

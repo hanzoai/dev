@@ -37,7 +37,7 @@ const config = {
     privateKey: Redacted.make("unused"),
   },
   fcmServiceAccount: Redacted.make(encodeJson(account)),
-  iamIssuer: "https://hanzo.id",
+  iamOrigin: "https://hanzo.id",
   iamAudience: "unused",
   apnsDeliveryJobSigningSecret: Redacted.make("unused"),
   cloudMintPrivateKey: Redacted.make("unused"),

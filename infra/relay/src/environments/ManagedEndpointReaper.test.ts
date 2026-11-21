@@ -230,7 +230,7 @@ function harness(input?: {
       bundleId: "ai.hanzo.dev.dev",
     },
     apnsDeliveryJobSigningSecret: Redacted.make("job-secret"),
-    iamIssuer: "https://hanzo.id",
+    iamOrigin: "https://hanzo.id",
     iamAudience: "hanzo-dev-relay",
     cloudMintPrivateKey: Redacted.make("cloud-private-key"),
     cloudMintPublicKey: "cloud-public-key",

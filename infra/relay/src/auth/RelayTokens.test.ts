@@ -29,7 +29,7 @@ const config = RelayConfiguration.RelayConfiguration.of({
     bundleId: "ai.hanzo.dev.dev",
   },
   apnsDeliveryJobSigningSecret: Redacted.make("job-secret"),
-  iamIssuer: "https://hanzo.id",
+  iamOrigin: "https://hanzo.id",
   iamAudience: "hanzo-dev-relay",
   cloudMintPrivateKey: Redacted.make(keyPair.privateKey),
   cloudMintPublicKey: keyPair.publicKey,

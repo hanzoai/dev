@@ -73,7 +73,7 @@ const config = {
     bundleId: "unused",
     privateKey: Redacted.make("unused"),
   },
-  iamIssuer: "https://hanzo.id",
+  iamOrigin: "https://hanzo.id",
   iamAudience: "unused",
   apnsDeliveryJobSigningSecret: Redacted.make("unused"),
   cloudMintPrivateKey: Redacted.make("unused"),

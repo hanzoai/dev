@@ -18,7 +18,7 @@ const config: RelayConfiguration.RelayConfiguration["Service"] = {
     bundleId: "ai.hanzo.test",
     environment: "sandbox",
   },
-  iamIssuer: "https://hanzo.id",
+  iamOrigin: "https://hanzo.id",
   iamAudience: "hanzo-dev-relay",
   apnsDeliveryJobSigningSecret: Redacted.make("apns-job-secret"),
   cloudMintPrivateKey: Redacted.make("cloud-private-key"),

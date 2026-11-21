@@ -165,7 +165,7 @@ export const layer = Api.make(
     const apnsDeliveryQueueSender = yield* Cloudflare.Queues.WriteQueue(apnsDeliveryQueue);
     const fcmDeliveryQueueSender = yield* Cloudflare.Queues.WriteQueue(fcmDeliveryQueue);
 
-    const iamIssuer = yield* Config.String("HANZO_IAM_ISSUER").pipe(
+    const iamOrigin = yield* Config.String("HANZO_IAM_ORIGIN").pipe(
       Config.withDefault(DEFAULT_HANZO_IAM_ISSUER),
     );
     const iamAudience = yield* Config.String("HANZO_IAM_AUDIENCE").pipe(
@@ -240,7 +240,7 @@ export const layer = Api.make(
         ...(fcmServiceAccount ? { fcmServiceAccount } : {}),
         apns: apnsCredentials,
         apnsDeliveryJobSigningSecret: yield* apnsDeliveryJobSigningSecret,
-        iamIssuer,
+        iamOrigin,
         iamAudience,
         cloudMintPrivateKey: yield* cloudMintPrivateKey,
         cloudMintPublicKey: yield* cloudMintPublicKey,

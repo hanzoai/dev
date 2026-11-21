@@ -472,7 +472,7 @@ const config: ExpoConfig = {
       url: repoEnv.HANZO_DEV_RELAY_URL ?? "https://relay.dev.hanzo.ai",
     },
     iam: {
-      issuer: repoEnv.HANZO_DEV_IAM_ISSUER ?? "https://hanzo.id",
+      issuer: repoEnv.HANZO_DEV_IAM_ISSUER ?? null, // absent: the shared default origin
       clientId: repoEnv.HANZO_DEV_IAM_CLIENT_ID ?? "hanzo-app",
     },
     observability: {

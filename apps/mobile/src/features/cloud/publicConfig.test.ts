@@ -11,10 +11,10 @@ vi.mock("expo-constants", () => ({
 }));
 
 describe("resolveCloudPublicConfig", () => {
-  it("defaults to Hanzo IAM (hanzo.id) and Hanzo Relay out-of-the-box", () => {
+  it("defaults to Hanzo IAM (hanzo.ai) and Hanzo Relay out-of-the-box", () => {
     expect(resolveCloudPublicConfig({})).toEqual({
       iam: {
-        issuer: "https://hanzo.id",
+        issuer: "https://hanzo.ai",
         clientId: "hanzo-app",
       },
       relay: {

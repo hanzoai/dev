@@ -4,7 +4,7 @@ Deployment and client configuration for Hanzo Connect. The [architecture note](.
 explains the trust boundaries; the [relay README](../../infra/relay/README.md#deployment) owns relay
 provisioning instructions.
 
-Identity is Hanzo IAM (`https://hanzo.id`). Clients sign in with the `hanzo-app` application and send
+Identity is Hanzo IAM. Sign-in starts at `https://hanzo.ai/login`; the issuer and keys are whatever `https://hanzo.ai/.well-known/openid-configuration` names. Clients sign in with the `hanzo-app` application and send
 the access token to the relay, which verifies it against the issuer's JWKS.
 
 ## Public application configuration
@@ -21,7 +21,7 @@ For another deployment, set these values in the repository-root `.env` or `.env.
 ```dotenv
 HANZO_DEV_RELAY_URL=https://relay.example.com
 # Only when the deployment uses another IAM or application than Hanzo ID's `hanzo-app`.
-HANZO_DEV_IAM_ISSUER=https://hanzo.id
+HANZO_DEV_IAM_ISSUER=https://hanzo.ai
 HANZO_DEV_IAM_CLIENT_ID=hanzo-app
 ```
 
@@ -45,7 +45,7 @@ In Hanzo IAM, the `hanzo-app` application must:
 3. Enable the `openid`, `profile`, `email`, and `offline_access` scopes.
 4. Enable the device authorization grant. Headless and SSH authorization use it.
 
-The relay accepts tokens whose `iss` is `HANZO_IAM_ISSUER` (default `https://hanzo.id`) and whose
+The relay accepts tokens whose `iss` is the `issuer` of the discovery document at `HANZO_IAM_ORIGIN` (default `https://hanzo.ai`) and whose
 `aud` is `HANZO_IAM_AUDIENCE` (default `hanzo-app`). The relay needs no IAM secret: it only reads the
 public JWKS. The audience stays the same across relay stages; the relay URL selects the deployment.
 
