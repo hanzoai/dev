@@ -13,7 +13,11 @@ export default defineConfig({
   base: "./",
   publicDir: false, // the host serves its own public files; the library ships code and its own assets
   assetsInclude: ["**/*.wasm"],
-  plugins: [tanstackRouter({ autoCodeSplitting: false }), react({ compiler: true }), tailwindPlugins(false)],
+  plugins: [
+    tanstackRouter({ autoCodeSplitting: false }),
+    react({ compiler: true }),
+    tailwindPlugins(false),
+  ],
   define: {
     "import.meta.env.VITE_WS_URL": JSON.stringify(""),
     "import.meta.env.VITE_HTTP_URL": JSON.stringify(""),

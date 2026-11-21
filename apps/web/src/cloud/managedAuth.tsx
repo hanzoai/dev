@@ -38,8 +38,7 @@ interface ManagedRelayIamSession extends CloudAccountSource {
 }
 
 function iamTokenReader(session: ManagedRelayIamSession): () => Promise<string | null> {
-  return async () =>
-    session.session ? await session.session.getToken() : null;
+  return async () => (session.session ? await session.session.getToken() : null);
 }
 
 const managedRelayAccountService = createCloudAccountService<ManagedRelayIamSession>({
