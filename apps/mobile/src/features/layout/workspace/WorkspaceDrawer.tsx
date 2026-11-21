@@ -5,6 +5,7 @@ import Reanimated, {
   Easing,
   interpolate,
   ReduceMotion,
+  type SharedValue,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -36,6 +37,45 @@ const DRAWER_EASING = Easing.bezier(0.16, 1, 0.3, 1);
  * trailing edge by one shared value that the finger, the menu button and a tap on the dimmed pane
  * all move. The pane's transform and the dim's opacity are the only animated properties.
  */
+/** Shared-value writes live here, outside the component, where the React Compiler does not track them. */
+function createDrawerGesture(input: {
+  readonly enabled: boolean;
+  readonly open: boolean;
+  readonly reach: number;
+  readonly at: SharedValue<number>;
+  readonly target: SharedValue<number>;
+  readonly from: SharedValue<number>;
+}) {
+  const { enabled, open, reach, at, target, from } = input;
+  return (
+      Gesture.Pan()
+        .enabled(enabled)
+        // Closed, only the leading edge begins a pull; open, anywhere on the dimmed pane closes.
+        .hitSlop(open ? undefined : { left: 0, width: DRAWER_EDGE })
+        .activeOffsetX([-8, 8])
+        .failOffsetY([-16, 16])
+        .onBegin(() => {
+          from.value = at.value;
+          // A finger catches a moving drawer where it is.
+          at.value = at.value;
+        })
+        .onUpdate((event) => {
+          at.value = drawerPull(from.value, event.translationX, reach);
+        })
+        .onEnd((event) => {
+          const stays = drawerSettles(at.value, reach, event.velocityX / 1000);
+          const next = stays ? reach : 0;
+          target.value = next;
+          at.value = withTiming(next, {
+            duration: DRAWER_DURATION,
+            easing: DRAWER_EASING,
+            reduceMotion: ReduceMotion.System,
+          });
+          runOnJS(dispatchWorkspaceDrawer)({ type: stays ? "open" : "close" });
+        })
+    );
+}
+
 export function WorkspaceDrawer(props: {
   readonly children: ReactNode;
   readonly menu: ReactNode;
@@ -69,35 +109,10 @@ export function WorkspaceDrawer(props: {
     setInteractive(open);
   }, [open, reach, at, target]);
 
-  const gesture = useMemo(() => {
-    return (
-      Gesture.Pan()
-        .enabled(props.enabled || open)
-        // Closed, only the leading edge begins a pull; open, anywhere on the dimmed pane closes.
-        .hitSlop(open ? undefined : { left: 0, width: DRAWER_EDGE })
-        .activeOffsetX([-8, 8])
-        .failOffsetY([-16, 16])
-        .onBegin(() => {
-          from.value = at.value;
-          // A finger catches a moving drawer where it is.
-          at.value = at.value;
-        })
-        .onUpdate((event) => {
-          at.value = drawerPull(from.value, event.translationX, reach);
-        })
-        .onEnd((event) => {
-          const stays = drawerSettles(at.value, reach, event.velocityX / 1000);
-          const next = stays ? reach : 0;
-          target.value = next;
-          at.value = withTiming(next, {
-            duration: DRAWER_DURATION,
-            easing: DRAWER_EASING,
-            reduceMotion: ReduceMotion.System,
-          });
-          runOnJS(dispatchWorkspaceDrawer)({ type: stays ? "open" : "close" });
-        })
-    );
-  }, [open, props.enabled, reach, at, target, from]);
+  const gesture = useMemo(
+    () => createDrawerGesture({ enabled: props.enabled || open, open, reach, at, target, from }),
+    [open, props.enabled, reach, at, target, from],
+  );
 
   // The pane is a raised card: it slides, shrinks a little and rounds its corners on the one value.
   const paneStyle = useAnimatedStyle(() => {
