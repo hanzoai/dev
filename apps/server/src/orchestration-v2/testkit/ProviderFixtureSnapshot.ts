@@ -33,6 +33,7 @@ const RACY_EVENTS = new Set([
   "claude_background_subagent_lifecycle/claudeAgent",
   "claude_background_wake_before_queued_prompt/claudeAgent",
   "claude_background_wake_before_queued_prompt_no_echo/claudeAgent",
+  "muse_permission/muse",
   "thread_rollback_after_stop/pi",
   "tool_call_read_only_on_request/grok",
 ]);
