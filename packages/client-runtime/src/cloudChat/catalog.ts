@@ -15,6 +15,7 @@ import {
 import { HANZO_REASONING_CAPABILITIES } from "@hanzodev/shared/model";
 
 import type { CloudChatModel } from "./api.ts";
+import { isLocalChatSlug, LOCAL_CHAT_DRIVER, localChatSlug, type LocalChatModel } from "./local.ts";
 
 const REASONING_EFFORT_ID = "reasoningEffort";
 
@@ -61,8 +62,35 @@ const KNOWN_DRIVERS: Readonly<Record<string, true>> = {
 
 const CHECKED_AT = "1970-01-01T00:00:00.000Z";
 
+/** The "Local" group: the Mac's models, or one placeholder row while none are known. */
+function localProvider(models: ReadonlyArray<LocalChatModel>): ServerProvider {
+  return {
+    instanceId: ProviderInstanceId.make(LOCAL_CHAT_DRIVER),
+    driver: ProviderDriverKind.make(LOCAL_CHAT_DRIVER),
+    displayName: "Local",
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: CHECKED_AT,
+    models: (models.length > 0 ? models : [{ id: "", engine: undefined }]).map((model) => ({
+      slug: localChatSlug(model.id),
+      name: model.id === "" ? "Local models" : model.id,
+      ...(model.engine === undefined ? {} : { subProvider: model.engine }),
+      isCustom: false,
+      isDefault: false,
+      capabilities: null,
+    })),
+    slashCommands: [],
+    skills: [],
+  };
+}
+
+/** Cloud providers from the catalog, then the "Local" group last when the Mac's models are given. */
 export function cloudChatProviders(
   models: ReadonlyArray<CloudChatModel>,
+  local?: ReadonlyArray<LocalChatModel>,
 ): ReadonlyArray<ServerProvider> {
   const byDriver = new Map<string, ServerProviderModel[]>();
   const owners = new Map<string, string>();
@@ -80,7 +108,7 @@ export function cloudChatProviders(
     });
     byDriver.set(driver, list);
   }
-  return [...byDriver.entries()].map(([driver, providerModels]) => ({
+  const cloud: ServerProvider[] = [...byDriver.entries()].map(([driver, providerModels]) => ({
     instanceId: ProviderInstanceId.make(driver),
     driver: ProviderDriverKind.make(driver),
     // A provider the picker does not know is named as the catalog names it.
@@ -97,17 +125,21 @@ export function cloudChatProviders(
     slashCommands: [],
     skills: [],
   }));
+  return local === undefined ? cloud : [...cloud, localProvider(local)];
 }
 
 /**
  * The catalog as the server config the thread composer reads. Only providers and the defaults
  * the composer consults exist; nothing here describes a machine, so it advertises no capabilities.
  */
-export function cloudChatServerConfig(models: ReadonlyArray<CloudChatModel>): ServerConfig {
+export function cloudChatServerConfig(
+  models: ReadonlyArray<CloudChatModel>,
+  local?: ReadonlyArray<LocalChatModel>,
+): ServerConfig {
   return {
     environment: { capabilities: {} },
     settings: DEFAULT_SERVER_SETTINGS,
-    providers: cloudChatProviders(models),
+    providers: cloudChatProviders(models, local),
   } as unknown as ServerConfig;
 }
 
@@ -117,9 +149,11 @@ export function cloudChatSelection(
   modelId: string,
   effort: string | null,
 ): ModelSelection {
-  const driver = cloudChatDriver(
-    models.find((model) => model.id === modelId) ?? { id: modelId, label: modelId },
-  );
+  const driver = isLocalChatSlug(modelId)
+    ? LOCAL_CHAT_DRIVER
+    : cloudChatDriver(
+        models.find((model) => model.id === modelId) ?? { id: modelId, label: modelId },
+      );
   const instanceId = ProviderInstanceId.make(driver);
   return effort === null || driver !== "hanzo"
     ? { instanceId, model: modelId }

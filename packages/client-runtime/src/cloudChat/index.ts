@@ -4,3 +4,4 @@ export * from "./sse.ts";
 export * from "./threads.ts";
 export * from "./chatThreads.ts";
 export * from "./catalog.ts";
+export * from "./local.ts";

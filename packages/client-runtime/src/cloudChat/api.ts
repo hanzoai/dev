@@ -88,7 +88,13 @@ export interface CloudChatOptions {
   readonly baseUrl?: string;
 }
 
-export type CloudChatErrorKind = "signed-out" | "unauthorized" | "unavailable" | "failed";
+export type CloudChatErrorKind =
+  | "signed-out"
+  | "unauthorized"
+  | "unavailable"
+  | "failed"
+  /** A local model was chosen and the machine that serves it is not connected. */
+  | "offline";
 
 export class CloudChatError extends Error {
   readonly kind: CloudChatErrorKind;
@@ -110,7 +116,7 @@ function requireToken(auth: CloudChatAuth): string {
   return token;
 }
 
-function failure(status: number): CloudChatError {
+export function httpFailure(status: number): CloudChatError {
   if (status === 401 || status === 403) return new CloudChatError("unauthorized", `HTTP ${status}`);
   if (status === 404 || status === 501) return new CloudChatError("unavailable", `HTTP ${status}`);
   return new CloudChatError("failed", `HTTP ${status}`);
@@ -182,9 +188,43 @@ export async function listChatModels(
   } catch {
     throw new CloudChatError("unavailable", "Network unavailable");
   }
-  if (!response.ok) throw failure(response.status);
+  if (!response.ok) throw httpFailure(response.status);
   const models = parseChatModels(await response.json().catch(() => null));
   return models.length > 0 ? models : FALLBACK_MODELS;
+}
+
+/** Reads an OpenAI-compatible SSE reply, calling `onDelta` per chunk; resolves to the full reply. */
+export async function readSseReply(
+  response: Response,
+  onDelta: (text: string) => void,
+): Promise<string> {
+  const parser = createSseParser();
+  let reply = "";
+  let done = false;
+  const apply = (events: ReturnType<typeof parser.push>) => {
+    for (const event of events) {
+      if (event.kind === "done") done = true;
+      else {
+        reply += event.text;
+        onDelta(event.text);
+      }
+    }
+  };
+  const reader = response.body?.getReader();
+  if (reader === undefined) {
+    // A fetch without a streaming body (React Native's built-in): decode it all at once.
+    apply(parser.push(await response.text()));
+  } else {
+    const decoder = new TextDecoder();
+    while (!done) {
+      const { value, done: finished } = await reader.read();
+      if (finished) break;
+      apply(parser.push(decoder.decode(value, { stream: true })));
+    }
+    if (done) void reader.cancel().catch(() => undefined);
+  }
+  apply(parser.flush());
+  return reply;
 }
 
 /** Streams one reply. Calls `onDelta` per text chunk and resolves to the full reply. */
@@ -220,35 +260,9 @@ export async function streamChatReply(input: {
   } catch {
     throw new CloudChatError("unavailable", "Network unavailable");
   }
-  if (!response.ok) throw failure(response.status);
+  if (!response.ok) throw httpFailure(response.status);
 
-  const parser = createSseParser();
-  let reply = "";
-  let done = false;
-  const apply = (events: ReturnType<typeof parser.push>) => {
-    for (const event of events) {
-      if (event.kind === "done") done = true;
-      else {
-        reply += event.text;
-        input.onDelta(event.text);
-      }
-    }
-  };
-  const reader = response.body?.getReader();
-  if (reader === undefined) {
-    // A fetch without a streaming body (React Native's built-in): decode it all at once.
-    apply(parser.push(await response.text()));
-  } else {
-    const decoder = new TextDecoder();
-    while (!done) {
-      const { value, done: finished } = await reader.read();
-      if (finished) break;
-      apply(parser.push(decoder.decode(value, { stream: true })));
-    }
-    if (done) void reader.cancel().catch(() => undefined);
-  }
-  apply(parser.flush());
-  return reply;
+  return readSseReply(response, input.onDelta);
 }
 
 /** Records turns in the hanzo.app thread store. Returns the thread id, or null when sync is unavailable. */

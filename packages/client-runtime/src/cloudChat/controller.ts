@@ -16,6 +16,12 @@ import {
 } from "./api.ts";
 import { loadChatThread } from "./chatThreads.ts";
 import {
+  isLocalChatSlug,
+  localChatModelId,
+  type LocalChatHost,
+  type LocalChatModel,
+} from "./local.ts";
+import {
   deleteRemoteThread,
   listRemoteThreads,
   mergeThreads,
@@ -33,6 +39,10 @@ export interface CloudChatState {
   readonly messages: ReadonlyArray<CloudChatMessage>;
   readonly models: ReadonlyArray<CloudChatModel>;
   readonly model: string;
+  /** The linked Mac's models, as last listed; empty until it has answered. */
+  readonly localModels: ReadonlyArray<LocalChatModel>;
+  /** Whether the linked Mac is connected: local models can only be chosen and used while it is. */
+  readonly macOnline: boolean;
   /** Reasoning effort chosen for the model; null leaves it to the router. */
   readonly effort: string | null;
   /** The hanzo.app thread id, once the remote store has accepted the thread. */
@@ -51,6 +61,8 @@ export interface CloudChatController {
   getState(): CloudChatState;
   subscribe(listener: () => void): () => void;
   loadModels(): Promise<void>;
+  /** Asks the linked Mac for its models; with no Mac connected, local models are offline. */
+  loadLocalModels(): Promise<void>;
   selectModel(id: string, effort?: string | null): void;
   /** Attachments ride this request and later ones of the open thread; threads store text only. */
   send(prompt: string, attachments?: ReadonlyArray<CloudChatAttachment>): Promise<void>;
@@ -76,6 +88,8 @@ export function createCloudChatController(input: {
   readonly options?: CloudChatOptions;
   /** Device copy of threads: a thread survives restart when sync fails. */
   readonly store?: ThreadStore;
+  /** The linked Mac, or null while it is not connected. Local models are served only by it. */
+  readonly local?: () => LocalChatHost | null;
   readonly createKey?: () => string;
   readonly now?: () => number;
 }): CloudChatController {
@@ -86,6 +100,8 @@ export function createCloudChatController(input: {
   const initial: CloudChatState = {
     messages: [],
     models: FALLBACK_MODELS,
+    localModels: [],
+    macOnline: false,
     model: DEFAULT_MODEL_ID,
     effort: null,
     threadId: null,
@@ -192,7 +208,21 @@ export function createCloudChatController(input: {
         // The known live set stays; sending reports sign-in problems itself.
       }
     },
+    async loadLocalModels() {
+      const host = input.local?.() ?? null;
+      if (host === null) {
+        set({ macOnline: false });
+        return;
+      }
+      try {
+        set({ localModels: await host.models(), macOnline: true });
+      } catch {
+        set({ macOnline: false });
+      }
+    },
     selectModel(id, effort = null) {
+      // A local model is chosen only while the Mac is there; the choice never falls back to cloud.
+      if (isLocalChatSlug(id) && input.local?.() == null) return;
       modelChosen = true;
       set({ model: id, effort });
     },
@@ -214,20 +244,34 @@ export function createCloudChatController(input: {
       });
       let reply = "";
       let auth: CloudChatAuth = { accessToken: null };
+      const onLocal = isLocalChatSlug(state.model);
+      const onDelta = (chunk: string) => {
+        reply += chunk;
+        set({ messages: [...history, { role: "assistant", content: reply }] });
+      };
       try {
         auth = await input.getAuth();
         persist(auth);
-        reply = await streamChatReply({
-          auth,
-          model: state.model,
-          effort: state.effort,
-          messages: request,
-          options: input.options,
-          onDelta: (chunk) => {
-            reply += chunk;
-            set({ messages: [...history, { role: "assistant", content: reply }] });
-          },
-        });
+        if (onLocal) {
+          const host = input.local?.() ?? null;
+          if (host === null) {
+            set({ macOnline: false });
+            throw new CloudChatError("offline", "The Mac is not connected");
+          }
+          reply = await host.stream({
+            model: localChatModelId(state.model),
+            messages: request,
+            onDelta,
+          });
+        } else
+          reply = await streamChatReply({
+            auth,
+            model: state.model,
+            effort: state.effort,
+            messages: request,
+            options: input.options,
+            onDelta,
+          });
       } catch (cause) {
         set({
           messages: reply === "" ? history : [...history, { role: "assistant", content: reply }],
@@ -241,6 +285,8 @@ export function createCloudChatController(input: {
       const all = [...history, answer];
       set({ messages: all, sending: false });
       persist(auth);
+      // A local conversation stays on the phone and the Mac: nothing is recorded at hanzo.app.
+      if (onLocal) return;
       const threadId = await recordTurns({
         auth: await input.getAuth().catch(() => ({ accessToken: null })),
         threadId: state.threadId,
