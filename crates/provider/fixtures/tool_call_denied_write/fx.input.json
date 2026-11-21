@@ -1,0 +1,22 @@
+{
+  "fixture": "tool_call_denied_write",
+  "driver": "fx",
+  "modelSelection": {
+    "instanceId": "fx",
+    "model": "default"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": "approval-required",
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Use the Write tool once to create .claude-denied-write.txt containing exactly: approval fixture. If permission is denied, do not retry or use another tool; reply exactly: write permission denied. Do not read any files, use the shell, network, or MCP."
+    },
+    {
+      "type": "approve_next_runtime_request",
+      "decision": "decline"
+    }
+  ]
+}

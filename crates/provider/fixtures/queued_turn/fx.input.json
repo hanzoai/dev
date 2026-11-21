@@ -1,0 +1,22 @@
+{
+  "fixture": "queued_turn",
+  "driver": "fx",
+  "modelSelection": {
+    "instanceId": "fx",
+    "model": "default"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": "approval-required",
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Respond with exactly: first fixture turn complete"
+    },
+    {
+      "type": "queue_message",
+      "text": "Respond with exactly: second fixture turn complete"
+    }
+  ]
+}

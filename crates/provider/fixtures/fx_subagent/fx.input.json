@@ -1,0 +1,18 @@
+{
+  "fixture": "fx_subagent",
+  "driver": "fx",
+  "modelSelection": {
+    "instanceId": "fx",
+    "model": "default"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": "auto",
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Spawn 2 subagents, one to read package.json and one to read tsconfig.json"
+    }
+  ]
+}

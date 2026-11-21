@@ -1,0 +1,1475 @@
+[
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_denied_write%3Athread-create%3A<uuid:2>:<uuid:0>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "thread.created",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "projectId": "project:fixture:tool_call_denied_write:<uuid:0>",
+      "title": "Replay fixture: tool_call_denied_write",
+      "providerInstanceId": "fx",
+      "modelSelection": {
+        "instanceId": "fx",
+        "model": "default"
+      },
+      "runtimeMode": "approval-required",
+      "interactionMode": "default",
+      "branch": null,
+      "worktreePath": null,
+      "pullRequests": [],
+      "activeProviderThreadId": null,
+      "lineage": {
+        "parentThreadId": null,
+        "relationshipToParent": null,
+        "rootThreadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>"
+      },
+      "forkedFrom": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "archivedAt": null,
+      "settledOverride": null,
+      "settledAt": null,
+      "snoozedUntil": null,
+      "snoozedAt": null,
+      "lastVisitedAt": null,
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_denied_write%3Amessage-1%3A<uuid:3>:<uuid:1>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "thread.metadata-updated",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "projectId": "project:fixture:tool_call_denied_write:<uuid:0>",
+      "title": "Replay fixture: tool_call_denied_write",
+      "providerInstanceId": "fx",
+      "modelSelection": {
+        "instanceId": "fx",
+        "model": "default"
+      },
+      "runtimeMode": "approval-required",
+      "interactionMode": "default",
+      "branch": null,
+      "worktreePath": null,
+      "pullRequests": [],
+      "activeProviderThreadId": null,
+      "lineage": {
+        "parentThreadId": null,
+        "relationshipToParent": null,
+        "rootThreadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>"
+      },
+      "forkedFrom": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "archivedAt": null,
+      "settledOverride": null,
+      "settledAt": null,
+      "snoozedUntil": null,
+      "snoozedAt": null,
+      "lastVisitedAt": "<time>",
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_denied_write%3Amessage-1%3A<uuid:3>:<uuid:3>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "fx",
+      "providerInstanceId": "fx",
+      "providerSessionId": "provider-session:provider-instance:fx:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": null,
+      "nativeConversationHeadRef": null,
+      "status": "not_loaded",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": null,
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_denied_write%3Amessage-1%3A<uuid:3>:<uuid:4>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "run.created",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "fx",
+      "modelSelection": {
+        "instanceId": "fx",
+        "model": "default"
+      },
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "starting",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": null,
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_denied_write%3Amessage-1%3A<uuid:3>:<uuid:5>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "run-attempt.created",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "fx",
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "pending",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_denied_write%3Amessage-1%3A<uuid:3>:<uuid:6>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "pending",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_denied_write%3Amessage-1%3A<uuid:3>:<uuid:7>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "checkpoint-scope.created",
+    "payload": {
+      "id": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:name:root",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentScopeId": null,
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "kind": "root_run",
+      "ordinalWithinParent": 0,
+      "advancesAppRunCount": true,
+      "cwd": "<workspace>",
+      "createdAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_denied_write%3Amessage-1%3A<uuid:3>:<uuid:8>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "message:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "role": "user",
+      "text": "Use the Write tool once to create .claude-denied-write.txt containing exactly: approval fixture. If permission is denied, do not retry or use another tool; reply exactly: write permission denied. Do not read any files, use the shell, network, or MCP.",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_denied_write%3Amessage-1%3A<uuid:3>:<uuid:9>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:message:message%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1%3A<uuid:4>",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000001,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "createdBy": "user",
+      "creationSource": "web",
+      "type": "user_message",
+      "messageId": "message:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "inputIntent": "turn_start",
+      "text": "Use the Write tool once to create .claude-denied-write.txt containing exactly: approval fixture. If permission is denied, do not retry or use another tool; reply exactly: write permission denied. Do not read any files, use the shell, network, or MCP.",
+      "attachments": []
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:10>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "provider-session.attached",
+    "payload": {
+      "id": "provider-session:provider-instance:fx:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "fx",
+      "providerInstanceId": "fx",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "default",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": false,
+          "canForkFromTurn": false,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": false,
+          "supportsSteeringByInterruptRestart": true,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": true,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": false
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": false,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": false,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": false,
+          "acceptsDeveloperContext": false,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": true,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": false,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "weak",
+          "nativeRequestIds": "weak"
+        },
+        "runtimePolicy": {
+          "enforcement": "client-boundary"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:11>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:fx:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "fx",
+      "providerInstanceId": "fx",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "default",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": false,
+          "canForkFromTurn": false,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": false,
+          "supportsSteeringByInterruptRestart": true,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": true,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": false
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": false,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": false,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": false,
+          "acceptsDeveloperContext": false,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": true,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": false,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "weak",
+          "nativeRequestIds": "weak"
+        },
+        "runtimePolicy": {
+          "enforcement": "client-boundary"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:<uuid:12>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "fx",
+      "providerInstanceId": "fx",
+      "providerSessionId": "provider-session:provider-instance:fx:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "fx",
+        "nativeId": "fx-session-01",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "itemIdentityVersion": 2
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:<uuid:13>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "fx",
+      "modelSelection": {
+        "instanceId": "fx",
+        "model": "default"
+      },
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "running",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:<uuid:14>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeThreadId": "fx-session-01",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "fx",
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:<uuid:15>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "running",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:16>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:fx:native-turn:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1",
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "fx",
+        "nativeId": "fx-session-01:turn:1",
+        "strength": "weak"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:17>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "fx",
+      "providerInstanceId": "fx",
+      "providerSessionId": "provider-session:provider-instance:fx:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "fx",
+        "nativeId": "fx-session-01",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "itemIdentityVersion": 2
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:18>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Atool%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Atool%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "running",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:fx:native-turn:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1",
+      "nativeItemRef": {
+        "driver": "fx",
+        "nativeId": "toolu_01UGENWURULQ8Y3F7F8Npwzg",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:19>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Atool%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Atool%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Atool%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg",
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:fx:native-turn:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1",
+      "nativeItemRef": {
+        "driver": "fx",
+        "nativeId": "toolu_01UGENWURULQ8Y3F7F8Npwzg",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000002,
+      "status": "pending",
+      "title": "Changed files",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "updatedAt": "<time>",
+      "type": "file_change",
+      "fileName": ".claude-denied-write.txt"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:20>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Afx%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Afx%253Anative-turn%253Aprovider-instance%25253Afx%25253Afx-session-01%25253Aturn%25253A1%3Anative-request%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg%3A<uuid:21>",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:runtime-request:runtime-request%3Aprovider%3Afx%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Afx%253Anative-turn%253Aprovider-instance%25253Afx%25253Afx-session-01%25253Aturn%25253A1%3Anative-request%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg%3A<uuid:21>",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "approval_request",
+      "status": "waiting",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:fx:native-turn:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1",
+      "nativeItemRef": {
+        "driver": "fx",
+        "nativeId": "toolu_01UGENWURULQ8Y3F7F8Npwzg",
+        "strength": "weak"
+      },
+      "runtimeRequestId": "runtime-request:provider:fx:provider-turn:provider-turn%3Aprovider%3Afx%3Anative-turn%3Aprovider-instance%253Afx%253Afx-session-01%253Aturn%253A1:native-request:toolu_01UGENWURULQ8Y3F7F8Npwzg:<uuid:21>",
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:22>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Afx%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Afx%253Anative-turn%253Aprovider-instance%25253Afx%25253Afx-session-01%25253Aturn%25253A1%3Anative-request%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg%3A<uuid:21>",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "runtime-request.updated",
+    "payload": {
+      "id": "runtime-request:provider:fx:provider-turn:provider-turn%3Aprovider%3Afx%3Anative-turn%3Aprovider-instance%253Afx%253Afx-session-01%253Aturn%253A1:native-request:toolu_01UGENWURULQ8Y3F7F8Npwzg:<uuid:21>",
+      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Afx%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Afx%253Anative-turn%253Aprovider-instance%25253Afx%25253Afx-session-01%25253Aturn%25253A1%3Anative-request%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg%3A<uuid:21>",
+      "providerTurnId": "provider-turn:provider:fx:native-turn:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1",
+      "nativeRequestRef": {
+        "driver": "fx",
+        "nativeId": "toolu_01UGENWURULQ8Y3F7F8Npwzg",
+        "strength": "weak"
+      },
+      "kind": "file-change",
+      "status": "pending",
+      "responseCapability": {
+        "type": "live",
+        "providerSessionId": "provider-session:provider-instance:fx:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:<uuid:2>"
+      },
+      "createdAt": "<time>",
+      "resolvedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:23>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Afx%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Afx%253Anative-turn%253Aprovider-instance%25253Afx%25253Afx-session-01%25253Aturn%25253A1%3Anative-request%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg%3A<uuid:21>",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:runtime-request:runtime-request%3Aprovider%3Afx%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Afx%253Anative-turn%253Aprovider-instance%25253Afx%25253Afx-session-01%25253Aturn%25253A1%3Anative-request%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg%3A<uuid:21>",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Afx%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Afx%253Anative-turn%253Aprovider-instance%25253Afx%25253Afx-session-01%25253Aturn%25253A1%3Anative-request%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg%3A<uuid:21>",
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:fx:native-turn:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1",
+      "nativeItemRef": {
+        "driver": "fx",
+        "nativeId": "toolu_01UGENWURULQ8Y3F7F8Npwzg",
+        "strength": "weak"
+      },
+      "parentItemId": null,
+      "ordinal": 1000003,
+      "status": "waiting",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": null,
+      "updatedAt": "<time>",
+      "type": "approval_request",
+      "requestId": "runtime-request:provider:fx:provider-turn:provider-turn%3Aprovider%3Afx%3Anative-turn%3Aprovider-instance%253Afx%253Afx-session-01%253Aturn%253A1:native-request:toolu_01UGENWURULQ8Y3F7F8Npwzg:<uuid:21>",
+      "requestKind": "file-change",
+      "prompt": "Changed files"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_denied_write%3Aapprove-runtime-request-1%3A<uuid:5>:<uuid:24>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Afx%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Afx%253Anative-turn%253Aprovider-instance%25253Afx%25253Afx-session-01%25253Aturn%25253A1%3Anative-request%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg%3A<uuid:21>",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "runtime-request.updated",
+    "payload": {
+      "id": "runtime-request:provider:fx:provider-turn:provider-turn%3Aprovider%3Afx%3Anative-turn%3Aprovider-instance%253Afx%253Afx-session-01%253Aturn%253A1:native-request:toolu_01UGENWURULQ8Y3F7F8Npwzg:<uuid:21>",
+      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Afx%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Afx%253Anative-turn%253Aprovider-instance%25253Afx%25253Afx-session-01%25253Aturn%25253A1%3Anative-request%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg%3A<uuid:21>",
+      "providerTurnId": "provider-turn:provider:fx:native-turn:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1",
+      "nativeRequestRef": {
+        "driver": "fx",
+        "nativeId": "toolu_01UGENWURULQ8Y3F7F8Npwzg",
+        "strength": "weak"
+      },
+      "kind": "file-change",
+      "status": "resolved",
+      "responseCapability": {
+        "type": "live",
+        "providerSessionId": "provider-session:provider-instance:fx:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:<uuid:2>"
+      },
+      "createdAt": "<time>",
+      "resolvedAt": "<time>",
+      "decision": "decline"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_denied_write%3Aapprove-runtime-request-1%3A<uuid:5>:<uuid:25>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Afx%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Afx%253Anative-turn%253Aprovider-instance%25253Afx%25253Afx-session-01%25253Aturn%25253A1%3Anative-request%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg%3A<uuid:21>",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:runtime-request:runtime-request%3Aprovider%3Afx%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Afx%253Anative-turn%253Aprovider-instance%25253Afx%25253Afx-session-01%25253Aturn%25253A1%3Anative-request%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg%3A<uuid:21>",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "approval_request",
+      "status": "cancelled",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:fx:native-turn:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1",
+      "nativeItemRef": {
+        "driver": "fx",
+        "nativeId": "toolu_01UGENWURULQ8Y3F7F8Npwzg",
+        "strength": "weak"
+      },
+      "runtimeRequestId": "runtime-request:provider:fx:provider-turn:provider-turn%3Aprovider%3Afx%3Anative-turn%3Aprovider-instance%253Afx%253Afx-session-01%253Aturn%253A1:native-request:toolu_01UGENWURULQ8Y3F7F8Npwzg:<uuid:21>",
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_denied_write%3Aapprove-runtime-request-1%3A<uuid:5>:<uuid:26>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Afx%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Afx%253Anative-turn%253Aprovider-instance%25253Afx%25253Afx-session-01%25253Aturn%25253A1%3Anative-request%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg%3A<uuid:21>",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:runtime-request:runtime-request%3Aprovider%3Afx%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Afx%253Anative-turn%253Aprovider-instance%25253Afx%25253Afx-session-01%25253Aturn%25253A1%3Anative-request%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg%3A<uuid:21>",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Afx%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Afx%253Anative-turn%253Aprovider-instance%25253Afx%25253Afx-session-01%25253Aturn%25253A1%3Anative-request%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg%3A<uuid:21>",
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:fx:native-turn:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1",
+      "nativeItemRef": {
+        "driver": "fx",
+        "nativeId": "toolu_01UGENWURULQ8Y3F7F8Npwzg",
+        "strength": "weak"
+      },
+      "parentItemId": null,
+      "ordinal": 1000003,
+      "status": "cancelled",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "approval_request",
+      "requestId": "runtime-request:provider:fx:provider-turn:provider-turn%3Aprovider%3Afx%3Anative-turn%3Aprovider-instance%253Afx%253Afx-session-01%253Aturn%253A1:native-request:toolu_01UGENWURULQ8Y3F7F8Npwzg:<uuid:21>",
+      "requestKind": "file-change",
+      "prompt": "Changed files"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:27>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Atool%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Atool%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "failed",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:fx:native-turn:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1",
+      "nativeItemRef": {
+        "driver": "fx",
+        "nativeId": "toolu_01UGENWURULQ8Y3F7F8Npwzg",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:28>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Atool%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Atool%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Atool%3Atoolu_01UGENWURULQ8Y3F7F8Npwzg",
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:fx:native-turn:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1",
+      "nativeItemRef": {
+        "driver": "fx",
+        "nativeId": "toolu_01UGENWURULQ8Y3F7F8Npwzg",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000002,
+      "status": "failed",
+      "title": "Changed files",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "file_change",
+      "fileName": ".claude-denied-write.txt",
+      "diffStr": "{\"error\":{\"type\":\"tool_permission_denied\",\"tool_name\":\"write_file\",\"message\":\"Permission denied by user\",\"reason\":\"user_denied\",\"denied\":true,\"suggestion\":\"The tool did not run. Do not retry unchanged; explain the denial or use a safer allowed alternative.\"}}"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:29>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "fx",
+      "providerInstanceId": "fx",
+      "providerSessionId": "provider-session:provider-instance:fx:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "fx",
+        "nativeId": "fx-session-01",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "title": "Create Approval Fixture File",
+        "updatedAt": "<time>",
+        "itemIdentityVersion": 2
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:30>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "fx",
+      "providerInstanceId": "fx",
+      "providerSessionId": "provider-session:provider-instance:fx:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "fx",
+        "nativeId": "fx-session-01",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": {
+        "usedTokens": 19817,
+        "maxTokens": 1000000
+      },
+      "nativeMetadata": {
+        "title": "Create Approval Fixture File",
+        "updatedAt": "<time>",
+        "itemIdentityVersion": 2
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:31>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1%3Aassistant%3Amessage%3A9e1760845a3fdc2b643eab4f6be6fb07",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1%3Aassistant%3Amessage%3A9e1760845a3fdc2b643eab4f6be6fb07",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "assistant_message",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:fx:native-turn:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1",
+      "nativeItemRef": {
+        "driver": "fx",
+        "nativeId": "fx-session-01:turn:1:assistant:message:9e1760845a3fdc2b643eab4f6be6fb07",
+        "strength": "weak"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:32>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1%3Aassistant%3Amessage%3A9e1760845a3fdc2b643eab4f6be6fb07",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "agent",
+      "creationSource": "provider",
+      "id": "message:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1%3Aassistant%3Amessage%3A9e1760845a3fdc2b643eab4f6be6fb07",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1%3Aassistant%3Amessage%3A9e1760845a3fdc2b643eab4f6be6fb07",
+      "role": "assistant",
+      "text": "write permission denied",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:33>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1%3Aassistant%3Amessage%3A9e1760845a3fdc2b643eab4f6be6fb07",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1%3Aassistant%3Amessage%3A9e1760845a3fdc2b643eab4f6be6fb07",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1%3Aassistant%3Amessage%3A9e1760845a3fdc2b643eab4f6be6fb07",
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:fx:native-turn:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1",
+      "nativeItemRef": {
+        "driver": "fx",
+        "nativeId": "fx-session-01:turn:1:assistant:message:9e1760845a3fdc2b643eab4f6be6fb07",
+        "strength": "weak"
+      },
+      "parentItemId": null,
+      "ordinal": 1000004,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "assistant_message",
+      "messageId": "message:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1%3Aassistant%3Amessage%3A9e1760845a3fdc2b643eab4f6be6fb07",
+      "text": "write permission denied",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:34>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:fx:native-turn:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1",
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "fx",
+        "nativeId": "fx-session-01:turn:1",
+        "strength": "weak"
+      },
+      "ordinal": 1,
+      "status": "completed",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "turnTokenUsage": {
+        "usageScope": "main_agent",
+        "hasSubagents": false,
+        "usageStatus": "unavailable"
+      }
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:35>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "fx",
+      "providerInstanceId": "fx",
+      "providerSessionId": "provider-session:provider-instance:fx:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "fx",
+        "nativeId": "fx-session-01",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": {
+        "usedTokens": 19817,
+        "maxTokens": 1000000
+      },
+      "nativeMetadata": {
+        "title": "Create Approval Fixture File",
+        "updatedAt": "<time>",
+        "itemIdentityVersion": 2
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:<uuid:36>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeThreadId": "fx-session-01",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "fx",
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "completed",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:<uuid:37>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "fx",
+      "modelSelection": {
+        "instanceId": "fx",
+        "model": "default"
+      },
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "waiting",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:<uuid:38>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "waiting",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:<uuid:39>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "fx",
+      "providerInstanceId": "fx",
+      "providerSessionId": "provider-session:provider-instance:fx:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "fx",
+        "nativeId": "fx-session-01",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "idle",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": {
+        "usedTokens": 19817,
+        "maxTokens": 1000000
+      },
+      "nativeMetadata": {
+        "title": "Create Approval Fixture File",
+        "updatedAt": "<time>",
+        "itemIdentityVersion": 2
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:40>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "checkpoint.captured",
+    "payload": {
+      "id": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:0",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:name:root",
+      "runId": null,
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentCheckpointId": null,
+      "ordinalWithinScope": 0,
+      "appRunOrdinal": null,
+      "ref": "refs/hanzo/orchestration-v2/checkpoints/YWU1YzE1Yzc3MjgwYTNlMDVkN2U1NjUwOGY4NThhYTY/ordinal/0",
+      "status": "ready",
+      "files": [],
+      "capturedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:41>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "checkpoint.captured",
+    "payload": {
+      "id": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:name:root",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentCheckpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:0",
+      "ordinalWithinScope": 1,
+      "appRunOrdinal": 1,
+      "ref": "refs/hanzo/orchestration-v2/checkpoints/YWU1YzE1Yzc3MjgwYTNlMDVkN2U1NjUwOGY4NThhYTY/ordinal/1",
+      "status": "ready",
+      "files": [],
+      "capturedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:42>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "fx",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:fx:native-item:checkpoint%3Acheckpoint%3Ascope%3Acheckpoint-scope%253Athread%253Athread%25253Afixture%25253Atool_call_denied_write%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_denied_write%2525253A<uuid:0>%25253A<uuid:1>%253Aname%253Aroot%3Aname%3A1",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000005,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "checkpoint",
+      "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:name:root",
+      "files": []
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:43>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "fx",
+      "modelSelection": {
+        "instanceId": "fx",
+        "model": "default"
+      },
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "completed",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:44>",
+    "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:tool_call_denied_write:project:project%3Afixture%3Atool_call_denied_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "completed",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_denied_write%253Aproject%253Aproject%25253Afixture%25253Atool_call_denied_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_denied_write%3Aproject%3Aproject%253Afixture%253Atool_call_denied_write%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  }
+]

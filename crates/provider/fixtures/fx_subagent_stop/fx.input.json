@@ -1,0 +1,23 @@
+{
+  "fixture": "fx_subagent_stop",
+  "driver": "fx",
+  "modelSelection": {
+    "instanceId": "fx",
+    "model": "default"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": "approval-required",
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Use exactly one subagent to create a file named stopped.txt containing STOP. Do not create the file yourself. Wait for the subagent, then reply DONE."
+    },
+    {
+      "type": "interrupt",
+      "targetRunIndex": 1,
+      "waitForTurnItemType": "subagent"
+    }
+  ]
+}

@@ -101,6 +101,7 @@ export const createUsageService = (
     }
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<ProviderSnapshot[]>((resolve) => {
+      // @effect-diagnostics-next-line globalTimers:off - a Promise read budget, outside any Effect runtime.
       timer = setTimeout(() => {
         const previous = [...last.values()].filter((s) => s.provider === id);
         resolve(
