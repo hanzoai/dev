@@ -248,11 +248,11 @@ const SOURCE_CONTROL_HOST_TERMS = sourceControlClients.definitions
 export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "local-ai-models",
-    title: msg("Zen local models"),
+    title: msg("Local AI engines"),
     to: "/settings/general",
     searchTerms: [
       msg(
-        "local ai ollama zen6 zen6-flash zen6-coder zen6-max zen-vl weights download offline inference",
+        "local ai engine hanzo engine ollama lm studio openai compatible endpoint zen models pull load offline inference lan mdns",
       ),
     ],
   },
@@ -261,12 +261,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: msg("Hanzo validator node (hanzod)"),
     to: "/settings/general",
     searchTerms: [msg("hanzod validator node rpc 9630 staking 9631 block height chain")],
-  },
-  {
-    id: "local-ai-engine",
-    title: msg("Embedded engine & LAN discovery"),
-    to: "/settings/general",
-    searchTerms: [msg("hanzo engine 36900 gguf huggingface metal cuda lan discovery inference")],
   },
   {
     id: "storage-worktree-keep-when",

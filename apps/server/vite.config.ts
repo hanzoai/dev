@@ -4,6 +4,7 @@ import * as NodePath from "node:path";
 import { defineConfig, mergeConfig } from "vite-plus";
 
 import baseConfig from "../../vite.config.ts";
+import { devWasmPlugin } from "../../scripts/lib/dev-wasm-plugin.ts";
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
 import { resolveTaggedSourceVersion } from "../../scripts/lib/tagged-source-version.ts";
 import rootPackageJson from "../../package.json" with { type: "json" };
@@ -93,6 +94,7 @@ export default mergeConfig(
     },
     pack: {
       plugins: [
+        devWasmPlugin,
         {
           // Every server module reads its version from this manifest import.
           name: "hanzodev:build-version",

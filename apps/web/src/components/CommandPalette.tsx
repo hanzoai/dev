@@ -1774,8 +1774,8 @@ function OpenCommandPaletteDialog(props: {
     searchTerms: [
       "local ai",
       "ollama",
-      "zen6",
-      "zen6-coder",
+      "lm studio",
+      "openai compatible",
       "zen",
       "hanzod",
       "validator",
@@ -1784,11 +1784,11 @@ function OpenCommandPaletteDialog(props: {
       "models",
       "lan",
     ],
-    title: gt("Local AI, Validator Node & Engine"),
+    title: gt("Local AI engines"),
     icon: <CpuIcon className={ITEM_ICON_CLASS} />,
     shortcutCommand: "localAi.open",
     run: async () => {
-      openLocalAiManager("models");
+      openLocalAiManager("engines");
     },
   });
 

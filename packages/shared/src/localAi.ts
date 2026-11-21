@@ -1,47 +1,55 @@
 // @effect-diagnostics globalDate:off -- Latency probes measure wall-clock HTTP round-trips outside an Effect runtime.
 
-export const LOCAL_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
-export const LOCAL_HANZO_ENGINE_BASE_URL = "http://127.0.0.1:36900";
+/** One pluggable local inference endpoint. `baseUrl` is the OpenAI-compatible API root (`<baseUrl>/models`, `<baseUrl>/chat/completions`). */
+export type LocalEngineKind = "hanzo-engine" | "ollama" | "lm-studio" | "openai";
+
+export interface LocalEngine {
+  readonly name: string;
+  readonly kind: LocalEngineKind;
+  readonly baseUrl: string;
+  /** Tried when `baseUrl` does not answer; lets Hanzo Engine fall back to its standalone port until hanzod is the default. */
+  readonly fallbackBaseUrl?: string;
+}
+
+export interface LocalModel {
+  readonly id: string;
+  /** Zen-family model served by Hanzo Engine. */
+  readonly zen: boolean;
+}
+
+export interface LocalEngineStatus {
+  readonly engine: LocalEngine;
+  readonly online: boolean;
+  /** The base URL that answered, which may be the fallback. */
+  readonly baseUrl: string;
+  readonly latencyMs: number | null;
+  readonly models: ReadonlyArray<LocalModel>;
+}
+
+export type LocalEngineAction = "pull" | "load" | null;
+
+export const HANZOD_ENGINE_BASE_URL = "http://127.0.0.1:3690/v1/engine";
+export const LOCAL_HANZO_ENGINE_STANDALONE_BASE_URL = "http://127.0.0.1:36900/v1";
 export const LOCAL_HANZOD_RPC_BASE_URL = "http://127.0.0.1:9630";
 const LOCAL_HANZOD_STAKING_PORT = 9631;
 
-export interface ZenCatalogModel {
-  readonly id: string;
-  readonly ollamaTag: string;
-  readonly hfRepo: string;
-  readonly title: string;
-  readonly sizeLabel: string;
-  readonly description: string;
-  readonly family: "zen";
-  readonly recommended?: boolean;
-  readonly vision?: boolean;
-  readonly thinking?: boolean;
-  readonly coding?: boolean;
-  readonly tools: boolean;
-}
+export const BUILT_IN_LOCAL_ENGINES: ReadonlyArray<LocalEngine> = [
+  {
+    name: "Hanzo Engine",
+    kind: "hanzo-engine",
+    baseUrl: HANZOD_ENGINE_BASE_URL,
+    fallbackBaseUrl: LOCAL_HANZO_ENGINE_STANDALONE_BASE_URL,
+  },
+  { name: "Ollama", kind: "ollama", baseUrl: "http://127.0.0.1:11434/v1" },
+  { name: "LM Studio", kind: "lm-studio", baseUrl: "http://127.0.0.1:1234/v1" },
+];
 
-export interface InstalledLocalAiModel {
-  readonly id: string;
-  readonly source: "ollama" | "hanzo-engine" | "custom";
-  readonly sizeBytes?: number;
-}
-
-export interface OllamaRuntimeStatus {
-  readonly online: boolean;
-  readonly baseUrl: string;
-  readonly latencyMs: number | null;
-  readonly models: ReadonlyArray<InstalledLocalAiModel>;
-}
-
-export interface HanzoEngineRuntimeStatus {
-  readonly online: boolean;
-  readonly baseUrl: string;
-  readonly latencyMs: number | null;
-  readonly loadedModel: string | null;
-  readonly device: string | null;
-  readonly memoryUsedMb: number | null;
-  readonly models: ReadonlyArray<InstalledLocalAiModel>;
-}
+const ENGINE_KINDS: ReadonlySet<string> = new Set([
+  "hanzo-engine",
+  "ollama",
+  "lm-studio",
+  "openai",
+]);
 
 export interface HanzodValidatorStatus {
   readonly online: boolean;
@@ -54,148 +62,154 @@ export interface HanzodValidatorStatus {
   readonly latencyMs: number | null;
 }
 
-export interface DiscoveredLanEngine {
-  readonly name: string;
-  readonly host: string;
-  readonly port: number;
-  readonly baseUrl: string;
-  readonly kind: "hanzo-engine" | "ollama";
-  readonly models: ReadonlyArray<string>;
-  readonly latencyMs: number | null;
+export function trimBaseUrl(raw: string): string {
+  return raw.trim().replace(/\/+$/u, "");
 }
 
-export interface LocalAiStackSnapshot {
-  readonly ollama: OllamaRuntimeStatus;
-  readonly engine: HanzoEngineRuntimeStatus;
-  readonly hanzod: HanzodValidatorStatus;
-  readonly installedModels: ReadonlyArray<InstalledLocalAiModel>;
+/** Parses the persisted custom-engine list. Invalid rows are dropped, never thrown on. */
+export function parseLocalEngines(raw: string | null | undefined): LocalEngine[] {
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const seen = new Set<string>();
+  const engines: LocalEngine[] = [];
+  for (const row of parsed) {
+    if (typeof row !== "object" || row === null) continue;
+    const { name, kind, baseUrl } = row as Record<string, unknown>;
+    if (typeof name !== "string" || typeof baseUrl !== "string") continue;
+    const url = trimBaseUrl(baseUrl);
+    const label = name.trim();
+    if (!label || !/^https?:\/\/[^\s/]+/iu.test(url) || seen.has(url)) continue;
+    const engineKind = typeof kind === "string" && ENGINE_KINDS.has(kind) ? kind : "openai";
+    seen.add(url);
+    engines.push({ name: label, kind: engineKind as LocalEngineKind, baseUrl: url });
+  }
+  return engines;
+}
+
+export function isZenModelId(id: string): boolean {
+  return /^zen/iu.test(id.trim());
 }
 
 /**
- * Strict evergreen Zen model policy guard: rejects any legacy `qwen2`, `zen4`, or `zen5`
- * weight or alias across catalog entries, Ollama tags, Engine models, and LAN discovery results.
+ * Normalizes an engine's model listing. Accepts the OpenAI `{data:[{id}]}` shape, Ollama's native
+ * `{models:[{name}]}`, and a bare array. Every served model is kept; Hanzo Engine's Zen family sorts first.
  */
-export function isAllowedLocalAiModel(modelId: string | null | undefined): boolean {
-  const trimmed = modelId?.trim() ?? "";
-  if (!trimmed) return false;
-  return !/qwen2|zen[45]/iu.test(trimmed);
-}
-
-export function filterAllowedLocalAiModels<T extends { readonly id: string }>(
-  models: ReadonlyArray<T>,
-): T[] {
-  return models.filter((entry) => isAllowedLocalAiModel(entry.id));
-}
-
-export const ZEN_LOCAL_AI_CATALOG: ReadonlyArray<ZenCatalogModel> = [
-  {
-    id: "zen6-flash:0.6b",
-    ollamaTag: "qwen3:0.6b",
-    hfRepo: "Qwen/Qwen3-0.6B",
-    title: "Zen 6 Flash Nano (0.6B)",
-    sizeLabel: "0.6 GB",
-    description: "Ultra-fast on-device 0.6B foundation model for instant offline responses.",
-    family: "zen",
-    tools: true,
-  },
-  {
-    id: "zen6-flash",
-    ollamaTag: "qwen3:4b",
-    hfRepo: "Qwen/Qwen3-4B",
-    title: "Zen 6 Flash (4B)",
-    sizeLabel: "2.5 GB",
-    description: "Compact agentic 4B model tuned for tool use, fast edits, and laptop batteries.",
-    family: "zen",
-    thinking: true,
-    tools: true,
-  },
-  {
-    id: "zen6",
-    ollamaTag: "qwen3:8b",
-    hfRepo: "Qwen/Qwen3-8B",
-    title: "Zen 6 (8B)",
-    sizeLabel: "5.0 GB",
-    description: "Flagship Zen 6 with strong reasoning and tool calling.",
-    family: "zen",
-    recommended: true,
-    thinking: true,
-    tools: true,
-  },
-  {
-    id: "zen6:14b",
-    ollamaTag: "qwen3:14b",
-    hfRepo: "Qwen/Qwen3-14B",
-    title: "Zen 6 (14B)",
-    sizeLabel: "9.0 GB",
-    description: "High-accuracy local 14B reasoning model for multi-file refactors and reviews.",
-    family: "zen",
-    thinking: true,
-    tools: true,
-  },
-  {
-    id: "zen6-max",
-    ollamaTag: "qwen3:30b-a3b",
-    hfRepo: "Qwen/Qwen3-30B-A3B",
-    title: "Zen 6 Max (30B-A3B MoE)",
-    sizeLabel: "18 GB",
-    description:
-      "Sparse Mixture-of-Experts (3B active) delivering frontier reasoning at 4B token speed.",
-    family: "zen",
-    thinking: true,
-    tools: true,
-  },
-  {
-    id: "zen6-coder",
-    ollamaTag: "qwen3-coder:30b",
-    hfRepo: "Qwen/Qwen3-Coder-30B-A3B-Instruct",
-    title: "Zen 6 Coder (30B)",
-    sizeLabel: "19 GB",
-    description:
-      "Specialized agentic coding MoE model tuned for repository navigation and patch synthesis.",
-    family: "zen",
-    coding: true,
-    thinking: true,
-    tools: true,
-  },
-  {
-    id: "zen-vl",
-    ollamaTag: "qwen3-vl:8b",
-    hfRepo: "Qwen/Qwen3-VL-8B-Instruct",
-    title: "Zen VL (8B)",
-    sizeLabel: "5.8 GB",
-    description: "Multimodal model for UI screenshot inspection, diagrams, and visual debugging.",
-    family: "zen",
-    vision: true,
-    thinking: true,
-    tools: true,
-  },
-] as const;
-
-const OLLAMA_PULL_ALIASES: Readonly<Record<string, string>> = {
-  "zen6-flash:0.6b": "qwen3:0.6b",
-  "zen-nano": "qwen3:0.6b",
-  "zen6-flash": "qwen3:4b",
-  "zen-mini": "qwen3:4b",
-  zen6: "qwen3:8b",
-  zen: "qwen3:8b",
-  "zen6:latest": "qwen3:8b",
-  "zen6:8b": "qwen3:8b",
-  "zen6:14b": "qwen3:14b",
-  "zen6-max": "qwen3:30b-a3b",
-  "zen-max": "qwen3:30b-a3b",
-  "zen6-coder": "qwen3-coder:30b",
-  "zen-coder": "qwen3-coder:30b",
-  "zen6-coder:30b": "qwen3-coder:30b",
-  "zen-vl": "qwen3-vl:8b",
-  "zen-vl:8b": "qwen3-vl:8b",
-};
-
-export function resolveOllamaPullTarget(modelTag: string): string {
-  const trimmed = modelTag.trim();
-  if (!isAllowedLocalAiModel(trimmed)) {
-    throw new Error("Legacy models are not supported; select a Zen model.");
+export function normalizeLocalModels(body: unknown, kind: LocalEngineKind): LocalModel[] {
+  const rows: unknown = Array.isArray(body)
+    ? body
+    : ((body as { data?: unknown; models?: unknown } | null)?.data ??
+      (body as { models?: unknown } | null)?.models);
+  if (!Array.isArray(rows)) return [];
+  const seen = new Set<string>();
+  const models: LocalModel[] = [];
+  for (const row of rows) {
+    const record = typeof row === "string" ? { id: row } : (row as Record<string, unknown> | null);
+    const raw = record?.id ?? record?.name ?? record?.model;
+    const id = typeof raw === "string" ? raw.trim() : "";
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    models.push({ id, zen: kind === "hanzo-engine" && isZenModelId(id) });
   }
-  return OLLAMA_PULL_ALIASES[trimmed] ?? trimmed;
+  return models.toSorted((a, b) => Number(b.zen) - Number(a.zen));
+}
+
+export function localEngineAction(kind: LocalEngineKind): LocalEngineAction {
+  switch (kind) {
+    case "hanzo-engine":
+      return "load";
+    case "ollama":
+      return "pull";
+    default:
+      return null;
+  }
+}
+
+/** Native (non-OpenAI) endpoints live at the server origin, not under the `/v1` root. */
+export function localEngineNativeUrl(engine: Pick<LocalEngine, "baseUrl">, path: string): string {
+  return `${new URL(engine.baseUrl).origin}${path}`;
+}
+
+export async function probeLocalEngine(
+  engine: LocalEngine,
+  options?: { readonly timeoutMs?: number; readonly fetchImpl?: typeof globalThis.fetch },
+): Promise<LocalEngineStatus> {
+  const fetchImpl = options?.fetchImpl ?? globalThis.fetch;
+  const timeoutMs = options?.timeoutMs ?? 1_500;
+  for (const baseUrl of [engine.baseUrl, engine.fallbackBaseUrl]) {
+    if (!baseUrl) continue;
+    const startedAt = Date.now();
+    try {
+      const response = await fetchImpl(`${baseUrl}/models`, {
+        method: "GET",
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!response.ok) continue;
+      const latencyMs = Math.max(0, Date.now() - startedAt);
+      const body = await response.json().catch(() => null);
+      return {
+        engine,
+        online: true,
+        baseUrl,
+        latencyMs,
+        models: normalizeLocalModels(body, engine.kind),
+      };
+    } catch {
+      // Unreachable or timed out; try the fallback, then report offline.
+    }
+  }
+  return { engine, online: false, baseUrl: engine.baseUrl, latencyMs: null, models: [] };
+}
+
+/** One bounded round of parallel probes. Callers invoke it on open and on explicit refresh, never on a timer. */
+export function probeLocalEngines(
+  engines: ReadonlyArray<LocalEngine>,
+  options?: { readonly timeoutMs?: number; readonly fetchImpl?: typeof globalThis.fetch },
+): Promise<LocalEngineStatus[]> {
+  return Promise.all(engines.map((engine) => probeLocalEngine(engine, options)));
+}
+
+/**
+ * The model-picker entry for an engine: a Hanzo agent instance whose model provider is the engine endpoint.
+ * Models come from the engine's own listing.
+ */
+export function localEngineInstanceId(engine: Pick<LocalEngine, "baseUrl">): string {
+  return `local_${new URL(engine.baseUrl).host.replace(/[^a-z0-9]+/giu, "_")}`;
+}
+
+export function localEngineProviderInstance(status: LocalEngineStatus): {
+  readonly displayName: string;
+  readonly enabled: true;
+  readonly config: {
+    readonly enabled: true;
+    readonly launchArgs: string;
+    readonly customModels: ReadonlyArray<{ readonly slug: string; readonly name?: string }>;
+  };
+} {
+  const id = localEngineInstanceId(status.engine);
+  const provider = `model_providers.${id}`;
+  const launchArgs = [
+    `-c model_provider="${id}"`,
+    `-c ${provider}.name="${status.engine.name.replace(/["\\]/gu, "")}"`,
+    `-c ${provider}.base_url="${status.baseUrl}"`,
+    `-c ${provider}.wire_api="chat"`,
+  ].join(" ");
+  return {
+    displayName: status.engine.name,
+    enabled: true,
+    config: {
+      enabled: true,
+      launchArgs,
+      customModels: status.models.map((model) =>
+        model.zen ? { slug: model.id, name: `${model.id} (Zen)` } : { slug: model.id },
+      ),
+    },
+  };
 }
 
 function formatChainNetworkLabel(chainId: number | null): string | null {
@@ -229,160 +243,6 @@ function parseHexQuantity(raw: unknown): number | null {
   return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
-function normalizeBaseUrl(raw: string | undefined, fallback: string): string {
-  const trimmed = raw?.trim().replace(/\/+$/u, "");
-  return trimmed || fallback;
-}
-
-export async function probeOllamaStatus(options?: {
-  readonly baseUrl?: string;
-  readonly timeoutMs?: number;
-  readonly fetchImpl?: typeof globalThis.fetch;
-}): Promise<OllamaRuntimeStatus> {
-  const fetchImpl = options?.fetchImpl ?? globalThis.fetch;
-  const baseUrl = normalizeBaseUrl(options?.baseUrl, LOCAL_OLLAMA_BASE_URL);
-  const timeoutMs = options?.timeoutMs ?? 1_500;
-  const startedAt = Date.now();
-
-  try {
-    const response = await fetchImpl(`${baseUrl}/api/tags`, {
-      method: "GET",
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (!response.ok) {
-      return { online: false, baseUrl, latencyMs: null, models: [] };
-    }
-    const latencyMs = Math.max(0, Date.now() - startedAt);
-    const body = (await response.json()) as {
-      readonly models?: ReadonlyArray<{
-        readonly name?: string;
-        readonly model?: string;
-        readonly size?: number;
-      }>;
-    };
-    const seen = new Set<string>();
-    const models: InstalledLocalAiModel[] = [];
-    for (const row of Array.isArray(body?.models) ? body.models : []) {
-      const id = String(row?.name ?? row?.model ?? "").trim();
-      if (!isAllowedLocalAiModel(id) || seen.has(id)) continue;
-      seen.add(id);
-      models.push({
-        id,
-        source: "ollama",
-        ...(typeof row?.size === "number" ? { sizeBytes: row.size } : {}),
-      });
-      for (const [alias, target] of Object.entries(OLLAMA_PULL_ALIASES)) {
-        if (target === id && !seen.has(alias)) {
-          seen.add(alias);
-          models.push({
-            id: alias,
-            source: "ollama",
-            ...(typeof row?.size === "number" ? { sizeBytes: row.size } : {}),
-          });
-        }
-      }
-    }
-    return { online: true, baseUrl, latencyMs, models };
-  } catch {
-    return { online: false, baseUrl, latencyMs: null, models: [] };
-  }
-}
-
-export async function probeHanzoEngineStatus(options?: {
-  readonly baseUrl?: string;
-  readonly timeoutMs?: number;
-  readonly fetchImpl?: typeof globalThis.fetch;
-}): Promise<HanzoEngineRuntimeStatus> {
-  const fetchImpl = options?.fetchImpl ?? globalThis.fetch;
-  const baseUrl = normalizeBaseUrl(options?.baseUrl, LOCAL_HANZO_ENGINE_BASE_URL);
-  const timeoutMs = options?.timeoutMs ?? 1_500;
-  const startedAt = Date.now();
-
-  try {
-    const [healthRes, modelsRes, statusRes] = await Promise.all([
-      fetchImpl(`${baseUrl}/health`, {
-        method: "GET",
-        signal: AbortSignal.timeout(timeoutMs),
-      }).catch(() => null),
-      fetchImpl(`${baseUrl}/v1/models`, {
-        method: "GET",
-        signal: AbortSignal.timeout(timeoutMs),
-      }).catch(() => null),
-      fetchImpl(`${baseUrl}/v1/engine/status`, {
-        method: "GET",
-        signal: AbortSignal.timeout(timeoutMs),
-      }).catch(() => null),
-    ]);
-
-    const anyOk = Boolean(healthRes?.ok || modelsRes?.ok || statusRes?.ok);
-    if (!anyOk) {
-      return {
-        online: false,
-        baseUrl,
-        latencyMs: null,
-        loadedModel: null,
-        device: null,
-        memoryUsedMb: null,
-        models: [],
-      };
-    }
-
-    const latencyMs = Math.max(0, Date.now() - startedAt);
-    const modelsJson =
-      modelsRes && modelsRes.ok
-        ? ((await modelsRes.json().catch(() => null)) as {
-            readonly data?: ReadonlyArray<{ readonly id?: string }>;
-          } | null)
-        : null;
-    const statusJson =
-      statusRes && statusRes.ok
-        ? ((await statusRes.json().catch(() => null)) as {
-            readonly loaded_model?: string | null;
-            readonly device?: string | null;
-            readonly memory_usage?: number | null;
-          } | null)
-        : null;
-
-    const seen = new Set<string>();
-    const models: InstalledLocalAiModel[] = [];
-    for (const row of Array.isArray(modelsJson?.data) ? modelsJson.data : []) {
-      const id = String(row?.id ?? "").trim();
-      if (!isAllowedLocalAiModel(id) || seen.has(id)) continue;
-      seen.add(id);
-      models.push({ id, source: "hanzo-engine" });
-    }
-
-    const rawLoaded = statusJson?.loaded_model ?? models[0]?.id ?? null;
-    const loadedModel = isAllowedLocalAiModel(rawLoaded) ? rawLoaded : null;
-    if (loadedModel && !seen.has(loadedModel)) {
-      models.unshift({ id: loadedModel, source: "hanzo-engine" });
-    }
-
-    return {
-      online: true,
-      baseUrl,
-      latencyMs,
-      loadedModel,
-      device: typeof statusJson?.device === "string" ? statusJson.device : null,
-      memoryUsedMb:
-        typeof statusJson?.memory_usage === "number" && Number.isFinite(statusJson.memory_usage)
-          ? statusJson.memory_usage
-          : null,
-      models,
-    };
-  } catch {
-    return {
-      online: false,
-      baseUrl,
-      latencyMs: null,
-      loadedModel: null,
-      device: null,
-      memoryUsedMb: null,
-      models: [],
-    };
-  }
-}
-
 export async function probeHanzodValidatorStatus(options?: {
   readonly baseUrl?: string;
   readonly stakingPort?: number;
@@ -390,7 +250,7 @@ export async function probeHanzodValidatorStatus(options?: {
   readonly fetchImpl?: typeof globalThis.fetch;
 }): Promise<HanzodValidatorStatus> {
   const fetchImpl = options?.fetchImpl ?? globalThis.fetch;
-  const rpcBaseUrl = normalizeBaseUrl(options?.baseUrl, LOCAL_HANZOD_RPC_BASE_URL);
+  const rpcBaseUrl = trimBaseUrl(options?.baseUrl ?? "") || LOCAL_HANZOD_RPC_BASE_URL;
   const stakingPort = options?.stakingPort ?? LOCAL_HANZOD_STAKING_PORT;
   const timeoutMs = options?.timeoutMs ?? 1_500;
   const stakingHost = (() => {
@@ -482,46 +342,5 @@ export async function probeHanzodValidatorStatus(options?: {
     networkLabel: formatChainNetworkLabel(chainId),
     blockHeight,
     latencyMs: online ? Math.max(0, Date.now() - startedAt) : null,
-  };
-}
-
-export async function probeLocalAiStack(options?: {
-  readonly ollamaBaseUrl?: string;
-  readonly engineBaseUrl?: string;
-  readonly hanzodBaseUrl?: string;
-  readonly timeoutMs?: number;
-  readonly fetchImpl?: typeof globalThis.fetch;
-}): Promise<LocalAiStackSnapshot> {
-  const [ollama, engine, hanzod] = await Promise.all([
-    probeOllamaStatus({
-      ...(options?.ollamaBaseUrl ? { baseUrl: options.ollamaBaseUrl } : {}),
-      ...(options?.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
-      ...(options?.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-    }),
-    probeHanzoEngineStatus({
-      ...(options?.engineBaseUrl ? { baseUrl: options.engineBaseUrl } : {}),
-      ...(options?.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
-      ...(options?.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-    }),
-    probeHanzodValidatorStatus({
-      ...(options?.hanzodBaseUrl ? { baseUrl: options.hanzodBaseUrl } : {}),
-      ...(options?.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
-      ...(options?.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-    }),
-  ]);
-
-  const seen = new Set<string>();
-  const installedModels: InstalledLocalAiModel[] = [];
-  for (const item of [...engine.models, ...ollama.models]) {
-    if (!isAllowedLocalAiModel(item.id) || seen.has(item.id)) continue;
-    seen.add(item.id);
-    installedModels.push(item);
-  }
-
-  return {
-    ollama,
-    engine,
-    hanzod,
-    installedModels,
   };
 }

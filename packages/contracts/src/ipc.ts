@@ -1071,12 +1071,8 @@ export type SystemSettingsPane = typeof SystemSettingsPaneSchema.Type;
 
 export const DesktopDiscoveredLanEngineSchema = Schema.Struct({
   name: Schema.String,
-  host: Schema.String,
-  port: Schema.Int,
+  kind: Schema.Literals(["hanzo-engine", "ollama", "lm-studio", "openai"]),
   baseUrl: Schema.String,
-  kind: Schema.Literals(["hanzo-engine", "ollama"]),
-  models: Schema.Array(Schema.String),
-  latencyMs: Schema.NullOr(Schema.Number),
 });
 export type DesktopDiscoveredLanEngine = typeof DesktopDiscoveredLanEngineSchema.Type;
 

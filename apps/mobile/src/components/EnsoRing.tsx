@@ -1,5 +1,5 @@
 import { ensoRingPath } from "@hanzodev/client-runtime/enso-ring";
-import { Path, Svg } from "react-native-svg";
+import { Circle, Path, Svg } from "react-native-svg";
 
 const BOX = 16;
 const STROKE = 1.75;
@@ -8,6 +8,7 @@ const STROKE = 1.75;
 export function EnsoRing(props: {
   readonly color: string;
   readonly gap: number;
+  readonly dot?: boolean;
   readonly size: number;
 }) {
   return (
@@ -18,6 +19,7 @@ export function EnsoRing(props: {
         strokeWidth={STROKE}
         strokeLinecap="round"
       />
+      {props.dot ? <Circle cx={BOX / 2} cy={BOX / 2} r={1.75} fill={props.color} /> : null}
     </Svg>
   );
 }

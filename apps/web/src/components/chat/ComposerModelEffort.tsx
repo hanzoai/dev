@@ -7,7 +7,7 @@ import {
 import type { ProviderOptionDescriptor, RuntimeMode } from "@hanzodev/contracts";
 import type { EffortDisplay } from "@hanzodev/contracts/settings";
 import { getProviderOptionCurrentLabel } from "@hanzodev/shared/model";
-import { ensoRingGap, isEnsoModel } from "@hanzodev/client-runtime/enso-ring";
+import { ensoRingDot, ensoRingGap, isEnsoModel } from "@hanzodev/client-runtime/enso-ring";
 import { msg, T, useGT, useMessages } from "gt-react";
 import { CheckIcon, ChevronRightIcon, ChevronUpIcon, WorkflowIcon } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, use, useRef, useState } from "react";
@@ -39,6 +39,8 @@ import {
 
 type SelectDescriptor = Extract<ProviderOptionDescriptor, { type: "select" }>;
 type BooleanDescriptor = Extract<ProviderOptionDescriptor, { type: "boolean" }>;
+
+export type EnsoRingState = { readonly gap: number; readonly dot: boolean };
 
 /** "medium effort", or "auto effort" when no level is set: what the ring shows. */
 function effortDetail(
@@ -102,10 +104,10 @@ export function describeComposerEffort(
   effortDisplay: EffortDisplay,
   size: ComposerControlSize,
   resolve: MessageResolver = m,
-): { suffix: ReactNode; detail: string | null; ringGap: number | null } {
-  if (!traits) return { suffix: null, detail: null, ringGap: null };
+): { suffix: ReactNode; detail: string | null; ring: EnsoRingState | null } {
+  if (!traits) return { suffix: null, detail: null, ring: null };
   const visibility = getTraitsSectionVisibility({ ...traits, resolve });
-  if (!visibility.hasAnyControls) return { suffix: null, detail: null, ringGap: null };
+  if (!visibility.hasAnyControls) return { suffix: null, detail: null, ring: null };
   const modelSelection =
     traits.instanceId && traits.model
       ? { instanceId: traits.instanceId, model: traits.model, options: traits.modelOptions ?? [] }
@@ -154,13 +156,19 @@ export function describeComposerEffort(
   // Enso shows its effort as the open gap of its ring, so the chip drops the word and bars.
   const ensoSelect =
     traits.model && isEnsoModel(traits.model) && reasoning?.type === "select" ? reasoning : null;
-  const ringGap = ensoSelect
-    ? ensoRingGap(
-        ensoSelect.options.map((option) => option.id),
-        ultrathink
-          ? "ultrathink"
-          : getDescriptorStringValue(ensoSelect, modelSelection, traits.reportedModelSelection),
-      )
+  const ensoEffort = ensoSelect
+    ? ultrathink
+      ? "ultrathink"
+      : getDescriptorStringValue(ensoSelect, modelSelection, traits.reportedModelSelection)
+    : null;
+  const ring: EnsoRingState | null = ensoSelect
+    ? {
+        gap: ensoRingGap(
+          ensoSelect.options.map((option) => option.id),
+          ensoEffort,
+        ),
+        dot: ensoRingDot(ensoEffort),
+      }
     : null;
   const fast = display.speedLabel === "Fast" || display.speedLabel === "Ultrafast";
   // Agent options such as modes live in the picker; the trigger adds only the context window.
@@ -178,11 +186,11 @@ export function describeComposerEffort(
         resolve,
       )
     : null;
-  if (ringGap === null && !word && !glyph && !fast && !display.ultracode && !contextWindow)
-    return { suffix: null, detail: display.label, ringGap };
+  if (ring === null && !word && !glyph && !fast && !display.ultracode && !contextWindow)
+    return { suffix: null, detail: display.label, ring };
   return {
     detail: ensoDetail ?? display.label,
-    ringGap,
+    ring,
     suffix: (
       <span
         className={cn(
@@ -191,7 +199,7 @@ export function describeComposerEffort(
           size === "sm" && "-ms-0.5",
         )}
       >
-        {ringGap !== null ? null : word ? (
+        {ring !== null ? null : word ? (
           <span data-composer-control-label className="max-w-24 truncate">
             {word}
           </span>

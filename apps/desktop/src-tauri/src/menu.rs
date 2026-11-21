@@ -43,7 +43,7 @@ pub fn build_app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         app_menu.append(&MenuItem::with_id(
             app,
             "menu:open-local-ai",
-            "Local AI & Node...",
+            "Local AI...",
             true,
             Some("CmdOrCtrl+Shift+M"),
         )?)?;
