@@ -6,7 +6,7 @@
 
 using namespace facebook::react;
 
-@interface HanzoSourceTextRun () <RCTT3SourceTextRunViewProtocol>
+@interface HanzoSourceTextRun () <RCTHanzoSourceTextRunViewProtocol>
 
 @end
 

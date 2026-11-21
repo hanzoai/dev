@@ -1,8 +1,9 @@
 import { Toolbar } from "@base-ui/react/toolbar";
 import { type ProviderInstanceId } from "@hanzodev/contracts";
-import { memo, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, memo, useLayoutEffect, useRef, useState } from "react";
 import { msg, T, useMessages } from "gt-react";
 import { StarIcon } from "lucide-react";
+import { EnsoRing } from "./EnsoRing";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
@@ -44,12 +45,20 @@ function describeUnavailableInstance(
   );
 }
 
+/** The sidebar's tabs: a provider instance, Favorites, or Enso, the router family of Hanzo. */
+export type PickerTab = ProviderInstanceId | "favorites" | "enso";
+
+/** Enso sits directly above the first Hanzo entry; no Hanzo entry, no Enso tab. */
+export function ensoTabAnchor(entries: ReadonlyArray<ProviderInstanceEntry>) {
+  return entries.find((entry) => entry.driverKind === "hanzo")?.instanceId ?? null;
+}
+
 const PICKER_TOOLTIP_SIDE = "left" as const;
 const PICKER_TOOLTIP_SIDE_OFFSET = 8;
 
 export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
-  selectedInstanceId: ProviderInstanceId | "favorites";
-  onSelectInstance: (instanceId: ProviderInstanceId | "favorites") => void;
+  selectedInstanceId: PickerTab;
+  onSelectInstance: (instanceId: PickerTab) => void;
   onFocusSearch: () => void;
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
   showFavorites?: boolean;
@@ -58,10 +67,11 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   getDisabledInstanceTooltip?: (entry: ProviderInstanceEntry) => string;
 }) {
   const m = useMessages();
-  const handleSelect = (instanceId: ProviderInstanceId | "favorites") => {
+  const handleSelect = (instanceId: PickerTab) => {
     props.onSelectInstance(instanceId);
   };
   const showFavorites = props.showFavorites ?? true;
+  const ensoAnchor = ensoTabAnchor(props.instanceEntries);
   const [hoveredInstanceId, setHoveredInstanceId] = useState<ProviderInstanceId | null>(null);
   const sidebarContentRef = useRef<HTMLDivElement>(null);
   const [selectedIndicatorTop, setSelectedIndicatorTop] = useState<number | null>(null);
@@ -209,22 +219,46 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
             );
 
             return (
-              <div
-                key={entry.instanceId}
-                className="relative w-full"
-                data-model-picker-provider={entry.instanceId}
-              >
-                <Tooltip>
-                  <TooltipTrigger render={trigger} />
-                  <TooltipPopup
-                    side={PICKER_TOOLTIP_SIDE}
-                    sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
-                    align="center"
-                  >
-                    {tooltip}
-                  </TooltipPopup>
-                </Tooltip>
-              </div>
+              <Fragment key={entry.instanceId}>
+                {entry.instanceId === ensoAnchor ? (
+                  <div className="relative w-full" data-model-picker-provider="enso">
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Toolbar.Button
+                            className="relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-md transition-colors hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none"
+                            onClick={() => handleSelect("enso")}
+                            type="button"
+                            aria-label="Enso"
+                            aria-pressed={props.selectedInstanceId === "enso"}
+                          >
+                            <EnsoRing gap={0} className="size-5 shrink-0" />
+                          </Toolbar.Button>
+                        }
+                      />
+                      <TooltipPopup
+                        side={PICKER_TOOLTIP_SIDE}
+                        sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
+                        align="center"
+                      >
+                        Enso
+                      </TooltipPopup>
+                    </Tooltip>
+                  </div>
+                ) : null}
+                <div className="relative w-full" data-model-picker-provider={entry.instanceId}>
+                  <Tooltip>
+                    <TooltipTrigger render={trigger} />
+                    <TooltipPopup
+                      side={PICKER_TOOLTIP_SIDE}
+                      sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
+                      align="center"
+                    >
+                      {tooltip}
+                    </TooltipPopup>
+                  </Tooltip>
+                </div>
+              </Fragment>
             );
           })}
         </div>

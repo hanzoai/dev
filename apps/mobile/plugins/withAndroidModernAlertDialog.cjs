@@ -71,7 +71,7 @@ function withAlertDialogStyles(config) {
           { _: "@color/alert_dialog_secondary_text", $: { name: "android:textColorPrimary" } },
           { _: "@color/alert_dialog_secondary_text", $: { name: "android:textColorSecondary" } },
           // Theme fontFamily covers text views without their own font, including the message body.
-          { _: "@font/xml_dm_sans_regular", $: { name: "android:fontFamily" } },
+          { _: "@font/xml_zen_regular", $: { name: "android:fontFamily" } },
           // AppCompat titles use android:windowTitleStyle; there is no unprefixed equivalent.
           { _: "@style/AppAlertDialog.Title", $: { name: "android:windowTitleStyle" } },
           { _: "@style/AppAlertDialog.Button", $: { name: "buttonBarPositiveButtonStyle" } },
@@ -82,7 +82,7 @@ function withAlertDialogStyles(config) {
       {
         $: { name: "AppAlertDialog.Title", parent: "RtlOverlay.DialogWindowTitle.AppCompat" },
         item: [
-          { _: "@font/dm_sans_500medium", $: { name: "android:fontFamily" } },
+          { _: "@font/zen_medium", $: { name: "android:fontFamily" } },
           { _: "18sp", $: { name: "android:textSize" } },
           { _: "@color/alert_dialog_text", $: { name: "android:textColor" } },
         ],
@@ -94,7 +94,7 @@ function withAlertDialogStyles(config) {
         },
         item: [
           // Override AppCompat's hardcoded sans-serif-medium button font.
-          { _: "@font/dm_sans_500medium", $: { name: "android:fontFamily" } },
+          { _: "@font/zen_medium", $: { name: "android:fontFamily" } },
           { _: "@color/alert_dialog_button_text", $: { name: "android:textColor" } },
           { _: "false", $: { name: "android:textAllCaps" } },
           { _: "0", $: { name: "android:letterSpacing" } },

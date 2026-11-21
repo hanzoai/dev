@@ -186,7 +186,7 @@ export function HanzoConnectProfilePage() {
 
   return (
     <ScrollView
-      className="flex-1 bg-clerk-page"
+      className="flex-1 bg-profile-page"
       contentContainerClassName="pb-8"
       contentInsetAdjustmentBehavior="automatic"
       refreshControl={
@@ -199,8 +199,8 @@ export function HanzoConnectProfilePage() {
       {activeAccount ? (
         <>
           <ClerkSectionHeader>{gt("Organization context (X-Org-Id)")}</ClerkSectionHeader>
-          <View className="border-b border-clerk-border px-6 py-4">
-            <Text className="text-sm text-clerk-foreground-muted">
+          <View className="border-b border-profile-border px-6 py-4">
+            <Text className="text-sm text-profile-foreground-muted">
               {gt("Active org header: X-Org-Id = {org}", {
                 org: activeOrgId ?? activeAccount.owner,
               })}
@@ -220,13 +220,13 @@ export function HanzoConnectProfilePage() {
                     }}
                     className={`rounded-full border px-3.5 py-1.5 ${
                       selected
-                        ? "border-clerk-foreground bg-clerk-foreground"
-                        : "border-clerk-border bg-transparent"
+                        ? "border-profile-foreground bg-profile-foreground"
+                        : "border-profile-border bg-transparent"
                     }`}
                   >
                     <Text
                       className={`text-xs font-semibold ${
-                        selected ? "text-clerk-page" : "text-clerk-foreground"
+                        selected ? "text-profile-page" : "text-profile-foreground"
                       }`}
                     >
                       {`${org.displayName} (${org.id})`}
@@ -239,8 +239,8 @@ export function HanzoConnectProfilePage() {
 
           <ClerkSectionHeader>{gt("Subscription plan & usage")}</ClerkSectionHeader>
           <ClerkRow title={activePlanLabel} subtitle={creditSummary} />
-          <View className="border-b border-clerk-border px-6 py-3">
-            <Text className="text-xs text-clerk-foreground-muted">
+          <View className="border-b border-profile-border px-6 py-3">
+            <Text className="text-xs text-profile-foreground-muted">
               {HANZO_SUBSCRIPTION_PLANS.filter((p) => p.id !== "free")
                 .map((p) => `${p.name} (${p.priceLabel})`)
                 .join(" · ")}
@@ -257,20 +257,20 @@ export function HanzoConnectProfilePage() {
               key={surface.id}
               accessibilityRole="link"
               onPress={() => openSurfaceUrl(surface.url)}
-              className="flex-row items-center justify-between border-b border-clerk-border px-6 py-3.5 active:opacity-60"
+              className="flex-row items-center justify-between border-b border-profile-border px-6 py-3.5 active:opacity-60"
             >
               <View className="min-w-0 flex-1 gap-0.5">
-                <Text className="text-base text-clerk-foreground" numberOfLines={1}>
+                <Text className="text-base text-profile-foreground" numberOfLines={1}>
                   {surface.label}
                 </Text>
-                <Text className="text-xs text-clerk-foreground-muted" numberOfLines={1}>
+                <Text className="text-xs text-profile-foreground-muted" numberOfLines={1}>
                   {`${surface.hostname} · ${surface.description}`}
                 </Text>
               </View>
               <SymbolView
                 name="arrow.up.right"
                 size={14}
-                tintColorClassName="accent-clerk-foreground-muted"
+                tintColorClassName="accent-profile-foreground-muted"
                 type="monochrome"
               />
             </Pressable>
@@ -297,8 +297,8 @@ export function HanzoConnectProfilePage() {
         </>
       ) : isInitialLoad ? (
         <View className="flex-row items-center gap-3 px-6 py-4">
-          <AppActivityIndicator colorClassName={"accent-clerk-foreground-muted"} size="small" />
-          <Text className="text-base text-clerk-foreground-muted">
+          <AppActivityIndicator colorClassName={"accent-profile-foreground-muted"} size="small" />
+          <Text className="text-base text-profile-foreground-muted">
             <T>Loading environments</T>
           </Text>
         </View>
@@ -311,7 +311,7 @@ export function HanzoConnectProfilePage() {
             accessory={
               deregisteringEnvironmentId === environment.environmentId ? (
                 <AppActivityIndicator
-                  colorClassName={"accent-clerk-foreground-muted"}
+                  colorClassName={"accent-profile-foreground-muted"}
                   size="small"
                 />
               ) : (
@@ -334,7 +334,7 @@ export function HanzoConnectProfilePage() {
                       <SymbolView
                         name="ellipsis"
                         size={18}
-                        tintColorClassName={"accent-clerk-foreground-muted"}
+                        tintColorClassName={"accent-profile-foreground-muted"}
                         type="monochrome"
                       />
                     </View>
@@ -353,7 +353,7 @@ export function HanzoConnectProfilePage() {
         />
       )}
 
-      <Text className="px-6 pt-6 text-xs leading-normal text-clerk-foreground-muted">
+      <Text className="px-6 pt-6 text-xs leading-normal text-profile-foreground-muted">
         <T>Connections on this device are managed in Settings.</T>
       </Text>
     </ScrollView>
@@ -362,7 +362,7 @@ export function HanzoConnectProfilePage() {
 
 function ClerkSectionHeader(props: { readonly children: string }) {
   return (
-    <Text className="min-h-4 border-b border-clerk-border px-6 pt-8 pb-4 text-xs font-medium tracking-[0.3px] text-clerk-foreground-muted uppercase">
+    <Text className="min-h-4 border-b border-profile-border px-6 pt-8 pb-4 text-xs font-medium tracking-[0.3px] text-profile-foreground-muted uppercase">
       {props.children}
     </Text>
   );
@@ -376,13 +376,13 @@ function ClerkRow(props: {
   return (
     <View
       collapsable={false}
-      className="flex-row items-center gap-3 border-b border-clerk-border px-6 py-4"
+      className="flex-row items-center gap-3 border-b border-profile-border px-6 py-4"
     >
       <View className="min-w-0 flex-1 gap-0.5">
-        <Text className="min-h-[22px] text-base text-clerk-foreground" numberOfLines={1}>
+        <Text className="min-h-[22px] text-base text-profile-foreground" numberOfLines={1}>
           {props.title}
         </Text>
-        <Text className="min-h-5 text-sm text-clerk-foreground-muted" numberOfLines={2}>
+        <Text className="min-h-5 text-sm text-profile-foreground-muted" numberOfLines={2}>
           {props.subtitle}
         </Text>
       </View>
@@ -396,9 +396,9 @@ function ClerkButtonRow(props: { readonly label: string; readonly onPress: () =>
     <Pressable
       accessibilityRole="button"
       onPress={props.onPress}
-      className="border-b border-clerk-border px-6 py-4 active:opacity-60"
+      className="border-b border-profile-border px-6 py-4 active:opacity-60"
     >
-      <Text className="text-base font-semibold text-clerk-foreground">{props.label}</Text>
+      <Text className="text-base font-semibold text-profile-foreground">{props.label}</Text>
     </Pressable>
   );
 }

@@ -117,7 +117,7 @@ HanzoSourceTextOutsideTapCoordinatorForWindow(UIWindow *window) {
   return coordinator;
 }
 
-@interface HanzoSourceText () <RCTT3SourceTextViewProtocol, UITextViewDelegate,
+@interface HanzoSourceText () <RCTHanzoSourceTextViewProtocol, UITextViewDelegate,
                             HanzoSourceTextOutsideTapTarget>
 @end
 

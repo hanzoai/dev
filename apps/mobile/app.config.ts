@@ -40,7 +40,7 @@ if (
 
 const DEVELOPMENT_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
-  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIconComposerProject),
+  iosIcon: fromRepoRoot("assets/app-icons/dev-hanzo-1024.png"),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
   androidAdaptiveForeground,
   androidAdaptiveBackgroundColor: "#347FF8",
@@ -124,10 +124,10 @@ const iosBundleIdentifier = isIosPersonalTeamBuild
   ? personalTeamBundleIdentifier!
   : variant.iosBundleIdentifier;
 
-const dmSansFonts = {
-  regular: "@expo-google-fonts/dm-sans/400Regular/DMSans_400Regular.ttf",
-  medium: "@expo-google-fonts/dm-sans/500Medium/DMSans_500Medium.ttf",
-  bold: "@expo-google-fonts/dm-sans/700Bold/DMSans_700Bold.ttf",
+const zenFonts = {
+  regular: "@hanzo/font/dist/fonts/zen-sans/Zen-Regular.ttf",
+  medium: "@hanzo/font/dist/fonts/zen-sans/Zen-Medium.ttf",
+  bold: "@hanzo/font/dist/fonts/zen-sans/Zen-Bold.ttf",
 } as const;
 
 const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
@@ -257,14 +257,14 @@ const config: ExpoConfig = {
     requireFullScreen: process.env.HANZO_SHOWCASE_CAPTURE_BUILD === "1",
     bundleIdentifier: iosBundleIdentifier,
     // Avoid Personal Team fallback: it cannot sign App Groups, Apple sign-in or push entitlements.
-    appleTeamId: "ARK85ZXQ4Z",
+    appleTeamId: repoEnv.HANZO_DEV_IOS_TEAM_ID?.trim() || "ARK85ZXQ4Z",
     associatedDomains: [
       `applinks:${variant.relyingParty}`,
       `webcredentials:${variant.relyingParty}`,
       `applinks:${HOSTED_APP_HOST}`,
     ],
     entitlements: {
-      "keychain-access-groups": [`$(AppIdentifierPrefix)${variant.iosBundleIdentifier}`],
+      "keychain-access-groups": [`$(AppIdentifierPrefix)${iosBundleIdentifier}`],
     },
     infoPlist: {
       UISupportedInterfaceOrientations: [
@@ -327,30 +327,39 @@ const config: ExpoConfig = {
     favicon: variant.assets.appIcon,
   },
   plugins: [
+    // Mods run last-in first-out; this one must come first to strip what later plugins add.
+    ...(isIosPersonalTeamBuild ? ["./plugins/withoutIosPersonalTeamCapabilities.cjs"] : []),
     "expo-asset",
     [
       "expo-font",
       {
         ios: {
-          fonts: [dmSansFonts.regular, dmSansFonts.medium, dmSansFonts.bold],
+          fonts: [zenFonts.regular, zenFonts.medium, zenFonts.bold],
         },
         android: {
           fonts: [
             {
-              fontFamily: "DMSans-Regular",
-              fontDefinitions: [{ path: dmSansFonts.regular, weight: 400 }],
+              fontFamily: "Zen-Regular",
+              fontDefinitions: [{ path: zenFonts.regular, weight: 400 }],
             },
             {
-              fontFamily: "DMSans-Medium",
-              fontDefinitions: [{ path: dmSansFonts.medium, weight: 500 }],
+              fontFamily: "Zen-Medium",
+              fontDefinitions: [{ path: zenFonts.medium, weight: 500 }],
             },
             {
-              fontFamily: "DMSans-Bold",
-              fontDefinitions: [{ path: dmSansFonts.bold, weight: 700 }],
+              fontFamily: "Zen-Bold",
+              fontDefinitions: [{ path: zenFonts.bold, weight: 700 }],
             },
           ],
         },
       },
+    ],
+    [
+      "expo-alternate-app-icons",
+      [
+        { name: "Dev", ios: fromRepoRoot("assets/app-icons/dev-1024.png") },
+        { name: "Hanzo", ios: fromRepoRoot("assets/app-icons/hanzo-1024.png") },
+      ],
     ],
     "expo-secure-store",
     "expo-sqlite",
@@ -460,7 +469,6 @@ const config: ExpoConfig = {
     // MainActivity mods run in reverse order; extend the tablet-orientation override.
     "./plugins/withAndroidWindowDisplayMetrics.cjs",
     "./plugins/withAndroidTabletOrientation.cjs",
-    ...(isIosPersonalTeamBuild ? ["./plugins/withoutIosPersonalTeamCapabilities.cjs"] : []),
   ],
   extra: {
     appVariant: APP_VARIANT,

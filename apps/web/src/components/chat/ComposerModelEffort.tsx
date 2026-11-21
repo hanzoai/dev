@@ -7,10 +7,12 @@ import {
 import type { ProviderOptionDescriptor, RuntimeMode } from "@hanzodev/contracts";
 import type { EffortDisplay } from "@hanzodev/contracts/settings";
 import { getProviderOptionCurrentLabel } from "@hanzodev/shared/model";
+import { ensoRingGap, isEnsoModel } from "@hanzodev/client-runtime/enso-ring";
 import { msg, T, useGT, useMessages } from "gt-react";
 import { CheckIcon, ChevronRightIcon, ChevronUpIcon, WorkflowIcon } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, use, useRef, useState } from "react";
 
+import { announce } from "~/lib/announce";
 import { m, type MessageResolver } from "~/i18n/messages";
 import { cn } from "~/lib/utils";
 import {
@@ -37,6 +39,18 @@ import {
 
 type SelectDescriptor = Extract<ProviderOptionDescriptor, { type: "select" }>;
 type BooleanDescriptor = Extract<ProviderOptionDescriptor, { type: "boolean" }>;
+
+/** "medium effort", or "auto effort" when no level is set: what the ring shows. */
+function effortDetail(
+  descriptor: SelectDescriptor,
+  current: string | null,
+  resolve: MessageResolver,
+): string {
+  const label = descriptor.options.find((option) => option.id === current)?.label;
+  return label
+    ? resolve(msg("{effort} effort", { effort: label.toLowerCase() }))
+    : resolve(msg("Auto effort"));
+}
 
 /** Service tiers, Claude's Fast mode, and Ultracode sit in the footer, not the column. */
 function splitSpeed(
@@ -88,10 +102,10 @@ export function describeComposerEffort(
   effortDisplay: EffortDisplay,
   size: ComposerControlSize,
   resolve: MessageResolver = m,
-): { suffix: ReactNode; detail: string | null } {
-  if (!traits) return { suffix: null, detail: null };
+): { suffix: ReactNode; detail: string | null; ringGap: number | null } {
+  if (!traits) return { suffix: null, detail: null, ringGap: null };
   const visibility = getTraitsSectionVisibility({ ...traits, resolve });
-  if (!visibility.hasAnyControls) return { suffix: null, detail: null };
+  if (!visibility.hasAnyControls) return { suffix: null, detail: null, ringGap: null };
   const modelSelection =
     traits.instanceId && traits.model
       ? { instanceId: traits.instanceId, model: traits.model, options: traits.modelOptions ?? [] }
@@ -137,6 +151,17 @@ export function describeComposerEffort(
               modelSelection,
               traits.reportedModelSelection,
             ) ?? (reasoning.id === "thinking" ? reasoning.label : null));
+  // Enso shows its effort as the open gap of its ring, so the chip drops the word and bars.
+  const ensoSelect =
+    traits.model && isEnsoModel(traits.model) && reasoning?.type === "select" ? reasoning : null;
+  const ringGap = ensoSelect
+    ? ensoRingGap(
+        ensoSelect.options.map((option) => option.id),
+        ultrathink
+          ? "ultrathink"
+          : getDescriptorStringValue(ensoSelect, modelSelection, traits.reportedModelSelection),
+      )
+    : null;
   const fast = display.speedLabel === "Fast" || display.speedLabel === "Ultrafast";
   // Agent options such as modes live in the picker; the trigger adds only the context window.
   const contextWindow =
@@ -146,10 +171,18 @@ export function describeComposerEffort(
       modelSelection,
       traits.reportedModelSelection,
     );
-  if (!word && !glyph && !fast && !display.ultracode && !contextWindow)
-    return { suffix: null, detail: display.label };
+  const ensoDetail = ensoSelect
+    ? effortDetail(
+        ensoSelect,
+        getDescriptorStringValue(ensoSelect, modelSelection, traits.reportedModelSelection),
+        resolve,
+      )
+    : null;
+  if (ringGap === null && !word && !glyph && !fast && !display.ultracode && !contextWindow)
+    return { suffix: null, detail: display.label, ringGap };
   return {
-    detail: display.label,
+    detail: ensoDetail ?? display.label,
+    ringGap,
     suffix: (
       <span
         className={cn(
@@ -158,7 +191,7 @@ export function describeComposerEffort(
           size === "sm" && "-ms-0.5",
         )}
       >
-        {word ? (
+        {ringGap !== null ? null : word ? (
           <span data-composer-control-label className="max-w-24 truncate">
             {word}
           </span>
@@ -284,7 +317,14 @@ function EffortLevels(props: { traits: TraitsSelectionInput }) {
     effort?.descriptor.id === traits.primarySelectDescriptor?.id && traits.ultrathinkInBodyText;
   return (
     <>
-      {effort ? <EffortRows control={effort} traits={traits} locked={locked} /> : null}
+      {effort ? (
+        <EffortRows
+          control={effort}
+          traits={traits}
+          locked={locked}
+          ringAnnounce={props.traits.model ? isEnsoModel(props.traits.model) : false}
+        />
+      ) : null}
       {others.length > 0 ? (
         <div
           className={cn("flex flex-col gap-0.5", effort && "mt-1 border-t border-border/70 pt-1")}
@@ -314,7 +354,12 @@ function EffortLevels(props: { traits: TraitsSelectionInput }) {
 
 type TraitsSelection = ReturnType<typeof useTraitsSelection>;
 
-function EffortRows(props: { control: ColumnControl; traits: TraitsSelection; locked: boolean }) {
+function EffortRows(props: {
+  control: ColumnControl;
+  traits: TraitsSelection;
+  locked: boolean;
+  ringAnnounce: boolean;
+}) {
   const gt = useGT();
   const messages = useMessages();
   const { control, traits } = props;
@@ -359,7 +404,12 @@ function EffortRows(props: { control: ColumnControl; traits: TraitsSelection; lo
           description={option.description}
           isDefault={option.isDefault}
           disabled={locked}
-          onPick={() => traits.changeSelect(control.descriptor, option.id)}
+          onPick={() => {
+            traits.changeSelect(control.descriptor, option.id);
+            if (props.ringAnnounce) {
+              announce(effortDetail(control.descriptor, option.id, messages), "effort");
+            }
+          }}
         />
       ))}
     </div>

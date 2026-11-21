@@ -25,6 +25,7 @@ import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { ModelPickerContent, resolveModelPickerSelectedModel } from "./ModelPickerContent";
 import { retainedModelWhileProviderLocked } from "./ProviderModelPicker.logic";
 import { ChatGptSharingControl } from "./ChatGptSharingControl";
+import { EnsoRing } from "./EnsoRing";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { ModelEsque, getDisplayModelName, getTriggerDisplayModelName } from "./providerIconUtils";
 import { shouldShowInstanceBadge, type ProviderInstanceEntry } from "../../providerInstances";
@@ -120,6 +121,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   triggerSuffix?: ReactNode;
   /** Names the suffix for the tooltip and screen readers. */
   triggerDetail?: string | null;
+  /** Open share of the Enso ring when the model is Enso; the ring then stands in for the logo. */
+  triggerRingGap?: number | null;
   /** Composer shortcuts this trigger answers besides the picker's own. */
   triggerShortcuts?: string;
   /**
@@ -415,21 +418,28 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           ) : activeEntry && props.triggerLabel === undefined ? (
             // Narrow compacted composers hide the provider icon before truncating the name.
             <span data-chat-provider-model-picker-icon className="contents">
-              <ProviderInstanceIcon
-                driverKind={activeEntry.driverKind}
-                displayName={activeEntry.displayName}
-                accentColor={activeEntry.accentColor}
-                acpRegistryAgentId={activeEntry.acpRegistryAgentId}
-                acpRegistryIconUrl={activeEntry.acpRegistryIconUrl}
-                showBadge={showInstanceBadge}
-                className="size-4"
-                iconClassName={cn("size-4", props.activeProviderIconClassName)}
-                indicatorBackground={props.instanceIndicatorBackground ?? "var(--contrast-input)"}
-                badgeClassName={cn(
-                  "right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-5xs",
-                  size === "xs" && "shadow-none",
-                )}
-              />
+              {props.triggerRingGap != null ? (
+                <EnsoRing
+                  gap={props.triggerRingGap}
+                  className={cn("size-4 shrink-0", props.activeProviderIconClassName)}
+                />
+              ) : (
+                <ProviderInstanceIcon
+                  driverKind={activeEntry.driverKind}
+                  displayName={activeEntry.displayName}
+                  accentColor={activeEntry.accentColor}
+                  acpRegistryAgentId={activeEntry.acpRegistryAgentId}
+                  acpRegistryIconUrl={activeEntry.acpRegistryIconUrl}
+                  showBadge={showInstanceBadge}
+                  className="size-4"
+                  iconClassName={cn("size-4", props.activeProviderIconClassName)}
+                  indicatorBackground={props.instanceIndicatorBackground ?? "var(--contrast-input)"}
+                  badgeClassName={cn(
+                    "right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-5xs",
+                    size === "xs" && "shadow-none",
+                  )}
+                />
+              )}
             </span>
           ) : null}
           {props.isComposerOwned ? (

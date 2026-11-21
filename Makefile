@@ -5,13 +5,18 @@ export NEXTEST_HIDE_PROGRESS_BAR := true
 # The wasm2go compiler: build it from hanzoai/wasm2go (go build ./cmd/wasm2go).
 WASM2GO ?= wasm2go
 
-.PHONY: test wasm wasm-check wasm2go fmt help
+.PHONY: test wasm wasm-check wasm2go frames-check fmt help
 .DEFAULT_GOAL := test
 
 ## test: run the Rust tests and the Go host's tests on the committed module
 test:
 	@cargo nextest run --locked --no-fail-fast $(ARGS)
 	@cd go && GOWORK=off go test -race ./...
+
+## frames-check: decode every frame the chat-mode adapter writes against packages/contracts
+frames-check:
+	@cd go && GOWORK=off go test ./frame -run TestChat -corpus $(CURDIR)/target/frames.jsonl
+	@node go/frame/e2e/validate.mjs $(CURDIR) target/frames.jsonl
 
 ## wasm: build the reasoning half for wasm32-wasip1
 # The loop as a wasm module: target/wasm32-wasip1/release/dev.wasm, copied to

@@ -22,6 +22,8 @@ import {
   buildExplicitProviderOptionSelectionsFromDescriptors,
   getProviderOptionDescriptors,
 } from "@hanzodev/shared/model";
+import { isEnsoModel } from "@hanzodev/client-runtime/enso-ring";
+import { writesReplies } from "@hanzodev/client-runtime/replyModels";
 import { resolveModelShortName } from "@hanzodev/client-runtime/provider-clients";
 import { resolveProvidersForCwd } from "@hanzodev/client-runtime/providerSkills";
 
@@ -411,7 +413,8 @@ export function buildModelOptions(
     const hiddenModels = new Set(preferences?.hiddenModels ?? []);
     const order = new Map((preferences?.modelOrder ?? []).map((slug, index) => [slug, index]));
     const models = provider.models.filter(
-      (model) => includeHidden || model.isCustom || !hiddenModels.has(model.slug),
+      (model) =>
+        writesReplies(model) && (includeHidden || model.isCustom || !hiddenModels.has(model.slug)),
     );
     if (order.size > 0)
       models.sort((a, b) => (order.get(a.slug) ?? Infinity) - (order.get(b.slug) ?? Infinity));
@@ -513,6 +516,9 @@ export function buildModelOptions(
   return [...options.values()];
 }
 
+/** Enso, Hanzo's router family, is its own group above Hanzo's. */
+export const ENSO_PROVIDER_KEY = "enso";
+
 export function groupByProvider(options: ReadonlyArray<ModelOption>): ReadonlyArray<ProviderGroup> {
   const groups = new Map<
     string,
@@ -524,14 +530,16 @@ export function groupByProvider(options: ReadonlyArray<ModelOption>): ReadonlyAr
     }
   >();
   for (const option of options) {
-    const existing = groups.get(option.providerKey);
+    const isEnso = option.providerDriver === "hanzo" && isEnsoModel(option.selection.model);
+    const providerKey = isEnso ? ENSO_PROVIDER_KEY : option.providerKey;
+    const existing = groups.get(providerKey);
     if (existing) {
       existing.models.push(option);
       existing.updateRequired ??= option.providerUpdateRequired;
       existing.subProviders ??= option.providerSubProviders;
     } else {
-      groups.set(option.providerKey, {
-        providerLabel: option.providerLabel,
+      groups.set(providerKey, {
+        providerLabel: isEnso ? "Enso" : option.providerLabel,
         models: [option],
         updateRequired: option.providerUpdateRequired,
         subProviders: option.providerSubProviders,
@@ -539,11 +547,16 @@ export function groupByProvider(options: ReadonlyArray<ModelOption>): ReadonlyAr
     }
   }
 
-  return [...groups.entries()].map(([providerKey, group]) => ({
+  const ordered = [...groups.entries()].map(([providerKey, group]) => ({
     providerKey,
     providerLabel: group.providerLabel,
     models: group.models,
     ...(group.updateRequired ? { updateRequired: group.updateRequired } : {}),
     ...(group.subProviders ? { subProviders: group.subProviders } : {}),
   }));
+  const enso = ordered.find((group) => group.providerKey === ENSO_PROVIDER_KEY);
+  if (!enso) return ordered;
+  const rest = ordered.filter((group) => group !== enso);
+  const hanzo = rest.findIndex((group) => group.models[0]?.providerDriver === "hanzo");
+  return hanzo < 0 ? ordered : [...rest.slice(0, hanzo), enso, ...rest.slice(hanzo)];
 }

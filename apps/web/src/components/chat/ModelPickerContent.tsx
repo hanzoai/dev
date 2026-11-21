@@ -1,3 +1,4 @@
+import { isEnsoModel } from "@hanzodev/client-runtime/enso-ring";
 import { T, useGT, useLocale, useMessages } from "gt-react";
 import { useLegendListRef } from "~/hooks/useLegendListRef";
 import {
@@ -70,6 +71,7 @@ import {
   shouldShowInstanceBadge,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
+import { ensoTabAnchor, type PickerTab } from "./ModelPickerSidebar";
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
 import { hasRuntimeModelCatalog } from "../../providerModels";
 
@@ -143,12 +145,12 @@ function shouldOfferModelPickerSetup(
 
 function adjacentModelPickerProvider(input: {
   entries: ReadonlyArray<ProviderInstanceEntry>;
-  selectedInstanceId: ProviderInstanceId | "favorites";
+  selectedInstanceId: PickerTab;
   direction: 1 | -1;
   disabledInstanceIds: ReadonlySet<ProviderInstanceId> | undefined;
   selectableUnavailableInstanceIds: ReadonlySet<ProviderInstanceId> | undefined;
 }) {
-  const providers: Array<ProviderInstanceId | "favorites"> = [
+  const providers: Array<PickerTab> = [
     "favorites",
     ...input.entries
       .filter(
@@ -157,7 +159,11 @@ function adjacentModelPickerProvider(input: {
           (isProviderInstancePickerReady(entry) ||
             input.selectableUnavailableInstanceIds?.has(entry.instanceId)),
       )
-      .map((entry) => entry.instanceId),
+      .flatMap((entry) =>
+        entry.instanceId === ensoTabAnchor(input.entries)
+          ? ["enso" as const, entry.instanceId]
+          : [entry.instanceId],
+      ),
   ];
   const index = providers.indexOf(input.selectedInstanceId);
   return providers[
@@ -423,38 +429,45 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       activeEntry,
       modelOptionsByInstance.get(props.activeInstanceId) ?? [],
     );
-  const [selectedInstanceId, setSelectedInstanceId] = useState<ProviderInstanceId | "favorites">(
-    () => {
-      if (
-        props.lockedProvider !== null ||
-        activeInstanceHasSelectableUnavailableModel ||
-        activeInstanceNeedsSetup
-      ) {
-        return props.activeInstanceId;
-      }
-      const hasPickableFavorite = favorites.some((favorite) => {
-        const entry = instanceEntries.find((entry) => entry.instanceId === favorite.provider);
-        return (
-          entry !== undefined &&
-          (modelOptionsByInstance.get(favorite.provider) ?? []).some(
-            (option) =>
-              option.slug === favorite.model &&
-              shouldIncludeModelPickerOption({
-                entry,
-                option,
-                activeInstanceId: props.activeInstanceId,
-                activeModel: activeModelSlug,
-              }),
-          )
-        );
-      });
-      return hasPickableFavorite ? "favorites" : props.activeInstanceId;
-    },
-  );
+  const [selectedInstanceId, setSelectedInstanceId] = useState<PickerTab>(() => {
+    if (
+      props.lockedProvider !== null ||
+      activeInstanceHasSelectableUnavailableModel ||
+      activeInstanceNeedsSetup
+    ) {
+      return props.activeInstanceId;
+    }
+    const hasPickableFavorite = favorites.some((favorite) => {
+      const entry = instanceEntries.find((entry) => entry.instanceId === favorite.provider);
+      return (
+        entry !== undefined &&
+        (modelOptionsByInstance.get(favorite.provider) ?? []).some(
+          (option) =>
+            option.slug === favorite.model &&
+            shouldIncludeModelPickerOption({
+              entry,
+              option,
+              activeInstanceId: props.activeInstanceId,
+              activeModel: activeModelSlug,
+            }),
+        )
+      );
+    });
+    if (hasPickableFavorite) return "favorites";
+    const activeEntryForTab = instanceEntries.find(
+      (entry) => entry.instanceId === props.activeInstanceId,
+    );
+    return activeEntryForTab?.driverKind === "hanzo" && isEnsoModel(activeModelSlug)
+      ? "enso"
+      : props.activeInstanceId;
+  });
   const { scanning: workspaceModelsScanning } = useProviderWorkspaceSnapshotRefresh({
     environmentId: props.environmentId,
     gitCwd: props.workspaceCwd ?? null,
-    instanceId: selectedInstanceId === "favorites" ? undefined : selectedInstanceId,
+    instanceId:
+      selectedInstanceId === "favorites" || selectedInstanceId === "enso"
+        ? undefined
+        : selectedInstanceId,
   });
   const favoritesSet = new Set(favorites.map((fav) => providerModelKey(fav.provider, fav.model)));
   const [expandedLegacyInstances, setExpandedLegacyInstances] = useState(
@@ -484,7 +497,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     searchInputRef.current?.focus({ preventScroll: true });
   };
 
-  const handleSelectInstance = (instanceId: ProviderInstanceId | "favorites") => {
+  const handleSelectInstance = (instanceId: PickerTab) => {
     setSelectedInstanceId(instanceId);
     // Focusing the search on touch raises the on-screen keyboard on every provider tap.
     if (window.matchMedia("(pointer: coarse)").matches) return;
@@ -631,8 +644,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const isSearching = searchQuery.trim().length > 0;
   // Fit the tallest tab so switching tabs never resizes the popup and moves the rail under the cursor.
   const tallestTabUnits = (() => {
-    const unitsByTab = new Map<ProviderInstanceId | "favorites", number>();
-    const addRow = (tab: ProviderInstanceId | "favorites") => {
+    const unitsByTab = new Map<PickerTab, number>();
+    const addRow = (tab: PickerTab) => {
       const previous = unitsByTab.get(tab);
       unitsByTab.set(
         tab,
@@ -705,16 +718,17 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
     if (lockedProvider !== null) {
       result = result.filter((m) => matchesLockedProvider(m));
-      if (selectedInstanceId === "favorites") {
-        result = result.filter((m) => favoritesSet.has(providerModelKey(m.instanceId, m.slug)));
-      } else {
-        result = result.filter((m) => m.instanceId === selectedInstanceId);
-      }
-    } else if (selectedInstanceId === "favorites") {
-      result = result.filter((m) => favoritesSet.has(providerModelKey(m.instanceId, m.slug)));
-    } else {
-      result = result.filter((m) => m.instanceId === selectedInstanceId);
     }
+    // Enso is its own tab; the Hanzo tab keeps the rest of the family.
+    result = result.filter((m) => {
+      if (selectedInstanceId === "favorites") {
+        return favoritesSet.has(providerModelKey(m.instanceId, m.slug));
+      }
+      const isEnso = m.driverKind === "hanzo" && isEnsoModel(m.slug);
+      return selectedInstanceId === "enso"
+        ? isEnso
+        : m.instanceId === selectedInstanceId && !isEnso;
+    });
 
     return sortProviderModelItems(result, {
       favoriteModelKeys: favoritesSet,
@@ -724,7 +738,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   })();
 
   const legacySection = (() => {
-    if (isSearching || selectedInstanceId === "favorites") {
+    if (isSearching || selectedInstanceId === "favorites" || selectedInstanceId === "enso") {
       return null;
     }
     const currentModels: ModelPickerItem[] = [];
@@ -749,10 +763,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   // backend as a collapsible heading. Search and Favorites stay flat.
   const subProviderSections = (() => {
     const subProviders =
-      isSearching || selectedInstanceId === "favorites"
+      isSearching || selectedInstanceId === "favorites" || selectedInstanceId === "enso"
         ? undefined
         : subProvidersByInstance.get(selectedInstanceId);
-    if (!subProviders || selectedInstanceId === "favorites") return null;
+    if (!subProviders || selectedInstanceId === "favorites" || selectedInstanceId === "enso") {
+      return null;
+    }
     const { ungrouped, groups } = groupModelsBySubProvider(
       filteredModels,
       subProviders,
@@ -795,7 +811,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   })();
 
   const selectedEntry =
-    selectedInstanceId === "favorites" ? undefined : entryByInstanceId.get(selectedInstanceId);
+    selectedInstanceId === "favorites" || selectedInstanceId === "enso"
+      ? undefined
+      : entryByInstanceId.get(selectedInstanceId);
   const providerSetupEntries =
     !isSearching && canOpenProviderSetup
       ? instanceEntries.filter(
@@ -906,7 +924,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       setSearchQuery("");
       handleSelectInstance(next);
       announce(
-        next === "favorites" ? gt("Favorites") : (entryByInstanceId.get(next)?.displayName ?? next),
+        next === "favorites"
+          ? gt("Favorites")
+          : next === "enso"
+            ? "Enso"
+            : (entryByInstanceId.get(next)?.displayName ?? next),
         "model-picker",
       );
       return;

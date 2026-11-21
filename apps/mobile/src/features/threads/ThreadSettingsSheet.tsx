@@ -66,6 +66,7 @@ import { cn } from "../../lib/cn";
 import { useReduceMotionEnabled } from "../../lib/appState";
 import {
   buildModelOptions,
+  ENSO_PROVIDER_KEY,
   groupByProvider,
   serverConfigForCwd,
   type ModelOption,
@@ -128,6 +129,7 @@ import { formatProviderUpdateRequiredNotice } from "@hanzodev/client-runtime/pro
 import type { MessageResolver } from "../../i18n/messages";
 
 const PRIMARY_PROVIDER_DRIVERS: ReadonlySet<string> = new Set([
+  ENSO_PROVIDER_KEY,
   "claudeAgent",
   "codex",
   "antigravity",
@@ -895,7 +897,10 @@ function buildThreadSettingsCatalogItems(
     ) {
       return [];
     }
-    const driver = group.models[0]?.providerDriver ?? group.providerKey;
+    const driver =
+      group.providerKey === ENSO_PROVIDER_KEY
+        ? ENSO_PROVIDER_KEY
+        : (group.models[0]?.providerDriver ?? group.providerKey);
     const catalogModels =
       session.manageHidden ||
       session.showLegacy ||

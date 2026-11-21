@@ -87,7 +87,7 @@ class HanzoContextChip(
   }
 
   companion object {
-    private const val CHIP_FONT_FAMILY = "DMSans-Medium"
+    private const val CHIP_FONT_FAMILY = "Zen-Medium"
 
     // Matches the iOS chips; builds without the bundled font keep the platform medium.
     private fun chipTypeface(): Typeface {

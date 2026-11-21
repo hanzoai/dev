@@ -73,6 +73,29 @@ describe("mobile model options", () => {
     ]);
   });
 
+  it("never offers a decision model", () => {
+    const config = {
+      providers: [
+        {
+          instanceId: "hanzo",
+          driver: "hanzo",
+          displayName: "Hanzo",
+          enabled: true,
+          installed: true,
+          auth: { status: "authenticated" },
+          models: [
+            { slug: "zen4", name: "Zen 4", isCustom: false, outputs: ["text"], capabilities: null },
+            { slug: "kai-1", name: "Kai 1", isCustom: false, outputs: ["decision"], capabilities: null },
+          ],
+        },
+      ],
+    } as unknown as ServerConfig;
+
+    const options = buildModelOptions(config, null, undefined, null);
+
+    expect(options.map((option) => option.selection.model)).toEqual(["zen4"]);
+  });
+
   it("groups fx's models under its backends, keeping a signed-out backend", () => {
     const subProviders = [
       { name: "Codex subscription" },

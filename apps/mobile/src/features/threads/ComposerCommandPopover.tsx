@@ -20,6 +20,7 @@ import { AppText as Text } from "../../components/ui/AppText";
 import { ENVIRONMENT_MACHINE_SYMBOLS } from "../../components/EnvironmentMachineSymbol";
 import { GlassSurface } from "../../components/ui/GlassSurface";
 import { PierreEntryIcon } from "../../components/PierreEntryIcon";
+import { isEnsoModel } from "@hanzodev/client-runtime/enso-ring";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import type { MessageResolver } from "../../i18n/messages";
 import { cn } from "../../lib/cn";
@@ -202,7 +203,12 @@ const CommandRow = memo(function CommandRow(props: {
       ) : props.item.type === "model" ? (
         <ProviderIcon
           iconUrl={props.item.option.providerIconUrl}
-          provider={props.item.option.providerDriver}
+          provider={
+            props.item.option.providerDriver === "hanzo" &&
+            isEnsoModel(props.item.option.selection.model)
+              ? "enso"
+              : props.item.option.providerDriver
+          }
           size={16}
         />
       ) : iconName ? (
