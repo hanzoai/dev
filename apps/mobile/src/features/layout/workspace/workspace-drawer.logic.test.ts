@@ -1,14 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { NAVIGATION_TAB_ORDER } from "./navigation-tab-order";
 import {
-  ALL_DRAWER_DESTINATIONS,
   DRAWER_FLICK,
-  barDestinations,
   drawerAccountCaption,
   drawerAccountInitial,
   drawerAxis,
-  drawerDestinations,
   drawerPull,
   drawerReach,
   drawerReducer,
@@ -60,36 +56,6 @@ describe("drawer open state", () => {
   });
 });
 
-describe("drawer destinations", () => {
-  it("lists every section and Settings by default", () => {
-    expect(drawerDestinations(undefined, undefined, false)).toEqual(ALL_DRAWER_DESTINATIONS);
-    expect(ALL_DRAWER_DESTINATIONS).toEqual([...NAVIGATION_TAB_ORDER, "settings"]);
-  });
-
-  it("is a superset of what the bar reached, whatever the user hid or reordered", () => {
-    const orders = [undefined, ["usage", "issues"], ["issues", "threads", "usage", "pullRequests"]];
-    const hiddens = [undefined, [], ["usage"], ["pullRequests", "issues"], ["threads"]];
-    for (const order of orders) {
-      for (const hidden of hiddens) {
-        const drawer = new Set(drawerDestinations(order, hidden, true));
-        for (const destination of barDestinations(order, hidden)) {
-          expect(drawer.has(destination)).toBe(true);
-        }
-        expect(drawer.has("settings")).toBe(true);
-      }
-    }
-  });
-
-  it("keeps the order the user chose and drops only what they hid", () => {
-    expect(drawerDestinations(["usage", "threads"], ["issues"], true)).toEqual([
-      "usage",
-      "threads",
-      "pullRequests",
-      "settings",
-    ]);
-  });
-});
-
 describe("drawer account", () => {
   it("calls only the reserved admin org SuperAdmin", () => {
     expect(drawerAccountCaption({ owner: "admin", planName: "Pro" }).kind).toBe("superAdmin");
@@ -106,11 +72,12 @@ describe("drawer account", () => {
 });
 
 describe("phone header mode", () => {
-  const home = { drawer: true, settingsOpen: false, selectedTab: "threads" };
-  it("floats only on the home chat screen", () => {
+  const home = { drawer: true, settingsOpen: false, section: "chat" as const };
+  it("floats on Chat and the web sections", () => {
     expect(phoneHeaderMode(home)).toBe("floating");
     expect(phoneHeaderMode({ ...home, settingsOpen: true })).toBe("native");
-    expect(phoneHeaderMode({ ...home, selectedTab: "pullRequests" })).toBe("native");
+    expect(phoneHeaderMode({ ...home, section: "dev" })).toBe("native");
+    expect(phoneHeaderMode({ ...home, section: "design" })).toBe("floating");
     expect(phoneHeaderMode({ ...home, drawer: false })).toBe("native");
   });
   it("hides the native header only when floating", () => {

@@ -1,9 +1,4 @@
-import {
-  NAVIGATION_TAB_ORDER,
-  resolveHiddenNavigationTabs,
-  resolveNavigationTabOrder,
-  type NavigationTab,
-} from "./navigation-tab-order";
+import { isWebSection, type WorkspaceSection } from "./workspace-section.logic";
 
 // The numbers of the hanzo.app phone drawer (@hanzo/app slide.ts), ported as is.
 /** Pane left in sight at the trailing edge while the drawer is open, pt. */
@@ -18,8 +13,6 @@ export const DRAWER_FLICK = 0.4;
 export const DRAWER_DURATION = 300;
 /** Where a drag may begin, pt from the leading edge. */
 export const DRAWER_EDGE = 24;
-
-export type DrawerDestination = NavigationTab | "settings";
 
 export function drawerReach(windowWidth: number): number {
   return Math.min(Math.max(0, windowWidth - DRAWER_STRIP), DRAWER_REACH);
@@ -46,36 +39,6 @@ export function drawerAxis(dx: number, dy: number): "x" | "y" | null {
   if (x < DRAWER_SLOP && y < DRAWER_SLOP) return null;
   return x > y * 1.2 ? "x" : "y";
 }
-
-/**
- * Every place the bottom bar reached, in its order. The shared pull-request/issue slot is a bar
- * constraint, not a drawer one; only tabs the user hid leave the list. Settings is always there.
- */
-export function drawerDestinations(
-  order: readonly unknown[] | undefined,
-  hidden: readonly unknown[] | undefined,
-  customizable: boolean,
-): readonly DrawerDestination[] {
-  const excluded = customizable ? resolveHiddenNavigationTabs(hidden) : [];
-  return [...resolveNavigationTabOrder(order).filter((tab) => !excluded.includes(tab)), "settings"];
-}
-
-/** The destinations the bar offered: its four slots, the overflow, and Settings. */
-export function barDestinations(
-  order: readonly unknown[] | undefined,
-  hidden: readonly unknown[] | undefined,
-): readonly DrawerDestination[] {
-  const hiddenTabs = resolveHiddenNavigationTabs(hidden);
-  return [
-    ...resolveNavigationTabOrder(order).filter((tab) => !hiddenTabs.includes(tab)),
-    "settings",
-  ];
-}
-
-export const ALL_DRAWER_DESTINATIONS: readonly DrawerDestination[] = [
-  ...NAVIGATION_TAB_ORDER,
-  "settings",
-];
 
 export interface DrawerState {
   readonly open: boolean;
@@ -123,15 +86,17 @@ export const FLOATING_HEADER_HEIGHT = 52;
 export type PhoneHeaderMode = "floating" | "native";
 
 /**
- * The home chat screen has no bar: two circles float over it. Every other screen of the drawer
- * phone (Settings, Pull requests, Issues...) keeps the native header and its menu.
+ * Chat and the web sections have no bar: two circles float over them. Every other screen of the
+ * drawer phone (Dev, Settings) keeps the native header and its menu.
  */
 export function phoneHeaderMode(input: {
   readonly drawer: boolean;
   readonly settingsOpen: boolean;
-  readonly selectedTab: string;
+  readonly section: WorkspaceSection;
 }): PhoneHeaderMode {
-  return input.drawer && !input.settingsOpen && input.selectedTab === "threads"
+  return input.drawer &&
+    !input.settingsOpen &&
+    (input.section === "chat" || isWebSection(input.section))
     ? "floating"
     : "native";
 }

@@ -123,6 +123,8 @@ import IconSun from "@tabler/icons-react-native/IconSun";
 import IconShieldQuestion from "@tabler/icons-react-native/IconShieldQuestion";
 import IconTarget from "@tabler/icons-react-native/IconTarget";
 import IconTerminal2 from "@tabler/icons-react-native/IconTerminal2";
+import IconBooks from "@tabler/icons-react-native/IconBooks";
+import IconWand from "@tabler/icons-react-native/IconWand";
 import IconTextDecrease from "@tabler/icons-react-native/IconTextDecrease";
 import IconTextIncrease from "@tabler/icons-react-native/IconTextIncrease";
 import IconTool from "@tabler/icons-react-native/IconTool";
@@ -278,6 +280,8 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   "stop.fill": IconPlayerStopFilled,
   target: IconTarget,
   terminal: IconTerminal2,
+  "books.vertical": IconBooks,
+  "wand.and.stars": IconWand,
   "text.alignleft": IconAlignLeft,
   "text.bubble": IconMessage,
   "questionmark.bubble": IconMessageCircleQuestion,
