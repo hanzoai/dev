@@ -127,6 +127,8 @@ export async function streamChatReply(input: {
   readonly auth: CloudChatAuth;
   readonly model: string;
   readonly messages: ReadonlyArray<CloudChatMessage>;
+  /** Reasoning effort for models that take one; omitted when unset. */
+  readonly effort?: string | null | undefined;
   readonly onDelta: (text: string) => void;
   readonly signal?: AbortSignal | undefined;
   readonly options?: CloudChatOptions | undefined;
@@ -142,7 +144,12 @@ export async function streamChatReply(input: {
         orgId: input.auth.orgId,
         extra: { "Content-Type": "application/json", Accept: "text/event-stream" },
       }),
-      body: JSON.stringify({ model: input.model, messages: input.messages, stream: true }),
+      body: JSON.stringify({
+        model: input.model,
+        messages: input.messages,
+        stream: true,
+        ...(input.effort ? { reasoning_effort: input.effort } : {}),
+      }),
       ...(input.signal ? { signal: input.signal } : {}),
     });
   } catch {

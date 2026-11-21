@@ -1,5 +1,5 @@
 import type { ServerProvider, ServerProviderModel } from "@hanzodev/contracts";
-import { createModelCapabilities } from "@hanzodev/shared/model";
+import { HANZO_REASONING_CAPABILITIES } from "@hanzodev/shared/model";
 import {
   buildHanzoIamAccountFromTokens,
   DEFAULT_HANZO_IAM_ISSUER,
@@ -11,23 +11,6 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-
-const DEFAULT_REASONING_DESCRIPTOR = {
-  id: "reasoningEffort",
-  label: "Reasoning",
-  type: "select" as const,
-  role: "reasoning" as const,
-  currentValue: "medium",
-  options: [
-    { id: "low", label: "Low" },
-    { id: "medium", label: "Medium", isDefault: true },
-    { id: "high", label: "High" },
-  ],
-};
-
-const HANZO_REASONING_CAPABILITIES = createModelCapabilities({
-  optionDescriptors: [DEFAULT_REASONING_DESCRIPTOR],
-});
 
 export const CURATED_HANZO_MODELS: ReadonlyArray<ServerProviderModel> = [
   {

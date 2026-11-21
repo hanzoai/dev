@@ -37,6 +37,24 @@ export function createModelCapabilities(input: {
   };
 }
 
+/** Reasoning effort for Hanzo's own models (Enso, Zen, Kai): the descriptor every client shows. */
+export const HANZO_REASONING_CAPABILITIES: ModelCapabilities = createModelCapabilities({
+  optionDescriptors: [
+    {
+      id: "reasoningEffort",
+      label: "Reasoning",
+      type: "select",
+      role: "reasoning",
+      currentValue: "medium",
+      options: [
+        { id: "low", label: "Low" },
+        { id: "medium", label: "Medium", isDefault: true },
+        { id: "high", label: "High" },
+      ],
+    },
+  ],
+});
+
 function getRawSelectionValueById(
   selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
   id: string,

@@ -31,6 +31,8 @@ export interface CloudChatState {
   readonly messages: ReadonlyArray<CloudChatMessage>;
   readonly models: ReadonlyArray<CloudChatModel>;
   readonly model: string;
+  /** Reasoning effort chosen for the model; null leaves it to the router. */
+  readonly effort: string | null;
   /** The hanzo.app thread id, once the remote store has accepted the thread. */
   readonly threadId: string | null;
   /** Device key of the open thread; null before the first message. */
@@ -47,7 +49,7 @@ export interface CloudChatController {
   getState(): CloudChatState;
   subscribe(listener: () => void): () => void;
   loadModels(): Promise<void>;
-  selectModel(id: string): void;
+  selectModel(id: string, effort?: string | null): void;
   send(prompt: string): Promise<void>;
   /** Reads the device copies, then the remote list, into `state.threads`. */
   loadThreads(): Promise<void>;
@@ -81,6 +83,7 @@ export function createCloudChatController(input: {
     messages: [],
     models: FALLBACK_MODELS,
     model: DEFAULT_MODEL_ID,
+    effort: null,
     threadId: null,
     threadKey: null,
     threads: [],
@@ -179,9 +182,9 @@ export function createCloudChatController(input: {
         // The known live set stays; sending reports sign-in problems itself.
       }
     },
-    selectModel(id) {
+    selectModel(id, effort = null) {
       modelChosen = true;
-      set({ model: id });
+      set({ model: id, effort });
     },
     async send(prompt) {
       const text = prompt.trim();
@@ -202,6 +205,7 @@ export function createCloudChatController(input: {
         reply = await streamChatReply({
           auth,
           model: state.model,
+          effort: state.effort,
           messages: history,
           options: input.options,
           onDelta: (chunk) => {
