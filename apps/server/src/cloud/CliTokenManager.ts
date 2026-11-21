@@ -132,6 +132,15 @@ const PersistedToken = Schema.Struct({
 });
 export type PersistedToken = typeof PersistedToken.Type;
 
+/**
+ * The machine's signed-in Hanzo identity as a token, when the host provides one. Hosts that do
+ * (the server) supply it from the credential vault the CLI owns; its refresh token is not ours to spend.
+ */
+export const MachineIdentityToken = Context.Reference<Effect.Effect<Option.Option<PersistedToken>>>(
+  "hanzo/cloud/MachineIdentityToken",
+  { defaultValue: () => Effect.succeed(Option.none()) },
+);
+
 const PersistedTokenJson = Schema.fromJsonString(PersistedToken);
 const decodePersistedToken = Schema.decodeUnknownEffect(PersistedTokenJson);
 const encodePersistedToken = Schema.encodeEffect(PersistedTokenJson);
@@ -495,6 +504,7 @@ export const make = Effect.gen(function* () {
   const terminal = yield* Terminal.Terminal;
   const externalLauncher = yield* ExternalLauncher.ExternalLauncher;
   const semaphore = yield* Semaphore.make(1);
+  const machineIdentity = yield* MachineIdentityToken;
   const persist = Effect.fn("cloud.cli_token.persist")(function* (token: PersistedToken) {
     const encoded = yield* encodePersistedToken(token);
     yield* secrets.set(CLOUD_CLI_OAUTH_TOKEN_SECRET, stringToBytes(encoded));
@@ -645,7 +655,10 @@ export const make = Effect.gen(function* () {
   });
 
   const getExisting = semaphore.withPermits(1)(
-    getExistingNoLock().pipe(
+    machineIdentity.pipe(
+      Effect.flatMap((machine) =>
+        Option.isSome(machine) ? Effect.succeed(machine) : getExistingNoLock(),
+      ),
       Effect.mapError((cause) =>
         isCloudCliCredentialRefreshError(cause)
           ? cause
@@ -661,7 +674,8 @@ export const make = Effect.gen(function* () {
     ),
   );
   const hasCredential = semaphore.withPermits(1)(
-    read().pipe(
+    machineIdentity.pipe(
+      Effect.flatMap((machine) => (Option.isSome(machine) ? Effect.succeed(machine) : read())),
       Effect.map(Option.isSome),
       Effect.mapError((cause) => new CloudCliCredentialReadError({ cause })),
     ),

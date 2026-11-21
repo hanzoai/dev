@@ -255,6 +255,14 @@
       "types": "./src/connectAuth.ts",
       "import": "./src/connectAuth.ts"
     },
+    "./mobileApp": {
+      "types": "./src/mobileApp.ts",
+      "import": "./src/mobileApp.ts"
+    },
+    "./hanzoSharedIdentity": {
+      "types": "./src/hanzoSharedIdentity.ts",
+      "import": "./src/hanzoSharedIdentity.ts"
+    },
     "./hanzoIamAuth": {
       "types": "./src/hanzoIamAuth.ts",
       "import": "./src/hanzoIamAuth.ts"

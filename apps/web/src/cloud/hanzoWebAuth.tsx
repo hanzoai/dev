@@ -165,6 +165,28 @@ function writeBrowserVault(vault: HanzoIamVaultState): void {
   }
 }
 
+const ACTIVE_ORGS_STORAGE_KEY = "hanzo.dev.active-orgs.v1";
+
+function readStoredOrgs(): Readonly<Record<string, string>> {
+  try {
+    const raw = window.localStorage.getItem(ACTIVE_ORGS_STORAGE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    return typeof parsed === "object" && parsed !== null
+      ? (parsed as Readonly<Record<string, string>>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredOrgs(orgs: Readonly<Record<string, string>>): void {
+  try {
+    window.localStorage.setItem(ACTIVE_ORGS_STORAGE_KEY, JSON.stringify(orgs));
+  } catch {
+    // Storage may be unavailable; the org choice then lasts for the session.
+  }
+}
+
 function readPendingPkce(): PendingPkceState | null {
   if (typeof window === "undefined") return null;
   try {
@@ -194,7 +216,7 @@ function writePendingPkce(pending: PendingPkceState | null): void {
   }
 }
 
-function openExternalUrl(url: string): void {
+export function openExternalUrl(url: string): void {
   if (typeof window === "undefined") return;
   if (window.desktopBridge?.openExternal) {
     void window.desktopBridge.openExternal(url);
@@ -227,6 +249,8 @@ export class HanzoWebAuthController implements CloudAccountSource {
   private loaded = false;
   private busy = false;
   private kmsBacked = false;
+  private shared = false;
+  private localServer = false;
   private lastError: string | null = null;
   private organizationsByAccount = new Map<string, ReadonlyArray<HanzoIamOrganization>>();
   private billingSummary: HanzoBillingSummary | null = null;
@@ -336,8 +360,12 @@ export class HanzoWebAuthController implements CloudAccountSource {
         this.organizationsByAccount.set(account.id, orgs.length > 0 ? orgs : EMPTY_ORGANIZATIONS);
       }
     }
-    writeBrowserVault(next);
-    if (typeof window !== "undefined" && window.desktopBridge?.setIamVault) {
+    if (this.shared) {
+      writeStoredOrgs(next.orgByAccountId ?? {});
+    } else {
+      writeBrowserVault(next);
+    }
+    if (!this.shared && typeof window !== "undefined" && window.desktopBridge?.setIamVault) {
       const payload = next.accounts.length > 0 ? serializeHanzoIamVaultJson(next) : null;
       void window.desktopBridge
         .setIamVault(payload)
@@ -378,6 +406,7 @@ export class HanzoWebAuthController implements CloudAccountSource {
       this.vault = initialVault;
       await this.completePendingPkceCallback();
       await this.syncLocalCliIdentities();
+      window.addEventListener("focus", () => void this.syncLocalCliIdentities());
       this.loaded = true;
       this.emit();
       void this.refreshOrganizationsAndBilling();
@@ -490,49 +519,94 @@ export class HanzoWebAuthController implements CloudAccountSource {
     }
   }
 
+  /** One request to this machine's identity routes, authorized the way every primary-environment call is. */
+  private async identityRequest(
+    action: "" | "/login" | "/use" | "/logout",
+    id?: string,
+  ): Promise<LocalHanzoIdentitiesResponse | null> {
+    const url = resolvePrimaryEnvironmentHttpUrl(`/v1/hanzo/identities${action}`);
+    const headers: Record<string, string> = { Accept: "application/json" };
+    let credentials: RequestCredentials = "omit";
+    if (isSameOriginBrowserPrimary()) {
+      credentials = "include";
+    } else {
+      const bearerToken = await readDesktopPrimaryBearerToken();
+      if (bearerToken) {
+        headers.Authorization = `Bearer ${bearerToken}`;
+      } else {
+        credentials = "include";
+      }
+    }
+    const init: RequestInit = { headers, credentials };
+    if (action === "") {
+      init.method = "GET";
+    } else {
+      init.method = "POST";
+      init.headers = { ...headers, "Content-Type": "application/json" };
+      init.body = JSON.stringify(id === undefined ? {} : { id });
+    }
+    const response = await fetch(url, init);
+    if (!response.ok) {
+      if (action === "") return null;
+      throw new Error((await response.text()) || `Hanzo sign-in failed (${response.status}).`);
+    }
+    return (await response.json()) as LocalHanzoIdentitiesResponse;
+  }
+
+  /**
+   * The machine's identity is the one the CLI, hanzod, and the desktop app share. When this
+   * environment serves it, it replaces what this client held, and tokens stay out of client storage.
+   */
+  private applySharedIdentity(snapshot: LocalHanzoIdentitiesResponse): void {
+    this.shared = true;
+    const accounts = Array.isArray(snapshot.accounts) ? snapshot.accounts : [];
+    const orgByAccountId = { ...readStoredOrgs(), ...this.vault.orgByAccountId };
+    const active =
+      accounts.find((entry) => entry.id === snapshot.activeAccountId) ?? accounts[0] ?? null;
+    this.persistVault({
+      activeAccountId: active?.id ?? null,
+      accounts,
+      activeOrgId: active ? (orgByAccountId[active.id] ?? active.owner) : null,
+      orgByAccountId,
+    });
+  }
+
   async syncLocalCliIdentities(): Promise<void> {
     if (typeof window === "undefined" || isHostedStaticApp()) {
       return;
     }
     try {
-      const url = resolvePrimaryEnvironmentHttpUrl("/v1/hanzo/identities");
-      const headers: Record<string, string> = { Accept: "application/json" };
-      let credentials: RequestCredentials = "omit";
-      if (isSameOriginBrowserPrimary()) {
-        credentials = "include";
-      } else {
-        const bearerToken = await readDesktopPrimaryBearerToken();
-        if (bearerToken) {
-          headers.Authorization = `Bearer ${bearerToken}`;
-        } else {
-          credentials = "include";
-        }
-      }
-
-      const response = await fetch(url, { headers, credentials });
-      if (!response.ok) return;
-      const snapshot = (await response.json()) as LocalHanzoIdentitiesResponse;
-      if (!Array.isArray(snapshot.accounts) || snapshot.accounts.length === 0) {
-        return;
-      }
-
-      let nextVault = this.vault;
-      const hadActive = Boolean(resolveActiveHanzoAccount(nextVault));
-      for (const local of snapshot.accounts) {
-        if (!local.accessToken) continue;
-        const makeActive = !hadActive && snapshot.activeAccountId === local.id;
-        nextVault = upsertHanzoIamVaultAccount(nextVault, local, makeActive);
-      }
-      if (!resolveActiveHanzoAccount(nextVault) && nextVault.accounts[0]) {
-        nextVault = {
-          ...nextVault,
-          activeAccountId: nextVault.accounts[0].id,
-          activeOrgId: nextVault.activeOrgId ?? nextVault.accounts[0].owner,
-        };
-      }
-      this.persistVault(nextVault);
+      const snapshot = await this.identityRequest("");
+      if (!snapshot) return;
+      this.localServer = true;
+      // An identity held only by this client's own store stays usable until the machine has one.
+      if (snapshot.accounts.length === 0 && !this.shared) return;
+      const before = this.vault.activeAccountId;
+      this.applySharedIdentity(snapshot);
+      if (before !== this.vault.activeAccountId) void this.refreshOrganizationsAndBilling();
     } catch {
       // Local server may not be reachable yet during cold boot; ignore silently.
+    }
+  }
+
+  private async runSharedIdentity(
+    action: "/login" | "/use" | "/logout",
+    id?: string,
+  ): Promise<boolean> {
+    this.busy = true;
+    this.lastError = null;
+    this.emit();
+    try {
+      const snapshot = await this.identityRequest(action, id);
+      if (snapshot) this.applySharedIdentity(snapshot);
+      void this.refreshOrganizationsAndBilling();
+      return true;
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : String(error);
+      return false;
+    } finally {
+      this.busy = false;
+      this.emit();
     }
   }
 
@@ -581,6 +655,11 @@ export class HanzoWebAuthController implements CloudAccountSource {
     readonly returnUrl?: string;
   }): Promise<void> {
     if (typeof window === "undefined") return;
+    if (this.localServer && (options?.brandId ?? "hanzo") === "hanzo") {
+      if (await this.runSharedIdentity("/login")) return;
+      // No CLI on this machine: sign in at hanzo.ai below, held by this client.
+      this.lastError = null;
+    }
     const config = resolveCloudPublicConfig();
     const brandId = options?.brandId ?? "hanzo";
     const brand = HANZO_IAM_BRANDS.find((entry) => entry.id === brandId);
@@ -686,6 +765,10 @@ export class HanzoWebAuthController implements CloudAccountSource {
   }
 
   switchAccount = (accountId: string): void => {
+    if (this.shared) {
+      void this.runSharedIdentity("/use", accountId);
+      return;
+    }
     const target = this.vault.accounts.find((account) => account.id === accountId);
     if (!target) {
       return;
@@ -715,6 +798,10 @@ export class HanzoWebAuthController implements CloudAccountSource {
   };
 
   removeAccount = (accountId: string): void => {
+    if (this.shared) {
+      void this.runSharedIdentity("/logout", accountId);
+      return;
+    }
     this.organizationsByAccount.delete(accountId);
     this.persistVault(removeHanzoIamVaultAccount(this.vault, accountId));
     void this.refreshOrganizationsAndBilling();
@@ -723,6 +810,10 @@ export class HanzoWebAuthController implements CloudAccountSource {
   signOut = async (_options?: { readonly redirectUrl?: string }): Promise<void> => {
     const active = this.activeAccount;
     if (!active) return;
+    if (this.shared) {
+      await this.runSharedIdentity("/logout", active.id);
+      return;
+    }
     this.organizationsByAccount.delete(active.id);
     this.persistVault(removeHanzoIamVaultAccount(this.vault, active.id));
     void this.refreshOrganizationsAndBilling();
@@ -731,6 +822,11 @@ export class HanzoWebAuthController implements CloudAccountSource {
   getToken = async (_options?: { readonly template?: string }): Promise<string | null> => {
     const active = this.activeAccount;
     if (!active) return null;
+    if (this.shared) {
+      // The refresh token is the CLI's to spend; ask this machine for the identity again.
+      if (isHanzoIamTokenExpiringSoon(active)) await this.syncLocalCliIdentities();
+      return this.activeAccount?.accessToken ?? null;
+    }
     if (!isHanzoIamTokenExpiringSoon(active) || !active.refreshToken) {
       return active.accessToken;
     }

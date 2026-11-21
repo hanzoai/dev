@@ -45,6 +45,8 @@ import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPr
 import { readIssueListPreferences } from "../issue/issueListPreferences";
 import { IssueGlyph } from "../issue/issuePresentation";
 import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
+import { useHanzoWebAccounts } from "../../cloud/hanzoWebAuth";
+import { SidebarAccount } from "./SidebarAccount";
 import { SidebarDrawerAccount } from "./SidebarDrawerAccount";
 import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
@@ -225,6 +227,11 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     closeMobileSidebar();
     void navigate({ to: "/issues", search: readIssueListPreferences() });
   };
+  const signedIn = useHanzoWebAccounts().activeAccount !== null;
+  const handleAccountNavigate = (to: "/usage" | "/settings") => {
+    closeMobileSidebar();
+    void navigate({ to });
+  };
   const handleSettingsClick = () => {
     closeMobileSidebar();
     void navigate({ to: "/settings" });
@@ -256,7 +263,10 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
       ) : (
         <>
           {isMobile && embed === null ? <SidebarDrawerAccount /> : null}
-          {embed === null ? (
+          {!isMobile && embed === null && signedIn ? (
+            <SidebarAccount onNavigate={handleAccountNavigate} />
+          ) : null}
+          {embed === null && !signedIn ? (
             <SidebarUtilityItem
               icon={<SettingsIcon />}
               label={gt("Settings")}
@@ -277,7 +287,7 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
               onClick={handleIssuesClick}
             />
           ) : null}
-          {embed === null ? (
+          {embed === null && !(signedIn && !isMobile) ? (
             <SidebarUtilityItem
               icon={<ChartNoAxesColumnIcon />}
               label={gt("Usage")}
