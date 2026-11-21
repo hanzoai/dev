@@ -92,7 +92,9 @@ export function MicrophoneTest({
       typeof AudioWorkletNode === "undefined"
     ) {
       setError(
-        gt("Microphone testing is unavailable in this browser. Use HTTPS or the desktop app."),
+        window.desktopBridge
+          ? gt("Microphone access is unavailable. Restart Hanzo Dev and try again.")
+          : gt("Microphone testing is unavailable in this browser. Use HTTPS or the desktop app."),
       );
       setPhase("idle");
       return;
@@ -183,7 +185,11 @@ export function MicrophoneTest({
       const name = typeof cause === "object" && cause !== null && "name" in cause && cause.name;
       setError(
         name === "NotAllowedError"
-          ? messages(MICROPHONE_PERMISSION_ERROR)
+          ? window.desktopBridge
+            ? gt(
+                "Microphone access is denied. Enable Hanzo Dev in System Settings, Privacy & Security, Microphone.",
+              )
+            : messages(MICROPHONE_PERMISSION_ERROR)
           : name === "NotFoundError"
             ? gt("No microphone found.")
             : cause instanceof Error
