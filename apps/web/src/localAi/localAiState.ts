@@ -1,8 +1,10 @@
 import { useSyncExternalStore } from "react";
 
+import { parseLocalEngines, trimBaseUrl, type LocalEngine } from "@hanzodev/shared/localAi";
+
 import { trackHanzoEvent } from "../analytics/hanzoWebAnalytics";
 
-export type LocalAiTabId = "models" | "node" | "engine";
+export type LocalAiTabId = "engines" | "node";
 
 export interface LocalAiModalState {
   readonly open: boolean;
@@ -10,13 +12,12 @@ export interface LocalAiModalState {
   readonly filterQuery: string;
 }
 
-const CUSTOM_ENGINE_URL_KEY = "hanzo.dev.localAi.engineUrl";
+const CUSTOM_ENGINES_KEY = "hanzo.dev.localAi.engines";
 const CUSTOM_HANZOD_URL_KEY = "hanzo.dev.localAi.hanzodUrl";
-const SELECTED_LOCAL_MODEL_KEY = "hanzo.dev.localAi.selectedModel";
 
 let modalState: LocalAiModalState = {
   open: false,
-  tab: "models",
+  tab: "engines",
   filterQuery: "",
 };
 
@@ -68,41 +69,24 @@ export function useLocalAiModalState(): LocalAiModalState {
   return useSyncExternalStore(subscribeLocalAiModal, getLocalAiModalState, getLocalAiModalState);
 }
 
-export function readSelectedLocalAiModel(): string {
-  if (typeof window === "undefined") return "zen6";
+export function readCustomLocalEngines(): LocalEngine[] {
+  if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(SELECTED_LOCAL_MODEL_KEY)?.trim();
-    if (raw && !/qwen2|zen[45]/iu.test(raw)) return raw;
+    return parseLocalEngines(window.localStorage.getItem(CUSTOM_ENGINES_KEY));
   } catch {
-    // Ignore restricted storage environments.
-  }
-  return "zen6";
-}
-
-export function writeSelectedLocalAiModel(modelId: string): void {
-  if (typeof window === "undefined" || /qwen2|zen[45]/iu.test(modelId)) return;
-  try {
-    window.localStorage.setItem(SELECTED_LOCAL_MODEL_KEY, modelId.trim());
-  } catch {
-    // Ignore restricted storage environments.
+    return [];
   }
 }
 
-export function readCustomLocalEngineUrl(): string {
-  if (typeof window === "undefined") return "";
-  try {
-    return window.localStorage.getItem(CUSTOM_ENGINE_URL_KEY)?.trim() ?? "";
-  } catch {
-    return "";
-  }
-}
-
-export function writeCustomLocalEngineUrl(url: string): void {
+export function writeCustomLocalEngines(engines: ReadonlyArray<LocalEngine>): void {
   if (typeof window === "undefined") return;
   try {
-    const trimmed = url.trim().replace(/\/+$/u, "");
-    if (trimmed) window.localStorage.setItem(CUSTOM_ENGINE_URL_KEY, trimmed);
-    else window.localStorage.removeItem(CUSTOM_ENGINE_URL_KEY);
+    if (engines.length > 0) {
+      const rows = engines.map((engine) => ({ ...engine, baseUrl: trimBaseUrl(engine.baseUrl) }));
+      window.localStorage.setItem(CUSTOM_ENGINES_KEY, JSON.stringify(rows));
+    } else {
+      window.localStorage.removeItem(CUSTOM_ENGINES_KEY);
+    }
   } catch {
     // Ignore restricted storage environments.
   }

@@ -437,7 +437,7 @@ const COMMAND_LABELS: Partial<Record<KeybindingCommand, string>> = {
   "commandPalette.toggle": msg("Command Palette: Toggle"),
   "settings.open": msg("Settings: Open"),
   "keybindings.open": msg("Keyboard Shortcuts: Open"),
-  "localAi.open": msg("Local AI & Node Manager: Open"),
+  "localAi.open": msg("Local AI engines: Open"),
   "filePicker.toggle": msg("File Picker: Toggle"),
   "projectSearch.toggle": msg("Project Search: Toggle"),
   "usage.open": msg("Usage: Open"),

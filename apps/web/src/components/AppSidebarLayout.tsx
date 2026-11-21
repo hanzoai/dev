@@ -339,7 +339,7 @@ function registerAppShellCommands(router: AnyRouter, shellElement: Element): () 
       getHanzoWebAuthController().openAccountModal("accounts");
     }),
     registerMenuAction("open-local-ai", () => {
-      openLocalAiManager("models");
+      openLocalAiManager("engines");
     }),
     registerMenuAction("commandPalette.toggle", () => {
       openCommandPalette();

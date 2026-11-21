@@ -11,7 +11,7 @@ use std::cmp::Ordering;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State, Theme};
 use tauri_plugin_dialog::DialogExt;
 
@@ -96,12 +96,81 @@ pub struct PickedThemeFileOutput {
 #[serde(rename_all = "camelCase")]
 pub struct DiscoveredLanEngine {
     pub name: String,
-    pub host: String,
-    pub port: u16,
-    pub base_url: String,
     pub kind: &'static str,
-    pub models: Vec<String>,
-    pub latency_ms: Option<u64>,
+    pub base_url: String,
+}
+
+/// mDNS service types a LAN inference node advertises, with the engine kind and OpenAI API root.
+const LAN_ENGINE_SERVICES: [(&str, &str, &str); 2] = [
+    ("_hanzo-engine._tcp", "hanzo-engine", "/v1/engine"),
+    ("_openai._tcp", "openai", "/v1"),
+];
+
+/// Parses `dns-sd -Z` zone output (`<instance>._svc._tcp SRV 0 0 <port> <host>`) into (instance, host, port).
+fn parse_dns_sd_zone(output: &str, service: &str) -> Vec<(String, String, u16)> {
+    let mut found = Vec::new();
+    for line in output.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() < 6 || fields[1] != "SRV" || !fields[0].contains(service) {
+            continue;
+        }
+        let Ok(port) = fields[4].parse::<u16>() else {
+            continue;
+        };
+        let instance = fields[0]
+            .split(&format!(".{service}"))
+            .next()
+            .unwrap_or(fields[0])
+            .replace("\\032", " ");
+        found.push((instance, fields[5].trim_end_matches('.').to_string(), port));
+    }
+    found
+}
+
+/// Parses `avahi-browse -rpt` resolved rows (`=;if;proto;name;type;domain;host;addr;port;txt`).
+fn parse_avahi_browse(output: &str) -> Vec<(String, String, u16)> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let f: Vec<&str> = line.split(';').collect();
+            if f.len() < 9 || f[0] != "=" || f[2] != "IPv4" {
+                return None;
+            }
+            Some((f[3].to_string(), f[7].to_string(), f[8].parse().ok()?))
+        })
+        .collect()
+}
+
+/// Collects mDNS answers for one bounded window, then reaps the browser process.
+async fn browse_mdns(service: &str, window: Duration) -> Vec<(String, String, u16)> {
+    use tokio::io::AsyncReadExt;
+    let mut command = if cfg!(target_os = "macos") {
+        let mut c = tokio::process::Command::new("dns-sd");
+        c.args(["-Z", service, "local."]);
+        c
+    } else {
+        let mut c = tokio::process::Command::new("avahi-browse");
+        c.args(["-rpt", service]);
+        c
+    };
+    let Ok(mut child) = command
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+    else {
+        return Vec::new();
+    };
+    let mut output = String::new();
+    if let Some(mut stdout) = child.stdout.take() {
+        let _ = tokio::time::timeout(window, stdout.read_to_string(&mut output)).await;
+    }
+    let _ = child.kill().await;
+    if cfg!(target_os = "macos") {
+        parse_dns_sd_zone(&output, service)
+    } else {
+        parse_avahi_browse(&output)
+    }
 }
 
 pub fn read_persisted_local_env_enabled(state_dir: &Path) -> bool {
@@ -1007,78 +1076,21 @@ pub async fn desktop_acknowledge_snapshot(
     Ok(())
 }
 
+/// LAN nodes that advertise themselves over mDNS. Localhost engines are built-ins the web client probes itself.
 #[tauri::command]
 pub async fn desktop_discover_lan_engines() -> Result<Vec<DiscoveredLanEngine>, String> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(450))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let targets = [
-        (
-            "Embedded Hanzo Engine",
-            "127.0.0.1",
-            36900u16,
-            "hanzo-engine",
-            "/v1/models",
-        ),
-        (
-            "Hanzo Node (hanzod)",
-            "127.0.0.1",
-            3690u16,
-            "hanzo-engine",
-            "/v1/models",
-        ),
-        (
-            "Hanzo Validator Node (hanzod)",
-            "127.0.0.1",
-            9630u16,
-            "hanzo-engine",
-            "/v1/health",
-        ),
-        (
-            "Hanzo Engine",
-            "127.0.0.1",
-            8000u16,
-            "hanzo-engine",
-            "/v1/models",
-        ),
-        ("Ollama Local", "127.0.0.1", 11434u16, "ollama", "/api/tags"),
-    ];
-
-    let mut out = Vec::new();
-    for (name, host, port, kind, path) in targets {
-        let base_url = format!("http://{host}:{port}");
-        let url = format!("{base_url}{path}");
-        let started = Instant::now();
-        if let Ok(resp) = client.get(&url).send().await {
-            if resp.status().is_success() {
-                let latency_ms = Some(started.elapsed().as_millis() as u64);
-                let mut models = Vec::new();
-                if let Ok(body) = resp.json::<Value>().await {
-                    if let Some(data) = body.get("data").and_then(Value::as_array) {
-                        for m in data {
-                            if let Some(id) = m.get("id").and_then(Value::as_str) {
-                                models.push(id.to_string());
-                            }
-                        }
-                    } else if let Some(list) = body.get("models").and_then(Value::as_array) {
-                        for m in list {
-                            if let Some(id) = m.get("name").and_then(Value::as_str) {
-                                models.push(id.to_string());
-                            }
-                        }
-                    }
-                }
-                out.push(DiscoveredLanEngine {
-                    name: name.to_string(),
-                    host: host.to_string(),
-                    port,
-                    base_url,
-                    kind,
-                    models,
-                    latency_ms,
-                });
+    let window = Duration::from_millis(1200);
+    let (hanzo, openai) = tokio::join!(
+        browse_mdns(LAN_ENGINE_SERVICES[0].0, window),
+        browse_mdns(LAN_ENGINE_SERVICES[1].0, window)
+    );
+    let results = [hanzo, openai];
+    let mut out: Vec<DiscoveredLanEngine> = Vec::new();
+    for ((_, kind, path), nodes) in LAN_ENGINE_SERVICES.iter().zip(results) {
+        for (name, host, port) in nodes {
+            let base_url = format!("http://{host}:{port}{path}");
+            if out.iter().all(|e| e.base_url != base_url) {
+                out.push(DiscoveredLanEngine { name, kind, base_url });
             }
         }
     }
@@ -1625,6 +1637,24 @@ pub async fn desktop_web_links_set_ready(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn parses_dns_sd_zone_srv_rows() {
+        let zone = "; registration\nMy\\032Mac._hanzo-engine._tcp\tSRV\t0 0 3690 mac.local.\nMy\\032Mac._hanzo-engine._tcp\tTXT\t\"\"\n";
+        assert_eq!(
+            super::parse_dns_sd_zone(zone, "_hanzo-engine._tcp"),
+            vec![("My Mac".to_string(), "mac.local".to_string(), 3690)]
+        );
+    }
+
+    #[test]
+    fn parses_avahi_resolved_rows_only() {
+        let out = "+;en0;IPv4;box;_openai._tcp;local\n=;en0;IPv4;box;_openai._tcp;local;box.local;10.0.0.5;8080;\"\"\n=;en0;IPv6;box;_openai._tcp;local;box.local;fe80::1;8080;\"\"\n";
+        assert_eq!(
+            super::parse_avahi_browse(out),
+            vec![("box".to_string(), "10.0.0.5".to_string(), 8080)]
+        );
+    }
+
     use super::*;
 
     #[test]
