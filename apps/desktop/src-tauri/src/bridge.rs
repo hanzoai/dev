@@ -231,6 +231,7 @@ pub fn build_initialization_script(config: &BackendRuntimeConfig, local_enabled:
       invoke("desktop_request_snapshot_permissions", {{ includeAccessibility: Boolean(includeAccessibility) }}),
     getSnapShotState: () => invoke("desktop_get_snapshot_state"),
     setupSnapShot: (action) => invoke("desktop_setup_snapshot", {{ action }}),
+    captureWindow: () => invoke("desktop_capture_window"),
     previewSnapShotConfig: async () => null,
     applySnapShotConfig: async () => ({{ backupPath: null, warning: null }}),
     checkSnapShotShortcut: (shortcut) => invoke("desktop_check_snapshot_shortcut", {{ shortcut }}),

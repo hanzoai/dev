@@ -1125,6 +1125,8 @@ export interface DesktopBridge {
   requestSnapShotPermissions: (includeAccessibility: boolean) => Promise<void>;
   getSnapShotState: () => Promise<DesktopSnapShotState>;
   setupSnapShot: (action: DesktopSnapShotSetupAction) => Promise<void>;
+  /** This window alone as a PNG data URL, for a problem report; null where the platform has no window capture. */
+  captureWindow: () => Promise<string | null>;
   previewSnapShotConfig: (
     request: DesktopCaptureConfigRequest,
   ) => Promise<DesktopCaptureConfigPreview | null>;

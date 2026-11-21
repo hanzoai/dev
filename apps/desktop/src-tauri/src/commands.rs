@@ -921,6 +921,43 @@ pub async fn desktop_request_snapshot_permissions(
     Ok(())
 }
 
+/// The app's own window as a PNG data URL, for a problem report. Only this
+/// window is captured (never the screen, so nothing of another app is in it);
+/// `None` where the platform has no window capture, and the page draws itself.
+#[tauri::command]
+pub async fn desktop_capture_window(window: tauri::WebviewWindow) -> Result<Option<String>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        use base64::Engine as _;
+        use objc2_app_kit::NSWindow;
+        let ptr = window.ns_window().map_err(|e| e.to_string())?;
+        // SAFETY: Tauri hands back the live NSWindow of this webview window.
+        let id = unsafe { &*(ptr as *const NSWindow) }.windowNumber();
+        let dest = std::env::temp_dir().join(format!("hanzo-report-{}.png", generate_random_hex(8)));
+        let status = tokio::process::Command::new("screencapture")
+            .args(["-x", "-o", "-l", &id.to_string()])
+            .arg(&dest)
+            .status()
+            .await
+            .map_err(|e| e.to_string())?;
+        let bytes = std::fs::read(&dest);
+        let _ = std::fs::remove_file(&dest);
+        if !status.success() {
+            return Ok(None);
+        }
+        let bytes = bytes.map_err(|e| e.to_string())?;
+        return Ok(Some(format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        )));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window;
+        Ok(None)
+    }
+}
+
 #[tauri::command]
 pub async fn desktop_setup_snapshot(
     app: AppHandle,

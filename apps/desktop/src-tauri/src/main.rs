@@ -253,6 +253,7 @@ fn main() {
             commands::desktop_get_snapshot_state,
             commands::desktop_request_snapshot_permissions,
             commands::desktop_setup_snapshot,
+            commands::desktop_capture_window,
             commands::desktop_check_snapshot_shortcut,
             commands::desktop_set_snapshot_shortcut_suppressed,
             commands::desktop_list_pending_snapshots,
