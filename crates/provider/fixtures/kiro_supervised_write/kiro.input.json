@@ -1,0 +1,24 @@
+{
+  "fixture": "kiro_supervised_write",
+  "driver": "kiro",
+  "modelSelection": {
+    "instanceId": "kiro",
+    "model": "claude-haiku-4.5"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": "approval-required",
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Create a file named kiro-permission-probe.txt in the current workspace containing exactly: kiro permission probe\nUse one file write tool call and nothing else, then reply exactly: kiro permission done"
+    },
+    {
+      "type": "approve_next_runtime_request"
+    },
+    {
+      "type": "approve_next_runtime_request"
+    }
+  ]
+}

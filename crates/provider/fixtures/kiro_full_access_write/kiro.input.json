@@ -1,0 +1,18 @@
+{
+  "fixture": "kiro_full_access_write",
+  "driver": "kiro",
+  "modelSelection": {
+    "instanceId": "kiro",
+    "model": "claude-haiku-4.5"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": "full-access",
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Create a file named kiro-permission-probe.txt in the current workspace containing exactly: kiro permission probe\nUse one file write tool call and nothing else, then reply exactly: kiro permission done"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "fixture": "tool_call_restricted_granular",
+  "driver": "codex",
+  "modelSelection": {
+    "instanceId": "codex",
+    "model": "gpt-5.6-terra"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Create or overwrite .codex-probe-write-action.txt with exactly this text: codex app-server approval fixture. Use a local shell command or file edit only, then briefly report what happened. Do not read package metadata, use GitHub, use web, or use MCP."
+    },
+    {
+      "type": "approve_next_runtime_request"
+    }
+  ]
+}

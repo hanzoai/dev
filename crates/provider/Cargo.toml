@@ -1,0 +1,16 @@
+[package]
+name = "dev-provider"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "dev_provider"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

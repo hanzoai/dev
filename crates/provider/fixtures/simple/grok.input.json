@@ -1,0 +1,18 @@
+{
+  "fixture": "simple",
+  "driver": "grok",
+  "modelSelection": {
+    "instanceId": "grok",
+    "model": "grok-build"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Respond with the following text: fixture simple ok"
+    }
+  ]
+}

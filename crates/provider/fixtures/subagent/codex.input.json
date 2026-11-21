@@ -1,0 +1,18 @@
+{
+  "fixture": "subagent",
+  "driver": "codex",
+  "modelSelection": {
+    "instanceId": "codex",
+    "model": "gpt-5.6-luna"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Spawn 2 subagents, one to read package.json and one to read tsconfig.json"
+    }
+  ]
+}

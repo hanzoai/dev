@@ -1,0 +1,18 @@
+{
+  "fixture": "proposed_plan",
+  "driver": "codex",
+  "modelSelection": {
+    "instanceId": "codex",
+    "model": "gpt-6-luna"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": "plan",
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Create a short implementation plan for adding deterministic replay fixtures. Do not ask questions. Present the final plan in a proposed plan block."
+    }
+  ]
+}

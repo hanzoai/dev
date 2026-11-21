@@ -1,0 +1,23 @@
+{
+  "fixture": "turn_interrupt_mid_tool",
+  "driver": "codex",
+  "modelSelection": {
+    "instanceId": "codex",
+    "model": "gpt-6-luna"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Run this exact local command: `node -e \"console.log('interrupt fixture tool started'); setTimeout(() => {}, 30000)\"`. Do not answer until it completes, then respond exactly: interrupt fixture should not finish naturally."
+    },
+    {
+      "type": "interrupt",
+      "targetRunIndex": 1,
+      "waitForTurnItemType": "command_execution"
+    }
+  ]
+}

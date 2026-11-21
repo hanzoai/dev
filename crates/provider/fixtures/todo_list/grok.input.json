@@ -1,0 +1,18 @@
+{
+  "fixture": "todo_list",
+  "driver": "grok",
+  "modelSelection": {
+    "instanceId": "grok",
+    "model": "grok-build"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Use the update_plan tool to track exactly three steps: inspect package.json, inspect tsconfig.json, report completion. Then read package.json and tsconfig.json, and answer exactly: todo list fixture complete"
+    }
+  ]
+}

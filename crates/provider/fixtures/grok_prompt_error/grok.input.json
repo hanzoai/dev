@@ -1,0 +1,22 @@
+{
+  "fixture": "grok_prompt_error",
+  "driver": "grok",
+  "modelSelection": {
+    "instanceId": "grok",
+    "model": "grok-build"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Respond with exactly: grok prompt error fixture"
+    },
+    {
+      "type": "message",
+      "text": "Respond with exactly: grok prompt error fixture recovered"
+    }
+  ]
+}

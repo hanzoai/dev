@@ -1,0 +1,38 @@
+{
+  "fixture": "pi_compaction",
+  "driver": "pi",
+  "modelSelection": {
+    "instanceId": "pi",
+    "model": "openrouter/deepseek/deepseek-v4-flash"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Remember the opaque marker compaction-marker-4Z7Q for later. Respond with exactly: compaction marker stored"
+    },
+    {
+      "type": "message",
+      "text": "/compact keep the opaque marker compaction-marker-4Z7Q"
+    },
+    {
+      "type": "message",
+      "text": "Respond with exactly: second compaction fixture turn"
+    },
+    {
+      "type": "message",
+      "text": "Respond with exactly: third compaction fixture turn"
+    },
+    {
+      "type": "message",
+      "text": "/compact"
+    },
+    {
+      "type": "message",
+      "text": "Return the opaque marker I asked you to remember. Respond with only the marker."
+    }
+  ]
+}

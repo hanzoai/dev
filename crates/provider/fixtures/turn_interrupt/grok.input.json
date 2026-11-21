@@ -1,0 +1,22 @@
+{
+  "fixture": "turn_interrupt",
+  "driver": "grok",
+  "modelSelection": {
+    "instanceId": "grok",
+    "model": "grok-build"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Do not answer immediately. First run the local shell command `sleep 30`, then respond with exactly: interrupt fixture should not finish naturally."
+    },
+    {
+      "type": "interrupt",
+      "targetRunIndex": 1
+    }
+  ]
+}

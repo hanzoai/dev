@@ -37,6 +37,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "dev-provider"
+version = "0.7.0-dev.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"

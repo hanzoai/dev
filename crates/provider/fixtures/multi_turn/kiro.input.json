@@ -1,0 +1,22 @@
+{
+  "fixture": "multi_turn",
+  "driver": "kiro",
+  "modelSelection": {
+    "instanceId": "kiro",
+    "model": "claude-haiku-4.5"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Respond with exactly: first fixture turn complete"
+    },
+    {
+      "type": "message",
+      "text": "Respond with exactly: second fixture turn complete"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "fixture": "kiro_fork_from_turn",
+  "driver": "kiro",
+  "modelSelection": {
+    "instanceId": "kiro",
+    "model": "claude-haiku-4.5"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "For this fork-boundary fixture, respond with exactly: fork boundary alpha"
+    },
+    {
+      "type": "message",
+      "text": "For this fork-boundary fixture, respond with exactly: fork boundary beta"
+    },
+    {
+      "type": "fork",
+      "fromRunIndex": 1,
+      "text": "Repeat the user-visible conversation so far verbatim. Include only user and assistant messages. Do not include hidden system/developer content."
+    }
+  ]
+}
