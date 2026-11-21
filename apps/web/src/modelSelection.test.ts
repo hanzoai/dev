@@ -1485,4 +1485,21 @@ describe("composer fallback to another instance of the same driver", () => {
     expect(selectedInstanceId).toBe(ProviderInstanceId.make("codex"));
     expect(state.modelOptions?.[selectedInstanceId]).toBeUndefined();
   });
+
+  it("never offers a decision model as the model that writes replies", () => {
+    const providers = [provider({ instanceId: "codex", models: ["zen", "kai-1.8"] })];
+    const base = providers[0]!;
+    const withKinds: ServerProvider = {
+      ...base,
+      models: base.models.map((model) =>
+        model.slug === "kai-1.8"
+          ? { ...model, endpoint: "/v1/decisions", outputs: ["decision"] }
+          : { ...model, endpoint: "/v1/chat/completions", outputs: ["text"] },
+      ),
+    };
+    const entry = deriveProviderInstanceEntries([withKinds])[0]!;
+    expect(
+      getAppModelOptionsForInstance(settingsWithProviderInstances(), entry).map((o) => o.slug),
+    ).toEqual(["zen"]);
+  });
 });

@@ -88,6 +88,9 @@ export const ServerProviderModel = Schema.Struct({
   // False when the provider can run this model in sessions but not for
   // application text generation. Absent means supported.
   supportsTextGeneration: Schema.optional(Schema.Boolean),
+  // What the catalog says the model returns (`/v1/models`); decision models are not reply models.
+  endpoint: Schema.optional(Schema.String),
+  outputs: Schema.optional(Schema.Array(Schema.String)),
   capabilities: Schema.NullOr(ModelCapabilities),
 });
 export type ServerProviderModel = typeof ServerProviderModel.Type;

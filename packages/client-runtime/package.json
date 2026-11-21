@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./replyModels": {
+      "types": "./src/replyModels.ts",
+      "default": "./src/replyModels.ts"
+    },
     "./pull-request-diff-fold": {
       "types": "./src/pullRequestDiffFold.ts",
       "default": "./src/pullRequestDiffFold.ts"

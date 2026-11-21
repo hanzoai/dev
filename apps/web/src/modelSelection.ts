@@ -1,3 +1,4 @@
+import { writesReplies } from "@hanzodev/client-runtime/replyModels";
 import {
   DEFAULT_TEXT_GENERATION_MODEL,
   DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
@@ -212,7 +213,7 @@ export function getAppModelOptionsForInstance(
   selectedModel?: string | null,
 ): AppModelOption[] {
   const options: AppModelOption[] = entry.models
-    .filter((model) => !model.isCustom)
+    .filter((model) => !model.isCustom && writesReplies(model))
     .map((model) => toAppModelOption(model, entry.driverKind));
   const seen = new Set(options.map((option) => option.slug));
   const builtInModelSlugs = new Set(
