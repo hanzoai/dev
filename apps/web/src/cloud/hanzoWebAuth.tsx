@@ -43,7 +43,6 @@ import {
   CreditCardIcon,
   ExternalLinkIcon,
   GlobeIcon,
-  KeyRoundIcon,
   LogOutIcon,
   PlusIcon,
   RefreshCwIcon,
@@ -67,6 +66,7 @@ import { openLocalAiManager } from "../localAi/localAiState";
 import { trackHanzoEvent } from "../analytics/hanzoWebAnalytics";
 import { toastManager } from "../components/ui/toast";
 import { m } from "../i18n/messages";
+import { HanzoSignInPanel } from "./HanzoSignInPanel";
 import { ManagedRelayAuthProvider } from "./managedAuth";
 import { resolveCloudPublicConfig } from "./publicConfig";
 
@@ -825,38 +825,50 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
     () => null,
   );
 
-  const [selectedBrand, setSelectedBrand] = useState<HanzoIamBrandId>("hanzo");
   const [showAddAccount, setShowAddAccount] = useState(false);
-  const [showTokenEntry, setShowTokenEntry] = useState(false);
-  const [tokenInput, setTokenInput] = useState("");
-  const [callbackUrlInput, setCallbackUrlInput] = useState("");
   const [customOrgInput, setCustomOrgInput] = useState("");
-  const [localError, setLocalError] = useState<string | null>(null);
 
   if (!modal.open) return null;
 
+  if (accounts.length === 0) {
+    return (
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={gt("Sign in to Hanzo")}
+        data-testid="hanzo-account-modal"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs"
+        onClick={(event) => {
+          if (event.target === event.currentTarget) controller.closeModal();
+        }}
+      >
+        <div className="relative w-full max-w-sm">
+          <HanzoSignInPanel
+            controller={controller}
+            errorMessage={errorMessage}
+            isBusy={isBusy}
+            pendingAuthorizeUrl={pendingAuthorizeUrl}
+          />
+          <button
+            type="button"
+            onClick={controller.closeModal}
+            className="absolute top-3 right-3 rounded-full p-1.5 text-white/60 hover:bg-white/10 hover:text-white"
+            aria-label={gt("Close")}
+          >
+            <XIcon className="size-4" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const activeCustomPage = modal.pages.find((page) => page.url === modal.tab) ?? null;
-  const shouldShowSignInForm = accounts.length === 0 || showAddAccount;
+  const shouldShowSignInForm = showAddAccount;
   const currentPlanId = billing?.planId ?? "go";
   const spendRatio =
     billing?.monthlyLimitCents && billing.monthlyLimitCents > 0
       ? Math.min(100, Math.round((billing.monthlyUsedCents / billing.monthlyLimitCents) * 100))
       : 18;
-
-  const handleTokenSubmit = async () => {
-    setLocalError(null);
-    try {
-      await controller.signInWithAccessToken({
-        accessToken: tokenInput,
-        brandId: selectedBrand,
-      });
-      setTokenInput("");
-      setShowTokenEntry(false);
-      setShowAddAccount(false);
-    } catch (error) {
-      setLocalError(error instanceof Error ? error.message : String(error));
-    }
-  };
 
   const handleCustomOrgSwitch = () => {
     const slug = customOrgInput.trim();
@@ -1391,145 +1403,13 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
               )}
 
               {shouldShowSignInForm && (
-                <div className="space-y-4 rounded-xl border border-border bg-muted/20 p-4">
-                  <div>
-                    <div className="text-sm font-semibold">
-                      {accounts.length > 0 ? (
-                        <T>Add another IAM account</T>
-                      ) : (
-                        <T>Sign in with Hanzo IAM</T>
-                      )}
-                    </div>
-                    <div className="mt-0.5 text-xs text-muted-foreground">
-                      <T>
-                        Connect Hanzo, Lux, Zoo, or Pars accounts for unified access across desktop,
-                        web, and mobile.
-                      </T>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-1.5">
-                    {HANZO_IAM_BRANDS.map((brand) => {
-                      const active = brand.id === selectedBrand;
-                      return (
-                        <button
-                          key={brand.id}
-                          type="button"
-                          onClick={() => setSelectedBrand(brand.id)}
-                          className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                            active
-                              ? "border-foreground bg-foreground text-background"
-                              : "border-border bg-background text-muted-foreground hover:text-foreground"
-                          }`}
-                        >
-                          {brand.label} ({brand.issuer.replace("https://", "")})
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {(localError || errorMessage) && (
-                    <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                      {localError ?? errorMessage}
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={isBusy}
-                      onClick={() => void controller.startOAuthSignIn({ brandId: selectedBrand })}
-                      className="inline-flex items-center justify-center rounded-lg bg-foreground px-4 py-2 text-xs font-semibold text-background hover:opacity-90 disabled:opacity-50"
-                    >
-                      {gt("Continue with {brand}", {
-                        brand:
-                          HANZO_IAM_BRANDS.find((b) => b.id === selectedBrand)?.label ?? "Hanzo",
-                      })}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowTokenEntry((prev) => !prev)}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-2 text-xs font-medium hover:bg-muted"
-                    >
-                      <KeyRoundIcon className="size-3.5" />
-                      <span>
-                        {showTokenEntry ? <T>Hide token sign-in</T> : <T>Use CLI / API token</T>}
-                      </span>
-                    </button>
-                  </div>
-
-                  {pendingAuthorizeUrl ? (
-                    <div
-                      data-testid="pending-oauth-recovery"
-                      className="space-y-2.5 rounded-lg border border-border bg-background p-3 text-xs"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="font-medium text-foreground">
-                          <T>Waiting for browser sign-in to return via hanzodev://...</T>
-                        </span>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={controller.reopenPendingSignIn}
-                            className="rounded-md border border-border px-2.5 py-1 text-xs font-medium hover:bg-muted"
-                          >
-                            <T>Reopen browser</T>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={controller.cancelPendingSignIn}
-                            className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-                          >
-                            <T>Cancel</T>
-                          </button>
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={callbackUrlInput}
-                          onChange={(event) => setCallbackUrlInput(event.currentTarget.value)}
-                          placeholder="hanzodev://oauth/callback?code=...&state=..."
-                          aria-label={gt("Paste OAuth callback URL")}
-                          className="flex-1 rounded-md border border-border bg-background px-2.5 py-1 font-mono text-xs focus:outline-hidden"
-                        />
-                        <button
-                          type="button"
-                          disabled={!callbackUrlInput.trim() || isBusy}
-                          onClick={() => {
-                            const raw = callbackUrlInput.trim();
-                            setCallbackUrlInput("");
-                            void controller.handleDeepLinkCallback(raw);
-                          }}
-                          className="rounded-md bg-foreground px-2.5 py-1 text-xs font-semibold text-background disabled:opacity-50"
-                        >
-                          <T>Complete</T>
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {showTokenEntry && (
-                    <div className="space-y-2 pt-1">
-                      <input
-                        type="password"
-                        value={tokenInput}
-                        onChange={(event) => setTokenInput(event.target.value)}
-                        placeholder={gt("Paste token from dev token or hanzo iam token")}
-                        aria-label={gt("Hanzo IAM access token")}
-                        className="w-full rounded-lg border border-border bg-background px-3 py-2 font-mono text-xs focus:outline-hidden"
-                      />
-                      <button
-                        type="button"
-                        disabled={isBusy || !tokenInput.trim()}
-                        onClick={() => void handleTokenSubmit()}
-                        className="rounded-lg border border-border bg-foreground px-3 py-1.5 text-xs font-semibold text-background disabled:opacity-50"
-                      >
-                        <T>Save token account</T>
-                      </button>
-                    </div>
-                  )}
-                </div>
+                <HanzoSignInPanel
+                  controller={controller}
+                  errorMessage={errorMessage}
+                  isBusy={isBusy}
+                  onSignedIn={() => setShowAddAccount(false)}
+                  pendingAuthorizeUrl={pendingAuthorizeUrl}
+                />
               )}
             </div>
           )}
