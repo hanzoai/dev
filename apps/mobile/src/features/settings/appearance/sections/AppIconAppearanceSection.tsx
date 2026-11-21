@@ -10,11 +10,11 @@ import { Platform, View } from "react-native";
 import { ListChoiceRow as SettingsChoiceRow } from "../../../../components/ui/ListChoiceRow";
 import { SettingsSection } from "../../components/SettingsSection";
 
-// Names match the alternate icons declared in app.config.ts; null is the default `</>` with an H.
+// Names match the alternate icons declared in app.config.ts; null is the default, the Hanzo H.
 const ICONS = [
-  { name: null, label: "</> H" },
+  { name: null, label: "H" },
+  { name: "DevHanzo", label: "</> H" },
   { name: "Dev", label: "</>" },
-  { name: "Hanzo", label: "H" },
 ] as const;
 
 export function AppIconAppearanceSection() {
@@ -38,10 +38,10 @@ export function AppIconAppearanceSection() {
             label={icon.label}
             description={
               icon.name === null
-                ? gt("The Dev glyph with the Hanzo H.")
-                : icon.name === "Dev"
-                  ? gt("The Dev glyph alone.")
-                  : gt("The Hanzo H logo.")
+                ? gt("The Hanzo H logo.")
+                : icon.name === "DevHanzo"
+                  ? gt("The Dev glyph with the Hanzo H.")
+                  : gt("The Dev glyph alone.")
             }
             selected={current === icon.name}
             onPress={() => choose(icon.name)}

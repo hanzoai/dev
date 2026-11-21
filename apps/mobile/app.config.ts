@@ -26,6 +26,8 @@ const observeEndpointUrl = repoEnv.HANZO_DEV_RELAY_URL?.trim()
   : "https://observe.invalid";
 
 const fromRepoRoot = (relativePath: string) => `../../${relativePath}`;
+// The default icon of every variant: the plain Hanzo H, as hanzo.app. `</>` with an H and `</>` are alternates.
+const HANZO_ICON = fromRepoRoot("assets/app-icons/hanzo-1024.png");
 const androidAdaptiveForeground = "./assets/android-icon-foreground.png";
 
 if (
@@ -39,8 +41,8 @@ if (
 }
 
 const DEVELOPMENT_ASSETS = {
-  appIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
-  iosIcon: fromRepoRoot("assets/app-icons/dev-hanzo-1024.png"),
+  appIcon: HANZO_ICON,
+  iosIcon: HANZO_ICON,
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
   androidAdaptiveForeground,
   androidAdaptiveBackgroundColor: "#347FF8",
@@ -52,8 +54,8 @@ const DEVELOPMENT_ASSETS = {
 } as const;
 
 const PREVIEW_ASSETS = {
-  appIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
-  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIconComposerProject),
+  appIcon: HANZO_ICON,
+  iosIcon: HANZO_ICON,
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
   androidAdaptiveForeground,
   androidAdaptiveBackgroundColor: "#111533",
@@ -65,8 +67,8 @@ const PREVIEW_ASSETS = {
 } as const;
 
 const RELEASE_ASSETS = {
-  appIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
-  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIconComposerProject),
+  appIcon: HANZO_ICON,
+  iosIcon: HANZO_ICON,
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
   androidAdaptiveForeground,
   androidAdaptiveBackgroundColor: "#000000",
@@ -79,7 +81,7 @@ const RELEASE_ASSETS = {
 
 const VARIANT_CONFIG = {
   development: {
-    appName: "Hanzo Dev (Dev)",
+    appName: "Hanzo (Dev)",
     scheme: "hanzo-dev",
     iosBundleIdentifier: "ai.hanzo.dev.dev",
     androidPackage: "ai.hanzo.dev.dev",
@@ -87,7 +89,7 @@ const VARIANT_CONFIG = {
     assets: DEVELOPMENT_ASSETS,
   },
   preview: {
-    appName: "Hanzo Dev Preview",
+    appName: "Hanzo Preview",
     scheme: "hanzo-preview",
     iosBundleIdentifier: "ai.hanzo.dev.preview",
     androidPackage: "ai.hanzo.dev.preview",
@@ -95,7 +97,7 @@ const VARIANT_CONFIG = {
     assets: PREVIEW_ASSETS,
   },
   production: {
-    appName: "Hanzo Dev",
+    appName: "Hanzo",
     scheme: "hanzodev",
     iosBundleIdentifier: "ai.hanzo.dev",
     androidPackage: "ai.hanzo.dev",
@@ -276,10 +278,10 @@ const config: ExpoConfig = {
         NSAllowsArbitraryLoads: true,
       },
       NSLocalNetworkUsageDescription:
-        "Allow Hanzo Dev to connect to Hanzo Dev servers on your local network or tailnet.",
+        "Allow Hanzo to connect to Hanzo Dev servers on your local network or tailnet.",
       // Built with the iOS 27 SDK, only view controllers can hide or style the status bar.
       UIViewControllerBasedStatusBarAppearance: true,
-      NSPhotoLibraryAddUsageDescription: "Allow Hanzo Dev to save images to your photo library.",
+      NSPhotoLibraryAddUsageDescription: "Allow Hanzo to save images to your photo library.",
       // System picture in picture needs background audio to start and survive outside the app.
       UIBackgroundModes: ["audio"],
       ITSAppUsesNonExemptEncryption: false,
@@ -357,8 +359,8 @@ const config: ExpoConfig = {
     [
       "expo-alternate-app-icons",
       [
+        { name: "DevHanzo", ios: fromRepoRoot("assets/app-icons/dev-hanzo-1024.png") },
         { name: "Dev", ios: fromRepoRoot("assets/app-icons/dev-1024.png") },
-        { name: "Hanzo", ios: fromRepoRoot("assets/app-icons/hanzo-1024.png") },
       ],
     ],
     "expo-secure-store",
@@ -392,7 +394,7 @@ const config: ExpoConfig = {
     [
       "expo-audio",
       {
-        microphonePermission: "Allow Hanzo Dev to use your microphone for voice input.",
+        microphonePermission: "Allow Hanzo to use your microphone for voice input.",
         recordAudioAndroid: true,
         enableBackgroundPlayback: false,
         enableBackgroundRecording: false,
@@ -401,7 +403,7 @@ const config: ExpoConfig = {
     [
       "expo-camera",
       {
-        cameraPermission: "Allow Hanzo Dev to access your camera so you can scan pairing QR codes.",
+        cameraPermission: "Allow Hanzo to access your camera so you can scan pairing QR codes.",
         microphonePermission: false,
         barcodeScannerEnabled: true,
         recordAudioAndroid: false,
@@ -412,7 +414,7 @@ const config: ExpoConfig = {
       {
         photosPermission: false,
         // `false` makes this plugin add RECORD_AUDIO to blockedPermissions, breaking Android dictation.
-        microphonePermission: "Allow Hanzo Dev to use your microphone for voice input.",
+        microphonePermission: "Allow Hanzo to use your microphone for voice input.",
       },
     ],
     [
