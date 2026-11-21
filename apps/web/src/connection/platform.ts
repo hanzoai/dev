@@ -54,6 +54,7 @@ import {
   type PrimaryEnvironmentTarget,
 } from "../environments/primary/target";
 import { clearComposerDraftsEnvironment } from "../composerDraftStore";
+import { isEmbedded } from "../embed/context";
 import { isHostedStaticApp } from "../hostedPairing";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { randomUUID } from "../lib/utils";
@@ -674,7 +675,8 @@ export function secondaryRegistrationsToRetainAfterTopologyRead(
 const layerPlatformConnectionSource = Layer.effect(
   PlatformConnectionSource.PlatformConnectionSource,
   Effect.gen(function* () {
-    if (isHostedStaticApp() || isLocalEnvironmentDisabled()) {
+    // An embedded core has only the runtime its host gave it: no primary environment to discover.
+    if (isEmbedded() || isHostedStaticApp() || isLocalEnvironmentDisabled()) {
       return PlatformConnectionSource.PlatformConnectionSource.of({
         registrations: Stream.empty,
       });

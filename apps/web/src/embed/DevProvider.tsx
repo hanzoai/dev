@@ -1,5 +1,6 @@
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 import type { EnvironmentId } from "@hanzodev/contracts";
 import { startAppServices } from "../appInit";
@@ -8,7 +9,7 @@ import { I18nProvider } from "../i18n/I18nProvider";
 import { whenLocaleReady } from "../i18n/runtime";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
 import { useAtomCommand } from "../state/use-atom-command";
-import { createSlot, EmbedContext, markEmbedded, type EmbedState } from "./context";
+import { createSlot, EmbedContext, markEmbedded, useEmbed, type EmbedState } from "./context";
 import type { DevRuntime } from "./runtime";
 
 // Services are app-lifetime singletons; one router per page.
@@ -34,15 +35,55 @@ export function whenPaired(runtimeId: string): Promise<EnvironmentId> {
   );
 }
 
+/** Dev's own state for a runtime that would not pair, drawn where the workspace goes. */
+function Failure({ runtime, retry }: { runtime: DevRuntime; retry: () => void }) {
+  const embed = useEmbed();
+  const slot = embed?.slots.workspace;
+  const target = useSyncExternalStore(
+    (notify) => (slot ? slot.subscribe(notify) : () => {}),
+    () => (slot ? slot.get() : null),
+    () => null,
+  );
+  const body = (
+    <div
+      role="alert"
+      className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center"
+    >
+      <h2 className="text-lg font-medium text-foreground">Could not connect to {runtime.label}</h2>
+      <p className="max-w-sm text-sm text-muted-foreground">
+        The environment did not answer. Check that it is online, then try again.
+      </p>
+      <button
+        type="button"
+        onClick={retry}
+        className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-accent"
+      >
+        Retry
+      </button>
+    </div>
+  );
+  return target ? createPortal(body, target) : null;
+}
+
 /** Redeems the runtime's pairing credential once per session, then draws the core. */
-function Pair({ runtime, children }: { runtime: DevRuntime; children: ReactNode }) {
+function Pair({
+  runtime,
+  onFail,
+  children,
+}: {
+  runtime: DevRuntime;
+  onFail?: ((runtime: DevRuntime) => void) | undefined;
+  children: ReactNode;
+}) {
   const pair = useAtomCommand(connectPairing, { reportFailure: false });
-  const [failure, setFailure] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [ready, setReady] = useState(paired.has(runtime.id));
   // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- redeems the pairing credential with the runtime once per session
   useEffect(() => {
     if (paired.has(runtime.id)) return;
     let live = true;
+    setFailed(false);
     void (async () => {
       const result = await pair({
         host: runtime.zap.replace(/^https:/, "zaps:"),
@@ -55,14 +96,16 @@ function Pair({ runtime, children }: { runtime: DevRuntime; children: ReactNode 
         waiting.delete(runtime.id);
         setReady(true);
       } else {
-        setFailure(`Could not connect to ${runtime.label}.`);
+        setFailed(true);
+        onFail?.(runtime);
       }
     })();
     return () => {
       live = false;
     };
-  }, [pair, runtime]);
-  if (failure) return <p role="alert">{failure}</p>;
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `onFail` is the host's, read when the pairing fails.
+  }, [pair, runtime, attempt]);
+  if (failed) return <Failure runtime={runtime} retry={() => setAttempt((n) => n + 1)} />;
   return ready ? <>{children}</> : null;
 }
 
@@ -71,7 +114,16 @@ function Pair({ runtime, children }: { runtime: DevRuntime; children: ReactNode 
  * `DevWorkspace` anywhere under it. They share one router, one connection and one
  * atom registry, so a thread opened in the list is the one the workspace shows.
  */
-export function DevProvider({ runtime, children }: { runtime: DevRuntime; children: ReactNode }) {
+export function DevProvider({
+  runtime,
+  onFail,
+  children,
+}: {
+  runtime: DevRuntime;
+  /** The runtime would not pair: the host may try another (a machine, else a cloud cell). */
+  onFail?: (runtime: DevRuntime) => void;
+  children: ReactNode;
+}) {
   const router = start();
   const slots = { threads: createSlot(), workspace: createSlot() };
   const state = { runtime, router, slots };
@@ -91,7 +143,7 @@ export function DevProvider({ runtime, children }: { runtime: DevRuntime; childr
     <EmbedContext.Provider value={state}>
       <I18nProvider>
         <AppAtomRegistryProvider>
-          <Pair runtime={runtime}>{ready ? <RouterProvider router={router} /> : null}</Pair>
+          <Pair runtime={runtime} onFail={onFail}>{ready ? <RouterProvider router={router} /> : null}</Pair>
           {children}
         </AppAtomRegistryProvider>
       </I18nProvider>
