@@ -201,6 +201,8 @@ export default defineConfig({
       "apps/mobile/modules/hanzo-highlights/cpp/generated/**",
       "apps/mobile/modules/hanzo-highlights/nitrogen/generated/**",
       "*.icon/**",
+      // The Go module: captured protocol templates are byte-exact.
+      "go/**",
     ],
     sortPackageJson: {},
     overrides: [
@@ -229,6 +231,7 @@ export default defineConfig({
       "apps/mobile/android/**",
       "apps/mobile/ios/**",
       "apps/mobile/uniwind-types.d.ts",
+      "go/**",
     ],
     plugins: ["eslint", "oxc", "react", "unicorn", "typescript"],
     jsPlugins: ["./oxlint-plugin-hanzo/index.ts", "@shadcn/lint"],

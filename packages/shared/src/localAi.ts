@@ -104,8 +104,7 @@ export const ZEN_LOCAL_AI_CATALOG: ReadonlyArray<ZenCatalogModel> = [
     hfRepo: "Qwen/Qwen3-4B",
     title: "Zen 6 Flash (4B)",
     sizeLabel: "2.5 GB",
-    description:
-      "Compact agentic 4B model tuned for tool use, fast edits, and laptop batteries.",
+    description: "Compact agentic 4B model tuned for tool use, fast edits, and laptop batteries.",
     family: "zen",
     thinking: true,
     tools: true,
@@ -128,8 +127,7 @@ export const ZEN_LOCAL_AI_CATALOG: ReadonlyArray<ZenCatalogModel> = [
     hfRepo: "Qwen/Qwen3-14B",
     title: "Zen 6 (14B)",
     sizeLabel: "9.0 GB",
-    description:
-      "High-accuracy local 14B reasoning model for multi-file refactors and reviews.",
+    description: "High-accuracy local 14B reasoning model for multi-file refactors and reviews.",
     family: "zen",
     thinking: true,
     tools: true,
@@ -165,8 +163,7 @@ export const ZEN_LOCAL_AI_CATALOG: ReadonlyArray<ZenCatalogModel> = [
     hfRepo: "Qwen/Qwen3-VL-8B-Instruct",
     title: "Zen VL (8B)",
     sizeLabel: "5.8 GB",
-    description:
-      "Multimodal model for UI screenshot inspection, diagrams, and visual debugging.",
+    description: "Multimodal model for UI screenshot inspection, diagrams, and visual debugging.",
     family: "zen",
     vision: true,
     thinking: true,
