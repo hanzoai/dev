@@ -5,9 +5,12 @@ import {
   connectDeviceVerificationCode,
   type ClientConnectionMethod,
   EnvironmentId,
-  type ExecutionEnvironmentDescriptor,
+  ExecutionEnvironmentDescriptor,
 } from "@hanzodev/contracts";
-import { RelayEnvironmentConnectScope } from "@hanzodev/contracts/relay";
+import {
+  RelayEnvironmentConnectScope,
+  type RelayEnvironmentConnectResponse,
+} from "@hanzodev/contracts/relay";
 import * as KeyedLock from "@hanzodev/shared/KeyedLock";
 import { withRelayClientTracing } from "@hanzodev/shared/relayTracing";
 import {
@@ -33,6 +36,7 @@ import {
 } from "../connection/model.ts";
 import { isNearbyAddress } from "../connection/routes.ts";
 import { fetchRemoteEnvironmentDescriptor } from "../environment/descriptor.ts";
+import { ZAP_DESCRIPTOR_METHOD, zapRouteAnswer } from "../rpc/zapCalls.ts";
 import { environmentEndpointUrl } from "../environment/endpoint.ts";
 import * as ClientCapabilities from "../platform/capabilities.ts";
 import * as ManagedRelay from "../relay/managedRelay.ts";
@@ -128,6 +132,7 @@ export class RemoteEnvironmentAuthorization extends Context.Service<
 >()("@hanzodev/client-runtime/authorization/service/RemoteEnvironmentAuthorization") {}
 
 const CACHED_ENDPOINT_SOCKET_TIMEOUT_MS = 3_000;
+const ZAP_DESCRIPTOR_TIMEOUT_MS = 10_000;
 const DPOP_AUTHORIZATION_TIMEOUT_MS = 30_000;
 const CHECKED_DESCRIPTOR_TTL_NANOS = 5_000_000_000n;
 // A loopback or LAN host answers well inside this, so a dead one frees its attempt sooner.
@@ -345,11 +350,19 @@ export const make = Effect.gen(function* () {
     }
   });
 
+  // A connect answer read to learn the route's kind, kept for the DPoP exchange that follows.
+  const probedBootstraps = new Map<EnvironmentId, RelayEnvironmentConnectResponse>();
+
   const obtainBootstrap = Effect.fn("relay.connection.bootstrap.obtain")(function* (
     environmentId: EnvironmentId,
     identity: ClientCapabilities.CloudSessionIdentity,
   ) {
     yield* assertSession(identity);
+    const probed = probedBootstraps.get(environmentId);
+    if (probed !== undefined) {
+      probedBootstraps.delete(environmentId);
+      return probed;
+    }
     const iamToken = yield* cloudSession.iamToken.pipe(
       Effect.withSpan("relay.connection.cloudSessionToken.resolve"),
     );
@@ -680,6 +693,48 @@ export const make = Effect.gen(function* () {
     },
   });
 
+  // A machine linked in /v1/sources is reached over ZAP, and the ZAP session is its proof: the
+  // IAM bearer rides the first envelope, the cloud checks it is the source's owner, and the Mac
+  // checks it again. There is no DPoP token to sign for, so no request needs a proof.
+  const authorizeZap = Effect.fn("clientRuntime.connection.remote.authorizeZap")(function* (
+    input: Parameters<RemoteEnvironmentAuthorization["Service"]["authorizeDpop"]>[0],
+  ) {
+    const session = yield* cloudSession.identity;
+    if (Option.isNone(session)) {
+      return yield* sessionPending();
+    }
+    const identity = session.value;
+    // A token minted by an earlier relay stays on its own path.
+    if (Option.isSome(yield* tokenStore.get(input.expectedEnvironmentId))) return undefined;
+    const connected = yield* obtainBootstrap(input.expectedEnvironmentId, identity);
+    if (connected.endpoint.providerKind !== "hanzo_relay") {
+      probedBootstraps.set(input.expectedEnvironmentId, connected);
+      return undefined;
+    }
+    const zapUrl = connected.endpoint.httpBaseUrl.replace(/^https:/, "zaps:");
+    const descriptor = yield* zapRouteAnswer(
+      zapUrl,
+      ZAP_DESCRIPTOR_METHOD,
+      ExecutionEnvironmentDescriptor,
+      { timeoutMs: ZAP_DESCRIPTOR_TIMEOUT_MS, bearer: connected.credential },
+    ).pipe(Effect.mapError(mapRemoteDpopEnvironmentError));
+    if (descriptor.environmentId !== input.expectedEnvironmentId) {
+      return yield* environmentMismatchError({
+        expected: input.expectedEnvironmentId,
+        actual: descriptor.environmentId,
+      });
+    }
+    yield* assertSession(identity);
+    return {
+      environmentId: descriptor.environmentId,
+      label: descriptor.label,
+      httpBaseUrl: connected.endpoint.httpBaseUrl,
+      socketUrl: zapUrl,
+      descriptor,
+      httpAuthorization: { _tag: "Bearer" as const, token: connected.credential },
+    };
+  });
+
   const authorizeDpop = Effect.fn("clientRuntime.connection.remote.authorizeDpop")(function* (
     input: Parameters<RemoteEnvironmentAuthorization["Service"]["authorizeDpop"]>[0],
   ) {
@@ -716,6 +771,10 @@ export const make = Effect.gen(function* () {
       }
       return Result.succeed(authorized(issued.token, opened.success, yield* Fiber.join(reading)));
     });
+    if (endpoint === undefined) {
+      const zapped = yield* authorizeZap(input);
+      if (zapped !== undefined) return zapped;
+    }
     let selected = yield* getDpopToken(input);
     if (selected.fromCache) {
       const cachedSocket = yield* openSocket(selected, CACHED_ENDPOINT_SOCKET_TIMEOUT_MS);

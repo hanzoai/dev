@@ -5,7 +5,9 @@ import {
   type ExecutionEnvironmentDescriptor,
 } from "@hanzodev/contracts";
 import { type RelayEnvironmentConnectResponse } from "@hanzodev/contracts/relay";
-import { describe, expect, it } from "@effect/vitest";
+import { afterEach, describe, expect, it, vi } from "@effect/vitest";
+import { splitMessages, lengthPrefixed, ZAP_DESCRIPTOR_METHOD } from "@hanzodev/shared/zapFrames";
+import { buildResponse, parseRequest, Status } from "@zap-proto/zap";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -306,6 +308,8 @@ const prepareDirectBearer = Effect.fn("TestRemoteAuthorization.prepareDirectBear
     resolver.prepare(entry).pipe(Effect.result),
   );
 });
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe("RemoteEnvironmentAuthorization", () => {
   it.effect("prepares a cold direct bearer connection with one descriptor request", () =>
@@ -645,6 +649,77 @@ describe("RemoteEnvironmentAuthorization", () => {
         "https://environment.example.test/.well-known/hanzo/environment",
         "https://environment.example.test/v1/auth/websocket-ticket/rpc",
       ]);
+    }),
+  );
+
+  it.effect("reaches a /v1/sources machine over ZAP with the IAM bearer and no DPoP proof", () =>
+    Effect.gen(function* () {
+      const zapAddress = "https://zap.example.test/v1/dev/zap/environment-1";
+      const asked: Array<{ method: number; cap: string }> = [];
+      const toClient = new TransformStream<Uint8Array, Uint8Array>();
+      const fromClient = new TransformStream<Uint8Array, Uint8Array>();
+      const out = toClient.writable.getWriter();
+      void (async () => {
+        const reader = fromClient.readable.getReader();
+        let rest: Uint8Array = new Uint8Array(0);
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) return;
+          const joined = new Uint8Array(rest.byteLength + value.byteLength);
+          joined.set(rest);
+          joined.set(value, rest.byteLength);
+          const split = splitMessages(joined);
+          rest = split.rest;
+          for (const message of split.messages) {
+            const call = parseRequest(message.slice());
+            asked.push({ method: call.method, cap: new TextDecoder().decode(call.cap) });
+            await out.write(
+              lengthPrefixed(
+                buildResponse(
+                  Status.OK,
+                  call.promiseID,
+                  new TextEncoder().encode(JSON.stringify(DESCRIPTOR)),
+                ),
+              ),
+            );
+          }
+        }
+      })();
+      class FakeTransport {
+        ready = Promise.resolve();
+        createBidirectionalStream = async () => ({
+          readable: toClient.readable,
+          writable: fromClient.writable,
+        });
+        close = () => {};
+      }
+      vi.stubGlobal("WebTransport", FakeTransport);
+
+      const harness = yield* makeHarness({
+        responses: [],
+        bootstrap: {
+          ...BOOTSTRAP,
+          endpoint: {
+            httpBaseUrl: zapAddress,
+            wsBaseUrl: zapAddress.replace("https", "wss"),
+            providerKind: "hanzo_relay",
+          },
+          credential: "iam-token",
+        },
+      });
+      const authorized = yield* Effect.gen(function* () {
+        const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+        return yield* remote.authorizeDpop({ expectedEnvironmentId: ENVIRONMENT_ID });
+      }).pipe(Effect.provide(harness.layer));
+
+      expect(authorized.socketUrl).toBe("zaps://zap.example.test/v1/dev/zap/environment-1");
+      expect(authorized.httpAuthorization).toEqual({ _tag: "Bearer", token: "iam-token" });
+      expect(authorized.descriptor).toMatchObject({ environmentId: ENVIRONMENT_ID });
+      expect(asked).toEqual([{ method: ZAP_DESCRIPTOR_METHOD, cap: "iam-token" }]);
+      // No token exchange, no ticket, no proof.
+      expect(harness.fetch.calls).toEqual([]);
+      expect(yield* Ref.get(harness.proofInputs)).toEqual([]);
+      expect(yield* Ref.get(harness.bootstrapCalls)).toBe(1);
     }),
   );
 
