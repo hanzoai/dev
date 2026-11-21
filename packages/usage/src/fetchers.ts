@@ -29,7 +29,7 @@ const iso = (v: unknown, epochSeconds = false): string | undefined => {
 };
 const json = async (res: Response): Promise<Record<string, unknown>> => {
   if (res.status === 401 || res.status === 403)
-    throw new Error("Sign in again with the provider's own CLI.");
+    throw new Error("Sign in again.");
   if (res.status === 429) throw new Error("Rate limited by the provider; will retry.");
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return obj(await res.json());
