@@ -3,11 +3,9 @@ import {
   RelayApi,
   RelayClientEnvironmentRecord,
   type RelayClientDeviceRecord,
-  RelayConnectEnvironmentEndpoint,
   type RelayDeviceRegistrationRequest,
   RelayDpopAccessTokenScope,
   RelayDpopTokenExchangeGrantType,
-  type RelayEnvironmentConnectRequest,
   type RelayEnvironmentConnectResponse,
   type RelayEnvironmentLinkChallengeRequest,
   type RelayEnvironmentLinkChallengeResponse,
@@ -34,9 +32,10 @@ import {
 import { encodeOAuthScope, oauthScopeSetEquals } from "@hanzodev/shared/oauthScope";
 import { decodeRelayJwt } from "@hanzodev/shared/relayJwt";
 import { withRelayClientTracing } from "@hanzodev/shared/relayTracing";
-import { DEFAULT_HANZO_API_BASE_URL } from "@hanzodev/shared/hanzoIamAuth";
+import { DEFAULT_HANZO_API_BASE_URL, hanzoSourceZapUrl } from "@hanzodev/shared/hanzoIamAuth";
 import { normalizeSecureRelayUrl } from "@hanzodev/shared/relayUrl";
 import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -549,14 +548,17 @@ function dpopHeaders(authorization: ManagedRelayAuthorization) {
   };
 }
 
-function disabledManagedRelayClient(relayUrl: string): ManagedRelayClient["Service"] {
+function disabledManagedRelayClient(
+  relayUrl: string,
+  http: HttpClient.HttpClient,
+): ManagedRelayClient["Service"] {
   const unavailable = (spanName: string) =>
     Effect.fn(spanName)(function* () {
       return yield* new ManagedRelayUrlInvalidError({ relayUrl });
     });
   return ManagedRelayClient.of({
     relayUrl,
-    listEnvironments: unavailable("clientRuntime.managedRelay.listEnvironments"),
+    ...sourceOperations(http),
     listDevices: unavailable("clientRuntime.managedRelay.listDevices"),
     createEnvironmentLinkChallenge: unavailable(
       "clientRuntime.managedRelay.createEnvironmentLinkChallenge",
@@ -569,7 +571,6 @@ function disabledManagedRelayClient(relayUrl: string): ManagedRelayClient["Servi
     ),
     unlinkHanzoChat: unavailable("clientRuntime.managedRelay.unlinkHanzoChat"),
     getEnvironmentStatus: unavailable("clientRuntime.managedRelay.getEnvironmentStatus"),
-    connectEnvironment: unavailable("clientRuntime.managedRelay.connectEnvironment"),
     registerDevice: unavailable("clientRuntime.managedRelay.registerDevice"),
     unregisterDevice: unavailable("clientRuntime.managedRelay.unregisterDevice"),
     registerLiveActivity: unavailable("clientRuntime.managedRelay.registerLiveActivity"),
@@ -583,7 +584,7 @@ function disabledManagedRelayClient(relayUrl: string): ManagedRelayClient["Servi
 const SourcesResponse = Schema.Struct({ sources: Schema.Array(Schema.Unknown) });
 
 const sourceEndpoint = (machine: LinkedMachine): RelayClientEnvironmentRecord["endpoint"] => {
-  const httpBaseUrl = machine.zap || `https://zap.hanzo.ai/v1/dev/zap/${machine.id}`;
+  const httpBaseUrl = machine.zap || hanzoSourceZapUrl(machine.id);
   return {
     httpBaseUrl,
     wsBaseUrl: httpBaseUrl.replace(/^http/, "ws"),
@@ -601,17 +602,76 @@ const sourceEnvironment = (machine: LinkedMachine): RelayClientEnvironmentRecord
     state: machine.state === "online" ? "online" : "offline",
   });
 
+const SOURCE_CONNECT_TTL_MS = 5 * 60_000;
+
+/**
+ * Hanzo Link's list and connect, from the `/v1/sources` registry. They need no relay: a
+ * machine is reached at the ZAP address it reports, with the person's IAM token.
+ */
+const sourceOperations = (http: HttpClient.HttpClient) => ({
+  listEnvironments: Effect.fnUntraced(
+    function* (input: { readonly iamToken: string }) {
+      return yield* HttpClientRequest.get(`${DEFAULT_HANZO_API_BASE_URL}/v1/sources`).pipe(
+        HttpClientRequest.bearerToken(input.iamToken),
+        http.execute,
+        Effect.flatMap(HttpClientResponse.filterStatusOk),
+        Effect.flatMap((response) => response.json),
+        Effect.flatMap(Schema.decodeUnknownEffect(SourcesResponse)),
+        Effect.mapError(relayRequestError("list relay-managed environments")),
+        Effect.map((body) => (parseSources(body) ?? []).map(sourceEnvironment)),
+        timeoutRelayRequest("Relay environment listing"),
+      );
+    },
+    Effect.withSpan("clientRuntime.managedRelay.listEnvironments"),
+    withRelayClientTracing,
+  ),
+  connectEnvironment: Effect.fnUntraced(
+    function* (input: {
+      readonly iamToken: string;
+      readonly environmentId: RelayClientEnvironmentRecord["environmentId"];
+    }) {
+      const source = yield* HttpClientRequest.get(
+        `${DEFAULT_HANZO_API_BASE_URL}/v1/sources/${encodeURIComponent(input.environmentId)}`,
+      ).pipe(
+        HttpClientRequest.bearerToken(input.iamToken),
+        http.execute,
+        Effect.flatMap(HttpClientResponse.filterStatusOk),
+        Effect.flatMap((response) => response.json),
+        Effect.mapError(relayRequestError("connect relay environment")),
+        timeoutRelayRequest("Relay environment connection"),
+      );
+      const machine = parseSources({ sources: [source] })?.[0];
+      if (machine === undefined || machine.zap === "") {
+        return yield* new ManagedRelayRequestFailedError({
+          action: "connect relay environment",
+          status: 409,
+          cause: new Error("The machine has not reported a ZAP address."),
+        });
+      }
+      const now = yield* Clock.currentTimeMillis;
+      return {
+        environmentId: input.environmentId,
+        endpoint: sourceEndpoint(machine),
+        credential: input.iamToken,
+        expiresAt: DateTime.formatIso(DateTime.makeUnsafe(now + SOURCE_CONNECT_TTL_MS)),
+      };
+    },
+    Effect.withSpan("clientRuntime.managedRelay.connectEnvironment"),
+    withRelayClientTracing,
+  ),
+});
+
 /** @public */
 export const make = Effect.fn("ManagedRelayClient.make")(function* (
   options: ManagedRelayClientLayerOptions,
 ) {
+  const http = yield* HttpClient.HttpClient;
   const relayUrl = normalizeSecureRelayUrl(options.relayUrl);
   if (relayUrl === null) {
-    return disabledManagedRelayClient(options.relayUrl);
+    return disabledManagedRelayClient(options.relayUrl, http);
   }
   const signer = yield* ManagedRelayDpopSigner;
   const client = yield* HttpApiClient.make(RelayApi, { baseUrl: relayUrl });
-  const http = yield* HttpClient.HttpClient;
   const initialTokens = options.accessTokenStore ? yield* options.accessTokenStore.load : [];
   const cachedTokens = yield* SynchronizedRef.make<
     ReadonlyArray<ManagedRelayAccessTokenCacheEntry>
@@ -629,12 +689,6 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
     ): DpopProofTarget => ({
       method: RelayGetEnvironmentStatusEndpoint.method,
       url: urlBuilder.dpopClient.getEnvironmentStatus({ params: { environmentId } }),
-    }),
-    connectEnvironment: (
-      environmentId: RelayClientEnvironmentRecord["environmentId"],
-    ): DpopProofTarget => ({
-      method: RelayConnectEnvironmentEndpoint.method,
-      url: urlBuilder.dpopClient.connectEnvironment({ params: { environmentId } }),
     }),
     registerDevice: (): DpopProofTarget => ({
       method: RelayRegisterDeviceEndpoint.method,
@@ -882,23 +936,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
 
   return ManagedRelayClient.of({
     relayUrl,
-    listEnvironments: Effect.fnUntraced(
-      function* (input) {
-        // Hanzo Link environments are the /v1/sources registry: desktops link themselves, phones list them.
-        return yield* HttpClientRequest.get(`${DEFAULT_HANZO_API_BASE_URL}/v1/sources`).pipe(
-          HttpClientRequest.bearerToken(input.iamToken),
-          http.execute,
-          Effect.flatMap(HttpClientResponse.filterStatusOk),
-          Effect.flatMap((response) => response.json),
-          Effect.flatMap(Schema.decodeUnknownEffect(SourcesResponse)),
-          Effect.mapError(relayRequestError("list relay-managed environments")),
-          Effect.map((body) => (parseSources(body) ?? []).map(sourceEnvironment)),
-          timeoutRelayRequest("Relay environment listing"),
-        );
-      },
-      Effect.withSpan("clientRuntime.managedRelay.listEnvironments"),
-      withRelayClientTracing,
-    ),
+    ...sourceOperations(http),
     listDevices: Effect.fnUntraced(
       function* (input) {
         return yield* client.client
@@ -1019,38 +1057,6 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
         );
       },
       Effect.withSpan("clientRuntime.managedRelay.getEnvironmentStatus"),
-      withRelayClientTracing,
-    ),
-    connectEnvironment: Effect.fnUntraced(
-      function* (input) {
-        yield* Effect.annotateCurrentSpan({
-          "environment.id": input.environmentId,
-        });
-        return yield* runDpopRequest(
-          {
-            iamToken: input.iamToken,
-            scopes: input.scopes,
-            target: dpopProofTargets.connectEnvironment(input.environmentId),
-          },
-          (authorization) => {
-            const payload: RelayEnvironmentConnectRequest = {
-              ...(input.deviceId ? { deviceId: input.deviceId } : {}),
-              clientKeyThumbprint: authorization.thumbprint,
-            };
-            return client.dpopClient
-              .connectEnvironment({
-                headers: dpopHeaders(authorization),
-                params: { environmentId: input.environmentId },
-                payload,
-              })
-              .pipe(
-                Effect.mapError(relayRequestError("connect relay environment")),
-                timeoutRelayRequest("Relay environment connection"),
-              );
-          },
-        );
-      },
-      Effect.withSpan("clientRuntime.managedRelay.connectEnvironment"),
       withRelayClientTracing,
     ),
     registerDevice: Effect.fnUntraced(

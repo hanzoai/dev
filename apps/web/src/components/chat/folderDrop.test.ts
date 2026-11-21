@@ -82,7 +82,7 @@ describe("folderDropTarget", () => {
         ...thinClient,
         connection: {
           target: new RelayConnectionTarget(base),
-          httpBaseUrl: "https://relay.dev.hanzo.ai",
+          httpBaseUrl: "https://relay.example.test",
         },
       },
       "remote",

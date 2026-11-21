@@ -11,14 +11,14 @@ vi.mock("expo-constants", () => ({
 }));
 
 describe("resolveCloudPublicConfig", () => {
-  it("defaults to Hanzo IAM (hanzo.ai) and Hanzo Relay out-of-the-box", () => {
+  it("defaults to Hanzo IAM (hanzo.ai) and no relay out-of-the-box", () => {
     expect(resolveCloudPublicConfig({})).toEqual({
       iam: {
         issuer: "https://hanzo.ai",
         clientId: "hanzo-app",
       },
       relay: {
-        url: "https://relay.dev.hanzo.ai",
+        url: null,
       },
       observability: {
         tracesUrl: null,
@@ -53,6 +53,6 @@ describe("resolveCloudPublicConfig", () => {
       hasCloudPublicConfig({
         relay: { url: "http://relay.example.test" },
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 });

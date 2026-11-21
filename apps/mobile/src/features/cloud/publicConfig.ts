@@ -2,7 +2,6 @@ import Constants from "expo-constants";
 import {
   DEFAULT_HANZO_IAM_CLIENT_ID,
   DEFAULT_HANZO_IAM_ISSUER,
-  DEFAULT_HANZO_RELAY_URL,
   normalizeHanzoIssuer,
 } from "@hanzodev/shared/hanzoIamAuth";
 import { normalizeSecureRelayUrl } from "@hanzodev/shared/relayUrl";
@@ -50,14 +49,14 @@ function normalizeSecureUrl(value: unknown): string | null {
 }
 
 export function resolveCloudPublicConfig(extra: ExpoExtra = Constants.expoConfig?.extra) {
-  const relayInput = trimNonEmpty(extra?.relay?.url) ?? DEFAULT_HANZO_RELAY_URL;
+  const relayInput = trimNonEmpty(extra?.relay?.url);
   return {
     iam: {
       issuer: normalizeHanzoIssuer(trimNonEmpty(extra?.iam?.issuer) ?? DEFAULT_HANZO_IAM_ISSUER),
       clientId: trimNonEmpty(extra?.iam?.clientId) ?? DEFAULT_HANZO_IAM_CLIENT_ID,
     },
     relay: {
-      url: normalizeSecureRelayUrl(relayInput),
+      url: relayInput === null ? null : normalizeSecureRelayUrl(relayInput),
     },
     observability: {
       tracesUrl: normalizeSecureUrl(extra?.observability?.tracesUrl),
@@ -69,7 +68,7 @@ export function resolveCloudPublicConfig(extra: ExpoExtra = Constants.expoConfig
 
 export function hasCloudPublicConfig(extra: ExpoExtra = Constants.expoConfig?.extra): boolean {
   const config = resolveCloudPublicConfig(extra);
-  return Boolean(config.iam.issuer && config.iam.clientId && config.relay.url);
+  return Boolean(config.iam.issuer && config.iam.clientId);
 }
 
 type Configured<T> = {

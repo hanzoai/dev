@@ -124,7 +124,7 @@ describe("mobile DPoP", () => {
     Effect.gen(function* () {
       secureStore.clear();
       const key = yield* loadOrCreateProofKey();
-      const url = "https://relay.dev.hanzo.ai/v1/environments";
+      const url = "https://relay.example.test/v1/environments";
       const proof = yield* DpopProof.createProof({
         method: "GET",
         url,
