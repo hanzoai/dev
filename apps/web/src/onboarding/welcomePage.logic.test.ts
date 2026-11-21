@@ -63,6 +63,44 @@ describe("groupWelcomeAgents", () => {
     expect(groups.readyCount).toBe(2);
   });
 
+  it("places Hanzo at the top of both found and available agent lists", () => {
+    const readyGroups = groupWelcomeAgents(
+      [provider("Claude"), provider("Codex"), provider("Hanzo"), provider("OpenCode")],
+      undefined,
+      nameOf,
+      allowAll,
+    );
+    expect(names(readyGroups.found)).toEqual(["Hanzo", "Claude", "Codex", "OpenCode"]);
+
+    const signInGroups = groupWelcomeAgents(
+      [
+        provider("Claude"),
+        provider("Hanzo", { auth: { status: "unauthenticated" }, status: "error" }),
+        provider("Codex"),
+      ],
+      undefined,
+      nameOf,
+      allowAll,
+    );
+    expect(names(signInGroups.found)).toEqual(["Hanzo", "Claude", "Codex"]);
+
+    const availableGroups = groupWelcomeAgents(
+      [
+        provider("Cursor", { installed: false, status: "error", auth: { status: "unknown" } }),
+        provider("Hanzo", { installed: false, status: "error", auth: { status: "unknown" } }),
+        provider("Antigravity", {
+          installed: false,
+          status: "error",
+          auth: { status: "unknown" },
+        }),
+      ],
+      undefined,
+      nameOf,
+      allowAll,
+    );
+    expect(names(availableGroups.available)).toEqual(["Hanzo", "Antigravity", "Cursor"]);
+  });
+
   it("uses this computer's settings and keeps agents that failed to load with the found ones", () => {
     const acpRegistry = ProviderDriverKind.make("acpRegistry");
     const settings: Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides"> = {

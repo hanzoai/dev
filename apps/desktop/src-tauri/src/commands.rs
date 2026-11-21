@@ -695,10 +695,116 @@ pub async fn desktop_open_external(url: String) -> Result<bool, String> {
     Ok(opener::open(url).is_ok())
 }
 
+#[cfg(target_os = "macos")]
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXIsProcessTrusted() -> bool;
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGPreflightScreenCaptureAccess() -> bool;
+    fn CGRequestScreenCaptureAccess() -> bool;
+}
+
+#[cfg(target_os = "macos")]
+#[link(name = "AVFoundation", kind = "framework")]
+extern "C" {
+    static AVMediaTypeAudio: *const std::ffi::c_void;
+}
+
+pub fn check_accessibility_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        // SAFETY: Pure CoreServices/ApplicationServices TCC status check.
+        unsafe { AXIsProcessTrusted() }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+pub fn check_screen_recording_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        // SAFETY: Pure CoreGraphics preflight check with no prompt.
+        unsafe { CGPreflightScreenCaptureAccess() }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+pub fn check_full_disk_access_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = dirs::home_dir() {
+            let user_tcc = home.join("Library/Application Support/com.apple.TCC/TCC.db");
+            if user_tcc.exists() {
+                return std::fs::File::open(&user_tcc).is_ok();
+            }
+            let mail_dir = home.join("Library/Mail");
+            if mail_dir.exists() {
+                return std::fs::read_dir(&mail_dir).is_ok();
+            }
+            let messages_dir = home.join("Library/Messages");
+            if messages_dir.exists() {
+                return std::fs::read_dir(&messages_dir).is_ok();
+            }
+        }
+        std::fs::File::open("/Library/Application Support/com.apple.TCC/TCC.db").is_ok()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+pub fn check_microphone_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::msg_send;
+        use objc2::runtime::AnyClass;
+        let Some(cls) = AnyClass::get(c"AVCaptureDevice") else {
+            return false;
+        };
+        // AVAuthorizationStatusAuthorized == 3
+        // SAFETY: AVMediaTypeAudio is a static NSString* exported by AVFoundation.
+        let status: isize = unsafe { msg_send![cls, authorizationStatusForMediaType: AVMediaTypeAudio] };
+        status == 3
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+#[tauri::command]
+pub async fn desktop_check_system_permission(pane: String) -> Result<bool, String> {
+    let granted = match pane.as_str() {
+        "accessibility" => check_accessibility_permission(),
+        "screen-recording" => check_screen_recording_permission(),
+        "full-disk-access" => check_full_disk_access_permission(),
+        "microphone" => check_microphone_permission(),
+        _ => false,
+    };
+    Ok(granted)
+}
+
 #[tauri::command]
 pub async fn desktop_open_system_settings(pane: String) -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
+        if pane == "screen-recording" && !check_screen_recording_permission() {
+            // Register the app in System Settings -> Screen Recording before opening the pane.
+            // SAFETY: CoreGraphics system prompt/registration call.
+            unsafe {
+                let _ = CGRequestScreenCaptureAccess();
+            }
+        }
         let target = match pane.as_str() {
             "full-disk-access" => {
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
@@ -708,6 +814,9 @@ pub async fn desktop_open_system_settings(pane: String) -> Result<bool, String> 
             }
             "accessibility" => {
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+            }
+            "microphone" => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
             }
             _ => "x-apple.systempreferences:com.apple.preference.security",
         };

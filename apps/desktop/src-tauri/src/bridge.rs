@@ -322,7 +322,7 @@ pub fn build_initialization_script(config: &BackendRuntimeConfig, local_enabled:
     startFileDrag: async () => false,
     openExternal: (url) => invoke("desktop_open_external", {{ url }}),
     readMedia: (url) => invoke("desktop_read_media", {{ url }}),
-    checkSystemPermission: async () => true,
+    checkSystemPermission: (pane) => invoke("desktop_check_system_permission", {{ pane }}),
     openSystemSettings: (pane) => invoke("desktop_open_system_settings", {{ pane }}),
     probeRemoteEditors: () => invoke("desktop_probe_remote_editors"),
     pasteAsText: async () => undefined,

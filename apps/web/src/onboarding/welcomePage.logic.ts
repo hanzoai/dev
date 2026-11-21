@@ -1,4 +1,5 @@
 import {
+  HANZO_DRIVER_KIND,
   isProviderAvailable,
   managedCapabilityDenial,
   type ManagedPolicySummary,
@@ -14,7 +15,7 @@ import { getOnboardingProviderState } from "./providerReadiness.logic";
 
 type ComputerSettings = Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">;
 
-// Ready agents first, then ones that need a sign-in or a look. Never ranked by vendor.
+// Hanzo first, then ready agents, then ones that need a sign-in or a look.
 const FOUND_ORDER = { ready: 0, signIn: 1, attention: 2 } as const;
 type FoundState = keyof typeof FOUND_ORDER;
 
@@ -43,8 +44,8 @@ export function welcomeAgentState(
 
 /**
  * Splits a computer's allowed providers into agents already on it and agents the user can add.
- * Order inside each group is by state, then by the name the user sees. Agents still being
- * checked are listed with the ones to add, so a slow check never drops an agent.
+ * Hanzo is listed first in each group, followed by state and the name the user sees. Agents still
+ * being checked are listed with the ones to add, so a slow check never drops an agent.
  */
 export function groupWelcomeAgents(
   providers: ReadonlyArray<ServerProvider> | null | undefined,
@@ -64,11 +65,16 @@ export function groupWelcomeAgents(
     if (isFoundState(state)) found.push({ provider, state });
     else available.push(provider);
   }
+  const byHanzoFirst = (a: ServerProvider, b: ServerProvider) =>
+    Number(b.driver === HANZO_DRIVER_KIND) - Number(a.driver === HANZO_DRIVER_KIND);
   const byName = (a: ServerProvider, b: ServerProvider) => nameOf(a).localeCompare(nameOf(b));
   found.sort(
-    (a, b) => FOUND_ORDER[a.state] - FOUND_ORDER[b.state] || byName(a.provider, b.provider),
+    (a, b) =>
+      byHanzoFirst(a.provider, b.provider) ||
+      FOUND_ORDER[a.state] - FOUND_ORDER[b.state] ||
+      byName(a.provider, b.provider),
   );
-  available.sort(byName);
+  available.sort((a, b) => byHanzoFirst(a, b) || byName(a, b));
   return { checking, readyCount, found: found.map((entry) => entry.provider), available };
 }
 

@@ -3269,7 +3269,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "on the computer that opened this page"]
+      "c": [
+        " ",
+        "on the computer that opened this page"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3281,7 +3284,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· whoever runs it gets this access"]
+      "c": [
+        " ",
+        "· whoever runs it gets this access"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Only approve a sign-in you just started.",
@@ -6088,6 +6094,40 @@
   "9a50b20569f2c9e7": "Your saved settings could not be loaded.",
   "0063290a2e825d18": "Hanzo Dev could not confirm this workspace.",
   "573a9e6b17f4e9e3": "Reload",
+  "4dd64d562cb56778": "Previous step",
+  "d74292c42d77e55e": "Next step",
+  "ab9753a651f9a405": "Allowed",
+  "e238ad27dd83f5e3": "Read and interact",
+  "90a258fff61fd77e": "Off",
+  "befff2df7d351c89": "Push to talk",
+  "c8c023a6c3a86751": "Fn",
+  "56cca1159f705675": "Option + Space",
+  "c9cffc57926eb089": "No shortcut",
+  "aeeca1c83a2e7cd2": "Hands-free mode",
+  "ea42170819e3496a": "Double-tap Fn",
+  "86a2917f997a6e61": "Allow",
+  "68efbc82e77e7b30": "Allow Hanzo Dev to use your computer?",
+  "5125042b29ce7305": "Ask Hanzo Dev to complete a task, then step away. Hanzo Dev has it ready when you're back.",
+  "32f8f44eb5f896f0": "Accessibility",
+  "a30aaffeba41a980": "Screen Recording",
+  "38737d8577e035b5": "Allow Hanzo Dev to take screenshots",
+  "de7f1d7e92d10941": "You can manage computer use permissions and blocked apps any time in Settings.",
+  "025538a612b475ea": "Skip",
+  "fa1df1ded7c5cb90": "Allow Hanzo Dev to access your files and local apps?",
+  "e79e3bbb67c513a0": "You don't need to hunt through folders, notes and messages anymore. With your approval, Hanzo Dev can find, read and edit your files and local apps.",
+  "853ee53361ffbc34": "Full Disk Access",
+  "41bdfc859174aa7d": "Select permissions for these apps",
+  "38fe5efa6bc15be6": "When you turn off an app here, Hanzo Dev will be blocked from accessing it. Hanzo Dev can still access apps outside of this list which also store information on your disk when requested.",
+  "e8be8639ac152492": "Allow Hanzo Dev to access your files and local apps",
+  "d3ead01fc53629bc": "You can turn on or off Full Disk Access and add blocked folders any time in Settings.",
+  "aa3aad15d54f985b": "Enable dictation",
+  "836401daf651c936": "Turn speech to text using a seamless voice-first workflow.",
+  "1777b6e07c074a29": "Allow Hanzo Dev to use your microphone for dictation",
+  "72103edd8074f58c": "Shortcuts",
+  "02a02b8327c1858d": "Push to talk",
+  "21b0fb265baf8c1e": "Hold the key to dictate",
+  "e5d7d50caea445ff": "Hands-free mode",
+  "218eeb921267f0cb": "Press the key to start and stop dictation without holding",
   "d6c31ff9bb97570e": "Scan limit reached. Some projects or conversations may be missing.",
   "da6f86321113fb7b": "This connection cannot import projects or thread history.",
   "1cdf16e5edb6bd99": "this computer",
@@ -6153,8 +6193,6 @@
     },
     "."
   ],
-  "e769515d5fa4d383": "What Hanzo Dev controls & progressive permissions",
-  "2824f0ec24e87205": "Hanzo Dev orchestrates local workspaces, Git worktrees, terminal commands, browser previews, and Local AI (Zen 6). Microphone, OS Keychain, folder access, and Hanzo Connect tunnels are requested only when you first use each capability.",
   "216ab7514aea1d61": "Start without an agent",
   "501ce2d99da8bfd1": "Set up one agent to start.",
   "e4f1c541b948dd09": [
@@ -6268,7 +6306,6 @@
   ],
   "f5d986fad54b4670": "Add to PATH",
   "7f5a37821edc1814": "Allowed",
-  "86a2917f997a6e61": "Allow",
   "40baaf84b74b6875": "Could not check permissions. We'll try again automatically.",
   "1c0244f781a87ef2": "Could not update annotation voice input",
   "53b9a6ba24deb0e7": "Navigation",
@@ -10942,7 +10979,6 @@
   "4a237f41ce592b7f": "Keep this project's worktrees until you delete them manually.",
   "00b8ffd8ea6e6a93": "Use these rules for this project.",
   "72c279824d15a999": "Use each machine's worktree cleanup settings.",
-  "90a258fff61fd77e": "Off",
   "b5702d0b64866b08": "Custom",
   "c009c901f3eefe78": "Delete worktrees with deleted threads",
   "431c7cd6d50102b7": "Remove unused worktrees when active or archived threads are deleted. Worktrees with local changes are kept.",

@@ -3265,7 +3265,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "(이 페이지를 연 컴퓨터)"]
+      "c": [
+        " ",
+        "(이 페이지를 연 컴퓨터)"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3277,7 +3280,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· 실행하는 사람이 이 액세스 권한을 얻습니다"]
+      "c": [
+        " ",
+        "· 실행하는 사람이 이 액세스 권한을 얻습니다"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "방금 시작한 로그인만 승인하세요.",
@@ -6129,8 +6135,6 @@
     },
     " 설정 중."
   ],
-  "e769515d5fa4d383": "What Hanzo Dev controls & progressive permissions",
-  "2824f0ec24e87205": "Hanzo Dev orchestrates local workspaces, Git worktrees, terminal commands, browser previews, and Local AI (Zen 6). Microphone, OS Keychain, folder access, and Hanzo Connect tunnels are requested only when you first use each capability.",
   "216ab7514aea1d61": "에이전트 없이 시작",
   "501ce2d99da8bfd1": "시작하려면 에이전트를 하나 설정하세요.",
   "e4f1c541b948dd09": [
@@ -12332,5 +12336,37 @@
   "27d76249d09eb69f": "검토 가이드 준비됨",
   "faa3bb26abb39c93": "검토 가이드 실패",
   "b7df38b7d8792d78": "가이드 열기",
-  "9e91e9a77b664e4e": "검토 가이드를 시작할 수 없습니다"
+  "9e91e9a77b664e4e": "검토 가이드를 시작할 수 없습니다",
+  "4dd64d562cb56778": "Previous step",
+  "d74292c42d77e55e": "Next step",
+  "ab9753a651f9a405": "Allowed",
+  "e238ad27dd83f5e3": "Read and interact",
+  "befff2df7d351c89": "Push to talk",
+  "c9cffc57926eb089": "No shortcut",
+  "aeeca1c83a2e7cd2": "Hands-free mode",
+  "ea42170819e3496a": "Double-tap Fn",
+  "68efbc82e77e7b30": "Allow Hanzo Dev to use your computer?",
+  "5125042b29ce7305": "Ask Hanzo Dev to complete a task, then step away. Hanzo Dev has it ready when you're back.",
+  "32f8f44eb5f896f0": "Accessibility",
+  "a30aaffeba41a980": "Screen Recording",
+  "38737d8577e035b5": "Allow Hanzo Dev to take screenshots",
+  "de7f1d7e92d10941": "You can manage computer use permissions and blocked apps any time in Settings.",
+  "025538a612b475ea": "Skip",
+  "fa1df1ded7c5cb90": "Allow Hanzo Dev to access your files and local apps?",
+  "e79e3bbb67c513a0": "You don't need to hunt through folders, notes and messages anymore. With your approval, Hanzo Dev can find, read and edit your files and local apps.",
+  "853ee53361ffbc34": "Full Disk Access",
+  "41bdfc859174aa7d": "Select permissions for these apps",
+  "38fe5efa6bc15be6": "When you turn off an app here, Hanzo Dev will be blocked from accessing it. Hanzo Dev can still access apps outside of this list which also store information on your disk when requested.",
+  "e8be8639ac152492": "Allow Hanzo Dev to access your files and local apps",
+  "d3ead01fc53629bc": "You can turn on or off Full Disk Access and add blocked folders any time in Settings.",
+  "aa3aad15d54f985b": "Enable dictation",
+  "836401daf651c936": "Turn speech to text using a seamless voice-first workflow.",
+  "1777b6e07c074a29": "Allow Hanzo Dev to use your microphone for dictation",
+  "72103edd8074f58c": "Shortcuts",
+  "02a02b8327c1858d": "Push to talk",
+  "21b0fb265baf8c1e": "Hold the key to dictate",
+  "e5d7d50caea445ff": "Hands-free mode",
+  "218eeb921267f0cb": "Press the key to start and stop dictation without holding",
+  "c8c023a6c3a86751": "Fn",
+  "56cca1159f705675": "Option + Space"
 }

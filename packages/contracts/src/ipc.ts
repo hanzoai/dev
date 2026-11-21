@@ -1066,7 +1066,12 @@ export const DesktopMediaReadSchema = Schema.Struct({
 });
 export type DesktopMediaRead = typeof DesktopMediaReadSchema.Type;
 
-export const SystemSettingsPaneSchema = Schema.Literals(["full-disk-access"]);
+export const SystemSettingsPaneSchema = Schema.Literals([
+  "full-disk-access",
+  "accessibility",
+  "screen-recording",
+  "microphone",
+]);
 export type SystemSettingsPane = typeof SystemSettingsPaneSchema.Type;
 
 export const DesktopDiscoveredLanEngineSchema = Schema.Struct({

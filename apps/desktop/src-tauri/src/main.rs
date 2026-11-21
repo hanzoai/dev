@@ -245,6 +245,7 @@ fn main() {
             commands::desktop_start_dragging,
             commands::desktop_toggle_maximize,
             commands::desktop_open_external,
+            commands::desktop_check_system_permission,
             commands::desktop_open_system_settings,
             commands::desktop_read_media,
             commands::desktop_discover_ssh_hosts,

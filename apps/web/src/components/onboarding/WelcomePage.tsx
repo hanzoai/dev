@@ -115,6 +115,12 @@ import { toastManager } from "../ui/toast";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../timestampFormat";
+import {
+  DESKTOP_ONBOARDING_STEPS,
+  OnboardingPermissionsStepView,
+  OnboardingStepDots,
+  OnboardingStepNav,
+} from "./OnboardingPermissionsSteps";
 
 const AGENT_ONBOARDING_THREAD_ID = ThreadId.make("onboarding-agent-setup");
 const SCAN_LIMIT_MESSAGE = msg(
@@ -162,6 +168,12 @@ export function WelcomePage({
     storeSelection(next);
   };
   const [isImporting, setIsImporting] = useState(false);
+  // Desktop primary installs step through macOS permission onboarding before Agents & Projects.
+  const hasPermissionSteps = isElectron && isPrimary;
+  const [stepIndex, setStepIndex] = useState(0);
+  const activeStep = hasPermissionSteps
+    ? (DESKTOP_ONBOARDING_STEPS[stepIndex] ?? "agents")
+    : "agents";
   // True from Start until the landing; leaving earlier would drop the import or the landing.
   const holdPageRef = useRef(false);
   useBlocker({
@@ -273,81 +285,100 @@ export function WelcomePage({
       role="main"
       className="h-dvh min-h-0 overflow-hidden overscroll-y-none"
     >
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-background">
         {/* The desktop window only moves where CSS opts in, so keep a titlebar strip. */}
         {isElectron ? <WorkspacePageHeader electron /> : null}
+        {hasPermissionSteps ? (
+          <div className="pointer-events-auto absolute top-4 right-5 z-20">
+            <OnboardingStepNav
+              stepIndex={stepIndex}
+              stepCount={DESKTOP_ONBOARDING_STEPS.length}
+              onPrev={() => setStepIndex((index) => Math.max(0, index - 1))}
+              onNext={() =>
+                setStepIndex((index) => Math.min(DESKTOP_ONBOARDING_STEPS.length - 1, index + 1))
+              }
+            />
+          </div>
+        ) : null}
         <div className="min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
-          <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 pt-12 pb-8 sm:pt-20">
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-              <T>Welcome to Hanzo Dev</T>
-            </h1>
-            <p className="mt-1.5 text-sm text-muted-foreground">
-              <T>
-                Setting up{" "}
-                <span className="text-foreground">
-                  <Var>{label}</Var>
-                </span>
-                .
-              </T>
-            </p>
-            <div className="mt-6 rounded-xl border border-border/70 bg-muted/20 p-4 text-xs text-muted-foreground">
-              <div className="font-semibold text-foreground">
-                <T>What Hanzo Dev controls &amp; progressive permissions</T>
-              </div>
-              <p className="mt-1 leading-relaxed">
+          {activeStep !== "agents" ? (
+            <OnboardingPermissionsStepView
+              step={activeStep}
+              stepIndex={stepIndex}
+              stepCount={DESKTOP_ONBOARDING_STEPS.length}
+              onSelectStep={setStepIndex}
+              onNext={() =>
+                setStepIndex((index) => Math.min(DESKTOP_ONBOARDING_STEPS.length - 1, index + 1))
+              }
+            />
+          ) : (
+            <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 pt-12 pb-8 sm:pt-20">
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                <T>Welcome to Hanzo Dev</T>
+              </h1>
+              <p className="mt-1.5 text-sm text-muted-foreground">
                 <T>
-                  Hanzo Dev orchestrates local workspaces, Git worktrees, terminal commands, browser
-                  previews, and Local AI (Zen 6). Microphone, OS Keychain, folder access, and Hanzo
-                  Connect tunnels are requested only when you first use each capability.
+                  Setting up{" "}
+                  <span className="text-foreground">
+                    <Var>{label}</Var>
+                  </span>
+                  .
                 </T>
               </p>
-            </div>
-            <div className="mt-8 border-t border-border/60">
-              <AgentsSection
-                environmentId={environmentId}
-                label={label}
-                isPrimary={isPrimary}
-                onImportSourceEnabled={() => scans[0]?.refresh()}
-              />
-              <ProjectsSection
-                scan={scans[0]}
-                projectImport={projectImport}
-                isImporting={isImporting}
-              />
-              {showPhone ? <PhoneSection environmentId={environmentId} /> : null}
-            </div>
-            <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-              {agentReady ? (
-                <span />
-              ) : (
-                <Button variant="ghost-muted" disabled={isImporting} onClick={start}>
-                  <T>Start without an agent</T>
-                </Button>
-              )}
-              <div className="flex items-center gap-3">
-                {agentReady ? null : (
-                  <span className="text-xs text-muted-foreground">
-                    <T>Set up one agent to start.</T>
-                  </span>
-                )}
-                <Button disabled={!agentReady || isImporting} onClick={start}>
-                  {isImporting
-                    ? selected.length > 0
-                      ? gt("Importing…")
-                      : gt("Starting…")
-                    : newCount > 0
-                      ? gt(
-                          "{count, plural, one {Import {count} project and start} other {Import {count} projects and start}}",
-                          { count: newCount },
-                        )
-                      : selected.length > 0
-                        ? gt("Import threads and start")
-                        : gt("Start", { $context: "verb, finishes setup" })}
-                </Button>
+              <div className="mt-8 border-t border-border/60">
+                <AgentsSection
+                  environmentId={environmentId}
+                  label={label}
+                  isPrimary={isPrimary}
+                  onImportSourceEnabled={() => scans[0]?.refresh()}
+                />
+                <ProjectsSection
+                  scan={scans[0]}
+                  projectImport={projectImport}
+                  isImporting={isImporting}
+                />
+                {showPhone ? <PhoneSection environmentId={environmentId} /> : null}
               </div>
+              <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+                {agentReady ? (
+                  <span />
+                ) : (
+                  <Button variant="ghost-muted" disabled={isImporting} onClick={start}>
+                    <T>Start without an agent</T>
+                  </Button>
+                )}
+                <div className="flex items-center gap-3">
+                  {agentReady ? null : (
+                    <span className="text-xs text-muted-foreground">
+                      <T>Set up one agent to start.</T>
+                    </span>
+                  )}
+                  <Button disabled={!agentReady || isImporting} onClick={start}>
+                    {isImporting
+                      ? selected.length > 0
+                        ? gt("Importing…")
+                        : gt("Starting…")
+                      : newCount > 0
+                        ? gt(
+                            "{count, plural, one {Import {count} project and start} other {Import {count} projects and start}}",
+                            { count: newCount },
+                          )
+                        : selected.length > 0
+                          ? gt("Import threads and start")
+                          : gt("Start", { $context: "verb, finishes setup" })}
+                  </Button>
+                </div>
+              </div>
+              {hasPermissionSteps ? (
+                <OnboardingStepDots
+                  stepIndex={stepIndex}
+                  stepCount={DESKTOP_ONBOARDING_STEPS.length}
+                  onSelect={setStepIndex}
+                />
+              ) : null}
+              <TelemetryNotice environmentId={environmentId} />
             </div>
-            <TelemetryNotice environmentId={environmentId} />
-          </div>
+          )}
         </div>
       </div>
     </SidebarInset>

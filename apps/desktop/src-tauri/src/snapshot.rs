@@ -199,8 +199,8 @@ pub fn build_snapshot_state_payload(state_dir: &Path, shortcut_registered: bool)
         obj.insert(
             "macPermissions".to_string(),
             json!({
-                "screenRecording": true,
-                "accessibility": true,
+                "screenRecording": crate::commands::check_screen_recording_permission(),
+                "accessibility": crate::commands::check_accessibility_permission(),
             }),
         );
     }
