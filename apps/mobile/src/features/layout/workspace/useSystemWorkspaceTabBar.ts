@@ -63,3 +63,11 @@ export function useSystemWorkspaceTabBar() {
     !compactTabs
   );
 }
+
+/**
+ * The phone drops the tab bar and dock for a side drawer holding every destination, with the menu
+ * and new-chat buttons in the header. Other devices keep their tab bar, rail or sidebar.
+ */
+export function useDrawerWorkspace() {
+  return useCompactWorkspaceTabs();
+}

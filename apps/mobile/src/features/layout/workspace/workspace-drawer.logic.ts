@@ -59,10 +59,7 @@ export function drawerDestinations(
   customizable: boolean,
 ): readonly DrawerDestination[] {
   const excluded = customizable ? resolveHiddenNavigationTabs(hidden) : [];
-  return [
-    ...resolveNavigationTabOrder(order).filter((tab) => !excluded.includes(tab)),
-    "settings",
-  ];
+  return [...resolveNavigationTabOrder(order).filter((tab) => !excluded.includes(tab)), "settings"];
 }
 
 /** The destinations the bar offered: its four slots, the overflow, and Settings. */
@@ -86,7 +83,10 @@ export interface DrawerState {
   readonly open: boolean;
 }
 
-export type DrawerAction = { readonly type: "open" } | { readonly type: "close" } | { readonly type: "toggle" };
+export type DrawerAction =
+  | { readonly type: "open" }
+  | { readonly type: "close" }
+  | { readonly type: "toggle" };
 
 export function drawerReducer(state: DrawerState, action: DrawerAction): DrawerState {
   const open = action.type === "toggle" ? !state.open : action.type === "open";

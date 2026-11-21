@@ -5,9 +5,9 @@ import { WORKSPACE_TAB_LABELS, useEnabledNavigationTabs } from "./navigation-tab
 import { WorkspaceExtraTab } from "./WorkspaceExtraTab";
 import { WorkspaceSettingsList } from "../../settings/SettingsRouteScreen";
 import { WorkspaceSectionToolbar } from "./WorkspaceSectionToolbar";
-import { useNavigation } from "@react-navigation/native";
+import { useIsFocused, useNavigation } from "@react-navigation/native";
 import { useGT, useMessages } from "gt-react-native";
-import { use } from "react";
+import { use, useEffect, type ReactNode } from "react";
 import { View, useWindowDimensions } from "react-native";
 import { useKeyboardState } from "react-native-keyboard-controller";
 import { SafeAreaInsetsContext, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -40,11 +40,15 @@ import { WorkspaceToolbar } from "./WorkspaceToolbar";
 import { WORKSPACE_DOCK, workspaceDockBottomClearance } from "./workspace-tabs-state";
 import { WorkspaceSidebarTabs } from "./WorkspaceSidebarTabs";
 import {
-  useCompactWorkspaceTabs,
+  useDrawerWorkspace,
   useSidebarWorkspaceTabs,
   useSystemWorkspaceTabBar,
 } from "./useSystemWorkspaceTabBar";
 import { openSettings } from "../../settings/settings-navigation";
+import { PhoneChatLanding } from "../../chat/PhoneChatLanding";
+import { WorkspaceDrawer } from "./WorkspaceDrawer";
+import { WorkspaceDrawerMenu } from "./WorkspaceDrawerMenu";
+import { closeWorkspaceDrawer } from "./workspace-drawer-store";
 
 const TAB_TITLES = WORKSPACE_TAB_LABELS;
 
@@ -85,6 +89,18 @@ function WorkspaceRootTitle(props: {
   );
 }
 
+/** On the phone the content slides aside for the drawer; elsewhere it is the content. */
+function DrawerHost(props: { readonly drawer: boolean; readonly children: ReactNode }) {
+  const focused = useIsFocused();
+  return props.drawer ? (
+    <WorkspaceDrawer enabled={focused} menu={<WorkspaceDrawerMenu />}>
+      {props.children}
+    </WorkspaceDrawer>
+  ) : (
+    props.children
+  );
+}
+
 function WorkspaceRootContent() {
   const gt = useGT();
   const m = useMessages();
@@ -96,7 +112,8 @@ function WorkspaceRootContent() {
   const nativeMetrics = useNativeLayoutMetrics();
   const deviceType = useDeviceType();
   const systemTabBar = useSystemWorkspaceTabBar();
-  const compactTabs = useCompactWorkspaceTabs();
+  const drawer = useDrawerWorkspace();
+  const focused = useIsFocused();
   const enabled = useEnabledNavigationTabs();
   const sidebarTabs = useSidebarWorkspaceTabs();
   const sidebarPicker = sidebarTabs === "picker" || (deviceType === "pad" && layout.usesSplitView);
@@ -126,15 +143,23 @@ function WorkspaceRootContent() {
       : isDuoDevice(deviceType)
         ? // The column's safe area holds the Duo's search toolbar, but not the sidebar's own tab bar.
           Math.max(insets.bottom + (sidebarPicker ? 64 : 0), keyboardHeight) + 16
-        : compactTabs || deviceType === "pad"
-          ? workspaceDockBottomClearance({ bottomInset: insets.bottom, keyboardHeight })
-          : Math.max(insets.bottom, keyboardHeight) +
-            (systemTabBar || sidebarTabs || tab.searchMode !== "resting"
-              ? sidebarPicker
-                ? 80
-                : 16
-              : WORKSPACE_DOCK.height + WORKSPACE_DOCK.bottomGap + 16);
+        : drawer
+          ? // The phone has no tab bar or dock; the drawer holds the destinations.
+            Math.max(insets.bottom, keyboardHeight) + 16
+          : deviceType === "pad"
+            ? workspaceDockBottomClearance({ bottomInset: insets.bottom, keyboardHeight })
+            : Math.max(insets.bottom, keyboardHeight) +
+              (systemTabBar || sidebarTabs || tab.searchMode !== "resting"
+                ? sidebarPicker
+                  ? 80
+                  : 16
+                : WORKSPACE_DOCK.height + WORKSPACE_DOCK.bottomGap + 16);
   const context = { ...workspace, bottomClearance };
+  // A thread, page or sheet opened from the drawer covers this screen; the drawer is shut by then.
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- shuts the drawer when another screen takes focus
+  useEffect(() => {
+    if (!focused) closeWorkspaceDrawer();
+  }, [focused]);
 
   return (
     <WorkspaceTabsContext value={context}>
@@ -173,22 +198,28 @@ function WorkspaceRootContent() {
                 : undefined,
           }}
         />
-        <SafeAreaInsetsContext value={compactTabs ? { ...insets, bottom: 0 } : insets}>
-          {/* Usage draws its own header, and skips its body itself. */}
-          {headerOnly && (settingsOpen || state.selectedTab !== "usage") ? null : settingsOpen ? (
-            <WorkspaceSettingsList />
-          ) : enabled.length === 0 ? (
-            <WorkspaceNoTabs />
-          ) : state.selectedTab === "threads" ? (
-            <HomeRouteScreen />
-          ) : state.selectedTab === "pullRequests" ? (
-            <PullRequestsScreen />
-          ) : state.selectedTab === "issues" ? (
-            <IssuesScreen />
-          ) : (
-            <WorkspaceExtraTab tab={state.selectedTab} />
-          )}
-        </SafeAreaInsetsContext>
+        <DrawerHost drawer={drawer && !headerOnly}>
+          <SafeAreaInsetsContext value={insets}>
+            {/* Usage draws its own header, and skips its body itself. */}
+            {headerOnly && (settingsOpen || state.selectedTab !== "usage") ? null : settingsOpen ? (
+              <WorkspaceSettingsList />
+            ) : enabled.length === 0 ? (
+              <WorkspaceNoTabs />
+            ) : state.selectedTab === "threads" ? (
+              drawer ? (
+                <PhoneChatLanding />
+              ) : (
+                <HomeRouteScreen />
+              )
+            ) : state.selectedTab === "pullRequests" ? (
+              <PullRequestsScreen />
+            ) : state.selectedTab === "issues" ? (
+              <IssuesScreen />
+            ) : (
+              <WorkspaceExtraTab tab={state.selectedTab} />
+            )}
+          </SafeAreaInsetsContext>
+        </DrawerHost>
         {deviceType !== "pad" && deviceType !== "phone" && sidebarPicker ? (
           <WorkspaceSidebarTabs />
         ) : null}

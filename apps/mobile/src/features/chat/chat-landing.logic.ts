@@ -21,7 +21,8 @@ export function resolveSend(input: {
   readonly cloudChatAvailable: boolean;
 }): SendOutcome {
   if (input.prompt.trim() === "") return { kind: "none" };
-  if (input.build) return input.hasReadyEnvironment ? { kind: "machine" } : { kind: "choose-target" };
+  if (input.build)
+    return input.hasReadyEnvironment ? { kind: "machine" } : { kind: "choose-target" };
   if (input.cloudChatAvailable) return { kind: "chat" };
   return input.hasReadyEnvironment ? { kind: "machine" } : { kind: "choose-target" };
 }

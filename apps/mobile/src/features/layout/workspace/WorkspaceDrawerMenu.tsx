@@ -7,8 +7,15 @@ import { AppText as Text } from "../../../components/ui/AppText";
 import { useControlTheme } from "../../../components/ui/useControlTheme";
 import { useHanzoMobileAccounts } from "../../cloud/hanzoMobileAuth";
 import { HomeRouteScreen } from "../../home/HomeRouteScreen";
-import { NAVIGATION_TAB_ICONS, WORKSPACE_TAB_LABELS, useNavigationTabOrder } from "./navigation-tabs";
-import { navigationCustomizationAvailable, resolveHiddenNavigationTabs } from "./navigation-tab-order";
+import {
+  NAVIGATION_TAB_ICONS,
+  WORKSPACE_TAB_LABELS,
+  useNavigationTabOrder,
+} from "./navigation-tabs";
+import {
+  navigationCustomizationAvailable,
+  resolveHiddenNavigationTabs,
+} from "./navigation-tab-order";
 import { useSelectWorkspaceTab } from "./useSelectWorkspaceTab";
 import { closeWorkspaceDrawer } from "./workspace-drawer-store";
 import {
@@ -142,7 +149,11 @@ export function WorkspaceDrawerMenu() {
     <View className="flex-1 bg-drawer">
       <View className="px-3 pb-2 pt-2">
         <View className="h-10 flex-row items-center gap-2 rounded-full bg-grouped-card px-3">
-          <SymbolView name="magnifyingglass" size={15} tintColor={colors["--color-foreground-muted"]} />
+          <SymbolView
+            name="magnifyingglass"
+            size={15}
+            tintColor={colors["--color-foreground-muted"]}
+          />
           <TextInput
             value={workspace.state.tabs.threads.query}
             onChangeText={(query) => workspace.dispatch({ type: "query", query, tab: "threads" })}

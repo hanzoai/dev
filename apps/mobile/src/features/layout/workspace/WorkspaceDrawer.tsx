@@ -65,31 +65,33 @@ export function WorkspaceDrawer(props: {
   }, [open, reach, at, target]);
 
   const gesture = useMemo(() => {
-    return Gesture.Pan()
-      .enabled(props.enabled || open)
-      // Closed, only the leading edge begins a pull; open, anywhere on the dimmed pane closes.
-      .hitSlop(open ? undefined : { left: 0, width: DRAWER_EDGE })
-      .activeOffsetX([-8, 8])
-      .failOffsetY([-16, 16])
-      .onBegin(() => {
-        from.value = at.value;
-        // A finger catches a moving drawer where it is.
-        at.value = at.value;
-      })
-      .onUpdate((event) => {
-        at.value = drawerPull(from.value, event.translationX, reach);
-      })
-      .onEnd((event) => {
-        const stays = drawerSettles(at.value, reach, event.velocityX / 1000);
-        const next = stays ? reach : 0;
-        target.value = next;
-        at.value = withTiming(next, {
-          duration: DRAWER_DURATION,
-          easing: DRAWER_EASING,
-          reduceMotion: ReduceMotion.System,
-        });
-        runOnJS(dispatchWorkspaceDrawer)({ type: stays ? "open" : "close" });
-      });
+    return (
+      Gesture.Pan()
+        .enabled(props.enabled || open)
+        // Closed, only the leading edge begins a pull; open, anywhere on the dimmed pane closes.
+        .hitSlop(open ? undefined : { left: 0, width: DRAWER_EDGE })
+        .activeOffsetX([-8, 8])
+        .failOffsetY([-16, 16])
+        .onBegin(() => {
+          from.value = at.value;
+          // A finger catches a moving drawer where it is.
+          at.value = at.value;
+        })
+        .onUpdate((event) => {
+          at.value = drawerPull(from.value, event.translationX, reach);
+        })
+        .onEnd((event) => {
+          const stays = drawerSettles(at.value, reach, event.velocityX / 1000);
+          const next = stays ? reach : 0;
+          target.value = next;
+          at.value = withTiming(next, {
+            duration: DRAWER_DURATION,
+            easing: DRAWER_EASING,
+            reduceMotion: ReduceMotion.System,
+          });
+          runOnJS(dispatchWorkspaceDrawer)({ type: stays ? "open" : "close" });
+        })
+    );
   }, [open, props.enabled, reach, at, target, from]);
 
   const paneStyle = useAnimatedStyle(() => ({ transform: [{ translateX: at.value }] }));
