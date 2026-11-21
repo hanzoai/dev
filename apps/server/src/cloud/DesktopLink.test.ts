@@ -508,3 +508,43 @@ it.effect(
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.provide(NodeServices.layer)),
 );
+
+it.effect(
+  "a routed run is refused on an unshared login and no credential appears in any answer",
+  () =>
+    Effect.gen(function* () {
+      const { requests, layer } = yield* harness;
+      yield* Effect.gen(function* () {
+        const desktopLink = yield* DesktopLink.DesktopLink;
+        yield* Effect.yieldNow;
+        yield* desktopLink.link({});
+        yield* Queue.take(requests);
+        yield* Queue.take(requests);
+
+        const refused = yield* desktopLink.assertRoutedRun("claude").pipe(Effect.flip);
+        assert.equal(refused.reason, "not_shared");
+        // Not routable (a login this policy does not offer) stays refused even with the switch asked for.
+        const unknown = yield* desktopLink.assertRoutedRun("nope").pipe(Effect.flip);
+        assert.equal(unknown.reason, "not_shared");
+
+        yield* desktopLink.setShared("claude", true);
+        yield* Queue.take(requests);
+        yield* desktopLink.assertRoutedRun("claude");
+
+        yield* desktopLink.setShared("claude", false);
+        yield* Queue.take(requests);
+        const again = yield* desktopLink.assertRoutedRun("claude").pipe(Effect.flip);
+        assert.equal(again.reason, "not_shared");
+
+        const everything = JSON.stringify([
+          refused.message,
+          again.message,
+          yield* desktopLink.status,
+          yield* desktopLink.outbox,
+        ]);
+        for (const secret of [SECRET_TOKEN, "refresh-token-secret", "auth.json", SECRET_EMAIL]) {
+          assert.notInclude(everything.replace(`"identity":"${SECRET_EMAIL}"`, ""), secret);
+        }
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.provide(NodeServices.layer)),
+);

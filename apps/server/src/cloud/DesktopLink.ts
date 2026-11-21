@@ -52,6 +52,8 @@ const OUTBOX_LIMIT = 100;
 // The cost window a report covers; cost rows replace by day, so resending is safe.
 const REPORT_WINDOW_MS = 30 * 86_400_000;
 const OUTBOX_FILE = "source-outbox.json";
+// Hanzo's own providers need no subscription login and are not gated by the share switch.
+const OWN_PROVIDERS: ReadonlySet<string> = new Set(["hanzo", "hanzogen", "devreplay"]);
 const SHARED_FILE = "source-shared.json";
 const USAGE_DOMAIN = "hanzo-source-usage/1";
 
@@ -286,6 +288,11 @@ export class DesktopLink extends Context.Service<
       instance: string,
       shared: boolean,
     ) => Effect.Effect<DesktopLinkStatus, DesktopLinkError>;
+    /**
+     * Refuses a routed run on a provider instance the user has not shared. Fail closed: only
+     * Hanzo's own providers and keys run for another surface without the share switch.
+     */
+    readonly assertRoutedRun: (instance: string) => Effect.Effect<void, DesktopLinkError>;
     readonly setSendNothing: (
       sendNothing: boolean,
     ) => Effect.Effect<DesktopOutbox, DesktopLinkError>;
@@ -794,6 +801,17 @@ const make = Effect.gen(function* () {
     return yield* buildStatus;
   });
 
+  const assertRoutedRun = Effect.fn("DesktopLink.assertRoutedRun")(function* (instance: string) {
+    const rows = yield* reportedProviders;
+    const row = rows.find((candidate) => candidate.instance === instance);
+    const open =
+      row !== undefined &&
+      (row.kind === "key" || OWN_PROVIDERS.has(row.provider) || (row.shareable && row.shared));
+    if (!open) {
+      return yield* fail("not_shared", "This provider is not shared with your other surfaces.");
+    }
+  });
+
   const outboxStatus = readOutbox.pipe(Effect.map(outboxView));
 
   const setSendNothing = Effect.fn("DesktopLink.setSendNothing")(function* (sendNothing: boolean) {
@@ -827,6 +845,7 @@ const make = Effect.gen(function* () {
 
   return DesktopLink.of({
     outbox: outboxStatus,
+    assertRoutedRun,
     setSendNothing,
     setShared,
     status: buildStatus,

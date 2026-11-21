@@ -121,6 +121,7 @@ export class DesktopLinkError extends Schema.TaggedError<DesktopLinkError>()("De
     "rejected",
     "limit",
     "not_linked",
+    "not_shared",
     "storage",
   ]),
   message: Schema.String,
