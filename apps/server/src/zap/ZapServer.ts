@@ -6,7 +6,6 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
-import * as Jwks from "effect/jose/Jwks";
 import * as Option from "effect/Option";
 import * as RpcServer from "effect/rpc/RpcServer";
 import * as SocketServer from "effect/socket/SocketServer";
@@ -14,7 +13,6 @@ import type * as Socket from "effect/socket/Socket";
 
 import * as AnalyticsService from "../telemetry/AnalyticsService.ts";
 import { makeHanzoIamConfig } from "../cloud/publicConfig.ts";
-import { normalizeHanzoIssuer } from "@hanzodev/shared/hanzoIamAuth";
 import { RpcSessions } from "../ws.ts";
 import { layerIam, ZapAuth } from "./ZapAuth.ts";
 import { serveZapStream, type ZapStream } from "./ZapSession.ts";
@@ -87,7 +85,9 @@ export const layer = (listen: ZapListen) =>
       const run = Effect.runForkWith(context);
       yield* Effect.acquireRelease(
         Effect.callback<NodeNet.Server>((resume) => {
-          const server = NodeNet.createServer((connection) => run(runSession(streamOf(connection))));
+          const server = NodeNet.createServer((connection) =>
+            run(runSession(streamOf(connection))),
+          );
           server.once("listening", () => resume(Effect.succeed(server)));
           if (listen.socket !== undefined) {
             server.listen({ path: listen.socket, readableAll: false, writableAll: false });
@@ -120,15 +120,8 @@ export const layerFromEnvironment = Layer.unwrap(
         : undefined;
     if (listen === undefined) return Layer.empty;
     const { iamIssuer, iamClientId } = yield* makeHanzoIamConfig();
-    const issuer = normalizeHanzoIssuer(iamIssuer);
-    // A key set that redirects is refused, so the client must not follow redirects.
-    const http = FetchHttpClient.layer.pipe(
-      Layer.provide(Layer.succeed(FetchHttpClient.RequestInit, { redirect: "manual" })),
-    );
-    const auth = layerIam({ issuer, audience: iamClientId, principal }).pipe(
-      Layer.provide(
-        Jwks.layerRemote({ url: `${issuer}/.well-known/jwks` }).pipe(Layer.provide(http)),
-      ),
+    const auth = layerIam({ origin: iamIssuer, audience: iamClientId, principal }).pipe(
+      Layer.provide(FetchHttpClient.layer),
     );
     return layer(listen).pipe(Layer.provide(auth));
   }),

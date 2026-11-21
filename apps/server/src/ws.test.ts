@@ -54,7 +54,6 @@ import * as FileSystem from "effect/FileSystem";
 import * as Clock from "effect/Clock";
 import * as Redacted from "effect/Redacted";
 import * as Jwk from "effect/jose/Jwk";
-import * as Jwks from "effect/jose/Jwks";
 import * as Jwt from "effect/jose/Jwt";
 import * as Schema from "effect/Schema";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- The test client connects to the local ZAP stream.
@@ -2649,7 +2648,10 @@ it.effect("ACP session RPCs list a thread missing its history and repair it on i
   ),
 );
 
-const IAM_ISSUER = "https://hanzo.id";
+// Sign-in happens at one origin; discovery there names the issuer and key set, on another host.
+const IAM_ORIGIN = "https://login.example";
+const IAM_ISSUER = "https://iam.example";
+const IAM_JWKS = "https://iam.example/v1/iam/.well-known/jwks";
 const IAM_AUDIENCE = "hanzo-app";
 const IamToken = Schema.Struct({
   iss: Schema.String,
@@ -2672,6 +2674,22 @@ it.live("serves a thread over ZAP on a local stream, authenticated by a Hanzo IA
     const signingKey = yield* Jwk.importPrivate(keys.privateKey, "ES256");
     const keySet = { keys: [{ ...keys.publicKey, kid: "test", alg: "ES256" }] };
     const now = yield* Clock.currentTimeMillis;
+    const fakeIam: typeof globalThis.fetch = async (input) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url === `${IAM_ORIGIN}/.well-known/openid-configuration`) {
+        return Response.json({
+          issuer: IAM_ISSUER,
+          jwks_uri: IAM_JWKS,
+          token_endpoint: `${IAM_ISSUER}/oauth/token`,
+          userinfo_endpoint: `${IAM_ISSUER}/oauth/userinfo`,
+        });
+      }
+      if (url === IAM_JWKS) {
+        // The key set client accepts only a response that names the URL it asked for.
+        return Object.defineProperty(Response.json(keySet), "url", { value: IAM_JWKS });
+      }
+      return new Response("not found", { status: 404 });
+    };
     const mint = (claims: Partial<typeof IamToken.Type>) =>
       Jwt.sign(
         IamToken,
@@ -2689,9 +2707,12 @@ it.live("serves a thread over ZAP on a local stream, authenticated by a Hanzo IA
 
     const zapLayer = ZapServer.layer({ socket: socketPath }).pipe(
       Layer.provide(
-        ZapAuth.layerIam({ issuer: IAM_ISSUER, audience: IAM_AUDIENCE, principal: "hanzo/z" }).pipe(
-          Layer.provide(Layer.mergeAll(Jwks.layerLocal(keySet), NodeCrypto.layer)),
-        ),
+        ZapAuth.layerIam({
+          origin: IAM_ORIGIN,
+          audience: IAM_AUDIENCE,
+          principal: "hanzo/z",
+          fetch: fakeIam,
+        }).pipe(Layer.provide(Layer.mergeAll(FetchHttpClient.layer, NodeCrypto.layer))),
       ),
       Layer.provideMerge(Ws.layer.pipe(Layer.provide(HttpRouter.layer))),
       Layer.provide(
@@ -2764,6 +2785,8 @@ it.live("serves a thread over ZAP on a local stream, authenticated by a Hanzo IA
       "not-a-jwt",
       yield* mint({ owner: "hanzo", name: "someone-else" }),
       yield* mint({ iss: "https://evil.example" }),
+      // The sign-in origin is not the issuer discovery names.
+      yield* mint({ iss: IAM_ORIGIN }),
       yield* mint({ aud: "another-app" }),
       yield* mint({ exp: Math.floor(now / 1000) - 600 }),
     ]) {
