@@ -30,7 +30,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
   favoriteStarOnHover?: boolean;
   isSelected: boolean;
   /** The chosen effort of the selected Enso row; other Enso rows show the plain ring. */
-  ensoRing?: { readonly gap: number; readonly dot: boolean } | null;
+  ensoRing?: { readonly gap: number; readonly dot: boolean } | null | undefined;
   /** Marks this instance apart from another of the same provider. */
   showInstanceBadge: boolean;
   showNewBadge?: boolean;
