@@ -102,3 +102,15 @@ describe("home empty state", () => {
     expect({ title, loading, showsAddEnvironment }).toEqual(expected);
   });
 });
+
+describe("no environment is not signed out", () => {
+  it("never tells a user without an environment to sign in", () => {
+    const state = deriveHomeEmptyState(
+      workspaceState({ hasConnections: false, hasReadyEnvironment: false }),
+      0,
+    );
+    expect(state.title).not.toMatch(/sign in/i);
+    expect(state.title).toBe("No environment connected");
+    expect(state.loading).toBe(false);
+  });
+});

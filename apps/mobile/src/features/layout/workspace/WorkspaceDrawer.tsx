@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, {
   Easing,
+  interpolate,
   ReduceMotion,
   runOnJS,
   useAnimatedStyle,
@@ -13,7 +14,8 @@ import { useGT } from "gt-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
-  DRAWER_DIM,
+  DRAWER_CARD_RADIUS,
+  DRAWER_CARD_SCALE,
   DRAWER_DURATION,
   DRAWER_EDGE,
   drawerPull,
@@ -37,6 +39,8 @@ const DRAWER_EASING = Easing.bezier(0.2, 0.8, 0.2, 1);
 export function WorkspaceDrawer(props: {
   readonly children: ReactNode;
   readonly menu: ReactNode;
+  /** Drawn on the card above the content; moves with it. */
+  readonly floating?: ReactNode;
   /** Whether the edge swipe may begin; false while another screen owns the edge. */
   readonly enabled: boolean;
 }) {
@@ -94,9 +98,23 @@ export function WorkspaceDrawer(props: {
     );
   }, [open, props.enabled, reach, at, target, from]);
 
-  const paneStyle = useAnimatedStyle(() => ({ transform: [{ translateX: at.value }] }));
-  const dimStyle = useAnimatedStyle(() => ({
-    opacity: reach === 0 ? 0 : (at.value / reach) * DRAWER_DIM,
+  // The pane is a raised card: it slides, shrinks a little and rounds its corners on the one value.
+  const paneStyle = useAnimatedStyle(() => {
+    const progress = reach === 0 ? 0 : at.value / reach;
+    return {
+      transform: [
+        { translateX: at.value },
+        { scale: interpolate(progress, [0, 1], [1, DRAWER_CARD_SCALE]) },
+      ],
+      shadowOpacity: progress * 0.25,
+    };
+  });
+  // The floating header's circles leave as the drawer opens, on the same value.
+  const floatingStyle = useAnimatedStyle(() => ({
+    opacity: reach === 0 ? 1 : 1 - Math.min(1, at.value / reach),
+  }));
+  const clipStyle = useAnimatedStyle(() => ({
+    borderRadius: interpolate(reach === 0 ? 0 : at.value / reach, [0, 1], [0, DRAWER_CARD_RADIUS]),
   }));
 
   return (
@@ -110,22 +128,27 @@ export function WorkspaceDrawer(props: {
       </View>
       <GestureDetector gesture={gesture}>
         <Reanimated.View
-          className="flex-1 bg-screen"
-          style={paneStyle}
+          className="flex-1"
+          style={[styles.card, paneStyle]}
           accessibilityElementsHidden={open}
           importantForAccessibility={open ? "no-hide-descendants" : "auto"}
         >
+          <Reanimated.View className="flex-1 bg-screen" style={[styles.clip, clipStyle]}>
           {props.children}
           <Reanimated.View
-            pointerEvents={interactive ? "auto" : "none"}
-            style={[StyleSheet.absoluteFill, styles.dim, dimStyle]}
+            pointerEvents={interactive ? "none" : "box-none"}
+            style={[StyleSheet.absoluteFill, floatingStyle]}
           >
+            {props.floating}
+          </Reanimated.View>
+          {interactive ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={gt("Close menu")}
               style={StyleSheet.absoluteFill}
               onPress={closeWorkspaceDrawer}
             />
+          ) : null}
           </Reanimated.View>
         </Reanimated.View>
       </GestureDetector>
@@ -135,5 +158,10 @@ export function WorkspaceDrawer(props: {
 
 const styles = StyleSheet.create({
   menu: { position: "absolute", top: 0, bottom: 0, left: 0 },
-  dim: { backgroundColor: "#000" },
+  clip: { overflow: "hidden", borderCurve: "continuous" },
+  card: {
+    shadowColor: "#000",
+    shadowOffset: { width: -6, height: 0 },
+    shadowRadius: 18,
+  },
 });

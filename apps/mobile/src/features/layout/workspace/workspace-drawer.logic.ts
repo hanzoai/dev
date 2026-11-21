@@ -18,8 +18,6 @@ export const DRAWER_FLICK = 0.4;
 export const DRAWER_DURATION = 260;
 /** Where a drag may begin, pt from the leading edge. */
 export const DRAWER_EDGE = 24;
-/** Dim over the content at full open. */
-export const DRAWER_DIM = 0.45;
 
 export type DrawerDestination = NavigationTab | "settings";
 
@@ -109,12 +107,19 @@ export function drawerAccountInitial(name: string): string {
   return first ? first.toUpperCase() : "?";
 }
 
-/** The native header sits under the drawer's dim by leaving while the drawer is open. */
-export function workspaceHeaderShown(input: {
-  readonly drawer: boolean;
-  readonly open: boolean;
-}): boolean {
-  return !(input.drawer && input.open);
+/** Raised card at full open: scale, corner radius (pt) and the extra top inset for the floating header. */
+export const DRAWER_CARD_SCALE = 0.96;
+export const DRAWER_CARD_RADIUS = 28;
+export const FLOATING_HEADER_HEIGHT = 52;
+
+/** The phone has no native header: two floating circles ride on the card instead. */
+export function workspaceHeaderShown(input: { readonly drawer: boolean }): boolean {
+  return !input.drawer;
+}
+
+/** The safe-area top a screen sees under the floating header. */
+export function floatingHeaderTop(safeTop: number, drawer: boolean): number {
+  return drawer ? safeTop + FLOATING_HEADER_HEIGHT : safeTop;
 }
 
 export interface DrawerThreadRow {
@@ -132,4 +137,21 @@ export function drawerThreadRows(
   return threads
     .map((thread) => ({ key: thread.key, title: thread.title === "" ? untitled : thread.title }))
     .filter((row) => needle === "" || row.title.toLowerCase().includes(needle));
+}
+
+/** The account row's name: what the account calls itself, then its email, then its subject. */
+export function drawerAccountName(
+  account: {
+    readonly displayName: string | null;
+    readonly email: string | null;
+    readonly subject: string;
+  } | null,
+  fallback: string,
+): string {
+  if (account === null) return fallback;
+  return (
+    [account.displayName, account.email, account.subject]
+      .map((value) => value?.trim() ?? "")
+      .find((value) => value !== "") ?? fallback
+  );
 }

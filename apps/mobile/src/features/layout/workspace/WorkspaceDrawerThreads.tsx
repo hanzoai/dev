@@ -1,6 +1,7 @@
 import { useNavigation } from "@react-navigation/native";
 import { useGT } from "gt-react-native";
-import { Pressable, ScrollView, View } from "react-native";
+import * as Clipboard from "expo-clipboard";
+import { Alert, Pressable, ScrollView, View } from "react-native";
 
 import { SymbolView } from "../../../components/ui/AppSymbol";
 import { AppText as Text } from "../../../components/ui/AppText";
@@ -64,24 +65,43 @@ export function WorkspaceDrawerThreads() {
       ) : null}
       {rows.length > 0 ? (
         <>
-          <Text className="px-3 pb-1 pt-3 text-xs text-foreground-muted">{gt("Chats")}</Text>
+          <Text className="px-3 pb-1 pt-3 text-xs text-foreground-muted">{gt("Recents")}</Text>
           {rows.map((row) => (
-            <Pressable
+            <View
               key={row.key}
-              accessibilityRole="button"
-              accessibilityState={{ selected: chat.state.threadKey === row.key }}
-              accessibilityLabel={row.title}
-              onPress={() => openThread(row.key)}
               className={
                 chat.state.threadKey === row.key
-                  ? "h-11 justify-center rounded-xl bg-grouped-card px-3"
-                  : "h-11 justify-center rounded-xl px-3"
+                  ? "h-11 flex-row items-center rounded-xl bg-grouped-card pl-3"
+                  : "h-11 flex-row items-center rounded-xl pl-3"
               }
             >
-              <Text className="text-base text-foreground" numberOfLines={1}>
-                {row.title}
-              </Text>
-            </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ selected: chat.state.threadKey === row.key }}
+                accessibilityLabel={row.title}
+                onPress={() => openThread(row.key)}
+                className="h-11 flex-1 justify-center"
+              >
+                <Text className="text-base text-foreground" numberOfLines={1}>
+                  {row.title}
+                </Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={gt("More")}
+                hitSlop={6}
+                onPress={() =>
+                  Alert.alert(row.title, undefined, [
+                    { text: gt("Open"), onPress: () => openThread(row.key) },
+                    { text: gt("Copy title"), onPress: () => void Clipboard.setStringAsync(row.title) },
+                    { text: gt("Cancel"), style: "cancel" },
+                  ])
+                }
+                className="h-11 w-11 items-center justify-center"
+              >
+                <SymbolView name="ellipsis" size={16} tintColor={colors["--color-foreground-muted"]} />
+              </Pressable>
+            </View>
           ))}
         </>
       ) : null}

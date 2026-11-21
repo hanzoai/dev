@@ -46,10 +46,11 @@ import {
 } from "./useSystemWorkspaceTabBar";
 import { openSettings } from "../../settings/settings-navigation";
 import { PhoneChatLanding } from "../../chat/PhoneChatLanding";
+import { PhoneFloatingHeader } from "./usePhoneHeaderButtons";
 import { WorkspaceDrawer } from "./WorkspaceDrawer";
 import { WorkspaceDrawerMenu } from "./WorkspaceDrawerMenu";
-import { closeWorkspaceDrawer, useWorkspaceDrawerOpen } from "./workspace-drawer-store";
-import { workspaceHeaderShown } from "./workspace-drawer.logic";
+import { closeWorkspaceDrawer } from "./workspace-drawer-store";
+import { floatingHeaderTop, workspaceHeaderShown } from "./workspace-drawer.logic";
 
 const TAB_TITLES = WORKSPACE_TAB_LABELS;
 
@@ -93,8 +94,13 @@ function WorkspaceRootTitle(props: {
 /** On the phone the content slides aside for the drawer; elsewhere it is the content. */
 function DrawerHost(props: { readonly drawer: boolean; readonly children: ReactNode }) {
   const focused = useIsFocused();
+  const insets = useSafeAreaInsets();
   return props.drawer ? (
-    <WorkspaceDrawer enabled={focused} menu={<WorkspaceDrawerMenu />}>
+    <WorkspaceDrawer
+      enabled={focused}
+      menu={<WorkspaceDrawerMenu />}
+      floating={<PhoneFloatingHeader top={insets.top + 4} />}
+    >
       {props.children}
     </WorkspaceDrawer>
   ) : (
@@ -131,10 +137,7 @@ function WorkspaceRootContent() {
   // Settings is a workspace tab too; its list takes the place of the selected tab's.
   const settingsOpen = workspace.settingsOpen;
   const headerOnly = use(NativeWorkspaceTabActivityContext)?.headerOnly === true;
-  // The native header (and its menu and compose circles) sits above the pane, so it leaves while
-  // the drawer is open and the dim covers the whole screen.
-  const drawerOpen = useWorkspaceDrawerOpen();
-  const headerShown = workspaceHeaderShown({ drawer: drawer && !headerOnly, open: drawerOpen });
+  const headerShown = workspaceHeaderShown({ drawer: drawer && !headerOnly });
   const renderHeaderTitle = () => (
     <WorkspaceRootTitle
       columnWidth={width}
@@ -205,7 +208,9 @@ function WorkspaceRootContent() {
           }}
         />
         <DrawerHost drawer={drawer && !headerOnly}>
-          <SafeAreaInsetsContext value={insets}>
+          <SafeAreaInsetsContext
+            value={{ ...insets, top: floatingHeaderTop(insets.top, drawer && !headerOnly) }}
+          >
             {/* Usage draws its own header, and skips its body itself. */}
             {headerOnly && (settingsOpen || state.selectedTab !== "usage") ? null : settingsOpen ? (
               <WorkspaceSettingsList />

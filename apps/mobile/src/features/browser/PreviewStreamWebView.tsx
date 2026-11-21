@@ -26,6 +26,7 @@ import { WebView } from "react-native-webview";
 import * as Clipboard from "expo-clipboard";
 
 import { AppText } from "../../components/ui/AppText";
+import { GlassSurface } from "../../components/ui/GlassSurface";
 import { PdfPreview } from "../../components/PdfPreview";
 import { m } from "../../i18n/messages";
 import { downloadAndShareAttachment } from "../../lib/attachmentDownload";
@@ -453,7 +454,7 @@ function PreviewStreamDocumentView({
         ) : null}
       </View>
       {!compact && fileChooser && control?.controller === "you" ? (
-        <View className="absolute inset-x-3 top-16 gap-3 rounded-xl border border-secondary-border bg-secondary p-4">
+        <GlassSurface className="absolute inset-x-3 top-16 gap-3 p-4" style={{ borderRadius: 20 }}>
           <AppText className="text-sm text-secondary-foreground">
             {fileChooser.multiple
               ? gt("The page asks for files.")
@@ -467,10 +468,10 @@ function PreviewStreamDocumentView({
               onPress={() => answerFileChooser(true)}
             />
           </View>
-        </View>
+        </GlassSurface>
       ) : null}
       {!compact && control?.dialog ? (
-        <View className="absolute inset-x-3 top-16 gap-3 rounded-xl border border-secondary-border bg-secondary p-4">
+        <GlassSurface className="absolute inset-x-3 top-16 gap-3 p-4" style={{ borderRadius: 20 }}>
           <AppText className="text-sm text-secondary-foreground">{control.dialog.message}</AppText>
           {control.controller === "you" ? (
             <>
@@ -508,7 +509,7 @@ function PreviewStreamDocumentView({
               {gt("Take control to respond.")}
             </AppText>
           )}
-        </View>
+        </GlassSurface>
       ) : null}
       {status !== "streaming" ? (
         <View

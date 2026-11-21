@@ -13,7 +13,10 @@ import {
   drawerReach,
   drawerReducer,
   drawerSettles,
+  drawerAccountName,
   drawerThreadRows,
+  floatingHeaderTop,
+  FLOATING_HEADER_HEIGHT,
   workspaceHeaderShown,
 } from "./workspace-drawer.logic";
 
@@ -101,15 +104,14 @@ describe("drawer account", () => {
   });
 });
 
-describe("native header under the dim", () => {
-  it("leaves while the drawer is open and returns when it closes", () => {
-    const open = drawerReducer({ open: false }, { type: "open" });
-    expect(workspaceHeaderShown({ drawer: true, open: open.open })).toBe(false);
-    expect(workspaceHeaderShown({ drawer: true, open: drawerReducer(open, { type: "close" }).open })).toBe(true);
-    expect(workspaceHeaderShown({ drawer: true, open: drawerReducer(open, { type: "toggle" }).open })).toBe(true);
+describe("floating header", () => {
+  it("replaces the native header on the drawer phone only", () => {
+    expect(workspaceHeaderShown({ drawer: true })).toBe(false);
+    expect(workspaceHeaderShown({ drawer: false })).toBe(true);
   });
-  it("never hides on layouts without a drawer", () => {
-    expect(workspaceHeaderShown({ drawer: false, open: true })).toBe(true);
+  it("pushes content below the circles only with a drawer", () => {
+    expect(floatingHeaderTop(47, true)).toBe(47 + FLOATING_HEADER_HEIGHT);
+    expect(floatingHeaderTop(47, false)).toBe(47);
   });
 });
 
@@ -128,5 +130,17 @@ describe("drawer threads", () => {
   });
   it("filters by the search field, ignoring case and padding", () => {
     expect(drawerThreadRows(threads, "  LOGIN ", "New chat")).toEqual([{ key: "c", title: "Fix login" }]);
+  });
+});
+
+describe("drawer account name", () => {
+  const base = { displayName: null, email: null, subject: "z" };
+  it("prefers the display name, then email, then subject", () => {
+    expect(drawerAccountName({ ...base, displayName: " Z A ", email: "z@x.io" }, "Hanzo")).toBe("Z A");
+    expect(drawerAccountName({ ...base, email: "z@x.io" }, "Hanzo")).toBe("z@x.io");
+    expect(drawerAccountName(base, "Hanzo")).toBe("z");
+  });
+  it("falls back only with no account", () => {
+    expect(drawerAccountName(null, "Hanzo")).toBe("Hanzo");
   });
 });

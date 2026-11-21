@@ -14,6 +14,7 @@ import { PREVIEW_VIEWPORT_PRESETS } from "@hanzodev/shared/previewViewport";
 import { msg, useGT, useMessages } from "gt-react-native";
 
 import { ControlPill } from "../../components/ui/ControlPill";
+import { GlassSurface } from "../../components/ui/GlassSurface";
 import { Menu } from "../../components/ui/Menu";
 import { m } from "../../i18n/messages";
 import { previewEnvironment } from "../../state/preview";
@@ -198,7 +199,9 @@ export function BrowserTabMenu({
       actions={streaming ? actions : [...openOnDevice, closeAction]}
       onPressAction={({ nativeEvent }) => onAction(nativeEvent.event)}
     >
-      <ControlPill icon="ellipsis" accessibilityLabel={gt("Browser tab options")} />
+      <GlassSurface chrome="none" style={{ borderRadius: 20 }}>
+        <ControlPill icon="ellipsis" accessibilityLabel={gt("Browser tab options")} />
+      </GlassSurface>
     </Menu>
   );
 }

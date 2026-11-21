@@ -16,7 +16,6 @@ import {
   useDrawerWorkspace,
   useSidebarWorkspaceTabs,
 } from "./useSystemWorkspaceTabBar";
-import { usePhoneHeaderButtons } from "./usePhoneHeaderButtons";
 
 const PULL_REQUEST_ICON = require("../../../../assets/icons/pull-request.png");
 const ISSUE_ICON = require("../../../../assets/icons/issue.png");
@@ -76,14 +75,7 @@ export function WorkspaceSectionToolbar({
   const compactTabs = useCompactWorkspaceTabs();
   const deviceType = useDeviceType();
   const drawer = useDrawerWorkspace();
-  const phoneButtons = usePhoneHeaderButtons();
-  if (drawer)
-    return (
-      <>
-        <Toolbar placement="left">{phoneButtons.menu}</Toolbar>
-        <Toolbar placement="right">{phoneButtons.compose}</Toolbar>
-      </>
-    );
+  if (drawer) return null;
   return (
     <>
       {showCompose && sidebarTabs !== "picker" && deviceType !== "duo-unfolded" && !compactTabs ? (

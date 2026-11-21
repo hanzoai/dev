@@ -37,8 +37,9 @@ function deriveEmptyState(
 
   if (!catalogState.hasConnections) {
     return {
-      title: resolve(msg("Sign in to Hanzo")),
-      detail: resolve(msg("Add an environment to load projects and start coding sessions.")),
+      // Signed in is not the same as having an environment: say what is missing, not who is out.
+      title: resolve(msg("No environment connected")),
+      detail: resolve(msg("Connect a Mac in Settings, or build in the cloud from a chat.")),
       loading: false,
     };
   }

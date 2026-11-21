@@ -37,3 +37,31 @@ export const RUN_TARGETS: readonly RunTarget[] = ["mac", "cloud"];
 export function landsInChat(input: { readonly signedIn: boolean }): boolean {
   return input.signedIn;
 }
+
+export interface SandboxNotice {
+  readonly title: string;
+  readonly detail: string;
+  /** Whether the notice offers to open the sandbox's environment. */
+  readonly opens: boolean;
+}
+
+/** What the Build chip's cloud sandbox answer says, in plain words. */
+export function sandboxNotice(
+  result:
+    | { readonly kind: "started"; readonly sessionId: string }
+    | { readonly kind: "unavailable" }
+    | { readonly kind: "failed"; readonly message: string },
+  text: {
+    readonly ready: string;
+    readonly readyDetail: string;
+    readonly unavailable: string;
+    readonly unavailableDetail: string;
+    readonly failed: string;
+  },
+): SandboxNotice {
+  if (result.kind === "started")
+    return { title: text.ready, detail: text.readyDetail, opens: true };
+  if (result.kind === "unavailable")
+    return { title: text.unavailable, detail: text.unavailableDetail, opens: false };
+  return { title: text.failed, detail: result.message, opens: false };
+}

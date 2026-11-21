@@ -3,28 +3,26 @@ import { Pressable, View } from "react-native";
 
 import { SymbolView } from "../../../components/ui/AppSymbol";
 import { useControlTheme } from "../../../components/ui/useControlTheme";
-import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../../native/native-glass";
+import { GlassSurface } from "../../../components/ui/GlassSurface";
 
-/** One circle for both header buttons. Liquid Glass draws the circle; before it, this does. */
+/** One glass circle for both header buttons. */
 function CircleButton(props: {
   readonly accessibilityLabel: string;
   readonly onPress: () => void;
   readonly children: ReactNode;
 }) {
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={props.accessibilityLabel}
-      onPress={props.onPress}
-      hitSlop={4}
-      className={
-        NATIVE_LIQUID_GLASS_SUPPORTED
-          ? "h-10 w-10 items-center justify-center"
-          : "h-10 w-10 items-center justify-center rounded-full bg-grouped-card"
-      }
-    >
-      {props.children}
-    </Pressable>
+    <GlassSurface chrome="none" style={{ width: 40, height: 40, borderRadius: 20 }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={props.accessibilityLabel}
+        onPress={props.onPress}
+        hitSlop={4}
+        className="h-10 w-10 items-center justify-center"
+      >
+        {props.children}
+      </Pressable>
+    </GlassSurface>
   );
 }
 

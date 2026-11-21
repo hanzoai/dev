@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { RUN_TARGETS, landsInChat, resolveSend } from "./chat-landing.logic";
+import { RUN_TARGETS, landsInChat, resolveSend, sandboxNotice } from "./chat-landing.logic";
 
 const base = { prompt: "hi", build: false, hasReadyEnvironment: false, cloudChatAvailable: false };
 
@@ -34,5 +34,18 @@ describe("sending from the chat landing", () => {
 
   it("lands a signed-in user in chat, never on an environment gate", () => {
     expect(landsInChat({ signedIn: true })).toBe(true);
+  });
+});
+
+describe("cloud sandbox notice", () => {
+  const text = { ready: "R", readyDetail: "RD", unavailable: "U", unavailableDetail: "UD", failed: "F" };
+  it("offers the sandbox when the endpoint is live", () => {
+    expect(sandboxNotice({ kind: "started", sessionId: "s" }, text)).toEqual({ title: "R", detail: "RD", opens: true });
+  });
+  it("says plainly when it is not available", () => {
+    expect(sandboxNotice({ kind: "unavailable" }, text)).toEqual({ title: "U", detail: "UD", opens: false });
+  });
+  it("reports a failure with its message", () => {
+    expect(sandboxNotice({ kind: "failed", message: "HTTP 500" }, text).detail).toBe("HTTP 500");
   });
 });
