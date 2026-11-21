@@ -19,6 +19,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "dev-orchestrator"
+version = "0.7.0-dev.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "dev-protocol"
 version = "0.7.0-dev.1"
 dependencies = [
