@@ -31,7 +31,7 @@ export interface DevRuntime {
   readonly label: string;
   /** The runtime's ZAP endpoint: an `https://` URL that accepts WebTransport sessions, used
    *  exactly as given and never built from parts (a cell: what `POST /v1/dev/sessions`
-   *  returns, `https://api.hanzo.ai/v1/dev/zap/<id>`; a machine: its Connect tunnel). */
+   *  returns, `https://zap.hanzo.ai/v1/dev/zap/<id>`; a machine: its Connect tunnel). */
   readonly zap: string;
   /** The person's Hanzo IAM access token, fresh per call. Presented as the `cap` of the
    *  first envelope of a session; never stored by the core. */
