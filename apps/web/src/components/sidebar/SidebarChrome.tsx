@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, ArrowRightIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
+import { ArrowLeftIcon, ChartNoAxesColumnIcon, ChevronLeftIcon, ChevronRightIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { T, useGT } from "gt-react";
 import { memo } from "react";
@@ -132,7 +132,7 @@ function HistoryNavigationButton({
     keybindings,
     direction === "back" ? "navigation.back" : "navigation.forward",
   );
-  const Icon = direction === "back" ? ArrowLeftIcon : ArrowRightIcon;
+  const Icon = direction === "back" ? ChevronLeftIcon : ChevronRightIcon;
   return (
     <Tooltip>
       <TooltipTrigger
