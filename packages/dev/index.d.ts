@@ -107,3 +107,22 @@ export function useReplyModels(cloud: DevCloud): {
   readonly models: ReadonlyArray<{ readonly id: string; readonly label: string; readonly family?: string }>;
   readonly error: string | null;
 };
+
+/** A source to publish: the repository's https clone URL, its ref, and the app name to declare. */
+export interface PublishSource {
+  readonly repo: string;
+  readonly ref: string;
+  readonly name: string;
+  readonly project?: string;
+}
+
+/**
+ * Publish (`POST /v1/platform/apps`): builds the repository on a branch and declares it in a project,
+ * a review until it merges; in the org's own code workspace it goes live when its build does. Draw it
+ * from a thread's or project's menu, or for the /dev/open deploy link. `source: null` draws nothing.
+ */
+export function DevPublish(props: {
+  cloud: DevCloud;
+  source: PublishSource | null;
+  onClose: () => void;
+}): ReactNode;

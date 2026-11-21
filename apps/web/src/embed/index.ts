@@ -11,3 +11,5 @@ export type { DevCloud, DevEnvironment, DevRuntime, DevRuntimeSource } from "./r
 export { focusComposer, focusThreadList } from "./focus";
 export { DevHome } from "./DevHome";
 export { useReplyModels } from "./useReplyModels";
+export { PublishDialog as DevPublish } from "./PublishDialog";
+export type { PublishSource } from "./publish";
