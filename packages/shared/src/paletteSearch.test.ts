@@ -207,10 +207,10 @@ describe("scoreThreadSearch", () => {
   it("ranks a title holding the words above the app's own branch prefix and project name", () => {
     const busy = { activityAt: NOW, opens: { openedAt: NOW, score: 6, picks: [] } };
     expect(
-      rankTitles("hanzo connect", [
-        thread("Diagnose Connect provisioning failures", {
+      rankTitles("hanzo link", [
+        thread("Diagnose Link provisioning failures", {
           ...busy,
-          branch: "hanzo/diagnose-connect",
+          branch: "hanzo/diagnose-link",
           projectTitle: "hanzodev",
         }),
         thread("Hanzo Link Tunnel Lifecycle Review", { projectTitle: "hanzodev" }),

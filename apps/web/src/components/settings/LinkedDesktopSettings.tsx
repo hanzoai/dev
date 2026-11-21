@@ -10,11 +10,11 @@ import {
   type Desktop,
   type DesktopLinkStatus,
   type DesktopOutbox,
+  type DesktopProviderRow,
   type DesktopProviderState,
   type ProviderAccount,
   type ProviderRouteClass,
 } from "@hanzodev/contracts";
-import { DEFAULT_HANZO_LOGIN_URL, HANZO_LOGIN_PATH } from "@hanzodev/shared/hanzoIamAuth";
 import { useGT, useMessages } from "gt-react";
 import { useState } from "react";
 
@@ -39,10 +39,6 @@ import { ITEM_ROW_CLASSNAME, ITEM_ROW_INNER_CLASSNAME } from "./itemRows";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
 const REFRESH_INTERVAL_MS = 15_000;
-
-// Sign-in lives at hanzo.ai; no identity host is named here.
-const openHanzoLogin = () =>
-  window.open(`${DEFAULT_HANZO_LOGIN_URL}${HANZO_LOGIN_PATH}`, "_blank", "noopener");
 
 function OnlineDot({ online, label }: { readonly online: boolean; readonly label: string }) {
   return (
@@ -79,13 +75,13 @@ export function LinkedDesktopSettings() {
             <SettingsRow title={gt("Loading…")} role="status" />
           )
         ) : (
-          <StatusRow environmentId={environmentId} status={data} />
+          <StatusRow environmentId={environmentId} status={data} onRefresh={status.refresh} />
         )}
       </SettingsSection>
       {environmentId !== null && data !== null && data.desktop !== null ? (
         <>
           <DesktopsSection environmentId={environmentId} thisDesktopId={data.desktop.id} />
-          <ProvidersSection providers={data.providers} />
+          <ProvidersSection environmentId={environmentId} providers={data.providers} />
         </>
       ) : null}
       {environmentId !== null && data !== null && data.signedIn ? (
@@ -116,9 +112,11 @@ function useFailureToast() {
 function StatusRow({
   environmentId,
   status,
+  onRefresh,
 }: {
   readonly environmentId: EnvironmentIdProp;
   readonly status: DesktopLinkStatus;
+  readonly onRefresh: () => void;
 }) {
   const gt = useGT();
   const reportFailure = useFailureToast();
@@ -156,7 +154,11 @@ function StatusRow({
     }
     const accessToken = activeAccount === null ? null : await getToken();
     if (activeAccount === null || accessToken === null) {
-      openHanzoLogin();
+      // No sign-in anywhere: this server opens the browser at Hanzo's authorization endpoint.
+      await settle(
+        () => link({ environmentId, input: { signIn: "browser" } }),
+        gt("Could not link this desktop"),
+      );
       return;
     }
     await settle(
@@ -171,6 +173,15 @@ function StatusRow({
             },
           },
         }),
+      gt("Could not link this desktop"),
+    );
+  };
+
+  const startDeviceLink = async () => {
+    // The code appears in the status once the server has asked Hanzo for it.
+    setTimeout(onRefresh, 2_000);
+    await settle(
+      () => link({ environmentId, input: { signIn: "device" } }),
       gt("Could not link this desktop"),
     );
   };
@@ -203,9 +214,29 @@ function StatusRow({
           "Link this desktop to your Hanzo account to see it, and the providers it can reach, on hanzo.app.",
         )}
         control={
-          <Button size="xs" disabled={busy || !canLink} onClick={() => void startLink()}>
-            {busy ? gt("Linking…") : gt("Link to Hanzo")}
-          </Button>
+          <>
+            {status.deviceCode === null ? null : (
+              <span className="text-sm">
+                {gt("Enter {code} at {uri}", {
+                  code: status.deviceCode.userCode,
+                  uri: status.deviceCode.verificationUri,
+                })}
+              </span>
+            )}
+            {status.signedIn ? null : (
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={busy || !canLink}
+                onClick={() => void startDeviceLink()}
+              >
+                {gt("Use a code instead")}
+              </Button>
+            )}
+            <Button size="xs" disabled={busy || !canLink} onClick={() => void startLink()}>
+              {busy ? gt("Linking…") : gt("Link to Hanzo")}
+            </Button>
+          </>
         }
       />
     );
@@ -398,17 +429,31 @@ function DesktopRow({
 }
 
 function ProvidersSection({
+  environmentId,
   providers,
 }: {
-  readonly providers: ReadonlyArray<DesktopProviderState>;
+  readonly environmentId: EnvironmentIdProp;
+  readonly providers: ReadonlyArray<DesktopProviderRow>;
 }) {
   const gt = useGT();
+  const reportFailure = useFailureToast();
+  const setShared = useAtomCommand(desktopEnvironment.setShared, { reportFailure: false });
+  const canShare = useAtomValue(desktopEnvironment.setShared.permissionAtom(environmentId));
   const stateLabel = (state: DesktopProviderState["state"]) =>
     state === "ready"
       ? gt("Ready")
       : state === "needs_login"
         ? gt("Needs login")
         : gt("Limit reached");
+  const toggle = async (provider: DesktopProviderRow, shared: boolean) => {
+    const result = await setShared({
+      environmentId,
+      input: { instance: provider.instance, shared },
+    });
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      reportFailure(gt("Could not change sharing"), squashAtomCommandFailure(result));
+    }
+  };
   return (
     <SettingsSection title={gt("Providers on this desktop")}>
       {providers.length === 0 ? (
@@ -419,14 +464,39 @@ function ProvidersSection({
             key={provider.instance}
             title={provider.instance}
             description={
-              provider.plan === undefined
-                ? stateLabel(provider.state)
-                : `${provider.plan} · ${stateLabel(provider.state)}`
+              <>
+                {provider.plan === undefined
+                  ? stateLabel(provider.state)
+                  : `${provider.plan} · ${stateLabel(provider.state)}`}
+                {provider.shareable ? (
+                  <span className="block">
+                    {gt(
+                      "hanzo.app and your other signed-in devices can start runs here. Your login never leaves this computer.",
+                    )}
+                  </span>
+                ) : provider.kind === "login" ? (
+                  <span className="block">
+                    {gt("Hanzo does not offer this provider to other surfaces.")}
+                  </span>
+                ) : null}
+              </>
             }
             control={
-              <Badge variant="outline" size="sm">
-                {routeLabel(gt, providerRouteClass(provider))}
-              </Badge>
+              provider.shareable ? (
+                <label className="flex items-center gap-2 text-sm">
+                  {gt("Share with my other surfaces")}
+                  <Switch
+                    aria-label={gt("Share with my other surfaces")}
+                    checked={provider.shared}
+                    disabled={!canShare}
+                    onCheckedChange={(next) => void toggle(provider, next)}
+                  />
+                </label>
+              ) : (
+                <Badge variant="outline" size="sm">
+                  {routeLabel(gt, providerRouteClass(provider))}
+                </Badge>
+              )
             }
           />
         ))
@@ -437,8 +507,8 @@ function ProvidersSection({
 
 // HIP-1350 Provider policy: a subscription login is `local`, a key is `key`. The `desktop`
 // class stays empty until a provider's terms allow it.
-const providerRouteClass = (provider: DesktopProviderState): ProviderRouteClass =>
-  provider.kind === "key" ? "key" : "local";
+const providerRouteClass = (provider: DesktopProviderRow): ProviderRouteClass =>
+  provider.kind === "key" ? "key" : provider.shared ? "desktop" : "local";
 
 const routeLabel = (gt: ReturnType<typeof useGT>, route: ProviderRouteClass) =>
   route === "local"

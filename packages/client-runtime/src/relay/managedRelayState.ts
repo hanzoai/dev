@@ -35,9 +35,7 @@ export interface ManagedRelaySessionInput {
 }
 
 interface ManagedRelaySessionControl {
-  readonly updateReadIamToken: (
-    readIamToken: ManagedRelaySessionInput["readIamToken"],
-  ) => void;
+  readonly updateReadIamToken: (readIamToken: ManagedRelaySessionInput["readIamToken"]) => void;
 }
 
 export interface ManagedRelaySnapshotState<A> {

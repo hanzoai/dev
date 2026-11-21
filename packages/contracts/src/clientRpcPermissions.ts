@@ -25,6 +25,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.desktopsRename]: AuthRelayWriteScope,
   [WS_METHODS.desktopsRevoke]: AuthRelayWriteScope,
   [WS_METHODS.desktopsSetSendNothing]: AuthRelayWriteScope,
+  // Sharing a login lets the user's other surfaces start runs here.
+  [WS_METHODS.desktopsSetShared]: AuthRelayConfigureScope,
   // A key goes to Hanzo KMS under the signed-in user, so adding or removing one needs the link grant.
   [WS_METHODS.providerAccountsAdd]: AuthRelayConfigureScope,
   [WS_METHODS.providerAccountsRemove]: AuthRelayConfigureScope,

@@ -313,6 +313,7 @@ export const make = Effect.gen(function* () {
       authorizedDescriptor ??
       (yield* fetchRemoteEnvironmentDescriptor({
         httpBaseUrl: prepared.httpBaseUrl,
+        zapUrl: prepared.socketUrl,
       }).pipe(
         Effect.mapError(mapRemoteEnvironmentError),
         Effect.provideService(HttpClient.HttpClient, httpClient),

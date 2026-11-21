@@ -27,11 +27,7 @@ import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collaps
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { toastManager } from "../ui/toast";
 import { stackedThreadToast } from "../ui/toastHelpers";
-import {
-  AccountPage,
-  AccountPageRefreshButton,
-  AccountPageRow,
-} from "./AccountPage";
+import { AccountPage, AccountPageRefreshButton, AccountPageRow } from "./AccountPage";
 import { m, type MessageResolver } from "../../i18n/messages";
 import { useHanzoChatLink } from "./useHanzoChatLink";
 
@@ -337,7 +333,7 @@ export function HanzoConnectUserProfilePage() {
                 <EmptyDescription>
                   <T>
                     Link an environment from its local Settings to make it available through Hanzo
-                    Connect.
+                    Link.
                   </T>
                 </EmptyDescription>
               </EmptyHeader>

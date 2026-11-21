@@ -44,7 +44,7 @@ By default, any device signed in to your Hanzo Link account can open a linked
 machine. To require approval instead, turn on **Require approval for new
 devices** with the Hanzo Link settings in **Settings → Sharing & access** on the
 host, or when you first set up Hanzo Link. Then someone who takes over your Hanzo
-Connect account cannot reach the machine from a new device without your
+Link account cannot reach the machine from a new device without your
 approval. Review the devices that are already approved, described below.
 
 A new device waits and shows a code such as `K7QM-2XFD`. Approve it from a

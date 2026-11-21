@@ -34,7 +34,7 @@ fresh token for the same session. The session itself must still be unexpired
 and unrevoked, so a device idle past the window pairs again. Renewal stays in place rather than issuing a
 successor, so live sockets keep their session, Sharing & access shows one row
 per device for its whole renewal window, and one revoke ends it. Hanzo Link,
-CLI, desktop and peer sessions never renew, so unlinking Connect or rotating
+CLI, desktop and peer sessions never renew, so unlinking Hanzo Link or rotating
 their credential still cuts a device off.
 
 ### Guest links are not sessions

@@ -335,7 +335,7 @@ function ConfiguredConnectOnboardingDialog() {
 
 const STEP_LABELS: Record<OnboardingStep, string> = {
   publish: msg("Publish"),
-  devices: msg("Connect devices"),
+  devices: msg("Link devices"),
 };
 
 function PublishStep({

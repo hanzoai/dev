@@ -12,7 +12,7 @@ Open the command palette (`Cmd/Ctrl+K`) and choose **Use Hanzo Dev in another
 app (MCP)**, or use the button in **Settings → Sharing & access**. Pick the
 app and follow the step for that app. Assistants like
 Poke and Claude run in the cloud, so the wizard first asks you to sign in to Hanzo
-Connect and turn it on for the environment. To reach your other machines through
+Link and turn it on for the environment. To reach your other machines through
 the same connection, turn on **Linked environments** in Labs and
 [link them](./remote-access.md#link-another-environment).
 
@@ -40,7 +40,7 @@ address, which agents can reach from anywhere. Otherwise it uses the route this
 device is connected over, so an agent on the same device can reach it.
 
 - **An agent on your own computers** can use `localhost` on the host, Hanzo
-  Connect, or any `https` address, such as
+  Link, or any `https` address, such as
   [Tailscale HTTPS](./remote-access.md#tailscale-https). Signing in sends the
   agent's credentials to the environment, and agents only do that over `https`
   or to `localhost`. A plain-`http` LAN or Tailscale address, like
@@ -124,7 +124,7 @@ Add the environment as a custom MCP app in ChatGPT's apps settings:
 
 1. Create a new app or plugin with a custom MCP server.
 2. Set the server URL to `https://<environment-address>/mcp`, using the Hanzo
-   Connect address.
+   Link address.
 3. Choose **OAuth** for authentication. ChatGPT discovers the rest; you do not
    need a client ID or secret.
 4. Create the app, then approve the sign-in page that opens.

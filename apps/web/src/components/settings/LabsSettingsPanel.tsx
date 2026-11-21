@@ -102,7 +102,7 @@ function GuestLinksRow() {
       description={
         <T>
           Share a thread with a guest who watches live and sends messages you approve. Needs Hanzo
-          Connect: sign in and link this machine in{" "}
+          Link: sign in and link this machine in{" "}
           <Link to="/settings/access" className="underline underline-offset-2">
             Sharing & access
           </Link>

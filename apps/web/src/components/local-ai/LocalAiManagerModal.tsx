@@ -67,9 +67,9 @@ export function LocalAiSettingsSection() {
       <SettingsRow
         {...searchableSetting("local-ai-models")}
         devicePreference
-        title={gt("Zen & Qwen3+ local models")}
+        title={gt("Zen local models")}
         description={gt(
-          "Manage local Qwen3+ weights on Ollama (:11434) and Embedded Hanzo Engine (:36900).",
+          "Manage local Zen weights on Ollama (:11434) and Embedded Hanzo Engine (:36900).",
         )}
         status={
           snapshot === null
@@ -114,7 +114,7 @@ export function LocalAiSettingsSection() {
         devicePreference
         title={gt("Embedded engine & LAN discovery")}
         description={gt(
-          "Load HuggingFace or GGUF Qwen3 weights on :36900 and discover inference nodes on LAN.",
+          "Load HuggingFace or GGUF Zen weights on :36900 and discover inference nodes on LAN.",
         )}
         control={
           <Button variant="outline" size="sm" onClick={() => openLocalAiManager("engine")}>
@@ -376,7 +376,7 @@ function LocalAiManagerModalBody({
     const trimmed = hfRepoInput.trim();
     if (!trimmed) return;
     if (!isAllowedLocalAiModel(trimmed)) {
-      setEngineLoadMessage(gt("Legacy qwen2 weights are blocked; use Zen or Qwen3+ weights."));
+      setEngineLoadMessage(gt("Legacy weights are blocked; use Zen weights."));
       return;
     }
     setLoadingEngineModel(true);
@@ -420,7 +420,7 @@ function LocalAiManagerModalBody({
                 <T>Local AI, Validator Node &amp; Engine</T>
               </div>
               <div className="text-xs text-muted-foreground">
-                <T>Zen / Qwen3+ weights · Ollama (:11434) · Engine (:36900) · hanzod (:9630)</T>
+                <T>Zen weights · Ollama (:11434) · Engine (:36900) · hanzod (:9630)</T>
               </div>
             </div>
           </div>
@@ -486,7 +486,7 @@ function LocalAiManagerModalBody({
         <div className="flex border-b border-border px-5">
           {(
             [
-              { id: "models", label: gt("Zen / Qwen3+ Models") },
+              { id: "models", label: gt("Zen Models") },
               { id: "node", label: gt("Validator Node (:9630)") },
               { id: "engine", label: gt("Embedded Engine & LAN") },
             ] as const
@@ -514,7 +514,7 @@ function LocalAiManagerModalBody({
                   type="text"
                   value={search}
                   onChange={(event) => setSearch(event.currentTarget.value)}
-                  placeholder={gt("Filter Zen / Qwen3+ models...")}
+                  placeholder={gt("Filter Zen models...")}
                   aria-label={gt("Filter local models")}
                   className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs focus:outline-hidden"
                 />
@@ -601,7 +601,7 @@ function LocalAiManagerModalBody({
                             onClick={() => void handlePullModel(model.id)}
                           >
                             <DownloadIcon className="size-3.5" />
-                            <T>Pull Qwen3+</T>
+                            <T>Pull Zen model</T>
                           </Button>
                         )}
                       </div>
@@ -722,7 +722,7 @@ function LocalAiManagerModalBody({
 
               <div className="space-y-2 rounded-xl border border-border p-4">
                 <div className="text-xs font-semibold">
-                  <T>Load HuggingFace or GGUF Qwen3+ Weights into :36900</T>
+                  <T>Load HuggingFace or GGUF Zen weights into :36900</T>
                 </div>
                 <div className="flex gap-2">
                   <input

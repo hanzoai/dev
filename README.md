@@ -6,6 +6,8 @@
 
 <h1 align="center">&lt;/&gt; Hanzo Dev</h1>
 
+[![Open in Hanzo](https://hanzo.app/badges/open-in-hanzo.svg)](https://hanzo.app/dev/open?repo=github.com/hanzoai/dev&ref=main&action=open) [![Edit with Hanzo](https://hanzo.app/badges/edit-with-hanzo.svg)](https://hanzo.app/dev/open?repo=github.com/hanzoai/dev&ref=main&action=edit) [![Deploy with Hanzo](https://hanzo.app/badges/deploy-with-hanzo.svg)](https://hanzo.app/dev/open?repo=github.com/hanzoai/dev&ref=main&action=deploy)
+
 <p align="center">The unified multi-agent control plane for coding agents across Desktop, Web, Mobile, and Cloud.</p>
 
 <p align="center">

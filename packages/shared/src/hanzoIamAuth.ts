@@ -111,7 +111,7 @@ export const HANZO_SUBSCRIPTION_PLANS: ReadonlyArray<HanzoSubscriptionPlan> = [
     name: "Free",
     priceLabel: "$0/mo",
     monthlyAllowanceCents: 500,
-    summary: "Local Zen Qwen3+ AI & starter cloud access",
+    summary: "Local Zen AI & starter cloud access",
   },
   {
     id: "go",

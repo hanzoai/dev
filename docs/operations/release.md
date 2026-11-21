@@ -619,7 +619,6 @@ Required repository variables:
 
 Optional repository variables:
 
-
 Checklist:
 
 1. Apple Developer account access:

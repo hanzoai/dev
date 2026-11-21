@@ -71,6 +71,11 @@ int32_t dev_snapshot(uint64_t session, dev_buf *out);
  * against the journal before dispatching one (see `pack` in dev-protocol). */
 int32_t dev_restore(const uint8_t *state, size_t len, uint64_t *out);
 
+/* Apply the pure decide function `name` (UTF-8) to a JSON input and write its JSON
+ * output to out. Stateless. DEV_MALFORMED for an unknown name or an unreadable input. */
+int32_t dev_decide(const uint8_t *name, size_t name_len, const uint8_t *input, size_t input_len,
+                   dev_buf *out);
+
 /* End a session and retire its handle. */
 void dev_drop(uint64_t session);
 

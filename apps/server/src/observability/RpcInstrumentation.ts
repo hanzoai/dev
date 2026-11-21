@@ -116,6 +116,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.desktopsRevoke]: "cloud",
   [WS_METHODS.desktopsOutbox]: "cloud",
   [WS_METHODS.desktopsSetSendNothing]: "cloud",
+  [WS_METHODS.desktopsSetShared]: "cloud",
   [WS_METHODS.providerAccountsList]: "cloud",
   [WS_METHODS.providerAccountsAdd]: "cloud",
   [WS_METHODS.providerAccountsRemove]: "cloud",

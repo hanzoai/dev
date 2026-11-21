@@ -77,6 +77,7 @@ it.effect("takes CLI OAuth endpoints from the login host's discovery document", 
 
     assert.deepEqual(requests, ["https://login.example.test/.well-known/openid-configuration"]);
     assert.deepEqual(config, {
+      authorizationEndpoint: "https://identity.example.test/authorize-here",
       tokenEndpoint: "https://tokens.example.test/exchange",
       deviceAuthorizationEndpoint: "https://tokens.example.test/device-start",
       clientId: "hanzo-app",

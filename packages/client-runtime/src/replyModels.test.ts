@@ -5,7 +5,9 @@ import { writesReplies } from "./replyModels.ts";
 describe("writesReplies", () => {
   it("lists chat models, whatever else they can produce", () => {
     expect(writesReplies({ endpoint: "/v1/chat/completions", outputs: ["text"] })).toBe(true);
-    expect(writesReplies({ endpoint: "/v1/chat/completions", outputs: ["image", "text"] })).toBe(true);
+    expect(writesReplies({ endpoint: "/v1/chat/completions", outputs: ["image", "text"] })).toBe(
+      true,
+    );
   });
   it("never lists a decision model", () => {
     expect(writesReplies({ endpoint: "/v1/decisions", outputs: ["decision"] })).toBe(false);

@@ -85,7 +85,13 @@ describe("mobile model options", () => {
           auth: { status: "authenticated" },
           models: [
             { slug: "zen4", name: "Zen 4", isCustom: false, outputs: ["text"], capabilities: null },
-            { slug: "kai-1", name: "Kai 1", isCustom: false, outputs: ["decision"], capabilities: null },
+            {
+              slug: "kai-1",
+              name: "Kai 1",
+              isCustom: false,
+              outputs: ["decision"],
+              capabilities: null,
+            },
           ],
         },
       ],

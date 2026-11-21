@@ -275,6 +275,7 @@ import * as SourceControlRateLimit from "@hanzodev/source-control-core/server/So
 import { isNetworkPath } from "@hanzodev/shared/path";
 import * as RelayClient from "@hanzodev/shared/relayClient";
 import * as DesktopLink from "./cloud/DesktopLink.ts";
+import { commandProviderTarget, isRoutedSession } from "./cloud/routedRun.ts";
 import * as ProviderAccounts from "./cloud/ProviderAccounts.ts";
 import {
   SOCKET_FRAME_PARTS_QUERY_PARAM,
@@ -1443,6 +1444,33 @@ export const layerWsRpc = (
       const currentSessionId = currentSession.sessionId;
       const sql = yield* SqlClient.SqlClient;
       const threadManagement = yield* ThreadManagementService.ThreadManagementService;
+      // Another surface's run on a login runs only where the user shared that login.
+      const assertRoutedCommand = Effect.fn("ws.assertRoutedCommand")(
+        function* (command: OrchestrationV2Command) {
+          if (!isRoutedSession(currentSession.method)) return;
+          const target = commandProviderTarget(command);
+          if (target === null) return;
+          const instanceId =
+            target._tag === "instance"
+              ? target.instanceId
+              : (yield* threadManagement.getThreadProjection(target.threadId)).thread
+                  .providerInstanceId;
+          yield* desktopLink.assertRoutedRun(instanceId);
+        },
+        (effect, command) =>
+          Effect.mapError(
+            effect,
+            (cause) =>
+              new OrchestrationV2DispatchCommandError({
+                commandId: command.commandId,
+                commandType: command.type,
+                message:
+                  cause._tag === "DesktopLinkError"
+                    ? cause.message
+                    : "Could not check whether this run may start on this computer.",
+              }),
+          ),
+      );
       const intakeContext = yield* Effect.context<
         | ThreadManagementService.ThreadManagementService
         | ThreadLaunchService.ThreadLaunchService
@@ -2012,6 +2040,7 @@ export const layerWsRpc = (
               ? { "orchestration_v2.source_thread_id": command.sourceThreadId }
               : {}),
           }).pipe(
+            Effect.andThen(assertRoutedCommand(command)),
             Effect.andThen(
               startup
                 .enqueueCommand(
@@ -2768,6 +2797,8 @@ export const layerWsRpc = (
         [WS_METHODS.desktopsOutbox]: (_input) => desktopLink.outbox,
         [WS_METHODS.desktopsSetSendNothing]: (input) =>
           desktopLink.setSendNothing(input.sendNothing),
+        [WS_METHODS.desktopsSetShared]: (input) =>
+          desktopLink.setShared(input.instance, input.shared),
         [WS_METHODS.providerAccountsList]: (_input) =>
           Effect.map(providerAccounts.list, (accounts) => ({ accounts })),
         [WS_METHODS.providerAccountsAdd]: (input) => providerAccounts.add(input),

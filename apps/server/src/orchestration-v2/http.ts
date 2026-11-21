@@ -53,71 +53,81 @@ function isThreadNotFound(error: unknown): boolean {
   );
 }
 
+/**
+ * The shell snapshot, as the `/v1/event/shell` route answers it and the ZAP session's shell call
+ * does: the whole thread list, or a note that held rows are still good.
+ */
+export const makeShellSnapshotAnswer = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const threadManagement = yield* ThreadManagementService.ThreadManagementService;
+  const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
+  const projectStore = yield* ProjectStore.ProjectStoreV2;
+  const projectEnrichment = yield* ProjectEnrichmentService.ProjectEnrichmentService;
+
+  const enrichProjectShells = Effect.fn("http.orchestration.enrichProjectShells")(
+    (projects: ReadonlyArray<OrchestrationProjectShell>) =>
+      Effect.forEach(
+        projects,
+        (project) =>
+          // Use available enrichment only; git probes can take a minute and exceed shell-snapshot budgets.
+          projectEnrichment.getAvailable(project.workspaceRoot).pipe(
+            Effect.map((enrichment) => ({
+              ...project,
+              repositoryIdentity: enrichment.repositoryIdentity,
+            })),
+          ),
+        { concurrency: 16 },
+      ),
+  );
+
+  const loadShellSnapshot = Effect.fn("http.orchestration.loadShellSnapshot")(function* (options: {
+    readonly omitIdleSubagents: boolean;
+    readonly omitOlderSettled: boolean;
+  }) {
+    const { snapshot } = yield* loadSubscriberShellSnapshot({
+      sql,
+      listShellIndex: threadManagement.listActiveShellIndex(),
+      readThreads: (threadIds) =>
+        threadManagement.readShellSnapshot({
+          location: "active",
+          ...(threadIds === undefined ? {} : { threadIds }),
+        }),
+      listProjects: projectStore.listShells(),
+      latestSequence: applicationEvents.latestApplicationSequence,
+      options,
+    });
+    const projects = yield* enrichProjectShells(snapshot.projects);
+    return { ...snapshot, projects, projectIdentities: projectIdentitiesDigest(projects) };
+  });
+
+  // A client that holds rows names their cursor; a small answer tells it to keep them.
+  const answerShellSnapshot = Effect.fn("http.orchestration.answerShellSnapshot")((query: {
+    readonly omitIdleSubagents?: string;
+    readonly omitOlderSettled?: string;
+    readonly resumeFrom?: string;
+  }) => {
+    const resumeFrom = query.resumeFrom === undefined ? Number.NaN : Number(query.resumeFrom);
+    return loadShellUnlessResumable({
+      events: applicationEvents,
+      resumeFrom: Number.isSafeInteger(resumeFrom) && resumeFrom >= 0 ? resumeFrom : undefined,
+      loadSnapshot: loadShellSnapshot({
+        omitIdleSubagents: query.omitIdleSubagents === "1",
+        omitOlderSettled: query.omitOlderSettled === "1",
+      }),
+    });
+  });
+
+  return answerShellSnapshot;
+});
+
 export const layer = HttpApiBuilder.group(
   EnvironmentHttpApi,
   "orchestration",
   Effect.fnUntraced(function* (handlers) {
-    const sql = yield* SqlClient.SqlClient;
     const environment = yield* ServerEnvironment.ServerEnvironmentIdentity;
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
-    const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
-    const projectStore = yield* ProjectStore.ProjectStoreV2;
-    const projectEnrichment = yield* ProjectEnrichmentService.ProjectEnrichmentService;
 
-    const enrichProjectShells = Effect.fn("http.orchestration.enrichProjectShells")(
-      (projects: ReadonlyArray<OrchestrationProjectShell>) =>
-        Effect.forEach(
-          projects,
-          (project) =>
-            // Use available enrichment only; git probes can take a minute and exceed shell-snapshot budgets.
-            projectEnrichment.getAvailable(project.workspaceRoot).pipe(
-              Effect.map((enrichment) => ({
-                ...project,
-                repositoryIdentity: enrichment.repositoryIdentity,
-              })),
-            ),
-          { concurrency: 16 },
-        ),
-    );
-
-    const loadShellSnapshot = Effect.fn("http.orchestration.loadShellSnapshot")(
-      function* (options: {
-        readonly omitIdleSubagents: boolean;
-        readonly omitOlderSettled: boolean;
-      }) {
-        const { snapshot } = yield* loadSubscriberShellSnapshot({
-          sql,
-          listShellIndex: threadManagement.listActiveShellIndex(),
-          readThreads: (threadIds) =>
-            threadManagement.readShellSnapshot({
-              location: "active",
-              ...(threadIds === undefined ? {} : { threadIds }),
-            }),
-          listProjects: projectStore.listShells(),
-          latestSequence: applicationEvents.latestApplicationSequence,
-          options,
-        });
-        const projects = yield* enrichProjectShells(snapshot.projects);
-        return { ...snapshot, projects, projectIdentities: projectIdentitiesDigest(projects) };
-      },
-    );
-
-    // A client that holds rows names their cursor; a small answer tells it to keep them.
-    const answerShellSnapshot = Effect.fn("http.orchestration.answerShellSnapshot")((query: {
-      readonly omitIdleSubagents?: string;
-      readonly omitOlderSettled?: string;
-      readonly resumeFrom?: string;
-    }) => {
-      const resumeFrom = query.resumeFrom === undefined ? Number.NaN : Number(query.resumeFrom);
-      return loadShellUnlessResumable({
-        events: applicationEvents,
-        resumeFrom: Number.isSafeInteger(resumeFrom) && resumeFrom >= 0 ? resumeFrom : undefined,
-        loadSnapshot: loadShellSnapshot({
-          omitIdleSubagents: query.omitIdleSubagents === "1",
-          omitOlderSettled: query.omitOlderSettled === "1",
-        }),
-      });
-    });
+    const answerShellSnapshot = yield* makeShellSnapshotAnswer;
 
     const loadThreadSnapshot = Effect.fn("http.orchestration.loadThreadSnapshot")(function* (
       threadId: Parameters<typeof threadManagement.getThreadSnapshot>[0],

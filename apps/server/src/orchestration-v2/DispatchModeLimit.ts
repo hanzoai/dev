@@ -1,11 +1,11 @@
 import {
-  isRuntimeModeAbove,
   type OrchestrationV2DomainEvent,
   type ProviderInteractionMode,
   type RuntimeMode,
   type ThreadId,
 } from "@hanzodev/contracts";
 import * as Context from "effect/Context";
+import { decide } from "./DevWasm.ts";
 import type * as Ref from "effect/Ref";
 
 export interface DispatchModes {
@@ -28,17 +28,12 @@ export const DispatchModeLimit = Context.Reference<DispatchModeLimitValue | unde
   { defaultValue: () => undefined },
 );
 
-const interactionModeRank: Record<ProviderInteractionMode, number> = { plan: 0, default: 1 };
-
+/** Which of the two modes a dispatch asks for is above the limit; decided by `dev.wasm`. */
 export const exceededDispatchModeLimit = (
   limit: DispatchModes,
   modes: DispatchModes,
 ): "runtime" | "interaction" | undefined =>
-  isRuntimeModeAbove(modes.runtimeMode, limit.runtimeMode)
-    ? "runtime"
-    : interactionModeRank[modes.interactionMode] > interactionModeRank[limit.interactionMode]
-      ? "interaction"
-      : undefined;
+  (decide("exceeded", { limit, modes }) as "runtime" | "interaction" | null) ?? undefined;
 
 /** The administrator's `limits.maxRuntimeMode`, which applies to every caller, the user included. */
 export interface RuntimeModeCeiling {
@@ -51,11 +46,15 @@ export const narrowToCeiling = <Limit extends DispatchModes>(
   limit: Limit | undefined,
   ceiling: RuntimeModeCeiling | undefined,
 ): Limit | undefined =>
-  limit === undefined ||
-  ceiling === undefined ||
-  !isRuntimeModeAbove(limit.runtimeMode, ceiling.maxRuntimeMode)
-    ? limit
-    : { ...limit, runtimeMode: ceiling.maxRuntimeMode };
+  limit === undefined || ceiling === undefined ? limit : narrowed(limit, ceiling);
+
+const narrowed = <Limit extends DispatchModes>(
+  limit: Limit,
+  ceiling: RuntimeModeCeiling,
+): Limit => {
+  const { runtimeMode } = decide("narrow", { limit, ceiling }) as DispatchModes;
+  return runtimeMode === limit.runtimeMode ? limit : { ...limit, runtimeMode };
+};
 
 export interface RuntimeModeCeilingRefusal {
   readonly threadId: ThreadId;
@@ -74,39 +73,29 @@ export const runtimeModeCeilingRefusal = (
   maxRuntimeMode: RuntimeMode,
   events: ReadonlyArray<OrchestrationV2DomainEvent>,
   runtimeModes: ReadonlyMap<ThreadId, RuntimeMode>,
-): RuntimeModeCeilingRefusal | undefined => {
-  const planned = new Map(runtimeModes);
-  for (const event of events) {
-    if (event.type === "thread.created" || event.type === "thread.runtime-mode-updated") {
-      const { runtimeMode } = event.payload;
-      planned.set(event.threadId, runtimeMode);
-      if (isRuntimeModeAbove(runtimeMode, maxRuntimeMode)) {
-        return { threadId: event.threadId, runtimeMode, refused: "mode" };
-      }
-    } else if (event.type === "run.created" || event.type === "run-attempt.created") {
-      const runtimeMode = planned.get(event.threadId);
-      if (runtimeMode !== undefined && isRuntimeModeAbove(runtimeMode, maxRuntimeMode)) {
-        return { threadId: event.threadId, runtimeMode, refused: "turn" };
-      }
-    }
-  }
-  return undefined;
-};
+): RuntimeModeCeilingRefusal | undefined =>
+  (decide("ceilingRefusal", {
+    max: maxRuntimeMode,
+    events: ceilingEvents(events),
+    runtimeModes: [...runtimeModes],
+  }) as RuntimeModeCeilingRefusal | null) ?? undefined;
+
+/** The fields of an event the ceiling check reads; the engine is not sent the rest. */
+const ceilingEvents = (events: ReadonlyArray<OrchestrationV2DomainEvent>) =>
+  events.map((event) => {
+    const payload =
+      "payload" in event ? (event.payload as { runtimeMode?: RuntimeMode }) : undefined;
+    return payload?.runtimeMode === undefined
+      ? { type: event.type, threadId: event.threadId }
+      : {
+          type: event.type,
+          threadId: event.threadId,
+          payload: { runtimeMode: payload.runtimeMode },
+        };
+  });
 
 /** Threads whose committed mode `runtimeModeCeilingRefusal` needs: those a planned run belongs to. */
 export const threadsStartingWork = (
   events: ReadonlyArray<OrchestrationV2DomainEvent>,
-): ReadonlySet<ThreadId> => {
-  const created = new Set<ThreadId>();
-  const starting = new Set<ThreadId>();
-  for (const event of events) {
-    if (event.type === "thread.created") created.add(event.threadId);
-    else if (
-      (event.type === "run.created" || event.type === "run-attempt.created") &&
-      !created.has(event.threadId)
-    ) {
-      starting.add(event.threadId);
-    }
-  }
-  return starting;
-};
+): ReadonlySet<ThreadId> =>
+  new Set(decide("threadsStartingWork", { events: ceilingEvents(events) }) as ThreadId[]);

@@ -2,14 +2,14 @@ import { assert, describe, it } from "@effect/vitest";
 
 import { resolveCatalogDependencies } from "./resolve-catalog.ts";
 
-const catalog = { effect: "4.0.0-rc.115", "jose": "6.2.2", react: "19.2.0" };
+const catalog = { effect: "4.0.0-rc.115", jose: "6.2.2", react: "19.2.0" };
 
 describe("resolveCatalogDependencies", () => {
   it("resolves bare, named and override-selector catalog specs like pnpm", () => {
     assert.deepStrictEqual(
       resolveCatalogDependencies(
         {
-          "jose": "catalog:",
+          jose: "catalog:",
           "react-dom": "catalog:react",
           "@opencode/protocol>effect": "catalog:",
           "dbus-next>usocket": "-",
@@ -19,7 +19,7 @@ describe("resolveCatalogDependencies", () => {
         "apps/desktop",
       ),
       {
-        "jose": "6.2.2",
+        jose: "6.2.2",
         "react-dom": "19.2.0",
         "@opencode/protocol>effect": "4.0.0-rc.115",
         "dbus-next>usocket": "-",

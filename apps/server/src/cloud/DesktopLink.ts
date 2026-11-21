@@ -7,6 +7,8 @@ import {
   type DesktopLinkInput,
   type DesktopLinkStatus,
   type DesktopOutbox,
+  type DesktopProviderRow,
+  DESKTOP_ROUTABLE_PROVIDERS,
   type DesktopProviderState,
   type ServerProvider,
 } from "@hanzodev/contracts";
@@ -29,6 +31,7 @@ import * as HostProcess from "@hanzodev/shared/HostProcess";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
+import { catalogId } from "../usage/HostReadings.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
 import * as SourceUsageSummary from "./SourceUsageSummary.ts";
@@ -49,6 +52,9 @@ const OUTBOX_LIMIT = 100;
 // The cost window a report covers; cost rows replace by day, so resending is safe.
 const REPORT_WINDOW_MS = 30 * 86_400_000;
 const OUTBOX_FILE = "source-outbox.json";
+// Hanzo's own providers need no subscription login and are not gated by the share switch.
+const OWN_PROVIDERS: ReadonlySet<string> = new Set(["hanzo", "hanzogen", "devreplay"]);
+const SHARED_FILE = "source-shared.json";
 const USAGE_DOMAIN = "hanzo-source-usage/1";
 
 const OutboxBatchRecord = Schema.Struct({
@@ -66,6 +72,21 @@ type OutboxFile = typeof OutboxFile.Type;
 const OutboxFileJson = Schema.fromJsonString(OutboxFile);
 const decodeOutboxFile = Schema.decodeUnknownOption(OutboxFileJson);
 const encodeOutboxFile = Schema.encodeSync(OutboxFileJson);
+const SharedFile = Schema.Struct({ instances: Schema.Array(Schema.String) });
+const SharedFileJson = Schema.fromJsonString(SharedFile);
+const decodeSharedFile = Schema.decodeUnknownOption(SharedFileJson);
+const encodeSharedFile = Schema.encodeSync(SharedFileJson);
+
+/** The heartbeat's provider entry: state only, plus whether the user shares it. */
+const wireProvider = (row: DesktopProviderRow): DesktopProviderState => ({
+  provider: row.provider,
+  instance: row.instance,
+  kind: row.kind,
+  state: row.state,
+  ...(row.plan === undefined ? {} : { plan: row.plan }),
+  shared: row.shared,
+});
+
 const EMPTY_OUTBOX: OutboxFile = { sendNothing: false, nextSeq: 1, batches: [] };
 const decodeUsageReport = Schema.decodeUnknownOption(Schema.fromJsonString(UsageReport));
 
@@ -135,6 +156,7 @@ const WireProvider = Schema.Struct({
   kind: Schema.Literals(["login", "key"]),
   state: Schema.Literals(["ready", "needs_login", "limited"]),
   plan: Schema.optional(Schema.String),
+  shared: Schema.optional(Schema.Boolean),
 });
 const WireDesktop = Schema.Struct({
   id: Schema.String,
@@ -169,12 +191,16 @@ const toDesktop = (wire: typeof WireDesktop.Type): Desktop => ({
     instance: provider.instance,
     kind: provider.kind,
     state: provider.state,
+    shared: provider.shared ?? false,
     ...(provider.plan === undefined || provider.plan === "" ? {} : { plan: provider.plan }),
   })),
 });
 
 /** The state a heartbeat reports for one provider, or null when it has nothing to report. */
-const providerState = (provider: ServerProvider): DesktopProviderState | null => {
+const providerState = (
+  provider: ServerProvider,
+  shared: ReadonlySet<string>,
+): DesktopProviderRow | null => {
   if (!provider.enabled || !provider.installed) return null;
   if (provider.availability === "unavailable") return null;
   if (provider.status !== "ready" && provider.status !== "warning") return null;
@@ -183,14 +209,20 @@ const providerState = (provider: ServerProvider): DesktopProviderState | null =>
     usage !== undefined &&
     (usage.zeroSpendCap === true || usage.windows.some((window) => window.usedPercent >= 100));
   const kind = provider.auth.type === "apiKey" ? "key" : "login";
+  // A key is never shared with a surface; only a login of a provider whose class includes desktop.
+  const shareable =
+    kind === "login" &&
+    (DESKTOP_ROUTABLE_PROVIDERS as ReadonlyArray<string>).includes(catalogId(provider.driver));
   const plan = kind === "login" ? provider.auth.type?.slice(0, MAX_PLAN_LENGTH) : undefined;
   return {
-    provider: provider.driver,
+    provider: catalogId(provider.driver),
     instance: provider.instanceId,
     kind,
     state:
       provider.auth.status === "unauthenticated" ? "needs_login" : limited ? "limited" : "ready",
     ...(plan === undefined ? {} : { plan }),
+    shared: shareable && shared.has(provider.instanceId),
+    shareable,
   };
 };
 
@@ -210,7 +242,7 @@ const ownerOf = (accessToken: string): string | null => {
 };
 
 /** The bytes a heartbeat's `sig` covers; cloud's `beatMessage` builds the same string. */
-const beatMessage = (beat: {
+export const beatMessage = (beat: {
   readonly id: string;
   readonly at: string;
   readonly version: string;
@@ -225,7 +257,9 @@ const beatMessage = (beat: {
     beat.version,
     beat.zap,
     String(beat.busy),
-    ...beat.providers.map((p) => [p.provider, p.instance, p.kind, p.state, p.plan ?? ""].join(",")),
+    ...beat.providers.map((p) =>
+      [p.provider, p.instance, p.kind, p.state, p.plan ?? "", String(p.shared)].join(","),
+    ),
   ]
     .map((line) => `${line}\n`)
     .join("");
@@ -249,6 +283,16 @@ export class DesktopLink extends Context.Service<
     readonly revoke: (id: string) => Effect.Effect<void, DesktopLinkError>;
     /** The usage reports written to the local outbox, newest first, and the Send nothing switch. */
     readonly outbox: Effect.Effect<DesktopOutbox, DesktopLinkError>;
+    /** Share one login instance with the user's other surfaces, or stop. Effective at once. */
+    readonly setShared: (
+      instance: string,
+      shared: boolean,
+    ) => Effect.Effect<DesktopLinkStatus, DesktopLinkError>;
+    /**
+     * Refuses a routed run on a provider instance the user has not shared. Fail closed: only
+     * Hanzo's own providers and keys run for another surface without the share switch.
+     */
+    readonly assertRoutedRun: (instance: string) => Effect.Effect<void, DesktopLinkError>;
     readonly setSendNothing: (
       sendNothing: boolean,
     ) => Effect.Effect<DesktopOutbox, DesktopLinkError>;
@@ -277,6 +321,7 @@ const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const usageSummary = yield* SourceUsageSummary.SourceUsageSummary;
   const usageLock = yield* Semaphore.make(1);
+  const deviceCode = yield* Ref.make<DesktopLinkStatus["deviceCode"]>(null);
   const outboxPath = path.join(config.stateDir, OUTBOX_FILE);
   const runtime = yield* Ref.make<Runtime>({
     lastReportAtMs: null,
@@ -351,26 +396,42 @@ const make = Effect.gen(function* () {
     return Base64Url.encode(signature);
   });
 
-  const reportedProviders = registry.getProviders.pipe(
-    Effect.map((providers) =>
-      providers.flatMap((provider) => {
-        const state = providerState(provider);
-        return state === null ? [] : [state];
-      }),
+  const sharedPath = path.join(config.stateDir, SHARED_FILE);
+  const readShared = fileSystem.readFileString(sharedPath).pipe(
+    Effect.map(
+      (text) =>
+        new Set(Option.getOrElse(decodeSharedFile(text), () => ({ instances: [] })).instances),
+    ),
+    Effect.catch((cause) =>
+      cause.reason._tag === "NotFound"
+        ? Effect.succeed(new Set<string>())
+        : Effect.fail(storageFailure(cause)),
     ),
   );
 
+  const reportedProviders = Effect.gen(function* () {
+    const shared = yield* readShared;
+    const providers = yield* registry.getProviders;
+    return providers.flatMap((provider) => {
+      const row = providerState(provider, shared);
+      return row === null ? [] : [row];
+    });
+  });
+
   // Before the first heartbeat there is no id or signature, so the preview shows the rest.
-  const beatPreview = (providers: ReadonlyArray<DesktopProviderState>) =>
+  const beatPreview = (rows: ReadonlyArray<DesktopProviderRow>) =>
     Clock.currentTimeMillis.pipe(
-      Effect.map((now) => encodeBody({ at: iso(now), version, zap: "", busy: 0, providers })),
+      Effect.map((now) =>
+        encodeBody({ at: iso(now), version, zap: "", busy: 0, providers: rows.map(wireProvider) }),
+      ),
     );
 
   const signedBeat = Effect.fn("DesktopLink.signedBeat")(function* (
     id: string,
     key: typeof DeviceKeyJwk.Type,
-    providers: ReadonlyArray<DesktopProviderState>,
+    rows: ReadonlyArray<DesktopProviderRow>,
   ) {
+    const providers = rows.map(wireProvider);
     const at = iso(yield* Clock.currentTimeMillis);
     const beat = { id, at, version, zap: "", busy: 0, providers };
     const sig = yield* signBeat(key, beatMessage(beat));
@@ -403,6 +464,7 @@ const make = Effect.gen(function* () {
         };
     return {
       signedIn: Option.isSome(stored),
+      deviceCode: yield* Ref.get(deviceCode),
       identity: Option.isSome(stored) ? (stored.value.identity ?? null) : null,
       organization: Option.isSome(stored) ? ownerOf(stored.value.accessToken) : null,
       desktop,
@@ -484,6 +546,29 @@ const make = Effect.gen(function* () {
               expiresAtEpochMs: input.token.expiresAtEpochMs,
             })
             .pipe(Effect.mapError(storageFailure));
+        }
+        const held = yield* tokens.getExisting.pipe(Effect.orElseSucceed(() => Option.none()));
+        if (Option.isNone(held) && input.signIn === "browser") {
+          yield* tokens.signInWithBrowser.pipe(
+            Effect.mapError((cause) =>
+              fail("sign_in_required", "Sign-in did not finish in the browser.", cause),
+            ),
+          );
+        }
+        if (Option.isNone(held) && input.signIn === "device") {
+          yield* tokens
+            .signInWithDeviceCode((prompt) =>
+              Ref.set(deviceCode, {
+                verificationUri: prompt.verificationUriComplete ?? prompt.verificationUri,
+                userCode: prompt.userCode,
+              }),
+            )
+            .pipe(
+              Effect.ensuring(Ref.set(deviceCode, null)),
+              Effect.mapError((cause) =>
+                fail("sign_in_required", "Sign-in with a code did not finish.", cause),
+              ),
+            );
         }
         const stored = yield* requireToken;
         const existing = yield* readRecord;
@@ -691,6 +776,42 @@ const make = Effect.gen(function* () {
     if (response.status !== 429 && response.status !== 409) return yield* reject(response.status);
   }).pipe(Effect.withSpan("DesktopLink.reportUsage"));
 
+  const setShared = Effect.fn("DesktopLink.setShared")(function* (
+    instance: string,
+    shared: boolean,
+  ) {
+    const rows = yield* reportedProviders;
+    const row = rows.find((candidate) => candidate.instance === instance);
+    if (row === undefined || (shared && !row.shareable)) {
+      return yield* fail("rejected", "This provider cannot be shared with other surfaces.");
+    }
+    const current = yield* readShared;
+    if (shared) current.add(instance);
+    else current.delete(instance);
+    yield* fileSystem.makeDirectory(config.stateDir, { recursive: true }).pipe(
+      Effect.andThen(
+        fileSystem.writeFileString(sharedPath, encodeSharedFile({ instances: [...current] }), {
+          mode: 0o600,
+        }),
+      ),
+      Effect.mapError(storageFailure),
+    );
+    // Tell Hanzo now, so a turned-off login stops being offered without waiting for the next beat.
+    yield* lock.withPermits(1)(beat).pipe(Effect.ignore);
+    return yield* buildStatus;
+  });
+
+  const assertRoutedRun = Effect.fn("DesktopLink.assertRoutedRun")(function* (instance: string) {
+    const rows = yield* reportedProviders;
+    const row = rows.find((candidate) => candidate.instance === instance);
+    const open =
+      row !== undefined &&
+      (row.kind === "key" || OWN_PROVIDERS.has(row.provider) || (row.shareable && row.shared));
+    if (!open) {
+      return yield* fail("not_shared", "This provider is not shared with your other surfaces.");
+    }
+  });
+
   const outboxStatus = readOutbox.pipe(Effect.map(outboxView));
 
   const setSendNothing = Effect.fn("DesktopLink.setSendNothing")(function* (sendNothing: boolean) {
@@ -724,7 +845,9 @@ const make = Effect.gen(function* () {
 
   return DesktopLink.of({
     outbox: outboxStatus,
+    assertRoutedRun,
     setSendNothing,
+    setShared,
     status: buildStatus,
     link,
     unlink: unlink(),

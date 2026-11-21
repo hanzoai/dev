@@ -1,5 +1,3 @@
-import { useCallback } from "react";
-
 import { useEmbed } from "./context";
 import { openRepository, type OpenRepository } from "./openRepository";
 
@@ -9,11 +7,8 @@ import { openRepository, type OpenRepository } from "./openRepository";
  */
 export function useDevOpen(): (input: OpenRepository) => Promise<string> {
   const embed = useEmbed();
-  return useCallback(
-    (input) => {
-      if (!embed) throw new Error("useDevOpen needs DevProvider above it.");
-      return openRepository(embed, input);
-    },
-    [embed],
-  );
+  return (input) => {
+    if (!embed) throw new Error("useDevOpen needs DevProvider above it.");
+    return openRepository(embed, input);
+  };
 }

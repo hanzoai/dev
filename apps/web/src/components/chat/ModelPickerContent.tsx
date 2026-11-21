@@ -927,7 +927,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         next === "favorites"
           ? gt("Favorites")
           : next === "enso"
-            ? "Enso"
+            ? // oxlint-disable-next-line hanzo/no-untranslated-copy -- product name
+              "Enso"
             : (entryByInstanceId.get(next)?.displayName ?? next),
         "model-picker",
       );

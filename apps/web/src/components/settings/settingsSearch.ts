@@ -248,11 +248,11 @@ const SOURCE_CONTROL_HOST_TERMS = sourceControlClients.definitions
 export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "local-ai-models",
-    title: msg("Zen & Qwen3+ local models"),
+    title: msg("Zen local models"),
     to: "/settings/general",
     searchTerms: [
       msg(
-        "local ai ollama qwen3 zen6 zen6-flash zen6-coder zen6-max zen-vl weights download offline inference",
+        "local ai ollama zen6 zen6-flash zen6-coder zen6-max zen-vl weights download offline inference",
       ),
     ],
   },

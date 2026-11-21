@@ -39,7 +39,7 @@ timing. Queues cap messages at 128 KB and cannot hold one link's requests back
 while its environment is away.
 
 Deployment and authentication setup live in the
-[Connect setup runbook](../operations/connect-setup.md).
+[Hanzo Link setup runbook](../operations/connect-setup.md).
 
 ## The relay is a trusted broker
 

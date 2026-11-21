@@ -31,6 +31,7 @@ export function useThreadRef(
     () => (router ? refOf(router.history.location.pathname) : null),
     () => null,
   );
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- moves the core's router to the host's address
   useEffect(() => {
     if (router && thread !== undefined && thread !== open) {
       void router.navigate({ to: pathOf(thread) });
@@ -38,6 +39,7 @@ export function useThreadRef(
     // The host's value moves the router; a router move is reported by the effect below.
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `open` is read, not reacted to.
   }, [router, thread]);
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- reports a router move to the host
   useEffect(() => {
     if (open !== (thread ?? null)) onChange?.(open);
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- reports router moves only.

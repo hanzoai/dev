@@ -39,6 +39,7 @@ vi.mock(import("~/state/desktops"), async () => {
       outbox: () => mocks.outboxAtom,
       accounts: () => mocks.accountsAtom,
       setSendNothing: command("setSendNothing"),
+      setShared: command("setShared"),
       addAccount: command("addAccount"),
       removeAccount: command("removeAccount"),
       link: command("link"),
@@ -80,6 +81,7 @@ const thisDesktop: Desktop = {
 const body = '{\n  "at": "2026-11-20T10:00:00.000Z",\n  "version": "1.8.4",\n  "providers": []\n}';
 const base: DesktopLinkStatus = {
   signedIn: true,
+  deviceCode: null,
   identity: "z@hanzo.ai",
   organization: "hanzo",
   desktop: null,
@@ -120,7 +122,15 @@ describe("LinkedDesktopSettings", () => {
         desktop: thisDesktop,
         lastHeartbeatAt: thisDesktop.lastSeen,
         providers: [
-          { provider: "claude", instance: "claude", kind: "login", state: "ready", plan: "max" },
+          {
+            provider: "claude",
+            instance: "claude",
+            kind: "login",
+            state: "ready",
+            plan: "max",
+            shared: false,
+            shareable: false,
+          },
         ],
         report: { body, sent: true },
       },
@@ -198,5 +208,43 @@ describe("LinkedDesktopSettings", () => {
       label: "removeAccount",
       value: { environmentId, input: { id: "acc_1" } },
     });
+  });
+
+  it("offers the share switch only for a shareable login, and turns it off again", async () => {
+    setup(
+      {
+        ...base,
+        desktop: thisDesktop,
+        providers: [
+          {
+            provider: "claude",
+            instance: "claude",
+            kind: "login",
+            state: "ready",
+            shared: true,
+            shareable: true,
+          },
+          {
+            provider: "cursor",
+            instance: "cursor",
+            kind: "login",
+            state: "ready",
+            shared: false,
+            shareable: false,
+          },
+        ],
+        report: { body, sent: true },
+      },
+      [thisDesktop],
+    );
+    await using screen = await render(<LinkedDesktopSettings />);
+    await expect.element(screen.getByText("This desktop only")).toBeVisible();
+    await userEvent.click(screen.getByRole("switch", { name: "Share with my other surfaces" }));
+    expect(mocks.calls).toEqual([
+      {
+        label: "setShared",
+        value: { environmentId, input: { instance: "claude", shared: false } },
+      },
+    ]);
   });
 });

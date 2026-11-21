@@ -140,7 +140,7 @@ ssh -t your-server 'sudo loginctl enable-linger "$(id -un)"'
 ```
 
 Then retry service setup as your normal user. Run only the `loginctl` command
-with sudo; running Hanzo Dev as root creates a separate installation and Connect
+with sudo; running Hanzo Dev as root creates a separate installation and Hanzo Link
 identity. Without administrator access, run `hanzo serve` in a terminal and keep
 that session open.
 

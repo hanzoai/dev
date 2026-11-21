@@ -5,7 +5,11 @@ import {
 } from "@hanzodev/client-runtime/environment";
 import type { ScopedThreadRef } from "@hanzodev/contracts";
 import type { ClientSettings } from "@hanzodev/contracts/settings";
-import { createBrowserHistory, createHashHistory, type RouterHistory } from "@tanstack/react-router";
+import {
+  createBrowserHistory,
+  createHashHistory,
+  type RouterHistory,
+} from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
 
 import { applyAppearanceContrast } from "./appearanceContrast";
@@ -261,9 +265,7 @@ export function startAppServices(history?: RouterHistory): AppRouter {
   if (!embedded) startProviderAuthDelivery();
 
   // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
-  const router = getRouter(
-    history ?? (isElectron ? createHashHistory() : createBrowserHistory()),
-  );
+  const router = getRouter(history ?? (isElectron ? createHashHistory() : createBrowserHistory()));
 
   if (isElectron) {
     syncDocumentElectronPlatformClasses(navigator.platform);

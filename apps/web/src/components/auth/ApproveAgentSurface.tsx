@@ -93,8 +93,7 @@ export function ApproveAgentSurface() {
   const session = useAtomValue(managedRelaySessionAtom);
   const signInOpened = useRef(false);
 
-  const openSignIn = () =>
-    auth.openSignIn(resolveSignInProps(window.location.href, isElectron));
+  const openSignIn = () => auth.openSignIn(resolveSignInProps(window.location.href, isElectron));
   const openSignInOnLoad = useEffectEvent(openSignIn);
 
   // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- opens sign-in once the session has loaded and nobody is signed in

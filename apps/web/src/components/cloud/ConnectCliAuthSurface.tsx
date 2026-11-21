@@ -34,10 +34,7 @@ export function ConnectCliAuthorizeSurface() {
       return;
     }
     auth.openSignIn(
-      resolveSignInProps(
-        connectCliSignInRedirectUrl(request, window.location.href),
-        isElectron,
-      ),
+      resolveSignInProps(connectCliSignInRedirectUrl(request, window.location.href), isElectron),
     );
   };
   const openSignInOnLoad = useEffectEvent(openSignIn);

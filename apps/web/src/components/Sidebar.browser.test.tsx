@@ -129,12 +129,17 @@ describe("sidebar header new thread", () => {
   });
 });
 
+// A distinct word per index keeps fixture titles out of the sidebar's near-duplicate fold.
+function tag(index: number): string {
+  return String.fromCharCode(97 + (Math.floor(index / 26) % 26), 97 + (index % 26));
+}
+
 function threadShell(projectId: ProjectId, index: number): EnvironmentThreadShell {
   return makeThreadFixture({
     environmentId: EnvironmentId.make("local"),
     id: ThreadId.make(`thread-${index}`),
     projectId,
-    title: `Thread ${index}`,
+    title: `Thread ${index} ${tag(index)}`,
   });
 }
 
@@ -178,7 +183,7 @@ describe("sidebar render isolation", () => {
         <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
       </SidebarProvider>,
     );
-    await expect.element(screen.getByText("Thread 4").first()).toBeInTheDocument();
+    await expect.element(screen.getByText(`Thread 4 ${tag(4)}`).first()).toBeInTheDocument();
     const rowRenders = () => vi.mocked(SortableThreadRow).mock.calls.length;
 
     using _timers = fakeTimers();
@@ -291,7 +296,7 @@ describe("sidebar thread menu", () => {
         <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
       </SidebarProvider>,
     );
-    const row = screen.getByText("Thread 0").first();
+    const row = screen.getByText(`Thread 0 ${tag(0)}`).first();
     await expect.element(row).toBeInTheDocument();
     row.element().closest<HTMLElement>("[data-sidebar-row]")!.focus();
     await userEvent.keyboard("{Shift>}{F10}{/Shift}");
@@ -327,7 +332,7 @@ describe("sidebar settled pagination", () => {
         environmentId: activeProject.environmentId,
         projectId: activeProject.id,
         id: ThreadId.make(`settled-${index}`),
-        title: `Settled thread ${index}`,
+        title: `Settled thread ${index} ${tag(index)}`,
         settledOverride: "settled",
         settledAt: "2026-01-01T00:00:00.000Z",
       }),

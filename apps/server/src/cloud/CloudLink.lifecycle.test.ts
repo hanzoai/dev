@@ -240,6 +240,8 @@ describe("releaseManagedTunnelOnShutdown", () => {
             hasCredential: unusedSecretStoreOperation(),
             store: () => unusedSecretStoreOperation(),
             clear: unusedSecretStoreOperation(),
+            signInWithBrowser: unusedSecretStoreOperation(),
+            signInWithDeviceCode: () => unusedSecretStoreOperation(),
           }),
         ),
         Effect.provideService(

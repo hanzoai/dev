@@ -25,8 +25,8 @@ import (
 	"strings"
 	"sync"
 
-	dev "github.com/hanzo-inc/dev/go"
-	"github.com/hanzo-inc/dev/go/frame"
+	dev "github.com/hanzoai/dev/go"
+	"github.com/hanzoai/dev/go/frame"
 )
 
 func main() {
@@ -37,6 +37,7 @@ func main() {
 	query := flag.String("query", "frameParts=1", "the query string the client opened its socket with")
 	modelURL := flag.String("model-url", "", "base URL of an OpenAI-compatible endpoint")
 	modelName := flag.String("model", "", "model to ask for; the thread's own when empty")
+	call := flag.Int("call", 0, "answer one non-frame method (1 descriptor, 2 session, 3 shell) on stdout and exit")
 	statePath := flag.String("state", "", "file to keep the session's state in")
 	flag.Parse()
 
@@ -58,6 +59,19 @@ func main() {
 	}
 	out := bufio.NewWriter(os.Stdout)
 	var mu sync.Mutex
+	if *call != 0 {
+		a, err := frame.New(frame.Config{Core: core, Effects: &effects{path: *statePath}, Environment: frame.Environment{ID: *envID, Label: *label},
+			Project: *project, Sequence: *seq, Query: q, State: state, Send: func([]byte) error { return nil }})
+		if err != nil {
+			log.Fatal(err)
+		}
+		body, err := a.Call(*call, nil)
+		if err != nil {
+			log.Fatal(err)
+		}
+		os.Stdout.Write(body)
+		return
+	}
 	a, err := frame.New(frame.Config{
 		Core: core, Effects: &effects{url: *modelURL, model: *modelName, path: *statePath},
 		Environment: frame.Environment{ID: *envID, Label: *label}, Project: *project, Sequence: *seq, Query: q, State: state,
