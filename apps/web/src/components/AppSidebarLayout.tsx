@@ -40,6 +40,7 @@ import {
   usePanelAnimationSettings,
   usePanelNavigationSuppression,
 } from "../panelAnimations";
+import { MobileCircleButton, MobileMenuIcon, MobileNewChatIcon } from "./MobileHeaderControls";
 import { BackgroundThreadAnnouncer } from "./BackgroundThreadAnnouncer";
 import { HistorySwipeNavigation } from "./HistorySwipeNavigation";
 import ThreadSidebar from "./Sidebar";
@@ -60,7 +61,6 @@ import {
   SidebarProvider,
   SidebarRail,
   SidebarTrigger,
-  useMobileSidebarSheetMounted,
   useSidebar,
   useSidebarVisibility,
 } from "./ui/sidebar";
@@ -293,6 +293,24 @@ function registerThreadUndoCommands(
   };
 }
 
+function startNewChat() {
+  const mac = isMacPlatform(navigator.platform);
+  const dispatched = window.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "n",
+      code: "KeyN",
+      metaKey: mac,
+      ctrlKey: !mac,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+  // If no chat route claimed Mod+N (e.g. inside Settings), open the new-thread palette.
+  if (dispatched) {
+    openCommandPalette({ open: "new-thread-in" });
+  }
+}
+
 /** Keyboard and menu commands that live as long as the app shell. */
 function registerAppShellCommands(router: AnyRouter, shellElement: Element): () => void {
   // The provider mirrors the visibility it renders onto its wrapper, so the
@@ -300,23 +318,6 @@ function registerAppShellCommands(router: AnyRouter, shellElement: Element): () 
   const readSidebarVisible = () =>
     shellElement.closest('[data-slot="sidebar-wrapper"]')?.getAttribute("data-sidebar-state") ===
     "expanded";
-  const triggerNewChatAction = () => {
-    const mac = isMacPlatform(navigator.platform);
-    const dispatched = window.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "n",
-        code: "KeyN",
-        metaKey: mac,
-        ctrlKey: !mac,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
-    // If no chat route claimed Mod+N (e.g. inside Settings), open the new-thread palette.
-    if (dispatched) {
-      openCommandPalette({ open: "new-thread-in" });
-    }
-  };
   const disposers = [
     registerThreadUndoCommands(router, readSidebarVisible),
     registerNavigationHistoryCommands(router),
@@ -346,8 +347,8 @@ function registerAppShellCommands(router: AnyRouter, shellElement: Element): () 
     registerMenuAction("global-spotlight", () => {
       openCommandPalette();
     }),
-    registerMenuAction("chat.new", triggerNewChatAction),
-    registerMenuAction("global-new-chat", triggerNewChatAction),
+    registerMenuAction("chat.new", startNewChat),
+    registerMenuAction("global-new-chat", startNewChat),
   ];
   return () => {
     for (const dispose of disposers) dispose();
@@ -359,8 +360,7 @@ function SidebarControl({ showSidebar }: { readonly showSidebar: boolean }) {
   const router = useRouter();
   const usagePageOpen = useLocation({ select: (location) => location.pathname === "/usage" });
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const { toggleSidebar } = useSidebar();
-  const mobileSidebarSheetMounted = useMobileSidebarSheetMounted();
+  const { toggleSidebar, isMobile } = useSidebar();
   const isSidebarVisible = useSidebarVisibility();
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const stageBackdropVariant = useSidebarStageBackdropVariant(environmentIdentificationMode);
@@ -426,11 +426,18 @@ function SidebarControl({ showSidebar }: { readonly showSidebar: boolean }) {
       ref={appShellCommandsRef}
       className={cn(
         "pointer-events-none fixed left-[var(--workspace-controls-left)] top-[var(--workspace-controls-top)] z-50 ml-px flex h-[var(--workspace-topbar-height)] items-center",
-        mobileSidebarSheetMounted && "hidden",
       )}
       data-sidebar-control=""
     >
-      {showSidebar ? (
+      {showSidebar && isMobile ? (
+        <MobileCircleButton
+          aria-label={gt("Toggle main sidebar")}
+          aria-pressed={isSidebarVisible}
+          onClick={toggleSidebar}
+        >
+          <MobileMenuIcon />
+        </MobileCircleButton>
+      ) : showSidebar ? (
         <Tooltip>
           <TooltipTrigger
             render={
@@ -450,6 +457,13 @@ function SidebarControl({ showSidebar }: { readonly showSidebar: boolean }) {
               : gt("Toggle main sidebar")}
           </TooltipPopup>
         </Tooltip>
+      ) : null}
+      {showSidebar && isMobile ? (
+        <div className="pointer-events-none fixed right-[var(--workspace-controls-right)] top-[var(--workspace-controls-top)] flex h-[var(--workspace-topbar-height)] items-center">
+          <MobileCircleButton aria-label={gt("New chat")} onClick={startNewChat}>
+            <MobileNewChatIcon />
+          </MobileCircleButton>
+        </div>
       ) : null}
     </div>
   );

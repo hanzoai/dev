@@ -8,13 +8,7 @@ import { cn } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
 import { Input, type InputProps } from "~/components/ui/input";
 import { ScrollArea } from "~/components/ui/scroll-area";
-import {
-  Sheet,
-  SheetDescription,
-  SheetHeader,
-  SheetPopup,
-  SheetTitle,
-} from "~/components/ui/sheet";
+import { MobileDrawer } from "~/components/ui/MobileDrawer";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useResizeDrag } from "~/hooks/useResizeDrag";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
@@ -29,7 +23,6 @@ import * as Schema from "effect/Schema";
 import { announceSidebarVisibility } from "~/lib/accessibilityAnnouncements";
 
 const SIDEBAR_WIDTH = "16rem";
-const SIDEBAR_WIDTH_MOBILE = "calc(100vw - var(--spacing) * 3)";
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH = 16 * 16;
 const SIDEBAR_TITLEBAR_CONTROL_SIZE = "max-sm:[--workspace-titlebar-control-size:--spacing(8)]";
@@ -294,7 +287,6 @@ function Sidebar({
   resizable?: boolean | SidebarResizableOptions;
 }) {
   const { isMobile, state, openMobile, setOpenMobile, setMobileSheetMounted } = useSidebar();
-  const gt = useGT();
   // Not usePanelAnimationSettings: its navigation suppression would snap the sheet shut mid-exit when an item navigates.
   const panelAnimationDurationMs = useClientSettings(
     (settings) => settings.panelAnimationDurationMs,
@@ -326,50 +318,20 @@ function Sidebar({
   if (isMobile) {
     return (
       <SidebarInstanceContext value={instanceContextValue}>
-        <Sheet
+        {/* Children stay mounted while closed so their window shortcuts, like thread jumps, keep working. */}
+        <MobileDrawer
+          animated={panelAnimationsActive}
+          className={cn("pb-safe pt-safe pl-safe", SIDEBAR_TITLEBAR_CONTROL_SIZE, className)}
           onOpenChange={setOpenMobile}
-          onOpenChangeComplete={(open) => {
+          onSettled={(open) => {
             if (!open) setMobileSheetMounted(false);
           }}
           open={openMobile}
         >
-          {/* Children stay mounted while closed so their window shortcuts, like thread jumps, keep working. */}
-          <SheetPopup
-            keepMounted
-            {...(panelAnimationsActive ? {} : { transitionDurationMs: 0 })}
-            className={cn(
-              "w-(--sidebar-width) max-w-none bg-sidebar surface-grain p-0 text-sidebar-foreground",
-              className,
-            )}
-            data-mobile="true"
-            data-sidebar="sidebar"
-            data-slot="sidebar"
-            showCloseButton={false}
-            side={side}
-            style={
-              {
-                "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
-              } as React.CSSProperties
-            }
-          >
-            <SheetHeader className="sr-only">
-              <SheetTitle>{props["aria-label"] ?? gt("Sidebar")}</SheetTitle>
-              <SheetDescription>
-                <T>Displays the mobile sidebar.</T>
-              </SheetDescription>
-            </SheetHeader>
-            <div
-              className={cn(
-                "flex h-full w-full flex-col pb-safe pt-safe",
-                SIDEBAR_TITLEBAR_CONTROL_SIZE,
-                side === "left" ? "pl-safe" : "pr-safe",
-              )}
-              {...props}
-            >
-              {children}
-            </div>
-          </SheetPopup>
-        </Sheet>
+          <div className="flex h-full w-full flex-col" {...props}>
+            {children}
+          </div>
+        </MobileDrawer>
       </SidebarInstanceContext>
     );
   }
