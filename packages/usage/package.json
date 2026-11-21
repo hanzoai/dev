@@ -33,7 +33,6 @@
     "test": "vp test run --config ../../vite.config.ts --dir ."
   },
   "dependencies": {
-    "@hanzodev/shared": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

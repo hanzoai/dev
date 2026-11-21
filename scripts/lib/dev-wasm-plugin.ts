@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - A build-time plugin; synchronous Node APIs keep it small.
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
