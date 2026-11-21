@@ -36,6 +36,7 @@ export type SettingsPath =
   | "/settings/source-control"
   | "/settings/worktrees"
   | "/settings/connections"
+  | "/settings/hanzo"
   | "/settings/access"
   | "/settings/secrets"
   | "/settings/maintenance"
@@ -112,6 +113,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/source-control": msg("Source control & issues"),
   "/settings/worktrees": msg("Worktrees"),
   "/settings/connections": msg("Environments"),
+  "/settings/hanzo": msg("Linked to Hanzo"),
   "/settings/access": msg("Sharing & access"),
   "/settings/secrets": msg("Secrets"),
   "/settings/maintenance": msg("Maintenance"),
@@ -168,6 +170,7 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
     heading: msg("Connections"),
     paths: [
       "/settings/connections",
+      "/settings/hanzo",
       "/settings/access",
       ...(isSecretsFeatureEnabled ? (["/settings/secrets"] as const) : []),
     ],
@@ -1433,6 +1436,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "linked-desktop",
+    title: msg("Linked to Hanzo"),
+    to: "/settings/hanzo",
+    searchTerms: [
+      msg("hanzo account link unlink desktop heartbeat providers reported usage revoke hanzo.app"),
+    ],
+  },
+  {
     id: "linked-environments",
     peerLinksOnly: true,
     title: msg("Linked environments"),
@@ -1509,6 +1520,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/source-control": "environment-defaults",
   "/settings/worktrees": "project-defaults",
   "/settings/connections": "connections",
+  "/settings/hanzo": null,
   "/settings/access": "connections",
   "/settings/secrets": null,
   "/settings/scheduled-tasks": null,

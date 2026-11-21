@@ -3267,10 +3267,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "en el ordenador que abrió esta página"
-      ]
+      "c": [" ", "en el ordenador que abrió esta página"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3282,10 +3279,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· quien lo ejecute obtiene este acceso"
-      ]
+      "c": [" ", "· quien lo ejecute obtiene este acceso"]
     }
   ],
   "c54cc9c75db9dc58": "Aprueba solo un inicio de sesión que acabes de iniciar.",
@@ -4243,7 +4237,7 @@
   "abe37e21953338e6": "Preparando...",
   "66d185fcf7d5f3e6": "Hacer checkout de la rama y resolver los conflictos en un hilo nuevo",
   "551ce3362d0307d4": "Resolver los conflictos en este hilo",
-  "f70f754b79025c67": "Marcar como lista",
+  "f70f754b79025c67": "Listo",
   "763cb56e21879aad": "Marcando...",
   "422f32e5d25da2ae": "Marcar esta {term, select, mr {merge request} cr {solicitud de cambios} other {pull request}} como lista para revisión",
   "9fe4c09b6a3ab4b4": "Corregir",
@@ -8783,6 +8777,46 @@
   "03ce9bea5f88ddbd": "Esta app no puede confirmar que sea una de tus máquinas. El código de emparejamiento que pegues se envía allí.",
   "30b696434167411f": "Vinculado",
   "80bbda74ee500b82": "Máquina",
+  "ca7e4b3271097ef2": "Vinculado a Hanzo",
+  "b0684009d6c5165f": "No hay ningún entorno conectado.",
+  "3c5dd680e87806a7": "No se pudo cargar el vínculo",
+  "5593412abf34ac33": "No se pudo vincular este escritorio",
+  "d10ea0c7354ec636": "¿Desvincular este escritorio de Hanzo? Deja de informar y desaparece de tus escritorios vinculados.",
+  "6794fb306cfce2f0": "No se pudo desvincular este escritorio",
+  "8d658d8ca30189d9": "No se pudo renombrar este escritorio",
+  "e9e6454753146a88": "Vincula este escritorio a tu cuenta de Hanzo para verlo, junto con los proveedores a los que accede, en hanzo.app.",
+  "fda858fdb5eb1090": "Vincular con Hanzo",
+  "58b7b0e79013a091": "Vinculado",
+  "e5ee09e07f5ec659": "Vinculado como {identity}",
+  "78c2ce3f09bd84e7": "Vinculado como {identity} · org. {organization}",
+  "c13b22597e78a057": "Aún no hay latido.",
+  "1bc7fc736e9abd61": "Último latido {when}",
+  "3bb2cd5cac4a5f37": "Online",
+  "6bc4837b05512820": "Desvincular este escritorio",
+  "b31564c6789f06ba": "Nombre de este escritorio",
+  "5a8297a550da3a15": "Tus fuentes vinculadas",
+  "9a5ea2ee006daaa4": "No se pudieron cargar tus fuentes vinculadas",
+  "c0170b1e7583aea0": "Sin fuentes vinculadas",
+  "ed72d5fe9f9951dd": "¿Revocar {name}? Deja de estar vinculado y hay que vincularlo de nuevo.",
+  "27a52341e07b18fe": "No se pudo revocar el escritorio",
+  "f7aab05f0491947b": "Este escritorio",
+  "10da6ac7e656ae95": "Visto por última vez {when}",
+  "a553be36e93303cd": "Listo",
+  "159e05bacc582a55": "Requiere iniciar sesión",
+  "4d9f05fa09cf6ec2": "Límite alcanzado",
+  "96bf175f6b13f0fb": "Proveedores en este escritorio",
+  "a1c47d1a32f0e947": "Sin proveedores que informar",
+  "0e36affc3afeb95e": "Solo este escritorio",
+  "12d0626b6f3e9852": "Qué se informa",
+  "b7ffb869e7c4cf6d": "Nivel",
+  "d15fe609aedb5c2e": "Los latidos solo llevan el estado del proveedor: sin prompts, archivos, tokens ni correos.",
+  "5f3c1a3638a804d3": "Metadatos",
+  "0dca3931d73e1f99": "Metadatos y contenido",
+  "5d3f19596dca88b7": "Último latido enviado",
+  "1b21eadc9095e649": "Próximo latido",
+  "2a9002e21acd34a9": "Los bytes exactos enviados a Hanzo.",
+  "953da76b0bda1e66": "Se envía cuando este escritorio esté vinculado.",
+  "078a870c03f3c24a": "Cuerpo del latido",
   "4cea6be0fe6be16f": "No se pudieron cargar los entornos vinculados",
   "58cb9c075da185fb": "Cargando entornos vinculados…",
   "25b74062dc03079e": "No hay entornos vinculados",
@@ -11780,6 +11814,7 @@
   "60c1b94543359858": "webhook automatizaciones sin conexión cola buzón hanzo connect",
   "9bebacdcfbde18d4": "móvil notificaciones push actividades en directo live activities nube túnel",
   "1c3e0ac06c8a1f1e": "conexiones servidor backend local remoto acceso administrativo permisos ámbito enlaces de emparejamiento código qr clientes autorizados sesiones revocar endpoint",
+  "0911cde8a1d4d5e5": "hanzo cuenta vincular desvincular escritorio latido proveedores informado uso revocar hanzo.app",
   "744fd34e8049efeb": "vincular par otra máquina vps agentes trabajar allí traspaso código de emparejamiento",
   "705f7ce81a5996ef": "añadir emparejar backend host código ssh config agente túnel guardado hanzo connect",
   "cbf49f84e7f456e5": "Equilibrio de carga",

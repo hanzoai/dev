@@ -273,6 +273,7 @@ import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http
 import * as SourceControlRateLimit from "@hanzodev/source-control-core/server/SourceControlRateLimit";
 import { isNetworkPath } from "@hanzodev/shared/path";
 import * as RelayClient from "@hanzodev/shared/relayClient";
+import * as DesktopLink from "./cloud/DesktopLink.ts";
 import {
   SOCKET_FRAME_PARTS_QUERY_PARAM,
   splitLargeSocketFrames,
@@ -1596,6 +1597,7 @@ export const layerWsRpc = (
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const relayClient = yield* RelayClient.RelayClient;
+      const desktopLink = yield* DesktopLink.DesktopLink;
       // Webhook URLs start agents; expose them only to operate-scoped sessions while keeping tasks readable.
       const withVisibleWebhookUrls = (result: ScheduledTaskListResult): ScheduledTaskListResult =>
         currentSession.scopes.includes(AuthOrchestrationOperateScope)
@@ -2754,6 +2756,14 @@ export const layerWsRpc = (
               ),
             ),
           ),
+        [WS_METHODS.desktopsStatus]: (_input) => desktopLink.status,
+        [WS_METHODS.desktopsLink]: (input) => desktopLink.link(input),
+        [WS_METHODS.desktopsUnlink]: (_input) => desktopLink.unlink,
+        [WS_METHODS.desktopsRename]: (input) => desktopLink.rename(input.name),
+        [WS_METHODS.desktopsList]: (_input) =>
+          Effect.map(desktopLink.list, (desktops) => ({ desktops })),
+        [WS_METHODS.desktopsRevoke]: (input) =>
+          Effect.as(desktopLink.revoke(input.id), { ok: true }),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) => relayClient.resolve,
         [WS_METHODS.cloudInstallRelayClient]: (_input) =>
           Stream.callback<RelayClientInstallProgressEvent, RelayClientInstallFailedError>((queue) =>

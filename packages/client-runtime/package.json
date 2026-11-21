@@ -279,6 +279,10 @@
       "types": "./src/state/previewTunnel.ts",
       "default": "./src/state/previewTunnel.ts"
     },
+    "./state/desktops": {
+      "types": "./src/state/desktops.ts",
+      "default": "./src/state/desktops.ts"
+    },
     "./state/peerLinks": {
       "types": "./src/state/peerLinks.ts",
       "default": "./src/state/peerLinks.ts"

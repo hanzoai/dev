@@ -2549,7 +2549,7 @@
   "34cc63390ad793cc": "Escolha uma thread",
   "8f12309ead62e38a": "Pesquisar threads ou projetos...",
   "2f664754d005d9a7": "Nenhuma thread ativa encontrada.",
-  "6095e59daf8ac2d6": "Vinculada",
+  "6095e59daf8ac2d6": "Vinculado",
   "dd52ffa80d5eff97": "Thread concluída",
   "fd1316b1f627872b": "Aprovação necessária",
   "a3178769f8308cbc": "A thread falhou",
@@ -3267,10 +3267,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "no computador que abriu esta página"
-      ]
+      "c": [" ", "no computador que abriu esta página"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3282,10 +3279,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· quem executar recebe este acesso"
-      ]
+      "c": [" ", "· quem executar recebe este acesso"]
     }
   ],
   "c54cc9c75db9dc58": "Aprove apenas um login que você acabou de iniciar.",
@@ -4244,7 +4238,7 @@
   "abe37e21953338e6": "Preparando...",
   "66d185fcf7d5f3e6": "Fazer checkout do branch e resolver os conflitos em uma nova thread",
   "551ce3362d0307d4": "Resolver os conflitos nesta thread",
-  "f70f754b79025c67": "Marcar como pronto",
+  "f70f754b79025c67": "Pronto",
   "763cb56e21879aad": "Marcando...",
   "422f32e5d25da2ae": "Marcar {term, select, mr {este merge request} cr {esta solicitação de alteração} other {este pull request}} como pronto para revisão",
   "9fe4c09b6a3ab4b4": "Corrigir",
@@ -8784,6 +8778,46 @@
   "03ce9bea5f88ddbd": "Este app não pode confirmar que esta é uma das suas máquinas. O código de pareamento que você colar será enviado para lá.",
   "30b696434167411f": "Vinculado",
   "80bbda74ee500b82": "Máquina",
+  "ca7e4b3271097ef2": "Vinculado ao Hanzo",
+  "b0684009d6c5165f": "Nenhum ambiente conectado.",
+  "3c5dd680e87806a7": "Não foi possível carregar o vínculo",
+  "5593412abf34ac33": "Não foi possível vincular este desktop",
+  "d10ea0c7354ec636": "Desvincular este desktop do Hanzo? Ele para de reportar e some dos seus desktops vinculados.",
+  "6794fb306cfce2f0": "Não foi possível desvincular este desktop",
+  "8d658d8ca30189d9": "Não foi possível renomear este desktop",
+  "e9e6454753146a88": "Vincule este desktop à sua conta Hanzo para vê-lo, com os provedores que ele alcança, em hanzo.app.",
+  "fda858fdb5eb1090": "Vincular ao Hanzo",
+  "58b7b0e79013a091": "Vinculado",
+  "e5ee09e07f5ec659": "Vinculado como {identity}",
+  "78c2ce3f09bd84e7": "Vinculado como {identity} · org. {organization}",
+  "c13b22597e78a057": "Ainda sem heartbeat.",
+  "1bc7fc736e9abd61": "Último heartbeat {when}",
+  "3bb2cd5cac4a5f37": "Online",
+  "6bc4837b05512820": "Desvincular este desktop",
+  "b31564c6789f06ba": "Nome deste desktop",
+  "5a8297a550da3a15": "Suas fontes vinculadas",
+  "9a5ea2ee006daaa4": "Não foi possível carregar suas fontes vinculadas",
+  "c0170b1e7583aea0": "Nenhuma fonte vinculada",
+  "ed72d5fe9f9951dd": "Revogar {name}? Ele deixa de estar vinculado e precisa ser vinculado de novo.",
+  "27a52341e07b18fe": "Não foi possível revogar o desktop",
+  "f7aab05f0491947b": "Este desktop",
+  "10da6ac7e656ae95": "Visto por último {when}",
+  "a553be36e93303cd": "Pronto",
+  "159e05bacc582a55": "Requer login",
+  "4d9f05fa09cf6ec2": "Limite atingido",
+  "96bf175f6b13f0fb": "Provedores neste desktop",
+  "a1c47d1a32f0e947": "Nenhum provedor para reportar",
+  "0e36affc3afeb95e": "Somente este desktop",
+  "12d0626b6f3e9852": "O que é reportado",
+  "b7ffb869e7c4cf6d": "Nível",
+  "d15fe609aedb5c2e": "Os heartbeats levam apenas o estado do provedor: sem prompts, arquivos, tokens ou e-mails.",
+  "5f3c1a3638a804d3": "Metadados",
+  "0dca3931d73e1f99": "Metadados e conteúdo",
+  "5d3f19596dca88b7": "Último heartbeat enviado",
+  "1b21eadc9095e649": "Próximo heartbeat",
+  "2a9002e21acd34a9": "Os bytes exatos enviados ao Hanzo.",
+  "953da76b0bda1e66": "Enviado assim que este desktop for vinculado.",
+  "078a870c03f3c24a": "Corpo do heartbeat",
   "4cea6be0fe6be16f": "Não foi possível carregar os ambientes vinculados",
   "58cb9c075da185fb": "Carregando ambientes vinculados…",
   "25b74062dc03079e": "Nenhum ambiente vinculado",
@@ -11784,6 +11818,7 @@
   "60c1b94543359858": "webhook automações offline fila caixa de correio hanzo connect",
   "9bebacdcfbde18d4": "celular notificações push live activities nuvem túnel",
   "1c3e0ac06c8a1f1e": "conexões servidor backend local remoto acesso administrativo permissões escopo links de pareamento código qr clientes autorizados sessões revogar endpoint",
+  "0911cde8a1d4d5e5": "hanzo conta vincular desvincular desktop heartbeat provedores reportado uso revogar hanzo.app",
   "744fd34e8049efeb": "vincular par outra máquina vps agentes trabalham lá transferir código de pareamento",
   "705f7ce81a5996ef": "adicionar parear backend host código ssh config agente túnel salvo hanzo connect",
   "cbf49f84e7f456e5": "Balanceamento de carga",

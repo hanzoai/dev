@@ -7,6 +7,8 @@ import {
   AuthOrchestrationReadScope,
   AuthPreviewOperateScope,
   AuthProvidersManageScope,
+  AuthRelayConfigureScope,
+  AuthRelayWriteScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
   AuthTerminalOperateScope,
@@ -17,6 +19,11 @@ import { WS_METHODS } from "./rpc.ts";
 
 /** Incremental client enforcement; the server still authorizes every request. */
 export const CLIENT_GUARDED_RPC_SCOPES = {
+  // Linking stores the IAM credential and registers this install, as signing in to Connect does.
+  [WS_METHODS.desktopsLink]: AuthRelayConfigureScope,
+  [WS_METHODS.desktopsUnlink]: AuthRelayWriteScope,
+  [WS_METHODS.desktopsRename]: AuthRelayWriteScope,
+  [WS_METHODS.desktopsRevoke]: AuthRelayWriteScope,
   [WS_METHODS.providerAuthRemoveMethod]: AuthProvidersManageScope,
   [WS_METHODS.previewClose]: AuthPreviewOperateScope,
   // Stopping a server signals its processes, as closing a terminal does.

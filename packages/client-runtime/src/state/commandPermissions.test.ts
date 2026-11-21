@@ -14,6 +14,8 @@ import {
   AuthOrchestrationReadScope,
   AuthPreviewOperateScope,
   AuthProvidersManageScope,
+  AuthRelayConfigureScope,
+  AuthRelayWriteScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
   ThreadId,
@@ -194,6 +196,26 @@ describe("command permissions", () => {
         expect(registry.get(check.permissionAtom(env))).toBe(true);
         yield* check.authorize(registry, env);
       }),
+  );
+
+  it.effect.each([
+    { method: WS_METHODS.desktopsLink, scope: AuthRelayConfigureScope },
+    { method: WS_METHODS.desktopsUnlink, scope: AuthRelayWriteScope },
+    { method: WS_METHODS.desktopsRename, scope: AuthRelayWriteScope },
+    { method: WS_METHODS.desktopsRevoke, scope: AuthRelayWriteScope },
+  ])("requires the destination relay grant for $method", ({ method, scope }) =>
+    Effect.gen(function* () {
+      const registry = yield* setup;
+      const command = createCommandPermissions(runtime, method);
+      registry.set(sessions(env), AsyncResult.success(grant(true)));
+      expect(registry.get(command.permissionAtom(env))).toBe(false);
+      registry.set(
+        sessions(env),
+        AsyncResult.success({ ...grant(false), scopes: [scope], permissions: [scope] }),
+      );
+      expect(registry.get(command.permissionAtom(env))).toBe(true);
+      yield* command.authorize(registry, env);
+    }),
   );
 
   it.effect("requires the destination settings grant to connect or bind an issue tracker", () =>

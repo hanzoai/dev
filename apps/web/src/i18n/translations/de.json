@@ -3267,10 +3267,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "auf dem Computer, der diese Seite geöffnet hat"
-      ]
+      "c": [" ", "auf dem Computer, der diese Seite geöffnet hat"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3282,10 +3279,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· wer es ausführt, erhält diesen Zugriff"
-      ]
+      "c": [" ", "· wer es ausführt, erhält diesen Zugriff"]
     }
   ],
   "c54cc9c75db9dc58": "Genehmige nur eine Anmeldung, die du gerade selbst gestartet hast.",
@@ -4246,7 +4240,7 @@
   "abe37e21953338e6": "Wird vorbereitet...",
   "66d185fcf7d5f3e6": "Branch auschecken und die Konflikte in einem neuen Thread auflösen",
   "551ce3362d0307d4": "Die Konflikte in diesem Thread auflösen",
-  "f70f754b79025c67": "Als bereit markieren",
+  "f70f754b79025c67": "Bereit",
   "763cb56e21879aad": "Wird markiert...",
   "422f32e5d25da2ae": "{term, select, mr {Diesen Merge Request als bereit für Review markieren} cr {Diese Änderungsanfrage als bereit für Review markieren} other {Diesen Pull Request als bereit für Review markieren}}",
   "9fe4c09b6a3ab4b4": "Beheben",
@@ -8409,7 +8403,7 @@
   ],
   "42765186ac32bfb7": "Log-Ordner öffnen",
   "45fadeb3f2729fc2": "Zeit",
-  "536fa3ca6eb2c9cb": "Level",
+  "536fa3ca6eb2c9cb": "Stufe",
   "90bdd3b254b5264a": "Span",
   "6b3e8bc1f3ded083": "Nachricht",
   "e638ba944fde98c2": "Trace",
@@ -8785,6 +8779,46 @@
   "03ce9bea5f88ddbd": "Diese App kann nicht bestätigen, dass es einer deiner Rechner ist. Der eingefügte Kopplungscode wird dorthin gesendet.",
   "30b696434167411f": "Verknüpft",
   "80bbda74ee500b82": "Rechner",
+  "ca7e4b3271097ef2": "Mit Hanzo verknüpft",
+  "b0684009d6c5165f": "Keine Umgebung verbunden.",
+  "3c5dd680e87806a7": "Verknüpfung konnte nicht geladen werden",
+  "5593412abf34ac33": "Dieser Desktop konnte nicht verknüpft werden",
+  "d10ea0c7354ec636": "Diesen Desktop von Hanzo trennen? Er meldet nichts mehr und verschwindet aus deinen verknüpften Desktops.",
+  "6794fb306cfce2f0": "Verknüpfung konnte nicht gelöst werden",
+  "8d658d8ca30189d9": "Desktop konnte nicht umbenannt werden",
+  "e9e6454753146a88": "Verknüpfe diesen Desktop mit deinem Hanzo-Konto, um ihn und seine Anbieter auf hanzo.app zu sehen.",
+  "fda858fdb5eb1090": "Mit Hanzo verknüpfen",
+  "58b7b0e79013a091": "Verknüpft",
+  "e5ee09e07f5ec659": "Verknüpft als {identity}",
+  "78c2ce3f09bd84e7": "Verknüpft als {identity} · Organisation {organization}",
+  "c13b22597e78a057": "Noch kein Heartbeat.",
+  "1bc7fc736e9abd61": "Letzter Heartbeat {when}",
+  "3bb2cd5cac4a5f37": "Online",
+  "6bc4837b05512820": "Diesen Desktop trennen",
+  "b31564c6789f06ba": "Name dieses Desktops",
+  "5a8297a550da3a15": "Deine verknüpften Quellen",
+  "9a5ea2ee006daaa4": "Verknüpfte Quellen konnten nicht geladen werden",
+  "c0170b1e7583aea0": "Keine verknüpften Quellen",
+  "ed72d5fe9f9951dd": "{name} widerrufen? Die Verknüpfung endet und muss neu hergestellt werden.",
+  "27a52341e07b18fe": "Desktop konnte nicht widerrufen werden",
+  "f7aab05f0491947b": "Dieser Desktop",
+  "10da6ac7e656ae95": "Zuletzt gesehen {when}",
+  "a553be36e93303cd": "Bereit",
+  "159e05bacc582a55": "Anmeldung nötig",
+  "4d9f05fa09cf6ec2": "Limit erreicht",
+  "96bf175f6b13f0fb": "Anbieter auf diesem Desktop",
+  "a1c47d1a32f0e947": "Keine Anbieter zu melden",
+  "0e36affc3afeb95e": "Nur dieser Desktop",
+  "12d0626b6f3e9852": "Was gemeldet wird",
+  "b7ffb869e7c4cf6d": "Stufe",
+  "d15fe609aedb5c2e": "Heartbeats enthalten nur den Anbieterstatus: keine Prompts, Dateien, Tokens oder E-Mails.",
+  "5f3c1a3638a804d3": "Metadaten",
+  "0dca3931d73e1f99": "Metadaten und Inhalt",
+  "5d3f19596dca88b7": "Zuletzt gesendeter Heartbeat",
+  "1b21eadc9095e649": "Nächster Heartbeat",
+  "2a9002e21acd34a9": "Genau die an Hanzo gesendeten Bytes.",
+  "953da76b0bda1e66": "Wird gesendet, sobald dieser Desktop verknüpft ist.",
+  "078a870c03f3c24a": "Heartbeat-Inhalt",
   "4cea6be0fe6be16f": "Verknüpfte Umgebungen konnten nicht geladen werden",
   "58cb9c075da185fb": "Verknüpfte Umgebungen werden geladen…",
   "25b74062dc03079e": "Keine verknüpften Umgebungen",
@@ -11787,6 +11821,7 @@
   "60c1b94543359858": "webhook automatisierungen offline warteschlange postfach hanzo connect",
   "9bebacdcfbde18d4": "mobil push-benachrichtigungen live-aktivitäten cloud tunnel",
   "1c3e0ac06c8a1f1e": "verbindungen server backend lokal remote zugriff administrativ berechtigungen bereich kopplungslinks qr-code autorisierte clients sitzungen widerrufen endpunkt",
+  "0911cde8a1d4d5e5": "hanzo konto verknüpfen trennen desktop heartbeat anbieter gemeldet nutzung widerrufen hanzo.app",
   "744fd34e8049efeb": "verknüpfen peer anderer rechner vps agenten dort arbeiten übergabe kopplungscode",
   "705f7ce81a5996ef": "hinzufügen koppeln backend host code ssh konfiguration agent tunnel gespeichert hanzo connect",
   "cbf49f84e7f456e5": "Lastverteilung",

@@ -3267,10 +3267,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "på datorn som öppnade den här sidan"
-      ]
+      "c": [" ", "på datorn som öppnade den här sidan"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3282,10 +3279,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· den som kör den får den här åtkomsten"
-      ]
+      "c": [" ", "· den som kör den får den här åtkomsten"]
     }
   ],
   "c54cc9c75db9dc58": "Godkänn bara en inloggning som du själv precis har startat.",
@@ -4244,7 +4238,7 @@
   "abe37e21953338e6": "Förbereder...",
   "66d185fcf7d5f3e6": "Checka ut grenen och lös konflikterna i en ny tråd",
   "551ce3362d0307d4": "Lös konflikterna i den här tråden",
-  "f70f754b79025c67": "Markera som redo",
+  "f70f754b79025c67": "Redo",
   "763cb56e21879aad": "Markerar...",
   "422f32e5d25da2ae": "Markera den här {term, select, mr {merge requesten} cr {ändringsbegäran} other {pull requesten}} som redo för granskning",
   "9fe4c09b6a3ab4b4": "Åtgärda",
@@ -8791,6 +8785,46 @@
   "03ce9bea5f88ddbd": "Appen kan inte bekräfta att det är en av dina datorer. Parkopplingskoden du klistrar in skickas dit.",
   "30b696434167411f": "Länkad",
   "80bbda74ee500b82": "Dator",
+  "ca7e4b3271097ef2": "Länkad till Hanzo",
+  "b0684009d6c5165f": "Ingen miljö är ansluten.",
+  "3c5dd680e87806a7": "Det gick inte att läsa in länken",
+  "5593412abf34ac33": "Det gick inte att länka den här datorn",
+  "d10ea0c7354ec636": "Koppla bort den här datorn från Hanzo? Den slutar rapportera och försvinner från dina länkade datorer.",
+  "6794fb306cfce2f0": "Det gick inte att koppla bort datorn",
+  "8d658d8ca30189d9": "Det gick inte att byta namn på datorn",
+  "e9e6454753146a88": "Länka den här datorn till ditt Hanzo-konto för att se den och dess leverantörer på hanzo.app.",
+  "fda858fdb5eb1090": "Länka till Hanzo",
+  "58b7b0e79013a091": "Länkad",
+  "e5ee09e07f5ec659": "Länkad som {identity}",
+  "78c2ce3f09bd84e7": "Länkad som {identity} · org {organization}",
+  "c13b22597e78a057": "Ingen heartbeat ännu.",
+  "1bc7fc736e9abd61": "Senaste heartbeat {when}",
+  "3bb2cd5cac4a5f37": "Online",
+  "6bc4837b05512820": "Koppla bort den här datorn",
+  "b31564c6789f06ba": "Den här datorns namn",
+  "5a8297a550da3a15": "Dina länkade källor",
+  "9a5ea2ee006daaa4": "Det gick inte att läsa in dina länkade källor",
+  "c0170b1e7583aea0": "Inga länkade källor",
+  "ed72d5fe9f9951dd": "Återkalla {name}? Länken upphör och måste göras om.",
+  "27a52341e07b18fe": "Det gick inte att återkalla datorn",
+  "f7aab05f0491947b": "Den här datorn",
+  "10da6ac7e656ae95": "Senast sedd {when}",
+  "a553be36e93303cd": "Redo",
+  "159e05bacc582a55": "Kräver inloggning",
+  "4d9f05fa09cf6ec2": "Gränsen nådd",
+  "96bf175f6b13f0fb": "Leverantörer på den här datorn",
+  "a1c47d1a32f0e947": "Inga leverantörer att rapportera",
+  "0e36affc3afeb95e": "Endast den här datorn",
+  "12d0626b6f3e9852": "Vad som rapporteras",
+  "b7ffb869e7c4cf6d": "Nivå",
+  "d15fe609aedb5c2e": "Heartbeats innehåller bara leverantörens status: inga prompter, filer, tokens eller e-post.",
+  "5f3c1a3638a804d3": "Metadata",
+  "0dca3931d73e1f99": "Metadata och innehåll",
+  "5d3f19596dca88b7": "Senast skickade heartbeat",
+  "1b21eadc9095e649": "Nästa heartbeat",
+  "2a9002e21acd34a9": "Exakt de bytes som skickats till Hanzo.",
+  "953da76b0bda1e66": "Skickas när den här datorn är länkad.",
+  "078a870c03f3c24a": "Heartbeat-innehåll",
   "4cea6be0fe6be16f": "Kunde inte läsa in länkade miljöer",
   "58cb9c075da185fb": "Läser in länkade miljöer…",
   "25b74062dc03079e": "Inga länkade miljöer",
@@ -11793,6 +11827,7 @@
   "60c1b94543359858": "webhook automatiseringar offline kö brevlåda hanzo connect",
   "9bebacdcfbde18d4": "mobil pushaviseringar liveaktiviteter live activities moln tunnel",
   "1c3e0ac06c8a1f1e": "anslutningar server backend lokal fjärråtkomst administrativa behörigheter omfång parkopplingslänkar qr-kod auktoriserade klienter sessioner återkalla slutpunkt",
+  "0911cde8a1d4d5e5": "hanzo konto länka koppla bort dator heartbeat leverantörer rapporterat användning återkalla hanzo.app",
   "744fd34e8049efeb": "länka peer annan dator vps agenter arbetar där överlämning parkopplingskod",
   "705f7ce81a5996ef": "lägg till parkoppla backend värd kod ssh-konfiguration agent tunnel sparad hanzo connect",
   "cbf49f84e7f456e5": "Lastbalansering",
@@ -12122,7 +12157,7 @@
   "0f3b14055f7bba6f": "{count, plural, one {{count} miljö} other {{count} miljöer}}",
   "9b84232a3f71dae1": "Vissa miljöer kunde inte rapportera användning",
   "004d25875c02d3eb": "Genomsöker…",
-  "1210d5c3d0cf203b": "Klar",
+  "1210d5c3d0cf203b": "Redo",
   "9b0277205d8a9b04": "Alla leverantörer",
   "31fd849033990734": "Inga leverantörer",
   "0d4d01729dabc81e": "{count, plural, one {{count} leverantör} other {{count} leverantörer}}",

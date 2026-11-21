@@ -180,6 +180,7 @@ import * as EnvironmentAuthPolicy from "./auth/EnvironmentAuthPolicy.ts";
 import * as CloudHttp from "./cloud/http.ts";
 import * as GuestHttp from "./guest/http.ts";
 import * as CloudLink from "./cloud/CloudLink.ts";
+import * as DesktopLink from "./cloud/DesktopLink.ts";
 import * as ConnectReachability from "./cloud/ConnectReachability.ts";
 import { pendingServiceUpdateExists } from "./cloud/updateHandoff.ts";
 import * as RelayTracing from "./cloud/relayTracing.ts";
@@ -701,6 +702,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   ),
   layerThreadPullRequestWorker,
   KeepAwake.layer,
+  DesktopLink.layer,
   DelegatedTaskAnalytics.layer,
   Layer.effectDiscard(
     Effect.gen(function* () {

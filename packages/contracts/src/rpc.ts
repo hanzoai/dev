@@ -17,6 +17,15 @@ import {
   McpAppUpdateModelContextInput,
 } from "./mcpApps.ts";
 import {
+  DesktopLinkError,
+  DesktopLinkInput,
+  DesktopLinkStatus,
+  DesktopListResult,
+  DesktopOk,
+  DesktopRenameInput,
+  DesktopRevokeInput,
+} from "./desktops.ts";
+import {
   PeerLink,
   PeerLinkCreateInput,
   PeerLinkError,
@@ -592,6 +601,13 @@ export const WS_METHODS = {
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
 
+  desktopsStatus: "desktops.status",
+  desktopsLink: "desktops.link",
+  desktopsUnlink: "desktops.unlink",
+  desktopsRename: "desktops.rename",
+  desktopsList: "desktops.list",
+  desktopsRevoke: "desktops.revoke",
+
   pullRequestsList: "pullRequests.list",
   pullRequestsListStats: "pullRequests.listStats",
   pullRequestsFilterOptions: "pullRequests.filterOptions",
@@ -1093,6 +1109,44 @@ const WsCloudInstallRelayClientRpc = Rpc.make(WS_METHODS.cloudInstallRelayClient
   success: RelayClientInstallProgressEventSchema,
   error: Schema.Union([RelayClientInstallFailedError, EnvironmentAuthorizationError]),
   stream: true,
+});
+
+const desktopsError = Schema.Union([DesktopLinkError, EnvironmentAuthorizationError]);
+
+const WsDesktopsStatusRpc = Rpc.make(WS_METHODS.desktopsStatus, {
+  payload: Schema.Struct({}),
+  success: DesktopLinkStatus,
+  error: desktopsError,
+});
+
+const WsDesktopsLinkRpc = Rpc.make(WS_METHODS.desktopsLink, {
+  payload: DesktopLinkInput,
+  success: DesktopLinkStatus,
+  error: desktopsError,
+});
+
+const WsDesktopsUnlinkRpc = Rpc.make(WS_METHODS.desktopsUnlink, {
+  payload: Schema.Struct({}),
+  success: DesktopLinkStatus,
+  error: desktopsError,
+});
+
+const WsDesktopsRenameRpc = Rpc.make(WS_METHODS.desktopsRename, {
+  payload: DesktopRenameInput,
+  success: DesktopLinkStatus,
+  error: desktopsError,
+});
+
+const WsDesktopsListRpc = Rpc.make(WS_METHODS.desktopsList, {
+  payload: Schema.Struct({}),
+  success: DesktopListResult,
+  error: desktopsError,
+});
+
+const WsDesktopsRevokeRpc = Rpc.make(WS_METHODS.desktopsRevoke, {
+  payload: DesktopRevokeInput,
+  success: DesktopOk,
+  error: desktopsError,
 });
 
 const WsServerReportClientActivityRpc = Rpc.make(WS_METHODS.serverReportClientActivity, {
@@ -2342,6 +2396,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerReportClientActivityRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
+  WsDesktopsStatusRpc,
+  WsDesktopsLinkRpc,
+  WsDesktopsUnlinkRpc,
+  WsDesktopsRenameRpc,
+  WsDesktopsListRpc,
+  WsDesktopsRevokeRpc,
   WsPullRequestsListRpc,
   WsPullRequestsListStatsRpc,
   WsPullRequestsFilterOptionsRpc,

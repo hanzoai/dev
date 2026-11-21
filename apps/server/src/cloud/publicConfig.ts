@@ -4,6 +4,7 @@ import {
   DEFAULT_HOSTED_APP_URL,
 } from "@hanzodev/shared/connectAuth";
 import {
+  DEFAULT_HANZO_API_BASE_URL,
   DEFAULT_HANZO_IAM_CLIENT_ID,
   DEFAULT_HANZO_IAM_ISSUER,
   DEFAULT_HANZO_RELAY_URL,
@@ -117,7 +118,13 @@ export const relayUrlConfig = makeRelayUrlConfig();
 export const hostedAppUrlConfig = makePublicValueConfig(
   "HANZO_DEV_HOSTED_APP_URL",
   DEFAULT_HOSTED_APP_URL,
-).pipe(Config.mapEffect(validateHostedAppUrl));
+).pipe(Config.mapEffect(validateOriginUrl));
+
+/** The unified Hanzo API origin; `/v1/desktops` (HIP-1350) is served here. */
+export const apiBaseUrlConfig = makePublicValueConfig(
+  "HANZO_DEV_API_URL",
+  DEFAULT_HANZO_API_BASE_URL,
+).pipe(Config.mapEffect(validateOriginUrl));
 
 const NIGHTLY_HOSTED_APP_URL = "https://nightly.hanzo.bot";
 
@@ -130,9 +137,9 @@ export const agentApprovalAppUrlConfig = makePublicValueConfig(
   typeof __HANZO_DEV_BUILD_CHANNEL__ !== "undefined" && __HANZO_DEV_BUILD_CHANNEL__ === "nightly"
     ? NIGHTLY_HOSTED_APP_URL
     : DEFAULT_HOSTED_APP_URL,
-).pipe(Config.mapEffect(validateHostedAppUrl));
+).pipe(Config.mapEffect(validateOriginUrl));
 
-function validateHostedAppUrl(value: string) {
+function validateOriginUrl(value: string) {
   try {
     const url = new URL(value);
     const isLoopbackHttp =
@@ -152,7 +159,7 @@ function validateHostedAppUrl(value: string) {
       new Config.ConfigError(
         new Schema.SchemaError(
           new SchemaIssue.InvalidValue({
-            message: "Hosted app URL must be an absolute HTTPS origin (or HTTP loopback origin).",
+            message: "Public URL must be an absolute HTTPS origin (or HTTP loopback origin).",
           }),
         ),
       ),

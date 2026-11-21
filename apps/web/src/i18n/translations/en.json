@@ -3267,10 +3267,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "on the computer that opened this page"
-      ]
+      "c": [" ", "on the computer that opened this page"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3282,10 +3279,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· whoever runs it gets this access"
-      ]
+      "c": [" ", "· whoever runs it gets this access"]
     }
   ],
   "c54cc9c75db9dc58": "Only approve a sign-in you just started.",
@@ -8793,6 +8787,46 @@
   "03ce9bea5f88ddbd": "This app cannot confirm it is one of your machines. The pairing code you paste is sent there.",
   "30b696434167411f": "Linked",
   "80bbda74ee500b82": "Machine",
+  "ca7e4b3271097ef2": "Linked to Hanzo",
+  "b0684009d6c5165f": "No environment is connected.",
+  "3c5dd680e87806a7": "Could not load the link",
+  "5593412abf34ac33": "Could not link this desktop",
+  "d10ea0c7354ec636": "Unlink this desktop from Hanzo? It stops reporting and disappears from your linked desktops.",
+  "6794fb306cfce2f0": "Could not unlink this desktop",
+  "8d658d8ca30189d9": "Could not rename this desktop",
+  "e9e6454753146a88": "Link this desktop to your Hanzo account to see it, and the providers it can reach, on hanzo.app.",
+  "fda858fdb5eb1090": "Link to Hanzo",
+  "58b7b0e79013a091": "Linked",
+  "e5ee09e07f5ec659": "Linked as {identity}",
+  "78c2ce3f09bd84e7": "Linked as {identity} · org {organization}",
+  "c13b22597e78a057": "No heartbeat yet.",
+  "1bc7fc736e9abd61": "Last heartbeat {when}",
+  "3bb2cd5cac4a5f37": "Online",
+  "6bc4837b05512820": "Unlink this desktop",
+  "b31564c6789f06ba": "This desktop's name",
+  "5a8297a550da3a15": "Your linked sources",
+  "9a5ea2ee006daaa4": "Could not load your linked sources",
+  "c0170b1e7583aea0": "No linked sources",
+  "ed72d5fe9f9951dd": "Revoke {name}? It stops being linked and must be linked again to come back.",
+  "27a52341e07b18fe": "Could not revoke the desktop",
+  "f7aab05f0491947b": "This desktop",
+  "10da6ac7e656ae95": "Last seen {when}",
+  "a553be36e93303cd": "Ready",
+  "159e05bacc582a55": "Needs login",
+  "4d9f05fa09cf6ec2": "Limit reached",
+  "96bf175f6b13f0fb": "Providers on this desktop",
+  "a1c47d1a32f0e947": "No providers to report",
+  "0e36affc3afeb95e": "This desktop only",
+  "12d0626b6f3e9852": "What is reported",
+  "b7ffb869e7c4cf6d": "Level",
+  "d15fe609aedb5c2e": "Heartbeats carry provider state only: no prompts, files, tokens or emails.",
+  "5f3c1a3638a804d3": "Metadata",
+  "0dca3931d73e1f99": "Metadata and content",
+  "5d3f19596dca88b7": "Last heartbeat sent",
+  "1b21eadc9095e649": "Next heartbeat",
+  "2a9002e21acd34a9": "The exact bytes sent to Hanzo.",
+  "953da76b0bda1e66": "Sent once this desktop is linked.",
+  "078a870c03f3c24a": "Heartbeat body",
   "4cea6be0fe6be16f": "Could not load linked environments",
   "58cb9c075da185fb": "Loading linked environments…",
   "25b74062dc03079e": "No linked environments",
@@ -11795,6 +11829,7 @@
   "60c1b94543359858": "webhook automations offline queue mailbox hanzo connect",
   "9bebacdcfbde18d4": "mobile push notifications live activities cloud tunnel",
   "1c3e0ac06c8a1f1e": "connections server backend local remote access administrative permissions scope pairing links qr code authorized clients sessions revoke endpoint",
+  "0911cde8a1d4d5e5": "hanzo account link unlink desktop heartbeat providers reported usage revoke hanzo.app",
   "744fd34e8049efeb": "link peer another machine vps agents work there handoff pairing code",
   "705f7ce81a5996ef": "add pair backend host code ssh config agent tunnel saved hanzo connect",
   "cbf49f84e7f456e5": "Load balancing",
