@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	dev "github.com/hanzo-inc/dev/go"
+	dev "github.com/hanzoai/dev/go"
 )
 
 // tpl holds one recorded frame or entity for every shape the Adapter writes.

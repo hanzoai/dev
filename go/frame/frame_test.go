@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	dev "github.com/hanzo-inc/dev/go"
+	dev "github.com/hanzoai/dev/go"
 )
 
 // corpus writes every frame of TestChat, in the form of testdata/chat.jsonl,

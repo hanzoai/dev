@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	dev "github.com/hanzo-inc/dev/go"
+	dev "github.com/hanzoai/dev/go"
 )
 
 // prelude is what the loop is told a chat session is. There is no workspace,

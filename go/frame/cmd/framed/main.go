@@ -25,8 +25,8 @@ import (
 	"strings"
 	"sync"
 
-	dev "github.com/hanzo-inc/dev/go"
-	"github.com/hanzo-inc/dev/go/frame"
+	dev "github.com/hanzoai/dev/go"
+	"github.com/hanzoai/dev/go/frame"
 )
 
 func main() {

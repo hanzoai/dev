@@ -32,7 +32,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	dev "github.com/hanzo-inc/dev/go"
+	dev "github.com/hanzoai/dev/go"
 )
 
 // Effects is what the Adapter asks of the session layer.
