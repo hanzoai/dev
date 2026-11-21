@@ -2,6 +2,8 @@ import {
   type CloudChatAttachment,
   cloudChatServerConfig,
   createCloudChatController,
+  runInCloud,
+  type RunInCloudResult,
   type CloudChatController,
   type CloudChatModel,
   type CloudChatState,
@@ -34,6 +36,8 @@ export interface CloudChat {
   readonly renameThread: (key: string, title: string) => Promise<void>;
   readonly pinThread: (key: string, pinned: boolean) => Promise<void>;
   readonly deleteThread: (key: string) => Promise<void>;
+  /** Starts a cloud sandbox session (POST /v1/dev/sessions); the Dev section's Cloud row uses it. */
+  readonly runInCloud: () => Promise<RunInCloudResult>;
 }
 
 const getAuth = async () => ({
@@ -88,6 +92,7 @@ export function useCloudChat(): CloudChat {
       renameThread: chat.renameThread,
       pinThread: chat.pinThread,
       deleteThread: chat.deleteThread,
+      runInCloud: async () => runInCloud(await getAuth()),
     }),
     [chat, isSignedIn, state],
   );
