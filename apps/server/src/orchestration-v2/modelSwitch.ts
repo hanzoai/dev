@@ -4,8 +4,8 @@ import {
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2TurnItem,
 } from "@hanzodev/contracts";
-import { modelSelectionsEqual } from "@hanzodev/shared/model";
-import { runRanAfter } from "@hanzodev/shared/orchestrationV2ThreadError";
+import * as DateTime from "effect/DateTime";
+import { decide } from "./DevWasm.ts";
 
 /**
  * Clients hide pending queued messages, fold async answers into their question, and replace
@@ -32,24 +32,37 @@ export const anchorsModelSwitch = (run: ModelSwitchRun, shownMessageIds: Readonl
  * The model or effort change a new run brings, measured from the latest run the timeline shows
  * through its message or its handoff row, so consecutive dividers always chain. `baseline` stands
  * in when there is none, such as a fork's source run. Callers skip starts with a context handoff;
- * the handoff item already shows those.
+ * the handoff item already shows those. Decided by `dev.wasm`.
  */
 export function modelSwitchSince(
   projection: Pick<OrchestrationV2ThreadProjection, "runs" | "turnItems">,
   to: ModelSelection,
   baseline?: ModelSelection,
 ): Pick<Extract<OrchestrationV2TurnItem, { type: "user_message" }>, "modelSwitch"> {
-  const shown = new Set(
-    projection.turnItems.flatMap((item) =>
-      item.type === "user_message" && isShownUserMessageItem(item) ? [item.messageId] : [],
+  return decide("modelSwitch", {
+    runs: projection.runs.map((run) => ({
+      ordinal: run.ordinal,
+      status: run.status,
+      // Unfinished runs count as latest: `null`, as `runRanAfter` reads a missing completedAt.
+      completedAt: run.completedAt ? DateTime.toEpochMillis(run.completedAt) : null,
+      handoff: run.contextHandoffId !== null,
+      userMessageId: run.userMessageId,
+      modelSelection: run.modelSelection,
+    })),
+    items: projection.turnItems.flatMap((item) =>
+      item.type === "user_message"
+        ? [
+            {
+              messageId: item.messageId,
+              inputIntent: item.inputIntent,
+              status: item.status,
+              text: item.text,
+              attachments: item.attachments?.length ?? 0,
+            },
+          ]
+        : [],
     ),
-  );
-  let previous: ModelSwitchRun | undefined;
-  for (const run of projection.runs) {
-    // A wake shows as a notification, but its context handoff row still shows the swap.
-    if (!anchorsModelSwitch(run, shown)) continue;
-    if (previous === undefined || runRanAfter(run, previous)) previous = run;
-  }
-  const from = previous?.modelSelection ?? baseline;
-  return from === undefined || modelSelectionsEqual(from, to) ? {} : { modelSwitch: { from, to } };
+    to,
+    ...(baseline === undefined ? {} : { baseline }),
+  }) as Pick<Extract<OrchestrationV2TurnItem, { type: "user_message" }>, "modelSwitch">;
 }
