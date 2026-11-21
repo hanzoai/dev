@@ -7,5 +7,7 @@ export { DevThreadList } from "./DevThreadList";
 export { DevStart } from "./DevStart";
 export { DevWorkspace } from "./DevWorkspace";
 export { useDevOpen } from "./useDevOpen";
-export type { DevRuntime, DevRuntimeSource } from "./runtime";
+export type { DevCloud, DevEnvironment, DevRuntime, DevRuntimeSource } from "./runtime";
 export { focusComposer, focusThreadList } from "./focus";
+export { DevHome } from "./DevHome";
+export { useReplyModels } from "./useReplyModels";
