@@ -39,10 +39,9 @@ export function AttachProjectControl(props: {
             onClick={() => {
               void setProject({
                 environmentId: props.environmentId,
-                threadId: props.threadId,
-                projectId: project.id,
+                input: { threadId: props.threadId, projectId: project.id },
               }).then((result) => {
-                if (result._tag !== "Success") {
+                if (result._tag === "Failure") {
                   toastManager.add({
                     type: "error",
                     title: gt("Could not attach {project}", { project: project.title }),

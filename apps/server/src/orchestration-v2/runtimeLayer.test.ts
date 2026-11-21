@@ -11919,7 +11919,7 @@ it.layer(layerScratchPromotionTest)("turning a No project thread into a project"
           projectId: ProjectId.make("attach-no-such-project"),
         })
         .pipe(Effect.flip);
-      assert.include(missing.message, "cannot move to missing project");
+      assert.include(String(missing.cause), "cannot move to missing project");
     }),
   );
 

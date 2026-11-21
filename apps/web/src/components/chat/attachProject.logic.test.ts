@@ -9,7 +9,7 @@ const project = (id: string, extra: Record<string, unknown> = {}) =>
     title: id,
     workspaceRoot: `/work/${id}`,
     ...extra,
-  }) as never;
+  }) as { id: string; environmentId: string; title: string; workspaceRoot: string };
 
 describe("attachableProjects", () => {
   it("offers the environment's projects, never the scratch project, the current one or a deleted one", () => {
@@ -18,7 +18,7 @@ describe("attachableProjects", () => {
       project("app"),
       project("api"),
       project("gone", { deletedAt: "2026-01-01" }),
-      { ...project("other"), environmentId: "env-2" },
+      project("other", { environmentId: "env-2" }),
     ];
     const names = attachableProjects(projects as never, {
       environmentId: "env-1" as never,
