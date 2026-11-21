@@ -1,6 +1,7 @@
 import { m } from "../i18n/messages";
 import { thrownErrorMessage } from "@hanzodev/client-runtime/errors";
-import { useGT, useMessages } from "gt-react";
+import { msg, useGT, useMessages } from "gt-react";
+import { isLocalEngineInstanceId } from "@hanzodev/shared/localAi";
 import { ChildThreadApprovals } from "./chat/ChildThreadApprovals";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { sourceControlClients } from "@hanzodev/client-runtime/source-control-clients";
@@ -1516,6 +1517,14 @@ export default function ChatView(props: ChatViewProps) {
     isCompacting,
     runlessWorkStartedAt,
   });
+  // A local engine loads its model and reads the whole prompt before the first word: say so.
+  const localModelLoading =
+    isWorking &&
+    activeRuntime !== null &&
+    isLocalEngineInstanceId(String(activeRuntime.providerInstanceId)) &&
+    !(serverVisibleTurnItems ?? []).some(
+      ({ item }) => item.runId === activeRuntime.activeRunId && item.type !== "user_message",
+    );
   const activeContextWindow = deriveLatestContextWindowSnapshot(
     serverVisibleTurnItems ?? [],
     activeThreadLiveTokenUsage,
@@ -3511,7 +3520,13 @@ export default function ChatView(props: ChatViewProps) {
                   providerStartingLabel={
                     activeActivityRun?.providerStartingLabelMsg
                       ? messages(activeActivityRun.providerStartingLabelMsg)
-                      : null
+                      : localModelLoading
+                        ? messages(
+                            msg("Loading model…", {
+                              $context: "a local model is loading before its first reply",
+                            }),
+                          )
+                        : null
                   }
                   worktreeSetup={worktreeSetup}
                   onCancelWorktreeSetup={onCancelWorktreeSetupStable}

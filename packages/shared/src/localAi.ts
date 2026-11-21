@@ -267,6 +267,10 @@ export function localEngineInstanceId(engine: Pick<LocalEngine, "baseUrl">): str
   return `local_${new URL(engine.baseUrl).host.replace(/[^a-z0-9]+/giu, "_")}`;
 }
 
+/** Whether a provider instance is a local engine added through Local AI. */
+export const isLocalEngineInstanceId = (instanceId: string): boolean =>
+  instanceId.startsWith("local_");
+
 export function localEngineProviderInstance(status: LocalEngineStatus): {
   readonly displayName: string;
   readonly enabled: true;

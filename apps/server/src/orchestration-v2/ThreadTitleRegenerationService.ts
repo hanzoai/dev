@@ -11,6 +11,7 @@ import {
   TextGenerationError,
   type ThreadId,
 } from "@hanzodev/contracts";
+import { isLocalEngineInstanceId } from "@hanzodev/shared/localAi";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -218,6 +219,21 @@ const make = Effect.gen(function* () {
       const worktreeExists =
         worktreePath !== null &&
         (yield* fileSystem.exists(worktreePath).pipe(Effect.orElseSucceed(() => false)));
+      // A local engine has one set of cores, and a title is a second full agent prompt on it:
+      // the turn answers first, the title follows.
+      if (isLocalEngineInstanceId(String(settings.textGenerationModelSelection.instanceId))) {
+        yield* threads.getThreadRecords(input.threadId, []).pipe(
+          Effect.flatMap((records) =>
+            records.thread.activeRunId === null ? Effect.void : Effect.fail("running" as const),
+          ),
+          Effect.retry({
+            schedule: Schedule.spaced("1 second"),
+            times: 600,
+            while: (e) => e === "running",
+          }),
+          Effect.ignore,
+        );
+      }
       const result = yield* textGeneration.generateThreadTitle({
         cwd: worktreeExists ? worktreePath : project.value.workspaceRoot,
         message: context.message,

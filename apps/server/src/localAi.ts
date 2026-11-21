@@ -11,6 +11,7 @@
 import { AuthOrchestrationOperateScope } from "@hanzodev/contracts";
 import {
   BUILT_IN_LOCAL_ENGINES,
+  isLocalEngineInstanceId,
   probeLocalEngines,
   type LocalEngineStatus,
 } from "@hanzodev/shared/localAi";
@@ -25,6 +26,7 @@ import {
 } from "effect/http";
 
 import { authenticateRawRouteWithScope } from "./http.ts";
+import { ServerSettingsService } from "./serverSettings.ts";
 
 export const LOCAL_AI_MODELS_PATH = "/v1/local-ai/models";
 export const LOCAL_AI_CHAT_PATH = "/v1/local-ai/chat";
@@ -32,7 +34,9 @@ export const LOCAL_AI_CHAT_PATH = "/v1/local-ai/chat";
 /** Every engine that answers, in Local AI's order, with the models it serves. */
 export const onlineEngines = (): Promise<ReadonlyArray<LocalEngineStatus>> =>
   // Hanzo Engine starts on its first request and loads Metal shaders, so give it time.
-  probeLocalEngines(BUILT_IN_LOCAL_ENGINES, { timeoutMs: 30_000 }).then((all) => all.filter((s) => s.online));
+  probeLocalEngines(BUILT_IN_LOCAL_ENGINES, { timeoutMs: 30_000 }).then((all) =>
+    all.filter((s) => s.online),
+  );
 
 /** The `{data}` body of the models route: the first engine to serve an id owns it. */
 export function modelsBody(engines: ReadonlyArray<LocalEngineStatus>) {
@@ -120,7 +124,8 @@ const chatRoute = HttpRouter.add(
     if (upstream === null || upstream.body === null) {
       return json(502, { error: "the local engine did not answer" });
     }
-    if (!upstream.ok) return json(upstream.status, { error: "the local engine refused the request" });
+    if (!upstream.ok)
+      return json(upstream.status, { error: "the local engine refused the request" });
     return HttpServerResponse.stream(
       Stream.fromAsyncIterable(
         upstream.body as unknown as AsyncIterable<Uint8Array>,
@@ -135,4 +140,24 @@ const chatRoute = HttpRouter.add(
   }).pipe(Effect.catchTags(failures), Effect.withTracerEnabled(false)),
 );
 
-export const layer = Layer.mergeAll(modelsRoute, chatRoute);
+/**
+ * Hanzo Engine starts on its first request and then loads the model, so a user who added a local
+ * engine would wait for that on their first message. Ask once, shortly after the server is up.
+ */
+const warmEngine = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const settings = yield* ServerSettingsService;
+    yield* Effect.sleep("5 seconds").pipe(
+      Effect.andThen(settings.getSettings),
+      Effect.flatMap((all) =>
+        Object.keys(all.providerInstances ?? {}).some(isLocalEngineInstanceId)
+          ? Effect.promise(onlineEngines)
+          : Effect.void,
+      ),
+      Effect.ignore,
+      Effect.forkScoped,
+    );
+  }),
+);
+
+export const layer = Layer.mergeAll(modelsRoute, chatRoute, warmEngine);

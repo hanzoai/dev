@@ -3,6 +3,7 @@ import { tokenizeCliArgs } from "./cliArgs.ts";
 import {
   BUILT_IN_LOCAL_ENGINES,
   HANZOD_ENGINE_BASE_URL,
+  isLocalEngineInstanceId,
   LOCAL_PRIVATE_GROUP,
   parseEngineCatalog,
   localEngineAction,
@@ -286,5 +287,16 @@ describe("the engine catalog", () => {
       models: [{ id: "zen-eco-3b-agent", zen: true }],
     };
     expect(localEngineProviderInstance(status).displayName).toBe(LOCAL_PRIVATE_GROUP);
+  });
+});
+
+describe("isLocalEngineInstanceId", () => {
+  it("is true for engines added through Local AI and false for providers", () => {
+    expect(
+      isLocalEngineInstanceId(
+        localEngineInstanceId({ baseUrl: "http://127.0.0.1:3690/v1/engine" }),
+      ),
+    ).toBe(true);
+    expect(isLocalEngineInstanceId("codex")).toBe(false);
   });
 });
