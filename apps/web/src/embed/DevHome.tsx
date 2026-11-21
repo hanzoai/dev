@@ -1,4 +1,5 @@
-import { CheckIcon, CloudIcon, LaptopIcon } from "lucide-react";
+import { enhancePrompt, said } from "@hanzodev/client-runtime/cloud-chat";
+import { CheckIcon, CloudIcon, LaptopIcon, UserRoundIcon } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import ChatMarkdown from "../components/ChatMarkdown";
@@ -8,6 +9,7 @@ import { startI18n, whenLocaleReady } from "../i18n/runtime";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
 import { HomeComposer } from "./HomeComposer";
 import { useHomeChat } from "./homeChat";
+import { prepareTurn } from "./homeSend";
 import type { DevCloud, DevEnvironment } from "./runtime";
 
 let ready: Promise<unknown> | null = null;
@@ -56,7 +58,40 @@ function EnvironmentChip(props: {
   );
 }
 
+function PersonaChip(props: {
+  personas: ReadonlyArray<{ readonly name: string; readonly description: string | null; readonly emoji: string | null }>;
+  persona: string | null;
+  onPersona: (name: string | null) => void;
+}) {
+  if (props.personas.length === 0) return null;
+  return (
+    <Menu>
+      <MenuTrigger
+        data-testid="persona-chip"
+        className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+      >
+        <UserRoundIcon className="size-3.5" />
+        {props.persona ?? "Persona"}
+      </MenuTrigger>
+      <MenuPopup align="start" side="top">
+        <MenuItem onClick={() => props.onPersona(null)}>
+          <span>No persona</span>
+          {props.persona === null ? <CheckIcon className="ml-auto size-4" /> : null}
+        </MenuItem>
+        {props.personas.map((p) => (
+          <MenuItem key={p.name} onClick={() => props.onPersona(p.name)}>
+            <span>{p.emoji ? `${p.emoji} ` : ""}{p.name}</span>
+            {p.description ? <span className="ml-2 truncate text-xs opacity-60">{p.description}</span> : null}
+            {p.name === props.persona ? <CheckIcon className="ml-auto size-4" /> : null}
+          </MenuItem>
+        ))}
+      </MenuPopup>
+    </Menu>
+  );
+}
+
 function Home(props: DevHomeProps): ReactNode {
+  const [preparing, setPreparing] = useState<string | null>(null);
   const machine = props.environments.find((e) => e.id === props.environment && e.kind === "machine") ?? null;
   const chat = useHomeChat(props.cloud, machine);
   const { state, controller } = chat;
@@ -89,7 +124,7 @@ function Home(props: DevHomeProps): ReactNode {
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 py-6">
             {state.messages.map((m, i) => (
               <div key={i} className={m.role === "user" ? "self-end rounded-2xl bg-accent px-4 py-2" : ""}>
-                {m.role === "user" ? m.content : <ChatMarkdown text={m.content} cwd={undefined} />}
+                {m.role === "user" ? said(m.content).text || said(m.content).carried?.attached.map((f) => f.name).join(", ") : <ChatMarkdown text={m.content} cwd={undefined} />}
               </div>
             ))}
           </div>
@@ -105,23 +140,47 @@ function Home(props: DevHomeProps): ReactNode {
           sending={state.sending}
           disabledReason={null}
           onSelect={(model, effort) => controller.selectModel(model, effort)}
+          preparing={preparing}
+          onEnhance={chat.localSelected ? undefined : async (draft) =>
+            enhancePrompt({
+              auth: { accessToken: await props.cloud.token(), orgId: props.cloud.org ?? null },
+              prompt: draft,
+              model: state.model,
+              options: { baseUrl: props.cloud.api },
+            })
+          }
           onSend={(prompt, attachments) => {
             if (machine && props.onHandoff && props.mode === "dev" && !chat.localSelected) {
               props.onHandoff(machine, prompt);
               return;
             }
-            void controller.send(prompt, attachments);
+            void (async () => {
+              const auth = { accessToken: await props.cloud.token(), orgId: props.cloud.org ?? null };
+              const prepared = chat.localSelected
+                ? { prompt, attachments, turn: {} }
+                : await prepareTurn({
+                    auth,
+                    options: { baseUrl: props.cloud.api },
+                    prompt,
+                    attachments,
+                    history: state.messages,
+                    persona: await chat.personaRecord(),
+                    say: setPreparing,
+                  });
+              await controller.send(prepared.prompt, prepared.attachments, prepared.turn);
+            })();
           }}
         />
-        {props.mode === "dev" ? (
-          <div className="flex items-center gap-2 pt-1">
+        <div className="flex items-center gap-2 pt-1">
+          <PersonaChip personas={chat.personas} persona={chat.persona} onPersona={chat.selectPersona} />
+          {props.mode === "dev" ? (
             <EnvironmentChip
               environments={props.environments}
               environment={props.environment}
               onEnvironment={props.onEnvironment}
             />
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </div>
     </div>
   );

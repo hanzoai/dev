@@ -8,8 +8,10 @@ import {
 import { EnvironmentId, ProjectId, ThreadId, type ModelSelection } from "@hanzodev/contracts";
 import { scopeThreadRef } from "@hanzodev/client-runtime/environment";
 import { useAtomValue } from "@effect/atom-react";
-import { useMemo, useRef } from "react";
+import { SparklesIcon, Undo2Icon } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 
+import { Button } from "../components/ui/button";
 import { ChatComposer, type ChatComposerHandle } from "../components/chat/ChatComposer";
 import { ComposerSurface } from "../components/chat/ComposerSurface";
 import { useEnvironmentSettings } from "../hooks/useSettings";
@@ -44,7 +46,16 @@ export function HomeComposer(props: {
   disabledReason: string | null;
   onSelect: (model: string, effort: string | null) => void;
   onSend: (prompt: string, attachments: ReadonlyArray<CloudChatAttachment>) => void;
+  /** Rewrites the draft through the gateway; the sparkle shows only when the host can. */
+  onEnhance?: ((draft: string) => Promise<string>) | undefined;
+  /** Said under the composer while a send is being prepared (files uploading and being read). */
+  preparing?: string | null | undefined;
 }) {
+  const [enhance, setEnhance] = useState<{ busy: boolean; before: string | null; failed: boolean }>({
+    busy: false,
+    before: null,
+    failed: false,
+  });
   const settings = useEnvironmentSettings(CLOUD_ENVIRONMENT);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { resolvedTheme } = useTheme();
@@ -74,7 +85,24 @@ export function HomeComposer(props: {
   const select = useStableCallback((_instance: unknown, model: string) =>
     props.onSelect(model, null),
   );
+  const write = (next: string) => {
+    promptRef.current = next;
+    useComposerDraftStore.getState().setPrompt(HOME_DRAFT, next);
+    composerRef.current?.focusAtEnd();
+  };
+  const runEnhance = async () => {
+    const draft = promptRef.current;
+    if (!props.onEnhance || draft.trim() === "" || enhance.busy) return;
+    setEnhance({ busy: true, before: null, failed: false });
+    try {
+      write(await props.onEnhance(draft));
+      setEnhance({ busy: false, before: draft, failed: false });
+    } catch {
+      setEnhance({ busy: false, before: null, failed: true });
+    }
+  };
   return (
+    <>
     <ComposerSurface.Shell>
       <ComposerSurface.Host>
         <ChatComposer
@@ -175,5 +203,23 @@ export function HomeComposer(props: {
         />
       </ComposerSurface.Host>
     </ComposerSurface.Shell>
+    {props.onEnhance || props.preparing ? (
+      <div className="flex items-center gap-2 px-1 pt-1 text-xs text-muted-foreground" data-testid="composer-extras">
+        {props.onEnhance ? (
+          enhance.before !== null ? (
+            <Button type="button" variant="ghost" size="xs" data-testid="enhance-undo" onClick={() => { write(enhance.before!); setEnhance({ busy: false, before: null, failed: false }); }}>
+              <Undo2Icon className="size-3.5" /> Undo enhance
+            </Button>
+          ) : (
+            <Button type="button" variant="ghost" size="xs" data-testid="enhance" disabled={enhance.busy} aria-label="Enhance prompt" onClick={() => void runEnhance()}>
+              <SparklesIcon className="size-3.5" /> {enhance.busy ? "Enhancing…" : "Enhance"}
+            </Button>
+          )
+        ) : null}
+        {enhance.failed ? <span role="status">Could not enhance that. Try again.</span> : null}
+        {props.preparing ? <span role="status">{props.preparing}</span> : null}
+      </div>
+    ) : null}
+    </>
   );
 }
