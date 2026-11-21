@@ -77,9 +77,41 @@ const refreshOne = async (
   return status ? snapshots.map((s) => ({ ...s, status })) : snapshots;
 };
 
+/** The longest the panel waits for one provider; a slower reader keeps running and lands on a later refresh. */
+export const READ_BUDGET_MS = 20_000;
+
 /** Holds the last good snapshot per provider so a failed refresh never blanks the panel. */
-export const createUsageService = (env: UsageEnv, getSettings: () => UsageSettings) => {
+export const createUsageService = (
+  env: UsageEnv,
+  getSettings: () => UsageSettings,
+  budgetMs: number = READ_BUDGET_MS,
+) => {
   const last = new Map<string, ProviderSnapshot>();
+  const reading = new Map<string, Promise<ProviderSnapshot[]>>();
+
+  /** One read per provider at a time, so a slow provider never piles up processes. */
+  const budgeted = (
+    id: string,
+    start: () => Promise<ProviderSnapshot[]>,
+  ): Promise<ProviderSnapshot[]> => {
+    let read = reading.get(id);
+    if (!read) {
+      read = start().finally(() => reading.delete(id));
+      reading.set(id, read);
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<ProviderSnapshot[]>((resolve) => {
+      timer = setTimeout(() => {
+        const previous = [...last.values()].filter((s) => s.provider === id);
+        resolve(
+          previous.length > 0
+            ? previous.map((s) => ({ ...s, error: "Still updating; showing the last reading." }))
+            : [failure(env, id, "Still reading usage; this provider is slow to answer.")],
+        );
+      }, budgetMs);
+    });
+    return Promise.race([read, late]).finally(() => clearTimeout(timer));
+  };
   let notified: NotifyState = new Map();
   let cost: ReadonlyArray<CostDay> = [];
 
@@ -96,11 +128,13 @@ export const createUsageService = (env: UsageEnv, getSettings: () => UsageSettin
     );
     const fresh = await Promise.all(
       ids.map((id) =>
-        refreshOne(
-          env,
-          id,
-          host.local.filter((s) => s.provider === id),
-          host.instances.filter((i) => i.provider === id),
+        budgeted(id, () =>
+          refreshOne(
+            env,
+            id,
+            host.local.filter((s) => s.provider === id),
+            host.instances.filter((i) => i.provider === id),
+          ),
         ),
       ),
     );

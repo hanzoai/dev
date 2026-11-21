@@ -234,12 +234,10 @@ function unpack(bytes, name, into) {
 }
 
 {
+  const staged = NodePath.join(resourcesRoot, `hanzod${exeSuffix}`);
   const pin = runtimes.hanzod.targets[hanzodTarget];
-  if (pin === undefined) {
-    console.warn(
-      `[stage-tauri-resources] no pinned hanzod for ${hanzodTarget}; the app will use the one in ~/.hanzo/bin`,
-    );
-  } else {
+  const local = process.env.HANZOD_BINARY;
+  if (pin !== undefined) {
     const work = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "hanzo-hanzod-"));
     const asset = `hanzod-${hanzodTarget}.tar.gz`;
     unpack(
@@ -250,11 +248,18 @@ function unpack(bytes, name, into) {
       asset,
       work,
     );
-    const staged = NodePath.join(resourcesRoot, `hanzod${exeSuffix}`);
     NodeFS.copyFileSync(NodePath.join(work, `hanzod${exeSuffix}`), staged);
-    if (!isWindows) NodeFS.chmodSync(staged, 0o755);
     NodeFS.rmSync(work, { recursive: true, force: true });
+  } else if (local !== undefined) {
+    // A hanzod built from a hanzoai/node commit that has no release yet.
+    NodeChildProcess.execFileSync(local, ["--version"], { stdio: "ignore" });
+    NodeFS.copyFileSync(local, staged);
+  } else {
+    console.warn(
+      `[stage-tauri-resources] no pinned hanzod for ${hanzodTarget}; the app will run the backend itself unless ~/.hanzo/bin has one`,
+    );
   }
+  if (NodeFS.existsSync(staged) && !isWindows) NodeFS.chmodSync(staged, 0o755);
 }
 
 // Stage dereferenced runtime external node_modules via BFS from apps/server/package.json

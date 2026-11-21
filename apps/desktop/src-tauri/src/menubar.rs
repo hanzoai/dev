@@ -2,8 +2,7 @@
 //! `/v1/usage` from this app's own server; this module starts it, relays its actions, and
 //! stops it with the app (the helper exits when its stdin closes).
 
-use crate::auth::exchange_bootstrap_for_bearer_token;
-use crate::commands::AppState;
+use crate::commands::{local_bearer_token, AppState};
 use std::path::PathBuf;
 use std::process::Stdio;
 use tauri::{AppHandle, Emitter, Manager};
@@ -42,16 +41,11 @@ pub fn start(app: &AppHandle) {
     let Some(path) = helper_path(app) else { return };
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        let (url, secret) = {
-            let state = handle.state::<AppState>();
-            (
-                state.supervisor.config.http_base_url.clone(),
-                state.supervisor.config.bootstrap_secret.clone(),
-            )
-        };
+        let state = handle.state::<AppState>();
+        let url = state.supervisor.config.http_base_url.clone();
         // The backend takes a moment to come up; wait for its token before showing anything.
         let token = loop {
-            match exchange_bootstrap_for_bearer_token(&url, &secret).await {
+            match local_bearer_token(&state).await {
                 Ok(t) => break t,
                 Err(_) => tokio::time::sleep(std::time::Duration::from_secs(2)).await,
             }
