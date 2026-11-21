@@ -155,7 +155,9 @@ export const HanzoDriver: ProviderDriver<
       accentColor,
       environment: [
         ...(environment ?? []),
-        ...(hanzoCliBinary ? [{ name: "HANZO_BINARY", value: hanzoCliBinary, sensitive: false }] : []),
+        ...(hanzoCliBinary
+          ? [{ name: "HANZO_BINARY", value: hanzoCliBinary, sensitive: false }]
+          : []),
       ],
       enabled,
       config: codexCompatibleConfig,

@@ -3265,10 +3265,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "(이 페이지를 연 컴퓨터)"
-      ]
+      "c": [" ", "(이 페이지를 연 컴퓨터)"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3280,10 +3277,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· 실행하는 사람이 이 액세스 권한을 얻습니다"
-      ]
+      "c": [" ", "· 실행하는 사람이 이 액세스 권한을 얻습니다"]
     }
   ],
   "c54cc9c75db9dc58": "방금 시작한 로그인만 승인하세요.",
@@ -5702,7 +5696,7 @@
   "745a0b899008618c": "이전 턴을 불러올 수 없습니다. 다시 시도하세요.",
   "0061fff77e36bd4f": "서버에 연결할 수 없습니다.",
   "04dfdd46e3dd4a2e": "문제가 발생했습니다. 다시 시도하세요.",
-  "084bb2d8127a508d": "보냄",
+  "084bb2d8127a508d": "전송됨",
   "e7c59185f8ab3987": "보내지 않음",
   "77c01a15bd36d17c": "이 링크는 종료되었거나 유효하지 않습니다",
   "e0e736810f3cbef2": "소유자에게 새 링크를 요청하세요. 각 링크는 한 브라우저에서만 작동합니다.",
@@ -5857,7 +5851,7 @@
   "21b317f03b971065": "Manage local Qwen3+ weights on Ollama (:11434) and Embedded Hanzo Engine (:36900).",
   "79dced5bbe5f862b": "Checking local runtimes...",
   "7d6cdccf8dfa026e": "Ollama: {ollama} · Engine: {engine} · {count} models ready",
-  "6e4b9080250290c0": "online",
+  "6e4b9080250290c0": "온라인",
   "f0cdc6e629fe2c45": "offline",
   "83048c3039e7a7a8": "standby",
   "d538b37f5673980f": "Hanzo validator node (hanzod)",
@@ -8750,7 +8744,7 @@
   "78c2ce3f09bd84e7": "{identity}(으)로 연결됨 · 조직 {organization}",
   "c13b22597e78a057": "아직 하트비트가 없습니다.",
   "1bc7fc736e9abd61": "마지막 하트비트 {when}",
-  "3bb2cd5cac4a5f37": "Online",
+  "3bb2cd5cac4a5f37": "온라인",
   "6bc4837b05512820": "이 데스크톱 연결 해제",
   "b31564c6789f06ba": "이 데스크톱 이름",
   "5a8297a550da3a15": "연결된 소스",
@@ -8766,16 +8760,39 @@
   "96bf175f6b13f0fb": "이 데스크톱의 공급자",
   "a1c47d1a32f0e947": "보고할 공급자 없음",
   "0e36affc3afeb95e": "이 데스크톱 전용",
+  "1d367d06854b660c": "hanzo.app에서 사용 가능",
+  "c0d63258f3619fbf": "키를 추가할 수 없습니다",
+  "d0e25f266dd13543": "키 {label}을(를) 삭제할까요? Hanzo KMS에서 제거됩니다.",
+  "1603426f3a4ec576": "키를 삭제할 수 없습니다",
+  "83ea1465d91cdb34": "API 키",
+  "c2677ff17a80f4e9": "키 추가",
+  "8c27a62efa1b7e13": "키는 Hanzo KMS로 한 번만 전송됩니다. 이 데스크톱에는 저장되지 않습니다.",
+  "691c0b60e0c4b574": "레이블",
+  "7e060354b3b6e131": "키 추가",
+  "37b2c13302bf450e": "키를 불러올 수 없습니다",
+  "ad8e0884c4e9300e": "아직 키가 없습니다",
+  "da49b8271b9dffa0": "삭제",
+  "e52398e8716b9b75": "전송 내용을 변경할 수 없습니다",
   "12d0626b6f3e9852": "보고되는 내용",
   "b7ffb869e7c4cf6d": "수준",
-  "d15fe609aedb5c2e": "하트비트에는 공급자 상태만 담깁니다. 프롬프트, 파일, 토큰, 이메일은 포함되지 않습니다.",
+  "520291a50e009cb7": "하트비트와 사용량 보고서에는 공급자 상태와 토큰 수만 담깁니다. 프롬프트, 파일, 토큰, 이메일은 포함되지 않습니다.",
   "5f3c1a3638a804d3": "메타데이터",
   "0dca3931d73e1f99": "메타데이터 및 콘텐츠",
+  "d4d1a2aca4c51911": "아직 사용할 수 없음",
+  "b501891cf42dfb2d": "아무것도 보내지 않음",
+  "a517bb638615fed8": "사용량 보고서 전송을 중지합니다. 하트비트는 계속 이 데스크톱이 온라인임을 Hanzo에 알립니다.",
   "5d3f19596dca88b7": "마지막으로 보낸 하트비트",
   "1b21eadc9095e649": "다음 하트비트",
   "2a9002e21acd34a9": "Hanzo로 전송된 정확한 바이트입니다.",
   "953da76b0bda1e66": "이 데스크톱이 연결되면 전송됩니다.",
   "078a870c03f3c24a": "하트비트 본문",
+  "e5913d2e19ba1f97": "사용량 보고서",
+  "2b3325b96ebc82c5": "아직 작성된 사용량 보고서가 없습니다.",
+  "d8df14f9905f38eb": "전송됨",
+  "353b08f4363dbb2c": "대기 중",
+  "1cd46a826c6c9438": "거부됨",
+  "1bebe619daa19c9a": "더 새로운 보고서로 대체됨",
+  "bd6b453517b482a0": "최근 보고서 100개로, 전송 전에 기록된 그대로입니다. 실제로 전송된 바이트입니다.",
   "4cea6be0fe6be16f": "연결된 환경을 불러올 수 없습니다",
   "58cb9c075da185fb": "연결된 환경 불러오는 중…",
   "25b74062dc03079e": "연결된 환경 없음",
@@ -11301,6 +11318,8 @@
   "ffc409b277d1e0ea": "One merged icon for the busiest provider, or one reading per provider.",
   "2f8f985531c0c748": "Merged",
   "63010469accecd20": "Per provider",
+  "e7baa5c56d0d70d6": "Show usage in menu bar",
+  "424eb8d60841f1f9": "Put the reading beside the icon. Off, the menu bar shows only the icon.",
   "f23ed52e972230e9": "Alert thresholds",
   "ae6b371e88fcba56": "A notification fires the first time a window crosses each percentage.",
   "8fd325178eeb43a7": "Reads the local sign-in this tool already has.",

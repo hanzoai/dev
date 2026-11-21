@@ -97,3 +97,59 @@ export class DesktopLinkError extends Schema.TaggedError<DesktopLinkError>()("De
   message: Schema.String,
   cause: Schema.optionalKey(Schema.Defect()),
 }) {}
+
+export const DesktopOutboxState = Schema.Literals(["pending", "sent", "superseded", "rejected"]);
+
+/** One usage report, as written to the local outbox before it is sent. `body` is the sent JSON. */
+export const DesktopOutboxBatch = Schema.Struct({
+  seq: Schema.Number,
+  at: IsoDateTime,
+  state: DesktopOutboxState,
+  body: Schema.String,
+});
+
+export const DesktopOutbox = Schema.Struct({
+  sendNothing: Schema.Boolean,
+  /** The newest batches first, at most 100. */
+  batches: Schema.Array(DesktopOutboxBatch),
+});
+export type DesktopOutbox = typeof DesktopOutbox.Type;
+
+export const DesktopSendNothingInput = Schema.Struct({ sendNothing: Schema.Boolean });
+
+/** Providers a user can hold an API key for (HIP-1350 Provider policy). */
+export const API_KEY_PROVIDERS = [
+  "anthropic",
+  "openai",
+  "gemini",
+  "xai",
+  "openrouter",
+  "opencode",
+  "kiro",
+] as const;
+
+export const ProviderRouteClass = Schema.Literals(["local", "desktop", "key"]);
+export type ProviderRouteClass = typeof ProviderRouteClass.Type;
+
+export const ProviderAccount = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  provider: TrimmedNonEmptyString,
+  kind: Schema.Literal("key"),
+  label: Schema.String,
+  /** First 8 hex of the sha256 of the key. The value itself is never returned. */
+  fingerprint: Schema.String,
+  created: IsoDateTime,
+  route: ProviderRouteClass,
+});
+export type ProviderAccount = typeof ProviderAccount.Type;
+
+export const ProviderAccountListResult = Schema.Struct({ accounts: Schema.Array(ProviderAccount) });
+
+export const ProviderAccountAddInput = Schema.Struct({
+  provider: Schema.Literals(API_KEY_PROVIDERS),
+  label: TrimmedNonEmptyString.check(Schema.isMaxLength(120)),
+  /** Sent to Hanzo KMS once; this desktop never stores it. */
+  value: TrimmedNonEmptyString.check(Schema.isMaxLength(4096)),
+});
+
+export const ProviderAccountRemoveInput = Schema.Struct({ id: TrimmedNonEmptyString });

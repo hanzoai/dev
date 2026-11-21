@@ -21,6 +21,16 @@ export function createDesktopEnvironmentAtoms<R, E>(
     // Listing asks Hanzo, so a list stays fresh briefly.
     staleTimeMs: 10_000,
   });
+  const outbox = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:desktops:outbox",
+    tag: WS_METHODS.desktopsOutbox,
+    staleTimeMs: 5_000,
+  });
+  const accounts = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:provider-accounts:list",
+    tag: WS_METHODS.providerAccountsList,
+    staleTimeMs: 10_000,
+  });
   const refresh = (
     { environmentId }: { readonly environmentId: EnvironmentId },
     registry: AtomRegistry.AtomRegistry,
@@ -28,10 +38,32 @@ export function createDesktopEnvironmentAtoms<R, E>(
     Effect.sync(() => {
       registry.refresh(status({ environmentId, input: {} }));
       registry.refresh(list({ environmentId, input: {} }));
+      registry.refresh(outbox({ environmentId, input: {} }));
     });
+  const refreshAccounts = (
+    { environmentId }: { readonly environmentId: EnvironmentId },
+    registry: AtomRegistry.AtomRegistry,
+  ) => Effect.sync(() => registry.refresh(accounts({ environmentId, input: {} })));
   return {
     status,
     list,
+    outbox,
+    accounts,
+    setSendNothing: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:desktops:set-send-nothing",
+      tag: WS_METHODS.desktopsSetSendNothing,
+      onSuccess: refresh,
+    }),
+    addAccount: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:provider-accounts:add",
+      tag: WS_METHODS.providerAccountsAdd,
+      onSuccess: refreshAccounts,
+    }),
+    removeAccount: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:provider-accounts:remove",
+      tag: WS_METHODS.providerAccountsRemove,
+      onSuccess: refreshAccounts,
+    }),
     link: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:desktops:link",
       tag: WS_METHODS.desktopsLink,

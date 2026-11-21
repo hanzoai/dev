@@ -18,7 +18,24 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ExternalLauncher from "../process/externalLauncher.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
 
+// The sign-in endpoints come from the login host's discovery document.
+const DISCOVERY_DOCUMENT = JSON.stringify({
+  issuer: "https://iam.example.test",
+  authorization_endpoint: "https://iam.example.test/oauth/authorize",
+  token_endpoint: "https://iam.example.test/oauth/token",
+  jwks_uri: "https://iam.example.test/.well-known/jwks",
+  device_authorization_endpoint: "https://iam.example.test/oauth/device",
+});
+
+const withDiscovery = (handle: Parameters<typeof HttpClient.make>[0]) =>
+  HttpClient.make((request, ...rest) =>
+    request.url.endsWith("/.well-known/openid-configuration")
+      ? Effect.succeed(HttpClientResponse.fromWeb(request, new Response(DISCOVERY_DOCUMENT)))
+      : handle(request, ...rest),
+  );
+
 const TEST_ENV = {
+  HANZO_DEV_LOGIN_URL: "https://login.example.test",
   HANZO_DEV_IAM_ISSUER: "https://iam.example.test",
   HANZO_DEV_IAM_CLIENT_ID: "oauth_client_test",
   HANZO_DEV_HOSTED_APP_URL: "https://hosted.example.test",
@@ -83,7 +100,7 @@ const tokenGranted = {
 const layerDeviceFlow = (server: DeviceFlowServer) =>
   Layer.succeed(
     HttpClient.HttpClient,
-    HttpClient.make((request) =>
+    withDiscovery((request) =>
       Effect.sync(() => {
         const body =
           request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : "";
@@ -142,7 +159,7 @@ it.effect(
       const releasePersist = yield* Deferred.make<void>();
       let stored = expiredStoredToken;
       let reads = 0;
-      const httpClient = HttpClient.make((request) =>
+      const httpClient = withDiscovery((request) =>
         Effect.gen(function* () {
           yield* Deferred.succeed(requestStarted, undefined);
           yield* Deferred.await(releaseRequest);
@@ -231,7 +248,7 @@ it.effect.each([
       assert.isTrue(yield* manager.hasCredential);
     }).pipe(
       provideRefreshManager(
-        HttpClient.make((request) =>
+        withDiscovery((request) =>
           Effect.succeed(
             HttpClientResponse.fromWeb(
               request,

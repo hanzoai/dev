@@ -24,6 +24,10 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.desktopsUnlink]: AuthRelayWriteScope,
   [WS_METHODS.desktopsRename]: AuthRelayWriteScope,
   [WS_METHODS.desktopsRevoke]: AuthRelayWriteScope,
+  [WS_METHODS.desktopsSetSendNothing]: AuthRelayWriteScope,
+  // A key goes to Hanzo KMS under the signed-in user, so adding or removing one needs the link grant.
+  [WS_METHODS.providerAccountsAdd]: AuthRelayConfigureScope,
+  [WS_METHODS.providerAccountsRemove]: AuthRelayConfigureScope,
   [WS_METHODS.providerAuthRemoveMethod]: AuthProvidersManageScope,
   [WS_METHODS.previewClose]: AuthPreviewOperateScope,
   // Stopping a server signals its processes, as closing a terminal does.

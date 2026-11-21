@@ -55,6 +55,9 @@ const DEFAULT_HANZO_IAM_BRAND: HanzoIamBrandConfig = HANZO_IAM_BRANDS[0]!;
 export const DEFAULT_HANZO_IAM_ISSUER = DEFAULT_HANZO_IAM_BRAND.issuer;
 export const DEFAULT_HANZO_IAM_CLIENT_ID = DEFAULT_HANZO_IAM_BRAND.clientId;
 export const DEFAULT_HANZO_RELAY_URL = "https://relay.dev.hanzo.ai";
+/** Sign-in and billing live here; it publishes the identity provider's discovery document. */
+export const DEFAULT_HANZO_LOGIN_URL = "https://hanzo.ai";
+export const HANZO_LOGIN_PATH = "/login";
 export const DEFAULT_HANZO_API_BASE_URL = "https://api.hanzo.ai";
 export const HANZO_BILLING_PORTAL_URL = "https://billing.hanzo.ai";
 const HANZO_IAM_OAUTH_SCOPES = ["openid", "profile", "email", "offline_access"] as const;
@@ -255,9 +258,12 @@ export function resolveIamEndpoints(
   };
   const pending = (async () => {
     try {
-      const response = await fetchImpl(new URL("/.well-known/openid-configuration", origin).toString(), {
-        headers: { Accept: "application/json" },
-      });
+      const response = await fetchImpl(
+        new URL("/.well-known/openid-configuration", origin).toString(),
+        {
+          headers: { Accept: "application/json" },
+        },
+      );
       if (!response.ok) return classic;
       const doc = (await response.json()) as Record<string, unknown>;
       const token = typeof doc.token_endpoint === "string" ? doc.token_endpoint : null;

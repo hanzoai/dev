@@ -1,4 +1,10 @@
-import { EnvironmentId, type Desktop, type DesktopLinkStatus } from "@hanzodev/contracts";
+import {
+  EnvironmentId,
+  type Desktop,
+  type DesktopLinkStatus,
+  type DesktopOutbox,
+  type ProviderAccount,
+} from "@hanzodev/contracts";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
@@ -12,6 +18,8 @@ const environmentId = EnvironmentId.make("mac");
 const mocks = vi.hoisted(() => ({
   statusAtom: null as unknown,
   listAtom: null as unknown,
+  outboxAtom: null as unknown,
+  accountsAtom: null as unknown,
   calls: [] as Array<{ readonly label: string; readonly value: unknown }>,
   account: null as unknown,
 }));
@@ -28,6 +36,11 @@ vi.mock(import("~/state/desktops"), async () => {
     desktopEnvironment: {
       status: () => mocks.statusAtom,
       list: () => mocks.listAtom,
+      outbox: () => mocks.outboxAtom,
+      accounts: () => mocks.accountsAtom,
+      setSendNothing: command("setSendNothing"),
+      addAccount: command("addAccount"),
+      removeAccount: command("removeAccount"),
       link: command("link"),
       unlink: command("unlink"),
       rename: command("rename"),
@@ -45,7 +58,6 @@ vi.mock(import("~/state/use-atom-command"), () => ({
 
 vi.mock(import("~/cloud/hanzoWebAuth"), () => ({
   useAuth: (() => ({ getToken: () => Promise.resolve("web-token") })) as never,
-  useHanzoSession: (() => ({ openSignIn: () => {} })) as never,
   useHanzoWebAccounts: (() => ({ activeAccount: mocks.account })) as never,
 }));
 
@@ -77,7 +89,16 @@ const base: DesktopLinkStatus = {
   report: { body, sent: false },
 };
 
-function setup(status: DesktopLinkStatus, desktops: ReadonlyArray<Desktop> = []) {
+const usageBody = '{\n  "version": 1,\n  "deviceId": "src_1"\n}';
+
+function setup(
+  status: DesktopLinkStatus,
+  desktops: ReadonlyArray<Desktop> = [],
+  outbox: DesktopOutbox = { sendNothing: false, batches: [] },
+  accounts: ReadonlyArray<ProviderAccount> = [],
+) {
+  mocks.outboxAtom = Atom.make(AsyncResult.success(outbox));
+  mocks.accountsAtom = Atom.make(AsyncResult.success({ accounts }));
   mocks.statusAtom = Atom.make(AsyncResult.success(status));
   mocks.listAtom = Atom.make(AsyncResult.success({ desktops }));
   mocks.calls = [];
@@ -120,5 +141,62 @@ describe("LinkedDesktopSettings", () => {
     ]);
     await userEvent.click(screen.getByRole("button", { name: "Unlink this desktop" }));
     expect(mocks.calls.at(-1)).toEqual({ label: "unlink", value: { environmentId, input: {} } });
+  });
+
+  it("shows the outbox bytes, a disabled content level, and Send nothing", async () => {
+    setup({ ...base, desktop: thisDesktop, report: { body, sent: true } }, [thisDesktop], {
+      sendNothing: false,
+      batches: [{ seq: 1, at: "2026-11-20T10:00:00.000Z", state: "sent", body: usageBody }],
+    });
+    await using screen = await render(<LinkedDesktopSettings />);
+    await expect.element(screen.getByText(/2026-11-20T10:00:00.000Z · Sent/)).toBeVisible();
+    await expect
+      .element(screen.getByRole("radio", { name: "Metadata and content" }))
+      .toBeDisabled();
+    await userEvent.click(screen.getByRole("switch", { name: "Send nothing" }));
+    expect(mocks.calls).toEqual([
+      { label: "setSendNothing", value: { environmentId, input: { sendNothing: true } } },
+    ]);
+  });
+
+  it("adds a key, clears the field at once, and lists only the label and fingerprint", async () => {
+    setup(
+      { ...base, desktop: thisDesktop, report: { body, sent: true } },
+      [thisDesktop],
+      undefined,
+      [
+        {
+          id: "acc_1",
+          provider: "anthropic",
+          kind: "key",
+          label: "work",
+          fingerprint: "deadbeef",
+          created: "2026-11-20T10:00:00Z",
+          route: "key",
+        },
+      ],
+    );
+    await using screen = await render(<LinkedDesktopSettings />);
+    await expect.element(screen.getByText("Anthropic · …beef")).toBeVisible();
+    const label = screen.getByRole("textbox", { name: "Label" });
+    await userEvent.fill(label, "home");
+    const key = screen.getByLabelText("API key", { exact: true });
+    await userEvent.fill(key, "sk-secret-value");
+    await userEvent.click(screen.getByRole("button", { name: "Add key" }));
+    expect(mocks.calls).toEqual([
+      {
+        label: "addAccount",
+        value: {
+          environmentId,
+          input: { provider: "anthropic", label: "home", value: "sk-secret-value" },
+        },
+      },
+    ]);
+    await expect.element(key).toHaveValue("");
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(mocks.calls.at(-1)).toEqual({
+      label: "removeAccount",
+      value: { environmentId, input: { id: "acc_1" } },
+    });
   });
 });

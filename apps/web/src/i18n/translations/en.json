@@ -3269,10 +3269,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "on the computer that opened this page"
-      ]
+      "c": [" ", "on the computer that opened this page"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3284,10 +3281,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· whoever runs it gets this access"
-      ]
+      "c": [" ", "· whoever runs it gets this access"]
     }
   ],
   "c54cc9c75db9dc58": "Only approve a sign-in you just started.",
@@ -8816,16 +8810,39 @@
   "96bf175f6b13f0fb": "Providers on this desktop",
   "a1c47d1a32f0e947": "No providers to report",
   "0e36affc3afeb95e": "This desktop only",
+  "1d367d06854b660c": "Available on hanzo.app",
+  "c0d63258f3619fbf": "Could not add the key",
+  "d0e25f266dd13543": "Delete the key {label}? It is removed from Hanzo KMS.",
+  "1603426f3a4ec576": "Could not delete the key",
+  "83ea1465d91cdb34": "API keys",
+  "c2677ff17a80f4e9": "Add a key",
+  "8c27a62efa1b7e13": "The key goes to Hanzo KMS once. This desktop does not keep it.",
+  "691c0b60e0c4b574": "Label",
+  "7e060354b3b6e131": "Add key",
+  "37b2c13302bf450e": "Could not load your keys",
+  "ad8e0884c4e9300e": "No keys yet",
+  "da49b8271b9dffa0": "Delete",
+  "e52398e8716b9b75": "Could not change what is sent",
   "12d0626b6f3e9852": "What is reported",
   "b7ffb869e7c4cf6d": "Level",
-  "d15fe609aedb5c2e": "Heartbeats carry provider state only: no prompts, files, tokens or emails.",
+  "520291a50e009cb7": "Heartbeats and usage reports carry provider state and token counts only: no prompts, files, tokens or emails.",
   "5f3c1a3638a804d3": "Metadata",
   "0dca3931d73e1f99": "Metadata and content",
+  "d4d1a2aca4c51911": "not available yet",
+  "b501891cf42dfb2d": "Send nothing",
+  "a517bb638615fed8": "Stop sending usage reports. Heartbeats still tell Hanzo this desktop is online.",
   "5d3f19596dca88b7": "Last heartbeat sent",
   "1b21eadc9095e649": "Next heartbeat",
   "2a9002e21acd34a9": "The exact bytes sent to Hanzo.",
   "953da76b0bda1e66": "Sent once this desktop is linked.",
   "078a870c03f3c24a": "Heartbeat body",
+  "e5913d2e19ba1f97": "Usage reports",
+  "2b3325b96ebc82c5": "No usage report has been written yet.",
+  "d8df14f9905f38eb": "Sent",
+  "353b08f4363dbb2c": "Pending",
+  "1cd46a826c6c9438": "Refused",
+  "1bebe619daa19c9a": "Replaced by a newer report",
+  "bd6b453517b482a0": "The last 100 reports, as written before sending. These are the bytes that left.",
   "4cea6be0fe6be16f": "Could not load linked environments",
   "58cb9c075da185fb": "Loading linked environments…",
   "25b74062dc03079e": "No linked environments",
@@ -11365,6 +11382,8 @@
   "ffc409b277d1e0ea": "One merged icon for the busiest provider, or one reading per provider.",
   "2f8f985531c0c748": "Merged",
   "63010469accecd20": "Per provider",
+  "e7baa5c56d0d70d6": "Show usage in menu bar",
+  "424eb8d60841f1f9": "Put the reading beside the icon. Off, the menu bar shows only the icon.",
   "f23ed52e972230e9": "Alert thresholds",
   "ae6b371e88fcba56": "A notification fires the first time a window crosses each percentage.",
   "8fd325178eeb43a7": "Reads the local sign-in this tool already has.",

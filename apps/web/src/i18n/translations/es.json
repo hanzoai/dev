@@ -3269,10 +3269,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "en el ordenador que abrió esta página"
-      ]
+      "c": [" ", "en el ordenador que abrió esta página"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3284,10 +3281,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· quien lo ejecute obtiene este acceso"
-      ]
+      "c": [" ", "· quien lo ejecute obtiene este acceso"]
     }
   ],
   "c54cc9c75db9dc58": "Aprueba solo un inicio de sesión que acabes de iniciar.",
@@ -5876,7 +5870,7 @@
   "21b317f03b971065": "Manage local Qwen3+ weights on Ollama (:11434) and Embedded Hanzo Engine (:36900).",
   "79dced5bbe5f862b": "Checking local runtimes...",
   "7d6cdccf8dfa026e": "Ollama: {ollama} · Engine: {engine} · {count} models ready",
-  "6e4b9080250290c0": "online",
+  "6e4b9080250290c0": "en línea",
   "f0cdc6e629fe2c45": "offline",
   "83048c3039e7a7a8": "standby",
   "d538b37f5673980f": "Hanzo validator node (hanzod)",
@@ -8790,7 +8784,7 @@
   "78c2ce3f09bd84e7": "Vinculado como {identity} · org. {organization}",
   "c13b22597e78a057": "Aún no hay latido.",
   "1bc7fc736e9abd61": "Último latido {when}",
-  "3bb2cd5cac4a5f37": "Online",
+  "3bb2cd5cac4a5f37": "En línea",
   "6bc4837b05512820": "Desvincular este escritorio",
   "b31564c6789f06ba": "Nombre de este escritorio",
   "5a8297a550da3a15": "Tus fuentes vinculadas",
@@ -8806,16 +8800,39 @@
   "96bf175f6b13f0fb": "Proveedores en este escritorio",
   "a1c47d1a32f0e947": "Sin proveedores que informar",
   "0e36affc3afeb95e": "Solo este escritorio",
+  "1d367d06854b660c": "Disponible en hanzo.app",
+  "c0d63258f3619fbf": "No se pudo añadir la clave",
+  "d0e25f266dd13543": "¿Eliminar la clave {label}? Se quita de Hanzo KMS.",
+  "1603426f3a4ec576": "No se pudo eliminar la clave",
+  "83ea1465d91cdb34": "Claves de API",
+  "c2677ff17a80f4e9": "Añadir una clave",
+  "8c27a62efa1b7e13": "La clave se envía una vez a Hanzo KMS. Este escritorio no la conserva.",
+  "691c0b60e0c4b574": "Etiqueta",
+  "7e060354b3b6e131": "Añadir clave",
+  "37b2c13302bf450e": "No se pudieron cargar tus claves",
+  "ad8e0884c4e9300e": "Aún no hay claves",
+  "da49b8271b9dffa0": "Eliminar",
+  "e52398e8716b9b75": "No se pudo cambiar lo que se envía",
   "12d0626b6f3e9852": "Qué se informa",
   "b7ffb869e7c4cf6d": "Nivel",
-  "d15fe609aedb5c2e": "Los latidos solo llevan el estado del proveedor: sin prompts, archivos, tokens ni correos.",
+  "520291a50e009cb7": "Los latidos y los informes de uso solo llevan el estado del proveedor y recuentos de tokens: sin prompts, archivos, tokens ni correos.",
   "5f3c1a3638a804d3": "Metadatos",
   "0dca3931d73e1f99": "Metadatos y contenido",
+  "d4d1a2aca4c51911": "aún no disponible",
+  "b501891cf42dfb2d": "No enviar nada",
+  "a517bb638615fed8": "Dejar de enviar informes de uso. Los latidos siguen indicando a Hanzo que este escritorio está en línea.",
   "5d3f19596dca88b7": "Último latido enviado",
   "1b21eadc9095e649": "Próximo latido",
   "2a9002e21acd34a9": "Los bytes exactos enviados a Hanzo.",
   "953da76b0bda1e66": "Se envía cuando este escritorio esté vinculado.",
   "078a870c03f3c24a": "Cuerpo del latido",
+  "e5913d2e19ba1f97": "Informes de uso",
+  "2b3325b96ebc82c5": "Aún no se ha escrito ningún informe de uso.",
+  "d8df14f9905f38eb": "Enviado",
+  "353b08f4363dbb2c": "Pendiente",
+  "1cd46a826c6c9438": "Rechazado",
+  "1bebe619daa19c9a": "Sustituido por un informe más reciente",
+  "bd6b453517b482a0": "Los últimos 100 informes, tal como se escribieron antes de enviarlos. Son los bytes que salieron.",
   "4cea6be0fe6be16f": "No se pudieron cargar los entornos vinculados",
   "58cb9c075da185fb": "Cargando entornos vinculados…",
   "25b74062dc03079e": "No hay entornos vinculados",
@@ -11350,6 +11367,8 @@
   "ffc409b277d1e0ea": "One merged icon for the busiest provider, or one reading per provider.",
   "2f8f985531c0c748": "Merged",
   "63010469accecd20": "Per provider",
+  "e7baa5c56d0d70d6": "Show usage in menu bar",
+  "424eb8d60841f1f9": "Put the reading beside the icon. Off, the menu bar shows only the icon.",
   "f23ed52e972230e9": "Alert thresholds",
   "ae6b371e88fcba56": "A notification fires the first time a window crosses each percentage.",
   "8fd325178eeb43a7": "Reads the local sign-in this tool already has.",

@@ -438,6 +438,11 @@ const pollDeviceToken = Effect.fn("cloud.cli_token.poll_device_token")(function*
 export const deviceAuthorizationLogin = Effect.fn("cloud.cli_token.device_authorization_login")(
   function* <E, R>(showPrompt: (prompt: DeviceAuthorizationPrompt) => Effect.Effect<void, E, R>) {
     const metadata = yield* cloudCliOAuthConfig;
+    if (metadata.deviceAuthorizationEndpoint === null) {
+      return yield* new CloudCliAuthorizationError({
+        cause: "Hanzo's sign-in configuration names no device authorization endpoint.",
+      });
+    }
     const httpClient = (yield* HttpClient.HttpClient).pipe(HttpClient.filterStatusOk);
     const authorization = yield* HttpClientRequest.post(metadata.deviceAuthorizationEndpoint).pipe(
       HttpClientRequest.bodyUrlParams({

@@ -1,4 +1,7 @@
 import { assert, it } from "@effect/vitest";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
+import * as Layer from "effect/Layer";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
@@ -37,18 +40,74 @@ it.effect("rejects malformed or insecure hosted app URLs", () =>
   }),
 );
 
-it.effect("defaults CLI OAuth endpoints to native Hanzo IAM", () =>
-  Effect.gen(function* () {
-    const config = yield* makeCloudCliOAuthConfig().pipe(provideEnv({}));
+const discoveryClient = (
+  requests: Array<string>,
+  document: Readonly<Record<string, string>> | null,
+) =>
+  Layer.succeed(
+    HttpClient.HttpClient,
+    HttpClient.make((request) =>
+      Effect.sync(() => {
+        requests.push(request.url);
+        return HttpClientResponse.fromWeb(
+          request,
+          new Response(document === null ? "" : JSON.stringify(document), {
+            status: document === null ? 503 : 200,
+          }),
+        );
+      }),
+    ),
+  );
 
+it.effect("takes CLI OAuth endpoints from the login host's discovery document", () =>
+  Effect.gen(function* () {
+    const requests: Array<string> = [];
+    const config = yield* makeCloudCliOAuthConfig().pipe(
+      provideEnv({ HANZO_DEV_LOGIN_URL: "https://login.example.test" }),
+      Effect.provide(
+        discoveryClient(requests, {
+          issuer: "https://identity.example.test",
+          authorization_endpoint: "https://identity.example.test/authorize-here",
+          token_endpoint: "https://tokens.example.test/exchange",
+          jwks_uri: "https://identity.example.test/keys",
+          device_authorization_endpoint: "https://tokens.example.test/device-start",
+        }),
+      ),
+    );
+
+    assert.deepEqual(requests, ["https://login.example.test/.well-known/openid-configuration"]);
     assert.deepEqual(config, {
-      tokenEndpoint: "https://hanzo.id/oauth/token",
-      deviceAuthorizationEndpoint: "https://hanzo.id/oauth/device",
+      tokenEndpoint: "https://tokens.example.test/exchange",
+      deviceAuthorizationEndpoint: "https://tokens.example.test/device-start",
       clientId: "hanzo-app",
       loopbackPort: 34338,
       redirectUri: "http://127.0.0.1:34338/callback",
       scopes: ["openid", "profile", "email", "offline_access"],
     });
+  }),
+);
+
+it.effect("fails closed when discovery is unreachable or names a non-HTTPS endpoint", () =>
+  Effect.gen(function* () {
+    const unreachable = yield* makeCloudCliOAuthConfig().pipe(
+      provideEnv({ HANZO_DEV_LOGIN_URL: "https://down.example.test" }),
+      Effect.provide(discoveryClient([], null)),
+      Effect.flip,
+    );
+    assert.equal(unreachable._tag, "IamDiscoveryError");
+    const insecure = yield* makeCloudCliOAuthConfig().pipe(
+      provideEnv({ HANZO_DEV_LOGIN_URL: "https://insecure.example.test" }),
+      Effect.provide(
+        discoveryClient([], {
+          issuer: "https://identity.example.test",
+          authorization_endpoint: "https://identity.example.test/a",
+          token_endpoint: "http://identity.example.test/t",
+          jwks_uri: "https://identity.example.test/k",
+        }),
+      ),
+      Effect.flip,
+    );
+    assert.equal(insecure._tag, "IamDiscoveryError");
   }),
 );
 

@@ -19,6 +19,12 @@ import {
 import {
   DesktopLinkError,
   DesktopLinkInput,
+  DesktopOutbox,
+  DesktopSendNothingInput,
+  ProviderAccount,
+  ProviderAccountAddInput,
+  ProviderAccountListResult,
+  ProviderAccountRemoveInput,
   DesktopLinkStatus,
   DesktopListResult,
   DesktopOk,
@@ -607,6 +613,11 @@ export const WS_METHODS = {
   desktopsRename: "desktops.rename",
   desktopsList: "desktops.list",
   desktopsRevoke: "desktops.revoke",
+  desktopsOutbox: "desktops.outbox",
+  desktopsSetSendNothing: "desktops.setSendNothing",
+  providerAccountsList: "providerAccounts.list",
+  providerAccountsAdd: "providerAccounts.add",
+  providerAccountsRemove: "providerAccounts.remove",
 
   pullRequestsList: "pullRequests.list",
   pullRequestsListStats: "pullRequests.listStats",
@@ -1145,6 +1156,36 @@ const WsDesktopsListRpc = Rpc.make(WS_METHODS.desktopsList, {
 
 const WsDesktopsRevokeRpc = Rpc.make(WS_METHODS.desktopsRevoke, {
   payload: DesktopRevokeInput,
+  success: DesktopOk,
+  error: desktopsError,
+});
+
+const WsDesktopsOutboxRpc = Rpc.make(WS_METHODS.desktopsOutbox, {
+  payload: Schema.Struct({}),
+  success: DesktopOutbox,
+  error: desktopsError,
+});
+
+const WsDesktopsSetSendNothingRpc = Rpc.make(WS_METHODS.desktopsSetSendNothing, {
+  payload: DesktopSendNothingInput,
+  success: DesktopOutbox,
+  error: desktopsError,
+});
+
+const WsProviderAccountsListRpc = Rpc.make(WS_METHODS.providerAccountsList, {
+  payload: Schema.Struct({}),
+  success: ProviderAccountListResult,
+  error: desktopsError,
+});
+
+const WsProviderAccountsAddRpc = Rpc.make(WS_METHODS.providerAccountsAdd, {
+  payload: ProviderAccountAddInput,
+  success: ProviderAccount,
+  error: desktopsError,
+});
+
+const WsProviderAccountsRemoveRpc = Rpc.make(WS_METHODS.providerAccountsRemove, {
+  payload: ProviderAccountRemoveInput,
   success: DesktopOk,
   error: desktopsError,
 });
@@ -2402,6 +2443,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsDesktopsRenameRpc,
   WsDesktopsListRpc,
   WsDesktopsRevokeRpc,
+  WsDesktopsOutboxRpc,
+  WsDesktopsSetSendNothingRpc,
+  WsProviderAccountsListRpc,
+  WsProviderAccountsAddRpc,
+  WsProviderAccountsRemoveRpc,
   WsPullRequestsListRpc,
   WsPullRequestsListStatsRpc,
   WsPullRequestsFilterOptionsRpc,

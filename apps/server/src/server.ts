@@ -182,6 +182,8 @@ import * as CloudHttp from "./cloud/http.ts";
 import * as GuestHttp from "./guest/http.ts";
 import * as CloudLink from "./cloud/CloudLink.ts";
 import * as DesktopLink from "./cloud/DesktopLink.ts";
+import * as ProviderAccounts from "./cloud/ProviderAccounts.ts";
+import * as SourceUsageSummary from "./cloud/SourceUsageSummary.ts";
 import * as ConnectReachability from "./cloud/ConnectReachability.ts";
 import { pendingServiceUpdateExists } from "./cloud/updateHandoff.ts";
 import * as RelayTracing from "./cloud/relayTracing.ts";
@@ -703,7 +705,8 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   ),
   layerThreadPullRequestWorker,
   KeepAwake.layer,
-  DesktopLink.layer,
+  DesktopLink.layer.pipe(Layer.provide(SourceUsageSummary.layer)),
+  ProviderAccounts.layer,
   DelegatedTaskAnalytics.layer,
   Layer.effectDiscard(
     Effect.gen(function* () {

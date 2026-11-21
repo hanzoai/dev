@@ -3269,10 +3269,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "no computador que abriu esta página"
-      ]
+      "c": [" ", "no computador que abriu esta página"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3284,10 +3281,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· quem executar recebe este acesso"
-      ]
+      "c": [" ", "· quem executar recebe este acesso"]
     }
   ],
   "c54cc9c75db9dc58": "Aprove apenas um login que você acabou de iniciar.",
@@ -5721,7 +5715,7 @@
   "745a0b899008618c": "Não foi possível carregar os turnos anteriores. Tente novamente.",
   "0061fff77e36bd4f": "Não foi possível acessar o servidor.",
   "04dfdd46e3dd4a2e": "Algo deu errado. Tente novamente.",
-  "084bb2d8127a508d": "Enviada",
+  "084bb2d8127a508d": "Enviado",
   "e7c59185f8ab3987": "Não enviada",
   "77c01a15bd36d17c": "Este link expirou ou não é válido",
   "e0e736810f3cbef2": "Peça um novo link ao proprietário. Cada link funciona em um navegador.",
@@ -8807,16 +8801,39 @@
   "96bf175f6b13f0fb": "Provedores neste desktop",
   "a1c47d1a32f0e947": "Nenhum provedor para reportar",
   "0e36affc3afeb95e": "Somente este desktop",
+  "1d367d06854b660c": "Disponível em hanzo.app",
+  "c0d63258f3619fbf": "Não foi possível adicionar a chave",
+  "d0e25f266dd13543": "Excluir a chave {label}? Ela é removida do Hanzo KMS.",
+  "1603426f3a4ec576": "Não foi possível excluir a chave",
+  "83ea1465d91cdb34": "Chaves de API",
+  "c2677ff17a80f4e9": "Adicionar uma chave",
+  "8c27a62efa1b7e13": "A chave vai uma vez para o Hanzo KMS. Este desktop não a guarda.",
+  "691c0b60e0c4b574": "Rótulo",
+  "7e060354b3b6e131": "Adicionar chave",
+  "37b2c13302bf450e": "Não foi possível carregar suas chaves",
+  "ad8e0884c4e9300e": "Nenhuma chave ainda",
+  "da49b8271b9dffa0": "Excluir",
+  "e52398e8716b9b75": "Não foi possível alterar o que é enviado",
   "12d0626b6f3e9852": "O que é reportado",
   "b7ffb869e7c4cf6d": "Nível",
-  "d15fe609aedb5c2e": "Os heartbeats levam apenas o estado do provedor: sem prompts, arquivos, tokens ou e-mails.",
+  "520291a50e009cb7": "Heartbeats e relatórios de uso levam apenas o estado do provedor e contagens de tokens: sem prompts, arquivos, tokens ou e-mails.",
   "5f3c1a3638a804d3": "Metadados",
   "0dca3931d73e1f99": "Metadados e conteúdo",
+  "d4d1a2aca4c51911": "ainda não disponível",
+  "b501891cf42dfb2d": "Não enviar nada",
+  "a517bb638615fed8": "Parar de enviar relatórios de uso. Os heartbeats ainda informam ao Hanzo que este desktop está online.",
   "5d3f19596dca88b7": "Último heartbeat enviado",
   "1b21eadc9095e649": "Próximo heartbeat",
   "2a9002e21acd34a9": "Os bytes exatos enviados ao Hanzo.",
   "953da76b0bda1e66": "Enviado assim que este desktop for vinculado.",
   "078a870c03f3c24a": "Corpo do heartbeat",
+  "e5913d2e19ba1f97": "Relatórios de uso",
+  "2b3325b96ebc82c5": "Nenhum relatório de uso foi escrito ainda.",
+  "d8df14f9905f38eb": "Enviado",
+  "353b08f4363dbb2c": "Pendente",
+  "1cd46a826c6c9438": "Recusado",
+  "1bebe619daa19c9a": "Substituído por um relatório mais novo",
+  "bd6b453517b482a0": "Os últimos 100 relatórios, como escritos antes do envio. Esses são os bytes que saíram.",
   "4cea6be0fe6be16f": "Não foi possível carregar os ambientes vinculados",
   "58cb9c075da185fb": "Carregando ambientes vinculados…",
   "25b74062dc03079e": "Nenhum ambiente vinculado",
@@ -11354,6 +11371,8 @@
   "ffc409b277d1e0ea": "One merged icon for the busiest provider, or one reading per provider.",
   "2f8f985531c0c748": "Merged",
   "63010469accecd20": "Per provider",
+  "e7baa5c56d0d70d6": "Show usage in menu bar",
+  "424eb8d60841f1f9": "Put the reading beside the icon. Off, the menu bar shows only the icon.",
   "f23ed52e972230e9": "Alert thresholds",
   "ae6b371e88fcba56": "A notification fires the first time a window crosses each percentage.",
   "8fd325178eeb43a7": "Reads the local sign-in this tool already has.",

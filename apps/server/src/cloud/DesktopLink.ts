@@ -6,13 +6,17 @@ import {
   DesktopLinkError,
   type DesktopLinkInput,
   type DesktopLinkStatus,
+  type DesktopOutbox,
   type DesktopProviderState,
   type ServerProvider,
 } from "@hanzodev/contracts";
+import { UsageReport, type ProviderSnapshot, type UsageSummary } from "@hanzodev/usage";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Effect from "effect/Effect";
 import * as Base64Url from "effect/encoding/Base64Url";
 import * as Layer from "effect/Layer";
@@ -20,24 +24,80 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import * as HttpClient from "effect/http/HttpClient";
-import * as HttpClientRequest from "effect/http/HttpClientRequest";
 
 import * as HostProcess from "@hanzodev/shared/HostProcess";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import packageJson from "../../package.json" with { type: "json" };
+import * as ServerConfig from "../config.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
-import { apiBaseUrlConfig } from "./publicConfig.ts";
+import * as SourceUsageSummary from "./SourceUsageSummary.ts";
+import { fail, makeSourceApi, reject, storageFailure } from "./SourceApi.ts";
 
 const DEVICE_KEY_SECRET = "desktop-device-key";
 const LINK_RECORD_SECRET = "desktop-link";
 const DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 30;
 // HIP-1350: online means a heartbeat in the last 90 seconds.
 const ONLINE_WINDOW_MS = 90_000;
-const REQUEST_TIMEOUT = Duration.seconds(10);
 const MAX_PLAN_LENGTH = 40;
 const DEFAULT_LEVEL = "metadata" as const;
+// HIP-1350: at most one usage report per source per 10 s.
+const MIN_REPORT_GAP_MS = 10_000;
+// An unchanged report is still sent this often, so cloud keeps its snapshots fresh.
+const REPORT_REFRESH_MS = 300_000;
+const OUTBOX_LIMIT = 100;
+// The cost window a report covers; cost rows replace by day, so resending is safe.
+const REPORT_WINDOW_MS = 30 * 86_400_000;
+const OUTBOX_FILE = "source-outbox.json";
+const USAGE_DOMAIN = "hanzo-source-usage/1";
+
+const OutboxBatchRecord = Schema.Struct({
+  seq: Schema.Number,
+  at: Schema.String,
+  state: Schema.Literals(["pending", "sent", "superseded", "rejected"]),
+  body: Schema.String,
+});
+const OutboxFile = Schema.Struct({
+  sendNothing: Schema.Boolean,
+  nextSeq: Schema.Number,
+  batches: Schema.Array(OutboxBatchRecord),
+});
+type OutboxFile = typeof OutboxFile.Type;
+const OutboxFileJson = Schema.fromJsonString(OutboxFile);
+const decodeOutboxFile = Schema.decodeUnknownOption(OutboxFileJson);
+const encodeOutboxFile = Schema.encodeSync(OutboxFileJson);
+const EMPTY_OUTBOX: OutboxFile = { sendNothing: false, nextSeq: 1, batches: [] };
+const decodeUsageReport = Schema.decodeUnknownOption(Schema.fromJsonString(UsageReport));
+
+/** A provider's free-text error becomes one of a few fixed codes, so no text leaves the desktop. */
+const errorCode = (text: string): string =>
+  /sign.?in|log.?in|auth|unauthori[sz]ed|expired|40[13]/i.test(text)
+    ? "auth_failed"
+    : /rate|limit|429/i.test(text)
+      ? "rate_limited"
+      : /timeout|timed out|network|fetch|econn|enotfound|offline/i.test(text)
+        ? "network_error"
+        : "refresh_failed";
+
+const reportSnapshot = (snapshot: ProviderSnapshot): ProviderSnapshot => {
+  const { account: _account, error, ...rest } = snapshot;
+  return error === undefined ? rest : { ...rest, error: errorCode(error) };
+};
+
+/** The usage model's summary as a report: no account, error as a code. */
+const usageReport = (id: string, summary: UsageSummary, fromMs: number, toMs: number) =>
+  ({
+    version: 1,
+    deviceId: id,
+    from: DateTime.formatIso(DateTime.makeUnsafe(fromMs)),
+    to: DateTime.formatIso(DateTime.makeUnsafe(toMs)),
+    cost: summary.cost,
+    snapshots: summary.snapshots.map(reportSnapshot),
+  }) satisfies UsageReport;
+
+/** What `x-hanzo-sig` covers on a usage report; cloud builds the same string. */
+const usageMessage = (id: string, bodySha256Hex: string) =>
+  `${USAGE_DOMAIN}\n${id}\n${bodySha256Hex}\n`;
 
 const LinkRecord = Schema.Struct({
   id: Schema.String,
@@ -113,15 +173,6 @@ const toDesktop = (wire: typeof WireDesktop.Type): Desktop => ({
   })),
 });
 
-const fail = (reason: DesktopLinkError["reason"], message: string, cause?: unknown) =>
-  new DesktopLinkError({ reason, message, ...(cause === undefined ? {} : { cause }) });
-
-const storageFailure = (cause: unknown) =>
-  fail("storage", "Could not read or write this desktop's link on disk.", cause);
-
-const unreachable = (cause: unknown) =>
-  fail("unreachable", "Could not reach Hanzo. Check the connection and try again.", cause);
-
 /** The state a heartbeat reports for one provider, or null when it has nothing to report. */
 const providerState = (provider: ServerProvider): DesktopProviderState | null => {
   if (!provider.enabled || !provider.installed) return null;
@@ -184,6 +235,8 @@ const iso = (epochMs: number) => DateTime.formatIso(DateTime.makeUnsafe(epochMs)
 const encodeBody = (value: unknown) => JSON.stringify(value, null, 2);
 
 const subtle = () => globalThis.crypto.subtle;
+const bytesToHex = (bytes: ArrayBuffer) =>
+  Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
 export class DesktopLink extends Context.Service<
   DesktopLink,
   {
@@ -194,10 +247,16 @@ export class DesktopLink extends Context.Service<
     readonly rename: (name: string) => Effect.Effect<DesktopLinkStatus, DesktopLinkError>;
     readonly list: Effect.Effect<ReadonlyArray<Desktop>, DesktopLinkError>;
     readonly revoke: (id: string) => Effect.Effect<void, DesktopLinkError>;
+    /** The usage reports written to the local outbox, newest first, and the Send nothing switch. */
+    readonly outbox: Effect.Effect<DesktopOutbox, DesktopLinkError>;
+    readonly setSendNothing: (
+      sendNothing: boolean,
+    ) => Effect.Effect<DesktopOutbox, DesktopLinkError>;
   }
 >()("hanzo/cloud/DesktopLink") {}
 
 interface Runtime {
+  readonly lastReportAtMs: number | null;
   readonly lastHeartbeatAtMs: number | null;
   readonly lastBody: string | null;
   readonly level: DesktopLinkStatus["level"];
@@ -208,13 +267,19 @@ const make = Effect.gen(function* () {
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const tokens = yield* CliTokenManager.CloudCliTokenManager;
   const registry = yield* ProviderRegistry.ProviderRegistry;
-  const httpClient = yield* HttpClient.HttpClient;
-  const apiBaseUrl = yield* apiBaseUrlConfig.pipe(Effect.orDie);
+  const { call, requireToken } = yield* makeSourceApi;
   const platform = yield* HostProcess.Platform;
   const arch = yield* HostProcess.Architecture;
   const version = packageJson.version;
   const lock = yield* Semaphore.make(1);
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const config = yield* ServerConfig.ServerConfig;
+  const usageSummary = yield* SourceUsageSummary.SourceUsageSummary;
+  const usageLock = yield* Semaphore.make(1);
+  const outboxPath = path.join(config.stateDir, OUTBOX_FILE);
   const runtime = yield* Ref.make<Runtime>({
+    lastReportAtMs: null,
     lastHeartbeatAtMs: null,
     lastBody: null,
     level: DEFAULT_LEVEL,
@@ -236,7 +301,9 @@ const make = Effect.gen(function* () {
   const clearLocal = Effect.gen(function* () {
     yield* secrets.remove(LINK_RECORD_SECRET);
     yield* secrets.remove(DEVICE_KEY_SECRET);
+    yield* fileSystem.remove(outboxPath, { force: true });
     yield* Ref.set(runtime, {
+      lastReportAtMs: null,
       lastHeartbeatAtMs: null,
       lastBody: null,
       level: DEFAULT_LEVEL,
@@ -283,64 +350,6 @@ const make = Effect.gen(function* () {
     });
     return Base64Url.encode(signature);
   });
-
-  /** One call to the registry. The status code is the caller's to read, the body is JSON. */
-  const call = Effect.fn("DesktopLink.call")(function* (input: {
-    readonly method: "GET" | "POST" | "DELETE";
-    readonly path: string;
-    readonly accessToken: string;
-    readonly body?: string;
-  }) {
-    const url = `${apiBaseUrl}${input.path}`;
-    const base =
-      input.method === "GET"
-        ? HttpClientRequest.get(url)
-        : input.method === "POST"
-          ? HttpClientRequest.post(url)
-          : HttpClientRequest.delete(url);
-    const request = base.pipe(
-      HttpClientRequest.bearerToken(input.accessToken),
-      input.body === undefined
-        ? (self) => self
-        : HttpClientRequest.bodyText(input.body, "application/json"),
-    );
-    return yield* httpClient.execute(request).pipe(
-      Effect.flatMap((response) =>
-        response.text.pipe(
-          Effect.map((text) => ({
-            status: response.status,
-            json: ((): unknown => {
-              try {
-                return text.length === 0 ? null : JSON.parse(text);
-              } catch {
-                return null;
-              }
-            })(),
-          })),
-        ),
-      ),
-      Effect.timeout(REQUEST_TIMEOUT),
-      Effect.mapError(unreachable),
-    );
-  });
-
-  const reject = (status: number) =>
-    status === 401
-      ? fail("sign_in_required", "Hanzo did not accept this sign-in. Sign in again.")
-      : status === 409
-        ? fail("limit", "This account has reached its limit of linked desktops. Revoke one first.")
-        : fail("rejected", `Hanzo refused the request (${status}).`);
-
-  const requireToken = tokens.getExisting.pipe(
-    Effect.mapError(() => fail("sign_in_required", "Sign in to Hanzo to link this desktop.")),
-    Effect.flatMap(
-      Option.match({
-        onNone: () =>
-          Effect.fail(fail("sign_in_required", "Sign in to Hanzo to link this desktop.")),
-        onSome: Effect.succeed,
-      }),
-    ),
-  );
 
   const reportedProviders = registry.getProviders.pipe(
     Effect.map((providers) =>
@@ -566,10 +575,144 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const readOutbox = fileSystem.readFileString(outboxPath).pipe(
+    Effect.map((text) => Option.getOrElse(decodeOutboxFile(text), () => EMPTY_OUTBOX)),
+    Effect.catch((cause) =>
+      cause.reason._tag === "NotFound"
+        ? Effect.succeed(EMPTY_OUTBOX)
+        : Effect.fail(storageFailure(cause)),
+    ),
+  );
+
+  // Written to a temporary file and renamed, so a reader never sees half an outbox.
+  const writeOutbox = (outbox: OutboxFile) =>
+    fileSystem.makeDirectory(config.stateDir, { recursive: true }).pipe(
+      Effect.andThen(
+        fileSystem.writeFileString(`${outboxPath}.tmp`, encodeOutboxFile(outbox), {
+          mode: 0o600,
+        }),
+      ),
+      Effect.andThen(fileSystem.rename(`${outboxPath}.tmp`, outboxPath)),
+      Effect.mapError(storageFailure),
+    );
+
+  const outboxView = (outbox: OutboxFile): DesktopOutbox => ({
+    sendNothing: outbox.sendNothing,
+    batches: outbox.batches.toReversed().slice(0, OUTBOX_LIMIT),
+  });
+
+  const setState = (
+    outbox: OutboxFile,
+    seq: number,
+    state: OutboxFile["batches"][number]["state"],
+  ) => ({
+    ...outbox,
+    batches: outbox.batches.map((batch) => (batch.seq === seq ? { ...batch, state } : batch)),
+  });
+
+  const sendBatch = Effect.fn("DesktopLink.sendBatch")(function* (
+    id: string,
+    accessToken: string,
+    batch: OutboxFile["batches"][number],
+  ) {
+    const key = yield* readDeviceKey;
+    const digest = yield* Effect.tryPromise({
+      try: async () =>
+        bytesToHex(await subtle().digest("SHA-256", new TextEncoder().encode(batch.body))),
+      catch: storageFailure,
+    });
+    const sig = yield* signBeat(key, usageMessage(id, digest));
+    return yield* call({
+      method: "POST",
+      path: `/v1/sources/${encodeURIComponent(id)}/usage`,
+      accessToken,
+      body: batch.body,
+      headers: { "x-hanzo-sig": sig },
+    });
+  });
+
+  // Writes the batch to the outbox before sending it; the outbox holds the bytes that were sent.
+  const reportUsage = Effect.gen(function* () {
+    const record = yield* readRecord;
+    if (Option.isNone(record)) return;
+    const stored = yield* tokens.getExisting.pipe(Effect.orElseSucceed(() => Option.none()));
+    if (Option.isNone(stored)) return;
+    let outbox = yield* readOutbox;
+    if (outbox.sendNothing) return;
+    const now = yield* Clock.currentTimeMillis;
+    const state = yield* Ref.get(runtime);
+    if (state.lastReportAtMs !== null && now - state.lastReportAtMs < MIN_REPORT_GAP_MS) return;
+    const id = record.value.id;
+    const newest = outbox.batches.at(-1);
+    let batch = newest !== undefined && newest.state === "pending" ? newest : undefined;
+    if (batch === undefined) {
+      const summary = yield* usageSummary.read.pipe(
+        Effect.mapError((cause) => fail("unreachable", "Could not read usage.", cause)),
+      );
+      const body = encodeBody(usageReport(id, summary, now - REPORT_WINDOW_MS, now));
+      const previous = newest === undefined ? Option.none() : decodeUsageReport(newest.body);
+      const unchanged =
+        Option.isSome(previous) &&
+        encodeBody({ cost: previous.value.cost, snapshots: previous.value.snapshots }) ===
+          encodeBody({ cost: summary.cost, snapshots: summary.snapshots.map(reportSnapshot) });
+      if (unchanged && newest !== undefined && now - Date.parse(newest.at) < REPORT_REFRESH_MS) {
+        return;
+      }
+      batch = { seq: outbox.nextSeq, at: iso(now), state: "pending", body };
+      outbox = {
+        ...outbox,
+        nextSeq: outbox.nextSeq + 1,
+        batches: [...outbox.batches, batch].slice(-OUTBOX_LIMIT),
+      };
+      yield* writeOutbox(outbox);
+    }
+    yield* Ref.update(runtime, (current) => ({ ...current, lastReportAtMs: now }));
+    const response = yield* sendBatch(id, stored.value.accessToken, batch);
+    if (response.status === 410) {
+      yield* clearLocal;
+      return;
+    }
+    if (response.status === 200) {
+      const sent = setState(outbox, batch.seq, "sent");
+      yield* writeOutbox({
+        ...sent,
+        batches: sent.batches.map((entry) =>
+          entry.state === "pending" ? { ...entry, state: "superseded" } : entry,
+        ),
+      });
+      return;
+    }
+    // Cloud refuses a bad payload whole; sending the same bytes again cannot help.
+    // 413 means over 1 MiB: the same bytes can never be accepted either.
+    if (response.status === 400 || response.status === 413) {
+      yield* writeOutbox(setState(outbox, batch.seq, "rejected"));
+      return;
+    }
+    if (response.status !== 429 && response.status !== 409) return yield* reject(response.status);
+  }).pipe(Effect.withSpan("DesktopLink.reportUsage"));
+
+  const outboxStatus = readOutbox.pipe(Effect.map(outboxView));
+
+  const setSendNothing = Effect.fn("DesktopLink.setSendNothing")(function* (sendNothing: boolean) {
+    return yield* usageLock.withPermits(1)(
+      Effect.gen(function* () {
+        const outbox = yield* readOutbox;
+        const next = { ...outbox, sendNothing };
+        yield* writeOutbox(next);
+        return outboxView(next);
+      }),
+    );
+  });
+
   yield* lock
     .withPermits(1)(beat)
     .pipe(
       Effect.catch((error) => Effect.logWarning("Desktop heartbeat failed.", error.message)),
+      Effect.andThen(
+        usageLock
+          .withPermits(1)(reportUsage)
+          .pipe(Effect.catch((error) => Effect.logWarning("Usage report failed.", error.message))),
+      ),
       Effect.andThen(
         Ref.get(runtime).pipe(
           Effect.flatMap((state) => Effect.sleep(Duration.seconds(state.intervalSeconds))),
@@ -580,6 +723,8 @@ const make = Effect.gen(function* () {
     );
 
   return DesktopLink.of({
+    outbox: outboxStatus,
+    setSendNothing,
     status: buildStatus,
     link,
     unlink: unlink(),

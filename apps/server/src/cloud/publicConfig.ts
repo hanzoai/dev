@@ -5,11 +5,12 @@ import {
 } from "@hanzodev/shared/connectAuth";
 import {
   DEFAULT_HANZO_API_BASE_URL,
+  DEFAULT_HANZO_LOGIN_URL,
   DEFAULT_HANZO_IAM_CLIENT_ID,
   DEFAULT_HANZO_IAM_ISSUER,
   DEFAULT_HANZO_RELAY_URL,
-  normalizeHanzoIssuer,
 } from "@hanzodev/shared/hanzoIamAuth";
+import { discoverIamEndpoints } from "./iamDiscovery.ts";
 import { isRelayTracingEnabled } from "@hanzodev/shared/otelEnvironment";
 import { normalizeSecureRelayUrl } from "@hanzodev/shared/relayUrl";
 import * as Config from "effect/Config";
@@ -174,9 +175,15 @@ function makePublicValueConfig(name: string, fallback: string) {
   );
 }
 
+/** Where people sign in and where the sign-in configuration is published. */
+export const loginUrlConfig = makePublicValueConfig(
+  "HANZO_DEV_LOGIN_URL",
+  DEFAULT_HANZO_LOGIN_URL,
+).pipe(Config.mapEffect(validateOriginUrl));
+
 export interface CloudCliOAuthConfig {
   readonly tokenEndpoint: string;
-  readonly deviceAuthorizationEndpoint: string;
+  readonly deviceAuthorizationEndpoint: string | null;
   readonly clientId: string;
   readonly loopbackPort: number;
   readonly redirectUri: string;
@@ -197,23 +204,27 @@ export function makeHanzoIamConfig({
   });
 }
 
-export function makeCloudCliOAuthConfig(options: Parameters<typeof makeHanzoIamConfig>[0] = {}) {
-  return makeHanzoIamConfig(options).pipe(
-    Config.map(({ iamIssuer, iamClientId }) => {
-      const issuer = normalizeHanzoIssuer(iamIssuer);
-      return {
-        tokenEndpoint: `${issuer}/oauth/token`,
-        deviceAuthorizationEndpoint: `${issuer}/oauth/device`,
-        clientId: iamClientId,
-        loopbackPort: CLOUD_CLI_OAUTH_LOOPBACK_PORT,
-        redirectUri: connectLoopbackRedirectUri(CLOUD_CLI_OAUTH_LOOPBACK_PORT),
-        scopes: CLOUD_CLI_OAUTH_SCOPES,
-      } satisfies CloudCliOAuthConfig;
-    }),
-  );
-}
+/**
+ * Token and device endpoints come from the login host's discovery document, not from a
+ * constant, so a change of identity host needs no release.
+ */
+export const makeCloudCliOAuthConfig = Effect.fn("cloud.cli_oauth.config")(function* (
+  options: Parameters<typeof makeHanzoIamConfig>[0] = {},
+) {
+  const { iamClientId } = yield* makeHanzoIamConfig(options);
+  const loginUrl = yield* loginUrlConfig;
+  const endpoints = yield* discoverIamEndpoints(loginUrl);
+  return {
+    tokenEndpoint: endpoints.tokenEndpoint,
+    deviceAuthorizationEndpoint: endpoints.deviceAuthorizationEndpoint,
+    clientId: iamClientId,
+    loopbackPort: CLOUD_CLI_OAUTH_LOOPBACK_PORT,
+    redirectUri: connectLoopbackRedirectUri(CLOUD_CLI_OAUTH_LOOPBACK_PORT),
+    scopes: CLOUD_CLI_OAUTH_SCOPES,
+  } satisfies CloudCliOAuthConfig;
+});
 
-export const cloudCliOAuthConfig = makeCloudCliOAuthConfig();
+export const cloudCliOAuthConfig = Effect.suspend(() => makeCloudCliOAuthConfig());
 
 export const hasCloudPublicConfig = Boolean(
   normalizeSecureRelayUrl(process.env.HANZO_DEV_RELAY_URL ?? "") ?? buildTimeRelayUrl,

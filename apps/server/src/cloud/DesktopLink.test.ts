@@ -1,4 +1,5 @@
 import { ServerProvider } from "@hanzodev/contracts";
+import type { UsageSummary } from "@hanzodev/usage";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Base64Url from "effect/encoding/Base64Url";
@@ -10,8 +11,13 @@ import * as TestClock from "effect/testing/TestClock";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as FileSystem from "effect/FileSystem";
+import * as ServerConfig from "../config.ts";
+import * as SourceUsageSummary from "./SourceUsageSummary.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import * as ProviderAccounts from "./ProviderAccounts.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
 import * as DesktopLink from "./DesktopLink.ts";
 
@@ -63,11 +69,39 @@ const providers = [
   },
 ].map((provider) => decodeProvider(provider));
 
+// Free text a provider returns, which must not leave the desktop.
+const usageSummary: UsageSummary = {
+  generatedAt: "2026-11-20T10:00:00.000Z",
+  cost: [
+    {
+      day: "2026-11-20",
+      provider: "claude",
+      model: "sonnet",
+      inputTokens: 10,
+      outputTokens: 20,
+      cacheTokens: 5,
+    },
+  ],
+  snapshots: [
+    {
+      provider: "claude",
+      fetchedAt: "2026-11-20T10:00:00.000Z",
+      source: "oauth",
+      plan: "max",
+      account: SECRET_EMAIL,
+      windows: [{ kind: "weekly", label: "Weekly", usedPercent: 42 }],
+      error: `401 Unauthorized for ${SECRET_EMAIL}`,
+    },
+  ],
+};
+
 const harness = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const stateDir = yield* fileSystem.makeTempDirectoryScoped();
   const requests = yield* Queue.unbounded<Recorded>();
   const secrets = new Map<string, Uint8Array>();
-  const replies = { heartbeat: 200, link: 201 };
-  const layer = DesktopLink.layer.pipe(
+  const replies = { heartbeat: 200, link: 201, usage: 200 };
+  const layer = Layer.mergeAll(DesktopLink.layer, ProviderAccounts.layer).pipe(
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ServerSecretStore.ServerSecretStore)({
@@ -83,6 +117,9 @@ const harness = Effect.gen(function* () {
             identity: SECRET_EMAIL,
           }),
         }),
+        NodeServices.layer,
+        Layer.mock(ServerConfig.ServerConfig)({ stateDir } as ServerConfig.ServerConfig["Service"]),
+        Layer.mock(SourceUsageSummary.SourceUsageSummary)({ read: Effect.succeed(usageSummary) }),
         Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed(providers) }),
         Layer.succeed(
           HttpClient.HttpClient,
@@ -100,10 +137,31 @@ const harness = Effect.gen(function* () {
                 body,
               });
               const heartbeat = url.pathname.endsWith("/heartbeat");
-              const status = heartbeat ? replies.heartbeat : replies.link;
+              const usage = url.pathname.endsWith("/usage");
+              if (url.pathname.startsWith("/v1/sources/accounts")) {
+                const account = {
+                  id: "acc_1",
+                  provider: "anthropic",
+                  kind: "key",
+                  label: "work",
+                  fingerprint: "deadbeef",
+                  created: "2026-11-20T10:00:00Z",
+                  route: "key",
+                };
+                return HttpClientResponse.fromWeb(
+                  request,
+                  new Response(
+                    JSON.stringify(request.method === "GET" ? { accounts: [account] } : account),
+                    { status: request.method === "POST" ? 201 : 200 },
+                  ),
+                );
+              }
+              const status = heartbeat ? replies.heartbeat : usage ? replies.usage : replies.link;
               const reply = heartbeat
                 ? { interval: 30, level: "metadata", revoked: false }
-                : { id: "src_1", interval: 30, level: "metadata" };
+                : usage
+                  ? { accepted: 2 }
+                  : { id: "src_1", interval: 30, level: "metadata" };
               return HttpClientResponse.fromWeb(
                 request,
                 new Response(status === 410 ? "" : JSON.stringify(reply), { status }),
@@ -114,7 +172,7 @@ const harness = Effect.gen(function* () {
       ),
     ),
   );
-  return { requests, secrets, replies, layer };
+  return { requests, secrets, replies, layer, stateDir, fileSystem };
 });
 
 it.effect("relinking the same install keeps one device key and one id", () =>
@@ -138,7 +196,7 @@ it.effect("relinking the same install keeps one device key and one id", () =>
       assert.equal(linkBodies[0]?.key, linkBodies[1]?.key);
       assert.equal(secrets.has("desktop-device-key"), true);
     }).pipe(Effect.provide(layer));
-  }),
+  }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.effect("a heartbeat reports provider state only and is signed by the device key", () =>
@@ -205,7 +263,7 @@ it.effect("a heartbeat reports provider state only and is signed by the device k
       );
       assert.equal(verified, true);
     }).pipe(Effect.provide(layer));
-  }),
+  }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.effect("a 410 on the next heartbeat unlinks and clears the local state", () =>
@@ -227,7 +285,7 @@ it.effect("a 410 on the next heartbeat unlinks and clears the local state", () =
       assert.equal(secrets.has("desktop-link"), false);
       assert.equal(secrets.has("desktop-device-key"), false);
     }).pipe(Effect.provide(layer));
-  }),
+  }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.effect("unlinking revokes the desktop at Hanzo and forgets the link", () =>
@@ -246,5 +304,141 @@ it.effect("unlinking revokes the desktop at Hanzo and forgets the link", () =>
       assert.equal(status.desktop, null);
       assert.equal(secrets.has("desktop-link"), false);
     }).pipe(Effect.provide(layer));
-  }),
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+const SECRET_KEY_VALUE = "sk-ant-api03-secret-value-never-stored";
+
+it.effect("a usage report drops the account, codes the error, and is signed over its bytes", () =>
+  Effect.gen(function* () {
+    const { requests, layer } = yield* harness;
+    yield* Effect.gen(function* () {
+      const desktopLink = yield* DesktopLink.DesktopLink;
+      yield* Effect.yieldNow;
+      yield* desktopLink.link({});
+      const registration = yield* Queue.take(requests);
+      yield* Queue.take(requests);
+      yield* TestClock.adjust("30 seconds");
+      yield* Queue.take(requests);
+      const usage = yield* Queue.take(requests);
+      assert.equal(usage.path, "/v1/sources/src_1/usage");
+      const report = JSON.parse(usage.body);
+      assert.equal(report.deviceId, "src_1");
+      assert.equal(report.version, 1);
+      assert.equal(report.snapshots[0].account, undefined);
+      assert.equal(report.snapshots[0].error, "auth_failed");
+      assert.notInclude(usage.body, SECRET_EMAIL);
+
+      const verifyKey = yield* Effect.promise(() =>
+        globalThis.crypto.subtle.importKey(
+          "jwk",
+          { kty: "OKP", crv: "Ed25519", x: JSON.parse(registration.body).key },
+          "Ed25519",
+          false,
+          ["verify"],
+        ),
+      );
+      const digest = yield* Effect.promise(async () =>
+        Array.from(
+          new Uint8Array(
+            await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(usage.body)),
+          ),
+          (byte) => byte.toString(16).padStart(2, "0"),
+        ).join(""),
+      );
+      const decoded = Base64Url.decode(usage.headers["x-hanzo-sig"] ?? "");
+      assert.equal(decoded._tag, "Success");
+      const verified = yield* Effect.promise(() =>
+        globalThis.crypto.subtle.verify(
+          "Ed25519",
+          verifyKey,
+          decoded._tag === "Success" ? decoded.success : new Uint8Array(),
+          // Cloud's usage message, written out by hand.
+          new TextEncoder().encode(`hanzo-source-usage/1\nsrc_1\n${digest}\n`),
+        ),
+      );
+      assert.equal(verified, true);
+
+      // Taking the usage lock waits for the report to finish, so its outbox write has landed.
+      yield* desktopLink.setSendNothing(false);
+      const outbox = yield* desktopLink.outbox;
+      assert.equal(outbox.batches.length, 1);
+      assert.equal(outbox.batches[0]?.body, usage.body);
+      assert.equal(outbox.batches[0]?.state, "sent");
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("send nothing writes and sends no report; a 410 on a report unlinks", () =>
+  Effect.gen(function* () {
+    const { requests, replies, secrets, layer } = yield* harness;
+    yield* Effect.gen(function* () {
+      const desktopLink = yield* DesktopLink.DesktopLink;
+      yield* Effect.yieldNow;
+      yield* desktopLink.link({});
+      yield* Queue.take(requests);
+      yield* Queue.take(requests);
+      yield* desktopLink.setSendNothing(true);
+      yield* TestClock.adjust("30 seconds");
+      yield* Queue.take(requests);
+      assert.equal(yield* Queue.size(requests), 0);
+      assert.deepEqual((yield* desktopLink.outbox).batches, []);
+
+      yield* desktopLink.setSendNothing(false);
+      replies.usage = 410;
+      yield* TestClock.adjust("30 seconds");
+      yield* Queue.take(requests);
+      yield* Queue.take(requests);
+      assert.equal((yield* desktopLink.status).desktop, null);
+      assert.equal(secrets.has("desktop-link"), false);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("an API key's value is sent to Hanzo once and is in no file this desktop writes", () =>
+  Effect.gen(function* () {
+    const { requests, secrets, layer, stateDir, fileSystem } = yield* harness;
+    yield* Effect.gen(function* () {
+      const desktopLink = yield* DesktopLink.DesktopLink;
+      const accounts = yield* ProviderAccounts.ProviderAccounts;
+      yield* Effect.yieldNow;
+      yield* desktopLink.link({});
+      yield* Queue.take(requests);
+      yield* Queue.take(requests);
+      yield* TestClock.adjust("30 seconds");
+      const added = yield* accounts.add({
+        provider: "anthropic",
+        label: "work",
+        value: SECRET_KEY_VALUE,
+      });
+      assert.deepEqual(added, {
+        id: "acc_1",
+        provider: "anthropic",
+        kind: "key",
+        label: "work",
+        fingerprint: "deadbeef",
+        created: "2026-11-20T10:00:00Z",
+        route: "key",
+      });
+      const list = yield* accounts.list;
+      assert.equal(list.length, 1);
+      assert.notInclude(JSON.stringify(list), SECRET_KEY_VALUE);
+      const sent = [];
+      while ((yield* Queue.size(requests)) > 0) sent.push(yield* Queue.take(requests));
+      const post = sent.find(
+        (request) => request.path === "/v1/sources/accounts" && request.method === "POST",
+      );
+      assert.equal(JSON.parse(post?.body ?? "{}").value, SECRET_KEY_VALUE);
+      for (const [, bytes] of secrets) {
+        assert.notInclude(new TextDecoder().decode(bytes), SECRET_KEY_VALUE);
+      }
+      const files = yield* fileSystem.readDirectory(stateDir, { recursive: true });
+      for (const file of files) {
+        const text = yield* fileSystem
+          .readFileString(`${stateDir}/${file}`)
+          .pipe(Effect.orElseSucceed(() => ""));
+        assert.notInclude(text, SECRET_KEY_VALUE);
+      }
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(NodeServices.layer)),
 );

@@ -275,6 +275,7 @@ import * as SourceControlRateLimit from "@hanzodev/source-control-core/server/So
 import { isNetworkPath } from "@hanzodev/shared/path";
 import * as RelayClient from "@hanzodev/shared/relayClient";
 import * as DesktopLink from "./cloud/DesktopLink.ts";
+import * as ProviderAccounts from "./cloud/ProviderAccounts.ts";
 import {
   SOCKET_FRAME_PARTS_QUERY_PARAM,
   splitLargeSocketFrames,
@@ -1599,6 +1600,7 @@ export const layerWsRpc = (
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const relayClient = yield* RelayClient.RelayClient;
       const desktopLink = yield* DesktopLink.DesktopLink;
+      const providerAccounts = yield* ProviderAccounts.ProviderAccounts;
       // Webhook URLs start agents; expose them only to operate-scoped sessions while keeping tasks readable.
       const withVisibleWebhookUrls = (result: ScheduledTaskListResult): ScheduledTaskListResult =>
         currentSession.scopes.includes(AuthOrchestrationOperateScope)
@@ -2763,6 +2765,14 @@ export const layerWsRpc = (
         [WS_METHODS.desktopsRename]: (input) => desktopLink.rename(input.name),
         [WS_METHODS.desktopsList]: (_input) =>
           Effect.map(desktopLink.list, (desktops) => ({ desktops })),
+        [WS_METHODS.desktopsOutbox]: (_input) => desktopLink.outbox,
+        [WS_METHODS.desktopsSetSendNothing]: (input) =>
+          desktopLink.setSendNothing(input.sendNothing),
+        [WS_METHODS.providerAccountsList]: (_input) =>
+          Effect.map(providerAccounts.list, (accounts) => ({ accounts })),
+        [WS_METHODS.providerAccountsAdd]: (input) => providerAccounts.add(input),
+        [WS_METHODS.providerAccountsRemove]: (input) =>
+          Effect.as(providerAccounts.remove(input.id), { ok: true }),
         [WS_METHODS.desktopsRevoke]: (input) =>
           Effect.as(desktopLink.revoke(input.id), { ok: true }),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) => relayClient.resolve,

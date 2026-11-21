@@ -3269,10 +3269,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "auf dem Computer, der diese Seite geöffnet hat"
-      ]
+      "c": [" ", "auf dem Computer, der diese Seite geöffnet hat"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3284,10 +3281,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· wer es ausführt, erhält diesen Zugriff"
-      ]
+      "c": [" ", "· wer es ausführt, erhält diesen Zugriff"]
     }
   ],
   "c54cc9c75db9dc58": "Genehmige nur eine Anmeldung, die du gerade selbst gestartet hast.",
@@ -8808,16 +8802,39 @@
   "96bf175f6b13f0fb": "Anbieter auf diesem Desktop",
   "a1c47d1a32f0e947": "Keine Anbieter zu melden",
   "0e36affc3afeb95e": "Nur dieser Desktop",
+  "1d367d06854b660c": "Verfügbar auf hanzo.app",
+  "c0d63258f3619fbf": "Schlüssel konnte nicht hinzugefügt werden",
+  "d0e25f266dd13543": "Schlüssel {label} löschen? Er wird aus Hanzo KMS entfernt.",
+  "1603426f3a4ec576": "Schlüssel konnte nicht gelöscht werden",
+  "83ea1465d91cdb34": "API-Schlüssel",
+  "c2677ff17a80f4e9": "Schlüssel hinzufügen",
+  "8c27a62efa1b7e13": "Der Schlüssel geht einmal an Hanzo KMS. Dieser Desktop behält ihn nicht.",
+  "691c0b60e0c4b574": "Bezeichnung",
+  "7e060354b3b6e131": "Schlüssel hinzufügen",
+  "37b2c13302bf450e": "Schlüssel konnten nicht geladen werden",
+  "ad8e0884c4e9300e": "Noch keine Schlüssel",
+  "da49b8271b9dffa0": "Löschen",
+  "e52398e8716b9b75": "Gesendete Daten konnten nicht geändert werden",
   "12d0626b6f3e9852": "Was gemeldet wird",
   "b7ffb869e7c4cf6d": "Stufe",
-  "d15fe609aedb5c2e": "Heartbeats enthalten nur den Anbieterstatus: keine Prompts, Dateien, Tokens oder E-Mails.",
+  "520291a50e009cb7": "Heartbeats und Nutzungsberichte enthalten nur Anbieterstatus und Token-Anzahlen: keine Prompts, Dateien, Tokens oder E-Mails.",
   "5f3c1a3638a804d3": "Metadaten",
   "0dca3931d73e1f99": "Metadaten und Inhalt",
+  "d4d1a2aca4c51911": "noch nicht verfügbar",
+  "b501891cf42dfb2d": "Nichts senden",
+  "a517bb638615fed8": "Keine Nutzungsberichte mehr senden. Heartbeats melden Hanzo weiterhin, dass dieser Desktop online ist.",
   "5d3f19596dca88b7": "Zuletzt gesendeter Heartbeat",
   "1b21eadc9095e649": "Nächster Heartbeat",
   "2a9002e21acd34a9": "Genau die an Hanzo gesendeten Bytes.",
   "953da76b0bda1e66": "Wird gesendet, sobald dieser Desktop verknüpft ist.",
   "078a870c03f3c24a": "Heartbeat-Inhalt",
+  "e5913d2e19ba1f97": "Nutzungsberichte",
+  "2b3325b96ebc82c5": "Noch kein Nutzungsbericht geschrieben.",
+  "d8df14f9905f38eb": "Gesendet",
+  "353b08f4363dbb2c": "Ausstehend",
+  "1cd46a826c6c9438": "Abgelehnt",
+  "1bebe619daa19c9a": "Durch neueren Bericht ersetzt",
+  "bd6b453517b482a0": "Die letzten 100 Berichte, so wie vor dem Senden geschrieben. Das sind die Bytes, die gesendet wurden.",
   "4cea6be0fe6be16f": "Verknüpfte Umgebungen konnten nicht geladen werden",
   "58cb9c075da185fb": "Verknüpfte Umgebungen werden geladen…",
   "25b74062dc03079e": "Keine verknüpften Umgebungen",
@@ -11356,6 +11373,8 @@
   "ffc409b277d1e0ea": "One merged icon for the busiest provider, or one reading per provider.",
   "2f8f985531c0c748": "Merged",
   "63010469accecd20": "Per provider",
+  "e7baa5c56d0d70d6": "Show usage in menu bar",
+  "424eb8d60841f1f9": "Put the reading beside the icon. Off, the menu bar shows only the icon.",
   "f23ed52e972230e9": "Alert thresholds",
   "ae6b371e88fcba56": "A notification fires the first time a window crosses each percentage.",
   "8fd325178eeb43a7": "Reads the local sign-in this tool already has.",
