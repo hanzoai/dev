@@ -14,7 +14,12 @@ export interface DevRuntimeSource {
   list(signal: AbortSignal): Promise<readonly DevRuntime[]>;
 }
 
-export function DevProvider(props: { runtime: DevRuntime; children?: ReactNode }): ReactNode;
+export function DevProvider(props: {
+  runtime: DevRuntime;
+  /** The runtime would not pair: the host may try another. */
+  onFail?: (runtime: DevRuntime) => void;
+  children?: ReactNode;
+}): ReactNode;
 
 export function DevThreadList(props: {
   active?: string | null;

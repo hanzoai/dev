@@ -156,10 +156,16 @@ export function describeComposerEffort(
   // Enso shows its effort as the open gap of its ring, so the chip drops the word and bars.
   const ensoSelect =
     traits.model && isEnsoModel(traits.model) && reasoning?.type === "select" ? reasoning : null;
+  // Auto is the closed ring: a level the user never chose (the model's default) reads as Auto.
+  const ensoChosen =
+    ensoSelect !== null &&
+    (modelSelection?.options ?? []).some((option) => option.id === ensoSelect.id);
   const ensoEffort = ensoSelect
     ? ultrathink
       ? "ultrathink"
-      : getDescriptorStringValue(ensoSelect, modelSelection, traits.reportedModelSelection)
+      : ensoChosen
+        ? getDescriptorStringValue(ensoSelect, modelSelection, traits.reportedModelSelection)
+        : null
     : null;
   const ring: EnsoRingState | null = ensoSelect
     ? {
