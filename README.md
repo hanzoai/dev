@@ -4,9 +4,18 @@
   </a>
 </p>
 
-<h1 align="center">Hanzo Dev</h1>
+<h1 align="center">&lt;/&gt; Hanzo Dev</h1>
 
-<p align="center">The unified multi-agent control plane for coding agents across Desktop, Web, and Mobile.</p>
+<p align="center">The unified multi-agent control plane for coding agents across Desktop, Web, Mobile, and Cloud.</p>
+
+<p align="center">
+  <a href="https://github.com/hanzoai/dev/releases/latest">Download for desktop</a> ·
+  <a href="https://dev.hanzo.ai">Web</a> ·
+  <a href="https://dev.hanzo.ai/ios">iOS (TestFlight, coming soon)</a> ·
+  <a href="./docs/user/install.md">Install guide</a>
+</p>
+
+> Hanzo Dev v1, the terminal agent, lives at [hanzoai/dev-v1](https://github.com/hanzoai/dev-v1). The command line going forward is `hanzo`.
 
 Hanzo Dev runs every coding agent on your machine—and connects to your local `hanzod` private AI node or `hanzo.ai` cloud account—in one unified interface. Start a thread at your desk, jump directly into **Hanzo IDE**, or approve the next step from your phone.
 
@@ -23,8 +32,8 @@ It works out-of-the-box with **Hanzo (`hanzo` / `hanzod`)**, **Claude Code**, **
 ## Running Locally
 
 ```bash
-git clone https://github.com/hanzoai/dev-desktop.git
-cd dev-desktop
+git clone https://github.com/hanzoai/dev.git
+cd dev
 COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm install
 
 # Build & launch the production-bundled native desktop app (fastest, zero HMR lag)

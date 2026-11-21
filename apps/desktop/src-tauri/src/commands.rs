@@ -15,7 +15,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State, Theme};
 use tauri_plugin_dialog::DialogExt;
 
-const GITHUB_RELEASES_API: &str = "https://api.github.com/repos/hanzoai/dev-desktop/releases";
+const GITHUB_RELEASES_API: &str = "https://api.github.com/repos/hanzoai/dev/releases";
 const DEFAULT_HANZO_KMS_URL: &str = "https://kms.hanzo.ai";
 const HANZO_KMS_IAM_VAULT_SECRET_PATH: &str = "/v1/kms/secrets/hanzo-dev-iam-vault";
 const LEGACY_IAM_VAULT_FILENAME: &str = "iam-vault.json";
@@ -1413,7 +1413,7 @@ pub async fn desktop_install_update(state: State<'_, AppState>) -> Result<Value,
         }
     }
     let fallback_url =
-        html_url.unwrap_or_else(|| "https://github.com/hanzoai/dev-desktop/releases".to_string());
+        html_url.unwrap_or_else(|| "https://github.com/hanzoai/dev/releases".to_string());
     let _ = opener::open(fallback_url);
     Ok(json!({
         "accepted": true,
