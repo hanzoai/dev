@@ -15,6 +15,7 @@ import {
   resolveActiveHanzoOrgId,
   switchHanzoIamVaultOrg,
   upsertHanzoIamVaultAccount,
+  IAM_DISCOVERY_TTL_MS,
   resolveIamEndpoints,
 } from "./hanzoIamAuth.ts";
 
@@ -22,6 +23,56 @@ function makeJwt(payload: Record<string, unknown>): string {
   const encode = (obj: unknown) => Buffer.from(JSON.stringify(obj), "utf8").toString("base64url");
   return `${encode({ alg: "RS256", typ: "JWT" })}.${encode(payload)}.sig`;
 }
+
+describe("resolveIamEndpoints cache", () => {
+  const doc = (issuer: string) =>
+    Response.json({
+      issuer,
+      jwks_uri: `${issuer}/jwks`,
+      token_endpoint: `${issuer}/t`,
+      userinfo_endpoint: `${issuer}/u`,
+    });
+
+  it("follows a moved issuer after the TTL and keeps the last good document when a refresh fails", async () => {
+    vi.useFakeTimers();
+    try {
+      let current: () => Response = () => doc("https://old.example");
+      const fetchImpl = vi.fn(async () => current()) as unknown as typeof globalThis.fetch;
+      const origin = "https://ttl.example";
+
+      expect((await resolveIamEndpoints(origin, fetchImpl)).issuer).toBe("https://old.example");
+      current = () => doc("https://new.example");
+      // Within the TTL the cached document is served without a fetch.
+      await vi.advanceTimersByTimeAsync(IAM_DISCOVERY_TTL_MS - 1000);
+      expect((await resolveIamEndpoints(origin, fetchImpl)).issuer).toBe("https://old.example");
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      // Past the TTL discovery is read again and the move is picked up.
+      await vi.advanceTimersByTimeAsync(2000);
+      expect((await resolveIamEndpoints(origin, fetchImpl)).issuer).toBe("https://new.example");
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+
+      // A failing refresh keeps the last good document, and the next attempt can recover.
+      current = () => new Response("down", { status: 503 });
+      await vi.advanceTimersByTimeAsync(IAM_DISCOVERY_TTL_MS + 1000);
+      expect((await resolveIamEndpoints(origin, fetchImpl)).issuer).toBe("https://new.example");
+      current = () => doc("https://newer.example");
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect((await resolveIamEndpoints(origin, fetchImpl)).issuer).toBe("https://newer.example");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not remember a host that has never served discovery", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response("no", { status: 404 }),
+    ) as unknown as typeof globalThis.fetch;
+    const origin = "https://none.example";
+    expect((await resolveIamEndpoints(origin, fetchImpl)).issuer).toBeNull();
+    expect((await resolveIamEndpoints(origin, fetchImpl)).jwks).toBeNull();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe("hanzoIamAuth", () => {
   it("reads token and userinfo endpoints from OIDC discovery", async () => {

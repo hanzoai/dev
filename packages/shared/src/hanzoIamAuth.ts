@@ -236,20 +236,36 @@ interface IamEndpoints {
   readonly jwks: string | null;
 }
 
-const discoveryCache = new Map<string, Promise<IamEndpoints>>();
+/** How long a discovery document is trusted before it is read again. */
+export const IAM_DISCOVERY_TTL_MS = 10 * 60 * 1000;
+/** After a failed refresh the last good document is kept this long before the next attempt. */
+const IAM_DISCOVERY_RETRY_MS = 30 * 1000;
+
+interface DiscoveryEntry {
+  /** The last successful document. */
+  readonly good: IamEndpoints;
+  /** When to read it again. */
+  readonly refreshAt: number;
+}
+
+const discoveryCache = new Map<string, DiscoveryEntry>();
+const discoveryInFlight = new Map<string, Promise<IamEndpoints>>();
 
 /**
  * Token and userinfo endpoints come from OIDC discovery at `<issuer>/.well-known/openid-configuration`,
- * never from a hard-coded IAM host. A host that serves no discovery document keeps the classic
- * `/oauth/*` paths on its own origin.
+ * never from a hard-coded IAM host. The document is read again after a TTL, so an issuer that moves
+ * is followed without a restart; a failed read keeps the last good document until the next attempt.
+ * A host that has never served discovery keeps the classic `/oauth/*` paths on its own origin.
  */
 export function resolveIamEndpoints(
   issuer: string,
   fetchImpl: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<IamEndpoints> {
   const origin = normalizeIamIssuer(issuer);
-  const cached = discoveryCache.get(origin);
-  if (cached) return cached;
+  const entry = discoveryCache.get(origin);
+  if (entry && Date.now() < entry.refreshAt) return Promise.resolve(entry.good);
+  const running = discoveryInFlight.get(origin);
+  if (running) return running;
   const classic: IamEndpoints = {
     issuer: null,
     token: new URL("/oauth/token", origin).toString(),
@@ -264,24 +280,32 @@ export function resolveIamEndpoints(
           headers: { Accept: "application/json" },
         },
       );
-      if (!response.ok) return classic;
+      if (!response.ok) throw new Error(`discovery ${response.status}`);
       const doc = (await response.json()) as Record<string, unknown>;
       const token = typeof doc.token_endpoint === "string" ? doc.token_endpoint : null;
       const userinfo = typeof doc.userinfo_endpoint === "string" ? doc.userinfo_endpoint : null;
-      return {
+      const good: IamEndpoints = {
         issuer: typeof doc.issuer === "string" ? doc.issuer : null,
         token: token ?? classic.token,
         userinfo: userinfo ?? classic.userinfo,
         jwks: typeof doc.jwks_uri === "string" ? doc.jwks_uri : null,
       };
+      discoveryCache.set(origin, { good, refreshAt: Date.now() + IAM_DISCOVERY_TTL_MS });
+      return good;
     } catch {
+      if (entry) {
+        discoveryCache.set(origin, {
+          good: entry.good,
+          refreshAt: Date.now() + IAM_DISCOVERY_RETRY_MS,
+        });
+        return entry.good;
+      }
       return classic;
+    } finally {
+      discoveryInFlight.delete(origin);
     }
   })();
-  discoveryCache.set(origin, pending);
-  void pending.then((value) => {
-    if (value === classic) discoveryCache.delete(origin);
-  });
+  discoveryInFlight.set(origin, pending);
   return pending;
 }
 
