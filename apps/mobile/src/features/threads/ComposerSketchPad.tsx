@@ -1,3 +1,4 @@
+import { File, Paths } from "expo-file-system";
 import { msg, useGT, useMessages } from "gt-react-native";
 import { useRef, useState } from "react";
 import { Modal, PanResponder, Pressable, View } from "react-native";
@@ -45,15 +46,12 @@ export function ComposerSketchPad(props: {
 
   const attach = () => {
     svg.current?.toDataURL((base64) => {
-      void (async () => {
-        const { File, Paths } = await import("expo-file-system");
-        const file = new File(Paths.cache, `sketch-${Date.now()}.png`);
-        file.create();
-        file.write(Uint8Array.from(atob(base64), (char) => char.charCodeAt(0)));
-        setStrokes([]);
-        props.onAttach(file.uri);
-        props.onClose();
-      })();
+      const file = new File(Paths.cache, `sketch-${Date.now()}.png`);
+      file.create();
+      file.write(Uint8Array.from(atob(base64), (char) => char.charCodeAt(0)));
+      setStrokes([]);
+      props.onAttach(file.uri);
+      props.onClose();
     });
   };
 
