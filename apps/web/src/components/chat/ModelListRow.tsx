@@ -10,6 +10,8 @@ import { Kbd } from "../ui/kbd";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { modelPickerModelKey } from "./modelPickerKeys";
+import { isEnsoModel } from "@hanzodev/client-runtime/enso-ring";
+import { EnsoRing } from "./EnsoRing";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 
 export const ModelListRow = memo(function ModelListRow(props: {
@@ -56,18 +58,22 @@ export const ModelListRow = memo(function ModelListRow(props: {
       )}
     >
       {/* One row shape in every tab: the logo names the provider, so Favorites needs no second line. */}
-      <ProviderInstanceIcon
-        driverKind={props.driverKind}
-        displayName={props.providerDisplayName}
-        accentColor={props.providerAccentColor}
-        acpRegistryAgentId={props.acpRegistryAgentId}
-        acpRegistryIconUrl={props.acpRegistryIconUrl}
-        showBadge={props.showInstanceBadge}
-        className="size-4"
-        iconClassName="size-4"
-        indicatorBackground="var(--popover)"
-        badgeClassName="right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-5xs"
-      />
+      {props.driverKind === "hanzo" && isEnsoModel(props.slug) ? (
+        <EnsoRing gap={0} className="size-4 shrink-0" />
+      ) : (
+        <ProviderInstanceIcon
+          driverKind={props.driverKind}
+          displayName={props.providerDisplayName}
+          accentColor={props.providerAccentColor}
+          acpRegistryAgentId={props.acpRegistryAgentId}
+          acpRegistryIconUrl={props.acpRegistryIconUrl}
+          showBadge={props.showInstanceBadge}
+          className="size-4"
+          iconClassName="size-4"
+          indicatorBackground="var(--popover)"
+          badgeClassName="right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-5xs"
+        />
+      )}
       <div className="flex min-w-0 flex-1 items-center gap-2 text-left">
         <div
           className="min-w-0 truncate text-sm font-normal leading-snug"

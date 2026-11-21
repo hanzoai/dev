@@ -9,6 +9,7 @@ import {
 import { useId, useState } from "react";
 import { resolveOfficialAcpRegistryIconUrl } from "@hanzodev/contracts";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
+import { EnsoRing } from "./EnsoRing";
 import { AppText as Text } from "./ui/AppText";
 import { cn } from "../lib/cn";
 import { getProviderClient, openRouterIcon } from "@hanzodev/client-runtime/provider-clients";
@@ -17,6 +18,8 @@ type ProviderIconProps = {
   readonly provider: string | null | undefined;
   readonly iconUrl?: string | null | undefined;
   readonly size?: number;
+  /** With provider "enso": the ring's open share, 0 (closed) by default. */
+  readonly ensoGap?: number;
 };
 
 function AcpRegistryFallbackIcon(props: { readonly color: string; readonly size: number }) {
@@ -83,6 +86,9 @@ export function ProviderIcon(props: ProviderIconProps) {
         contentFit="contain"
       />
     );
+  }
+  if (props.provider === "enso") {
+    return <EnsoRing color={mono} gap={props.ensoGap ?? 0} size={size} />;
   }
   if (props.provider === "acpRegistry") {
     return <AcpRegistryProviderIcon color={mono} iconUrl={props.iconUrl} size={size} />;

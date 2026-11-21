@@ -1353,6 +1353,8 @@
   "71369ce364d8ed08": "Could not update quote",
   "5f794b9980f91c26": "This comment would make the message too long to send. Shorten the comment or draft.",
   "b9cf50b7e7b1bc54": "正在复制上下文…",
+  "09489e2ac7335c6a": "{effort}强度",
+  "c39de2f2abee26a3": "自动强度",
   "bda161176d64ec51": "选择模型",
   "54a5cee284438dd6": "模型和推理设置",
   "a46fa964b634eb5d": "服务器",

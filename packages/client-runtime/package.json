@@ -607,6 +607,10 @@
       "types": "./src/pullRequestQuery.ts",
       "default": "./src/pullRequestQuery.ts"
     },
+    "./enso-ring": {
+      "types": "./src/ensoRing.ts",
+      "default": "./src/ensoRing.ts"
+    },
     "./model-traits": {
       "types": "./src/modelTraits.ts",
       "default": "./src/modelTraits.ts"

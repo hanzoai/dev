@@ -1,8 +1,11 @@
 import type { ModelSelection, ProviderDriverKind } from "@hanzodev/contracts";
 import { useGT, useMessages } from "gt-react-native";
+import { ensoRingGap, isEnsoModel } from "@hanzodev/client-runtime/enso-ring";
 import {
   buildTraitsTriggerDisplay,
+  getDescriptorStringValue,
   getPromptControlledTraits,
+  isReasoningControl,
 } from "@hanzodev/client-runtime/model-traits";
 import type { ModelOption } from "../lib/modelOptions";
 import { resolveProviderOptionDescriptors } from "../lib/providerOptions";
@@ -41,6 +44,24 @@ export function ComposerModelControl(props: {
         m,
       ).label
     : "";
+  // Enso shows its effort as the open gap of its ring instead of a word.
+  const ensoSelect =
+    props.provider === "hanzo" && props.selection && isEnsoModel(props.selection.model)
+      ? descriptors.find(
+          (descriptor): descriptor is Extract<typeof descriptor, { type: "select" }> =>
+            descriptor.type === "select" && isReasoningControl(descriptor),
+        )
+      : undefined;
+  const ensoEffort = ensoSelect
+    ? getDescriptorStringValue(ensoSelect, props.selection, props.reportedSelection)
+    : null;
+  const ensoEffortLabel = ensoSelect?.options.find((option) => option.id === ensoEffort)?.label;
+  const ensoDetail = ensoSelect
+    ? ensoEffortLabel
+      ? gt("{effort} effort", { effort: ensoEffortLabel.toLowerCase() })
+      : gt("Auto effort")
+    : null;
+  const effortSummary = ensoSelect ? "" : summary;
   const badge = props.modelOption?.providerBadge;
   const label = props.modelOption?.label ?? props.selection?.model ?? gt("Choose model");
   const providerNameLabel = badge
@@ -58,7 +79,7 @@ export function ComposerModelControl(props: {
         gt("Model and reasoning settings"),
         label,
         badge?.showBadge ? badge.displayName : null,
-        summary,
+        ensoDetail ?? summary,
       ]
         .filter(Boolean)
         .join(", ")}
@@ -66,7 +87,16 @@ export function ComposerModelControl(props: {
       disabled={props.disabled}
       emphasized
       renderIcon={(size) =>
-        badge?.showBadge ? (
+        ensoSelect ? (
+          <ProviderIcon
+            provider="enso"
+            ensoGap={ensoRingGap(
+              ensoSelect.options.map((option) => option.id),
+              ensoEffort,
+            )}
+            size={size}
+          />
+        ) : badge?.showBadge ? (
           <ProviderInstanceIcon
             iconUrl={props.modelOption?.providerIconUrl}
             provider={props.modelOption?.providerDriver}
@@ -99,9 +129,9 @@ export function ComposerModelControl(props: {
             numberOfLines={1}
           >
             {shortLabel}
-            {summary ? ` · ${summary}` : ""}
+            {effortSummary ? ` · ${effortSummary}` : ""}
           </Text>
-        ) : summary ? (
+        ) : effortSummary ? (
           <Text
             className={
               props.size === "large"
@@ -110,7 +140,7 @@ export function ComposerModelControl(props: {
             }
             numberOfLines={1}
           >
-            {summary}
+            {effortSummary}
           </Text>
         ) : undefined
       }
