@@ -3,11 +3,10 @@ import { Alert, Image, Pressable, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { GlassSurface } from "../../../components/ui/GlassSurface";
-import { SymbolView } from "../../../components/ui/AppSymbol";
+import { SymbolView, type AppSymbolName } from "../../../components/ui/AppSymbol";
 import { AppText as Text } from "../../../components/ui/AppText";
 import { useControlTheme } from "../../../components/ui/useControlTheme";
 import { useHanzoMobileAccounts } from "../../cloud/hanzoMobileAuth";
-import { HomeRouteScreen } from "../../home/HomeRouteScreen";
 import { useWorkspaceState } from "../../../state/workspace";
 import { WorkspaceDrawerThreads } from "./WorkspaceDrawerThreads";
 import {
@@ -19,55 +18,67 @@ import {
   navigationCustomizationAvailable,
   resolveHiddenNavigationTabs,
 } from "./navigation-tab-order";
+import { showDevMacs, useWorkspaceSection } from "./workspace-section-store";
+import {
+  SECTION_ICONS,
+  WORKSPACE_SECTIONS,
+  devContents,
+  type DevContent,
+  type WorkspaceSection,
+} from "./workspace-section.logic";
 import { useSelectWorkspaceTab } from "./useSelectWorkspaceTab";
 import { closeWorkspaceDrawer } from "./workspace-drawer-store";
 import { startNewCloudChat } from "../../chat/cloud-chat";
 import { useAdaptiveWorkspaceLayout } from "../adaptive-workspace-context";
-import {
-  drawerAccountName,
-  drawerAccountInitial,
-  drawerDestinations,
-  type DrawerDestination,
-} from "./workspace-drawer.logic";
+import { drawerAccountName, drawerAccountInitial } from "./workspace-drawer.logic";
 import { useWorkspaceTabs } from "./WorkspaceTabsContext";
 import { mobilePreferencesAtom } from "../../../state/preferences";
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/reactivity";
 
-function useDrawerDestinations() {
+function useDevContents() {
   const preferences = useAtomValue(mobilePreferencesAtom);
   const order = useNavigationTabOrder();
   const hidden = AsyncResult.isSuccess(preferences)
     ? resolveHiddenNavigationTabs(preferences.value.hiddenNavigationTabs)
     : [];
-  return drawerDestinations(order, hidden, navigationCustomizationAvailable());
+  return devContents(order, navigationCustomizationAvailable() ? hidden : []);
 }
 
-function DestinationRow(props: {
-  readonly destination: DrawerDestination;
+/** The section names are hanzo.app's own (@hanzo/app Rail): product names, not translated prose. */
+function useSectionLabels(): Readonly<Record<WorkspaceSection, string>> {
+  const gt = useGT();
+  return {
+    chat: gt("Chat"),
+    dev: gt("Dev"),
+    design: gt("Design"),
+    library: gt("Library"),
+    tabs: gt("Tabs"),
+  };
+}
+
+function NavRow(props: {
+  readonly label: string;
+  readonly icon: AppSymbolName;
   readonly selected: boolean;
+  readonly indent?: boolean;
   readonly onPress: () => void;
 }) {
-  const gt = useGT();
-  const m = useMessages();
   const { colors } = useControlTheme();
-  const settings = props.destination === "settings";
-  const label = settings ? gt("Settings") : m(WORKSPACE_TAB_LABELS[props.destination]);
-  const icon = settings ? "gearshape" : NAVIGATION_TAB_ICONS[props.destination];
+  const tint = props.indent ? colors["--color-foreground-muted"] : colors["--color-foreground"];
+  const base = props.indent ? "h-10 flex-row items-center gap-3 rounded-xl pl-9 pr-3" : "h-11 flex-row items-center gap-3 rounded-xl px-3";
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityState={{ selected: props.selected }}
-      accessibilityLabel={label}
+      accessibilityLabel={props.label}
       onPress={props.onPress}
-      className={
-        props.selected
-          ? "h-11 flex-row items-center gap-3 rounded-xl bg-grouped-card px-3"
-          : "h-11 flex-row items-center gap-3 rounded-xl px-3"
-      }
+      className={props.selected ? `${base} bg-grouped-card` : base}
     >
-      <SymbolView name={icon} size={18} tintColor={colors["--color-foreground"]} />
-      <Text className="text-base text-foreground">{label}</Text>
+      <SymbolView name={props.icon} size={props.indent ? 15 : 18} tintColor={tint} />
+      <Text className={props.indent ? "text-[15px] text-foreground" : "text-base text-foreground"}>
+        {props.label}
+      </Text>
     </Pressable>
   );
 }
@@ -83,8 +94,8 @@ function AccountFooter() {
   const openMenu = () => {
     const others = accounts.filter((account) => account.id !== activeAccount?.id);
     Alert.alert(name, email ?? undefined, [
-      { text: gt("Usage"), onPress: () => select("usage") },
-      { text: gt("Settings"), onPress: () => select("settings") },
+      { text: gt("Usage"), onPress: () => select.other("usage") },
+      { text: gt("Settings"), onPress: () => select.other("settings") },
       ...others.map((account) => ({
         text: gt("Switch to {name}", { name: drawerAccountName(account, gt("Hanzo")) }),
         onPress: () => void switchAccount(account.id),
@@ -134,31 +145,45 @@ function AccountFooter() {
 
 function useDrawerSelect() {
   const selectTab = useSelectWorkspaceTab();
-  return (destination: DrawerDestination) => {
-    closeWorkspaceDrawer();
-    selectTab(destination);
+  const workspace = useWorkspaceTabs()!;
+  return {
+    section: (section: WorkspaceSection) => {
+      closeWorkspaceDrawer();
+      // Dev reopens where it was left; the others ride on the threads tab.
+      selectTab(section === "dev" ? workspace.state.selectedTab : "threads", section);
+    },
+    dev: (content: DevContent) => {
+      closeWorkspaceDrawer();
+      showDevMacs(content === "macs");
+      selectTab(content === "macs" ? "threads" : content, "dev");
+    },
+    other: (destination: "usage" | "settings") => {
+      closeWorkspaceDrawer();
+      selectTab(destination);
+    },
   };
 }
 
-/** Hanzo and search, New chat, the sections, Recents, and the account. */
+/** Hanzo and search, New chat, hanzo.app's five sections, Recents, and the account. */
 export function WorkspaceDrawerMenu() {
   const gt = useGT();
+  const m = useMessages();
   const { colors } = useControlTheme();
   const workspace = useWorkspaceTabs()!;
-  const destinations = useDrawerDestinations();
   const select = useDrawerSelect();
+  const labels = useSectionLabels();
+  const devs = useDevContents();
+  const { section, macs } = useWorkspaceSection();
   const { state: catalog } = useWorkspaceState();
   const { startNewTask } = useAdaptiveWorkspaceLayout();
-  const sections = destinations.filter(
-    (destination) => destination !== "usage" && destination !== "settings",
-  );
-  const selected = workspace.settingsOpen ? "settings" : workspace.state.selectedTab;
+  const active = workspace.settingsOpen ? null : section;
+  const devSelected: DevContent = macs ? "macs" : workspace.state.selectedTab;
   const newChat = () => {
     closeWorkspaceDrawer();
     if (catalog.hasReadyEnvironment) startNewTask();
     else {
       startNewCloudChat();
-      select("threads");
+      select.section("chat");
     }
   };
   return (
@@ -197,23 +222,32 @@ export function WorkspaceDrawerMenu() {
           <SymbolView name="square.and.pencil" size={18} tintColor={colors["--color-foreground"]} />
           <Text className="text-base text-foreground">{gt("New chat")}</Text>
         </Pressable>
-        {sections.map((destination) => (
-          <DestinationRow
-            key={destination}
-            destination={destination}
-            selected={selected === destination}
-            onPress={() => select(destination)}
-          />
+        {WORKSPACE_SECTIONS.map((entry) => (
+          <View key={entry} className="gap-0.5">
+            <NavRow
+              label={labels[entry]}
+              icon={SECTION_ICONS[entry]}
+              selected={active === entry}
+              onPress={() => select.section(entry)}
+            />
+            {entry === "dev" && active === "dev"
+              ? devs.map((content) => (
+                  <NavRow
+                    key={content}
+                    indent
+                    label={content === "macs" ? gt("Macs") : m(WORKSPACE_TAB_LABELS[content])}
+                    icon={content === "macs" ? "laptopcomputer" : NAVIGATION_TAB_ICONS[content]}
+                    selected={devSelected === content}
+                    onPress={() => select.dev(content)}
+                  />
+                ))
+              : null}
+          </View>
         ))}
       </View>
-      <View className={catalog.hasReadyEnvironment ? "max-h-[40%]" : "flex-1"}>
+      <View className="flex-1">
         <WorkspaceDrawerThreads />
       </View>
-      {catalog.hasReadyEnvironment ? (
-        <View className="flex-1">
-          <HomeRouteScreen />
-        </View>
-      ) : null}
       <AccountFooter />
     </View>
   );

@@ -50,6 +50,10 @@ import { PhoneFloatingHeader } from "./usePhoneHeaderButtons";
 import { WorkspaceDrawer } from "./WorkspaceDrawer";
 import { WorkspaceDrawerMenu } from "./WorkspaceDrawerMenu";
 import { closeWorkspaceDrawer } from "./workspace-drawer-store";
+import { DevMacsList } from "./DevMacsList";
+import { WorkspaceWebSection } from "./WorkspaceWebSection";
+import { useWorkspaceSection } from "./workspace-section-store";
+import { isWebSection } from "./workspace-section.logic";
 import { floatingHeaderTop, phoneHeaderMode, workspaceHeaderShown } from "./workspace-drawer.logic";
 
 const TAB_TITLES = WORKSPACE_TAB_LABELS;
@@ -61,13 +65,16 @@ function WorkspaceRootTitle(props: {
   const gt = useGT();
   const m = useMessages();
   const { state, settingsOpen } = useWorkspaceTabs()!;
+  const { section, macs } = useWorkspaceSection();
   const maxWidth = Math.max(0, props.columnWidth - (use(HeaderItemsWidthContext) ?? 160));
   const enabled = useEnabledNavigationTabs();
   const tabTitle = settingsOpen
     ? gt("Settings")
-    : enabled.length
-      ? m(TAB_TITLES[state.selectedTab])
-      : gt("Navigation", { $context: "screen title when every navigation tab is hidden" });
+    : section === "dev" && macs
+      ? gt("Macs")
+      : enabled.length
+        ? m(TAB_TITLES[state.selectedTab])
+        : gt("Navigation", { $context: "screen title when every navigation tab is hidden" });
   return (
     <View style={{ width: maxWidth, minHeight: 32, justifyContent: "center" }}>
       <WorkspaceConnectionTitle
@@ -141,11 +148,13 @@ function WorkspaceRootContent() {
   // Settings is a workspace tab too; its list takes the place of the selected tab's.
   const settingsOpen = workspace.settingsOpen;
   const headerOnly = use(NativeWorkspaceTabActivityContext)?.headerOnly === true;
+  const { section, macs } = useWorkspaceSection();
   const headerMode = phoneHeaderMode({
     drawer: drawer && !headerOnly,
     settingsOpen,
-    selectedTab: state.selectedTab,
+    section,
   });
+  const webSection = drawer && !settingsOpen && isWebSection(section);
   const headerShown = workspaceHeaderShown(headerMode);
   const renderHeaderTitle = () => (
     <WorkspaceRootTitle
@@ -189,11 +198,15 @@ function WorkspaceRootContent() {
             sidebarNavigation,
             enabled.length,
             headerShown,
+            section,
+            macs,
           ]}
           options={{
             title: settingsOpen
               ? gt("Settings")
-              : enabled.length
+              : section === "dev" && macs
+                ? gt("Macs")
+                : enabled.length
                 ? m(TAB_TITLES[state.selectedTab])
                 : gt("Navigation", {
                     $context: "screen title when every navigation tab is hidden",
@@ -223,14 +236,16 @@ function WorkspaceRootContent() {
             {/* Usage draws its own header, and skips its body itself. */}
             {headerOnly && (settingsOpen || state.selectedTab !== "usage") ? null : settingsOpen ? (
               <WorkspaceSettingsList />
+            ) : drawer && isWebSection(section) ? (
+              <WorkspaceWebSection section={section} />
+            ) : drawer && section === "chat" ? (
+              <PhoneChatLanding />
+            ) : drawer && section === "dev" && macs ? (
+              <DevMacsList />
             ) : enabled.length === 0 ? (
               <WorkspaceNoTabs />
             ) : state.selectedTab === "threads" ? (
-              drawer ? (
-                <PhoneChatLanding />
-              ) : (
-                <HomeRouteScreen />
-              )
+              <HomeRouteScreen />
             ) : state.selectedTab === "pullRequests" ? (
               <PullRequestsScreen />
             ) : state.selectedTab === "issues" ? (
@@ -243,7 +258,7 @@ function WorkspaceRootContent() {
         {deviceType !== "pad" && deviceType !== "phone" && sidebarPicker ? (
           <WorkspaceSidebarTabs />
         ) : null}
-        {enabled.length === 0 && !settingsOpen ? null : settingsOpen ||
+        {webSection || (enabled.length === 0 && !settingsOpen) ? null : settingsOpen ||
           state.selectedTab !== "usage" ? (
           <WorkspaceToolbar sidebar={sidebarNavigation} onNewTask={startNewTask} />
         ) : (

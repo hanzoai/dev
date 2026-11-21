@@ -27,6 +27,7 @@ import {
 import { WorkspaceTabToolbarButtons } from "./WorkspaceSectionToolbar";
 import { usePhoneHeaderButtons } from "./usePhoneHeaderButtons";
 import { phoneHeaderMode } from "./workspace-drawer.logic";
+import { useWorkspaceSection } from "./workspace-section-store";
 import { useWorkspaceCompose } from "./useWorkspaceCompose";
 
 const SEARCH_LABELS = {
@@ -52,12 +53,13 @@ export function WorkspaceToolbar(props: {
   const compose = useWorkspaceCompose();
   const drawer = useDrawerWorkspace();
   const phoneButtons = usePhoneHeaderButtons();
+  const { section } = useWorkspaceSection();
   const nativePhoneButtons =
     drawer &&
     phoneHeaderMode({
       drawer,
       settingsOpen: workspace.settingsOpen,
-      selectedTab: workspace.state.selectedTab,
+      section,
     }) === "native";
   // On the Duo, compose sits in the list's bar when folded and the detail column's when unfolded.
   const nativeToolbarCompose =

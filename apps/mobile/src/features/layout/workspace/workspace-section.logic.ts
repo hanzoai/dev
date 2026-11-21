@@ -42,10 +42,13 @@ export function devContents(
   return [...enabledNavigationTabs(order, hidden), "macs"];
 }
 
-/** The section a workspace tab belongs to: every list but the cloud chat landing is Dev's. */
+/**
+ * The section a workspace tab belongs to. Pull requests, issues and usage are Dev's. "threads"
+ * is the tab Chat, Dev's thread list and the web sections all ride on, so it keeps the section
+ * that was asked for.
+ */
 export function sectionOfTab(tab: NavigationTab, requested: WorkspaceSection): WorkspaceSection {
-  if (tab === "threads") return requested === "chat" || requested === "dev" ? requested : "chat";
-  return "dev";
+  return tab === "threads" ? requested : "dev";
 }
 
 export interface SectionState {

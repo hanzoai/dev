@@ -50,7 +50,7 @@ describe("Dev content", () => {
     expect(sectionOfTab("usage", "chat")).toBe("dev");
     expect(sectionOfTab("threads", "chat")).toBe("chat");
     expect(sectionOfTab("threads", "dev")).toBe("dev");
-    expect(sectionOfTab("threads", "design")).toBe("chat");
+    expect(sectionOfTab("threads", "design")).toBe("design");
   });
 });
 
