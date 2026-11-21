@@ -315,6 +315,8 @@ while (queue.length > 0) {
       ...Object.keys(childPkg.dependencies ?? {}),
       ...Object.keys(childPkg.optionalDependencies ?? {}),
     ]) {
+      // The Linux app is glibc; a musl prebuild's libc is absent, and linuxdeploy refuses it.
+      if (/-musl[a-z]*$/.test(nextDep)) continue;
       if (!visited.has(nextDep)) {
         queue.push([nextDep, childPkgJsonPath]);
       }
