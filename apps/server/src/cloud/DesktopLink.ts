@@ -32,6 +32,7 @@ import { hanzoSourceZapUrl } from "@hanzodev/shared/hanzoIamAuth";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
+import { announceLink } from "../zap/ZapMux.ts";
 import { catalogId } from "../usage/HostReadings.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { CLOUD_LINKED_USER_ID } from "./config.ts";
@@ -448,6 +449,7 @@ const make = Effect.gen(function* () {
     rows: ReadonlyArray<DesktopProviderRow>,
   ) {
     const providers = rows.map(wireProvider);
+    announceLink(hanzoSourceZapUrl(id));
     const at = iso(yield* Clock.currentTimeMillis);
     const beat = { id, at, version, zap: hanzoSourceZapUrl(id), busy: 0, providers };
     const sig = yield* signBeat(key, beatMessage(beat));
