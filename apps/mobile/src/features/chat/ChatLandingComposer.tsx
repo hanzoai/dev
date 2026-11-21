@@ -1,9 +1,10 @@
+import { CLOUD_ENVIRONMENT } from "./cloud-environment";
 import {
   cloudChatAcceptsInput,
   cloudChatSelection,
   type CloudChatAttachment,
 } from "@hanzodev/client-runtime/cloud-chat";
-import { EnvironmentId, MessageId, ProjectId, ThreadId } from "@hanzodev/contracts";
+import { MessageId, ProjectId, ThreadId } from "@hanzodev/contracts";
 import { useGT } from "gt-react-native";
 import { useSharedValue } from "react-native-reanimated";
 
@@ -29,7 +30,6 @@ import type { CloudChat } from "./cloud-chat";
 
 // Stand-ins for the thread the composer expects. No environment owns them, so every
 // environment-keyed lookup the composer makes finds nothing and falls back.
-const CLOUD_ENVIRONMENT = EnvironmentId.make("cloud-chat");
 const CLOUD_PROJECT = ProjectId.make("cloud-chat");
 const CLOUD_THREAD = ThreadId.make("cloud-chat");
 const SENT = MessageId.make("cloud-chat");

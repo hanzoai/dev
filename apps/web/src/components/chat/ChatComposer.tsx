@@ -212,7 +212,6 @@ import {
   composerSuggestionOptionId,
 } from "./ComposerCommandMenu";
 import {
-  ComposerAttachButton,
   ComposerAttachmentFileList,
   ComposerAttachmentMediaRow,
   ComposerFilePreviewDialog,
@@ -246,6 +245,8 @@ import { observeResize } from "~/lib/observeResize";
 
 const isEnvironmentRequestInvalidError = Schema.is(EnvironmentRequestInvalidError);
 import { toastManager } from "../ui/toast";
+import { ComposerPlusMenu } from "./ComposerPlusMenu";
+import type { ComposerShelf } from "./ComposerShelfDialog";
 import { m as resolveMessage } from "../../i18n/messages";
 import { BuildingIcon, PlayIcon, ReplyIcon } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
@@ -1029,6 +1030,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [isComposerFooterCompact, setIsComposerFooterCompact] = useState(false);
   const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
   const [isComposerModelPickerOpen, setIsComposerModelPickerOpen] = useState(false);
+  const [plusShelf, setPlusShelf] = useState<ComposerShelf | null>(null);
   const isMobileViewport = useMediaQuery("max-sm");
   const isSoftwareKeyboardOpen = useSoftwareKeyboardOpen();
   const [isComposerFocused, setIsComposerFocused] = useState(false);
@@ -1997,6 +1999,25 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         if (applied) {
           setComposerHighlightedItemId(null);
           props.onFreshSession?.();
+        }
+        return;
+      }
+      if (item.command === "skills") {
+        // `$` opens the skills list, which searches and picks.
+        const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "$", {
+          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+        });
+        if (applied) setComposerHighlightedItemId(null);
+        return;
+      }
+      if (item.command === "plugins") {
+        const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+          focusEditorAfterReplace: false,
+        });
+        if (applied) {
+          setComposerHighlightedItemId(null);
+          setPlusShelf("plugins");
         }
         return;
       }
@@ -3419,12 +3440,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       />
     ) : null;
   const composerAttachButton = showComposerAttachAction ? (
-    <ComposerAttachButton
+    <ComposerPlusMenu
+      environmentId={environmentId}
+      threadRef={routeThreadRef}
       addComposerAttachments={addComposerAttachments}
       focusComposer={focusComposer}
       onInsertText={(text) => {
         insertComposerTextAtEndStable(text);
       }}
+      shelf={plusShelf}
+      onShelfChange={setPlusShelf}
     />
   ) : null;
   return (

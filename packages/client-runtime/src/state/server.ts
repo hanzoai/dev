@@ -1898,6 +1898,18 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:check-otlp-endpoint",
       tag: WS_METHODS.serverCheckOtlpEndpoint,
     }),
+    listPlugins: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:list-plugins",
+      tag: WS_METHODS.serverListPlugins,
+    }),
+    setPluginEnabled: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:set-plugin-enabled",
+      tag: WS_METHODS.serverSetPluginEnabled,
+    }),
+    installPlugin: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:install-plugin",
+      tag: WS_METHODS.serverInstallPlugin,
+    }),
     checkSecretSource: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:check-secret-source",
       tag: WS_METHODS.serverCheckSecretSource,

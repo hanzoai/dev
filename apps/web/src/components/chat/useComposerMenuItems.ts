@@ -24,6 +24,7 @@ import {
   filterComposerPullRequestMatches,
   withLinkedComposerPullRequestsFirst,
 } from "@hanzodev/shared/composerPullRequestMatches";
+import { workspaceSlashCommands } from "@hanzodev/client-runtime/composer-commands";
 import { formatProviderSkillDisplayName } from "@hanzodev/shared/inlineSkills";
 
 import type { ComposerTrigger } from "../../composer-logic";
@@ -288,6 +289,14 @@ export function useComposerMenuItems({
               },
             ] as const)
           : []),
+        // `/skills` and `/plugins` are Hanzo's, so a provider command of the same name never shadows them.
+        ...workspaceSlashCommands(messages).map(({ command, description }) => ({
+          id: `slash:${command}`,
+          type: "slash-command" as const,
+          command,
+          label: `/${command}`,
+          description,
+        })),
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const slashMenuSkills = getProviderSkillsForSlashMenu(
         selectedProviderSkills,
@@ -320,7 +329,9 @@ export function useComposerMenuItems({
       const visibleProviderSlashCommandItems = providerSlashCommandItems.filter(
         (item) =>
           (item.command.name !== "compact" || compactSlashCommandAvailable) &&
-          (item.command.name !== "clear" || !freshSessionAvailable),
+          (item.command.name !== "clear" || !freshSessionAvailable) &&
+          item.command.name !== "skills" &&
+          item.command.name !== "plugins",
       );
       const slashCommandItems = slashCommandItemsForPromptPosition(
         [...builtInSlashCommandItems, ...visibleProviderSlashCommandItems, ...skillItems],

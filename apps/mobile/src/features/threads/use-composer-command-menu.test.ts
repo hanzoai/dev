@@ -63,6 +63,36 @@ describe("resolveComposerMenuSelection", () => {
   });
 });
 
+describe("mobile /skills and /plugins", () => {
+  const base = { atMessageStart: false, hasThread: true, selectedProviderStatus: null } as const;
+
+  it("offers /skills anywhere and /plugins where a machine can run them", () => {
+    expect(
+      buildComposerSlashCommandItems({ ...base, query: "skills" }).map((item) => item.id),
+    ).toEqual(["cmd:skills"]);
+    expect(buildComposerSlashCommandItems({ ...base, query: "plug" })).toEqual([]);
+    expect(
+      buildComposerSlashCommandItems({ ...base, query: "plug", offersPlugins: true }).map(
+        (item) => item.id,
+      ),
+    ).toEqual(["cmd:plugins"]);
+  });
+
+  it("is not shadowed by a provider command of the same name", () => {
+    const items = buildComposerSlashCommandItems({
+      ...base,
+      atMessageStart: true,
+      offersPlugins: true,
+      query: "plugins",
+      selectedProviderStatus: {
+        driver: ProviderDriverKind.make("claudeAgent"),
+        slashCommands: [{ name: "plugins", description: "native" }],
+      },
+    });
+    expect(items.map((item) => item.type)).toEqual(["slash-command"]);
+  });
+});
+
 describe("mobile slash commands", () => {
   it("keeps a provider's native /plan", () => {
     const items = buildComposerSlashCommandItems({

@@ -58,7 +58,10 @@ import { useEnvironmentScopeDenied } from "../../state/session";
 import { scopeProjectRef } from "@hanzodev/client-runtime/environment";
 
 import { AppText as Text } from "../../components/ui/AppText";
+import { CLOUD_ENVIRONMENT } from "../chat/cloud-environment";
 import { ComposerAttachmentButton } from "./ComposerAttachmentButton";
+import { ComposerPlusSheet, type PlusPage } from "./ComposerPlusSheet";
+import { ComposerSketchPad } from "./ComposerSketchPad";
 import {
   ComposerAttachmentStrip,
   ComposerAttachmentThumbnail,
@@ -82,6 +85,7 @@ import {
 import { formatTokens } from "@hanzodev/shared/usageFormat";
 import { ComposerModelControl } from "../../components/ComposerModelControl";
 import {
+  captureComposerPhoto,
   composerStripAttachments,
   type DraftComposerFileAttachment,
 } from "../../lib/composerImages";
@@ -264,6 +268,19 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
   const { themeVariables: materialTheme } = useAppearancePreferences();
   const composerPanel = materialTheme["--color-composer-panel"];
   const navigation = useNavigation();
+  const [plusOpen, setPlusOpen] = useState(false);
+  const [plusPage, setPlusPage] = useState<PlusPage>("main");
+  const [sketching, setSketching] = useState(false);
+  const insertDraftText = (text: string) => {
+    const current = getComposerDraftSnapshot(composerDraftKey).text;
+    const joined = current === "" || /\s$/.test(current) ? current : `${current} `;
+    setComposerDraftText(composerDraftKey, `${joined}${text}`);
+  };
+  const capturePhoto = async () => {
+    const { uri, error } = await captureComposerPhoto();
+    if (error) Dialog.alert(gt("Could not take a photo"), error);
+    else if (uri) await props.onNativePasteImages([uri]);
+  };
   const foregroundColor = useUniwindTheme()["--color-foreground"];
   const bodyText = useComposerTextRole();
   const fallbackInputRef = useRef<ComposerEditorHandle>(null);
@@ -445,6 +462,14 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
     onUsageLimits:
       usageLimitsOffered && draftAttachments.length === 0 ? openUsageLimits : undefined,
     onOpenModelPicker: settingsSheetPresentation.open,
+    ...(props.environmentId === CLOUD_ENVIRONMENT
+      ? {}
+      : {
+          onOpenPlugins: () => {
+            setPlusPage("plugins");
+            setPlusOpen(true);
+          },
+        }),
     modelOptions: mentionModelOptions,
     modelProviders: props.serverConfig?.providers,
     ...(props.onFreshSession === undefined ? {} : { onFreshSession: props.onFreshSession }),
@@ -825,6 +850,37 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                 supportsFiles={props.serverConfig !== null}
                 onPickMedia={props.onPickDraftMedia}
                 onPickFiles={props.onPickDraftFiles}
+                onOpenMenu={() => {
+                  setPlusPage("main");
+                  setPlusOpen(true);
+                }}
+              />
+              <ComposerPlusSheet
+                visible={plusOpen}
+                page={plusPage}
+                onPageChange={setPlusPage}
+                onClose={() => setPlusOpen(false)}
+                environmentId={
+                  props.environmentId === CLOUD_ENVIRONMENT ? null : props.environmentId
+                }
+                supportsFiles={props.serverConfig !== null}
+                offersBrowser={props.isDraft !== true && props.environmentId !== CLOUD_ENVIRONMENT}
+                onPickMedia={() => void props.onPickDraftMedia()}
+                onPickFiles={() => void props.onPickDraftFiles()}
+                onCapture={() => void capturePhoto()}
+                onSketch={() => setSketching(true)}
+                onBrowser={() =>
+                  navigation.navigate("ThreadBrowserPreview", {
+                    environmentId: String(props.environmentId),
+                    threadId: String(props.selectedThread.id),
+                  })
+                }
+                onInsertText={insertDraftText}
+              />
+              <ComposerSketchPad
+                visible={sketching}
+                onClose={() => setSketching(false)}
+                onAttach={(uri) => void props.onNativePasteImages([uri])}
               />
               <Animated.View
                 className="min-w-0 flex-1"

@@ -95,6 +95,14 @@ import {
   AcpRegistrySetProviderInput,
   AcpRegistrySetProviderResult,
 } from "./acpRegistry.ts";
+import {
+  PluginInstallInput,
+  PluginListInput,
+  PluginListResult,
+  PluginOperationError,
+  PluginOperationResult,
+  PluginSetEnabledInput,
+} from "./plugin.ts";
 import { ExternalLauncherError, LaunchEditorInput } from "./editor.ts";
 import {
   AuthAccessStreamError,
@@ -578,6 +586,9 @@ export const WS_METHODS = {
   serverImportAcpRegistrySession: "server.importAcpRegistrySession",
   serverDeleteAcpRegistrySession: "server.deleteAcpRegistrySession",
   serverListAcpRegistryProviders: "server.listAcpRegistryProviders",
+  serverListPlugins: "server.listPlugins",
+  serverSetPluginEnabled: "server.setPluginEnabled",
+  serverInstallPlugin: "server.installPlugin",
   serverSetAcpRegistryProvider: "server.setAcpRegistryProvider",
   serverDisableAcpRegistryProvider: "server.disableAcpRegistryProvider",
   serverLogoutAcpRegistry: "server.logoutAcpRegistry",
@@ -1015,6 +1026,24 @@ const WsServerListAcpRegistryProvidersRpc = Rpc.make(WS_METHODS.serverListAcpReg
   payload: AcpRegistryListProvidersInput,
   success: AcpRegistryListProvidersResult,
   error: Schema.Union([AcpRegistryOperationError, EnvironmentAuthorizationError]),
+});
+
+const WsServerListPluginsRpc = Rpc.make(WS_METHODS.serverListPlugins, {
+  payload: PluginListInput,
+  success: PluginListResult,
+  error: Schema.Union([PluginOperationError, EnvironmentAuthorizationError]),
+});
+
+const WsServerSetPluginEnabledRpc = Rpc.make(WS_METHODS.serverSetPluginEnabled, {
+  payload: PluginSetEnabledInput,
+  success: PluginOperationResult,
+  error: Schema.Union([PluginOperationError, EnvironmentAuthorizationError]),
+});
+
+const WsServerInstallPluginRpc = Rpc.make(WS_METHODS.serverInstallPlugin, {
+  payload: PluginInstallInput,
+  success: PluginOperationResult,
+  error: Schema.Union([PluginOperationError, EnvironmentAuthorizationError]),
 });
 
 const WsServerSetAcpRegistryProviderRpc = Rpc.make(WS_METHODS.serverSetAcpRegistryProvider, {
@@ -2426,6 +2455,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerImportAcpRegistrySessionRpc,
   WsServerDeleteAcpRegistrySessionRpc,
   WsServerListAcpRegistryProvidersRpc,
+  WsServerListPluginsRpc,
+  WsServerSetPluginEnabledRpc,
+  WsServerInstallPluginRpc,
   WsServerSetAcpRegistryProviderRpc,
   WsServerDisableAcpRegistryProviderRpc,
   WsServerLogoutAcpRegistryRpc,

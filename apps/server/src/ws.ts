@@ -16,6 +16,7 @@ import * as Base64 from "effect/encoding/Base64";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
+import { ChildProcessSpawner } from "effect/process";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -214,6 +215,7 @@ import * as KnownWorkspaces from "./workspace/KnownWorkspaces.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import { readWorkflowScript } from "./orchestration-v2/workflowScriptQuery.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
+import * as ClaudePlugins from "./plugins/ClaudePlugins.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
@@ -1576,6 +1578,13 @@ export const layerWsRpc = (
       const acpRegistryRuntimeCoordinator =
         yield* AcpRegistryRuntimeCoordinator.AcpRegistryRuntimeCoordinator;
       const acpRegistrySessions = yield* AcpRegistrySessions.AcpRegistrySessions;
+      const pluginSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const pluginEnvironment = yield* HostProcess.Environment;
+      const runPluginCommand: ClaudePlugins.RunPluginCommand = (args) =>
+        ClaudePlugins.runClaudePluginCommand(args).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, pluginSpawner),
+          Effect.provideService(HostProcess.Environment, pluginEnvironment),
+        );
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const providerAuth = yield* ProviderAuthService.ProviderAuthService;
       const providerInstallation = yield* ProviderInstallation.ProviderInstallation;
@@ -2453,6 +2462,12 @@ export const layerWsRpc = (
             "provider.instance_id": input.instanceId,
             "project.id": input.projectId,
           }).pipe(Effect.andThen(listAcpRegistryProviders(input))),
+        [WS_METHODS.serverListPlugins]: (input) =>
+          ClaudePlugins.listPlugins(runPluginCommand, input.query),
+        [WS_METHODS.serverSetPluginEnabled]: (input) =>
+          ClaudePlugins.setPluginEnabled(runPluginCommand, input.id, input.enabled),
+        [WS_METHODS.serverInstallPlugin]: (input) =>
+          ClaudePlugins.installPlugin(runPluginCommand, input.id),
         [WS_METHODS.serverSetAcpRegistryProvider]: (input) =>
           Effect.annotateCurrentSpan({
             "provider.instance_id": input.instanceId,

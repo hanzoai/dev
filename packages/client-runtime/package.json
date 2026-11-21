@@ -39,6 +39,14 @@
       "types": "./src/savedViews.ts",
       "default": "./src/savedViews.ts"
     },
+    "./composer-plus": {
+      "types": "./src/composerPlus.ts",
+      "default": "./src/composerPlus.ts"
+    },
+    "./composer-commands": {
+      "types": "./src/composerCommands.ts",
+      "default": "./src/composerCommands.ts"
+    },
     "./composerThreadItems": {
       "types": "./src/composerThreadItems.ts",
       "default": "./src/composerThreadItems.ts"

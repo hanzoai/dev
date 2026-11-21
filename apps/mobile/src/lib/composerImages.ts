@@ -683,3 +683,38 @@ export async function convertPastedImagesToAttachments(input: {
 
   return { attachments, error };
 }
+
+/**
+ * One photo from the camera, as a file URI, or null when the person cancels. A phone cannot
+ * capture its own screen from inside an app, so the `+` menu's screenshot entry takes a photo.
+ */
+export async function captureComposerPhoto(): Promise<{
+  readonly uri: string | null;
+  readonly error: string | null;
+}> {
+  let imagePicker: Awaited<ReturnType<typeof loadImagePicker>>;
+  try {
+    imagePicker = await loadImagePicker();
+  } catch (error) {
+    return {
+      uri: null,
+      error: errorDisplayMessage(error, m) ?? m(msg("The camera is unavailable right now.")),
+    };
+  }
+  const permission = await imagePicker.requestCameraPermissionsAsync();
+  if (!permission.granted) {
+    return { uri: null, error: m(msg("Allow camera access in Settings to take a photo.")) };
+  }
+  const endHandoff = beginForegroundHandoff();
+  try {
+    const result = await imagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 1 });
+    return { uri: result.canceled ? null : (result.assets[0]?.uri ?? null), error: null };
+  } catch (error) {
+    return {
+      uri: null,
+      error: errorDisplayMessage(error, m) ?? m(msg("Could not open the camera.")),
+    };
+  } finally {
+    endHandoff();
+  }
+}

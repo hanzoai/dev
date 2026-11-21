@@ -1,3 +1,4 @@
+import { workspaceSlashCommands } from "@hanzodev/client-runtime/composer-commands";
 import { threadPullRequestKeyOf } from "@hanzodev/client-runtime/thread-pull-requests";
 import * as Dialog from "../../components/ui/Dialog";
 import type {
@@ -115,6 +116,8 @@ export function buildComposerSlashCommandItems(
     /** Hanzo's `/clear` replaces the provider's, which would clear a session Hanzo still treats as live. */
     readonly offersFreshSession?: boolean;
     readonly offersSideChat?: boolean;
+    /** Where the machine can run plugins (a thread on an environment, not chat with none). */
+    readonly offersPlugins?: boolean;
     readonly selectedProviderStatus: Pick<ServerProvider, "driver" | "slashCommands"> | null;
   },
   resolve: MessageResolver = m,
@@ -131,6 +134,19 @@ export function buildComposerSlashCommandItems(
         },
       ]
     : [];
+
+  // `/skills` and `/plugins` are Hanzo's, so a provider command of the same name never shadows them.
+  for (const { command, description } of workspaceSlashCommands(resolve)) {
+    if (command === "plugins" && !input.offersPlugins) continue;
+    if (!command.includes(query)) continue;
+    items.push({
+      id: `cmd:${command}`,
+      type: "slash-command",
+      command,
+      label: `/${command}`,
+      description,
+    });
+  }
 
   // Providers expand commands only at the start of a message. Hanzo commands
   // change local state and do not have this restriction, except `/clear`.
@@ -162,6 +178,7 @@ export function buildComposerSlashCommandItems(
   for (const command of input.selectedProviderStatus?.slashCommands ?? []) {
     if (!command.name.toLowerCase().includes(query)) continue;
     if (command.name === "clear" && input.offersFreshSession) continue;
+    if (command.name === "skills" || command.name === "plugins") continue;
     if (command.name === "compact" && !input.hasCompactableConversation) continue;
     if (command.name === USAGE_LIMITS_COMMAND.name && input.offersUsageLimits && !input.hasThread) {
       continue;
@@ -268,6 +285,7 @@ export function useComposerCommandMenu({
   onChangeDraftMessage,
   onUsageLimits,
   onOpenModelPicker,
+  onOpenPlugins,
   modelOptions,
   modelProviders,
   onFreshSession,
@@ -294,6 +312,8 @@ export function useComposerCommandMenu({
   readonly onUsageLimits?: () => void;
   /** `/model` opens this picker instead of inserting text. */
   readonly onOpenModelPicker: () => void;
+  /** Opens the plugins list; absent where no machine can run plugins. */
+  readonly onOpenPlugins?: () => void;
   readonly modelOptions?: ReadonlyArray<ModelOption>;
   readonly modelProviders?: ReadonlyArray<ServerProvider>;
   /** Arms a fresh session for the next message; absent where `/clear` is unavailable. */
@@ -408,6 +428,7 @@ export function useComposerCommandMenu({
           offersUsageLimits,
           offersFreshSession: onFreshSession !== undefined,
           offersSideChat,
+          offersPlugins: onOpenPlugins !== undefined,
           selectedProviderStatus: selectedProviderStatus
             ? {
                 ...selectedProviderStatus,
@@ -670,6 +691,17 @@ export function useComposerCommandMenu({
     };
     if (item.type === "slash-command" && item.command === "model") {
       clearTriggerThen(onOpenModelPicker);
+      return;
+    }
+    if (item.type === "slash-command" && item.command === "plugins" && onOpenPlugins) {
+      clearTriggerThen(onOpenPlugins);
+      return;
+    }
+    if (item.type === "slash-command" && item.command === "skills") {
+      // `$` opens the skills list, which searches and picks.
+      const result = replaceTextRange(draftMessage, trigger.rangeStart, trigger.rangeEnd, "$");
+      setSelection({ start: result.cursor, end: result.cursor });
+      onChangeDraftMessage(result.text);
       return;
     }
     if (item.type === "slash-command" && item.command === "clear" && onFreshSession) {
