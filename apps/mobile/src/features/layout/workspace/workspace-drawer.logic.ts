@@ -108,3 +108,28 @@ export function drawerAccountInitial(name: string): string {
   const first = [...name.trim()][0];
   return first ? first.toUpperCase() : "?";
 }
+
+/** The native header sits under the drawer's dim by leaving while the drawer is open. */
+export function workspaceHeaderShown(input: {
+  readonly drawer: boolean;
+  readonly open: boolean;
+}): boolean {
+  return !(input.drawer && input.open);
+}
+
+export interface DrawerThreadRow {
+  readonly key: string;
+  readonly title: string;
+}
+
+/** The drawer's cloud threads, filtered by the search field; untitled ones read "New chat". */
+export function drawerThreadRows(
+  threads: readonly { readonly key: string; readonly title: string }[],
+  query: string,
+  untitled: string,
+): readonly DrawerThreadRow[] {
+  const needle = query.trim().toLowerCase();
+  return threads
+    .map((thread) => ({ key: thread.key, title: thread.title === "" ? untitled : thread.title }))
+    .filter((row) => needle === "" || row.title.toLowerCase().includes(needle));
+}

@@ -48,7 +48,8 @@ import { openSettings } from "../../settings/settings-navigation";
 import { PhoneChatLanding } from "../../chat/PhoneChatLanding";
 import { WorkspaceDrawer } from "./WorkspaceDrawer";
 import { WorkspaceDrawerMenu } from "./WorkspaceDrawerMenu";
-import { closeWorkspaceDrawer } from "./workspace-drawer-store";
+import { closeWorkspaceDrawer, useWorkspaceDrawerOpen } from "./workspace-drawer-store";
+import { workspaceHeaderShown } from "./workspace-drawer.logic";
 
 const TAB_TITLES = WORKSPACE_TAB_LABELS;
 
@@ -130,6 +131,10 @@ function WorkspaceRootContent() {
   // Settings is a workspace tab too; its list takes the place of the selected tab's.
   const settingsOpen = workspace.settingsOpen;
   const headerOnly = use(NativeWorkspaceTabActivityContext)?.headerOnly === true;
+  // The native header (and its menu and compose circles) sits above the pane, so it leaves while
+  // the drawer is open and the dim covers the whole screen.
+  const drawerOpen = useWorkspaceDrawerOpen();
+  const headerShown = workspaceHeaderShown({ drawer: drawer && !headerOnly, open: drawerOpen });
   const renderHeaderTitle = () => (
     <WorkspaceRootTitle
       columnWidth={width}
@@ -171,6 +176,7 @@ function WorkspaceRootContent() {
             width,
             sidebarNavigation,
             enabled.length,
+            headerShown,
           ]}
           options={{
             title: settingsOpen
@@ -180,7 +186,7 @@ function WorkspaceRootContent() {
                 : gt("Navigation", {
                     $context: "screen title when every navigation tab is hidden",
                   }),
-            headerShown: true,
+            headerShown,
             headerTransparent: NATIVE_LIQUID_GLASS_SUPPORTED,
             headerStyle: NATIVE_LIQUID_GLASS_SUPPORTED
               ? { backgroundColor: "transparent" }
