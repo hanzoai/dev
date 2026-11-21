@@ -1692,6 +1692,7 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-single-instance",
  "tokio",
+ "zaphttp",
 ]
 
 [[package]]
@@ -6168,6 +6169,15 @@ dependencies = [
  "quote",
  "syn 3.0.10",
  "synstructure",
+]
+
+[[package]]
+name = "zaphttp"
+version = "0.1.0"
+source = "git+https://github.com/hanzoai/node?rev=2d93704e9#2d93704e98568565455944b26248b7b8f1e9c489"
+dependencies = [
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

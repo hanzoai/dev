@@ -21,6 +21,7 @@ import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import { makeShellSnapshotAnswer } from "../orchestration-v2/http.ts";
 import { serveZapStream, ZapShellError, type ZapCalls, type ZapStream } from "./ZapSession.ts";
+import { serveMux } from "./ZapMux.ts";
 
 // A connection of the local ZAP stream (a unix socket, or loopback TCP) read as a byte stream.
 const streamOf = (socket: NodeNet.Socket): ZapStream => {
@@ -60,8 +61,10 @@ const mountSocket = Effect.fn("ZapServer.mountSocket")(function* (socket: Socket
 
 /** Where the local ZAP stream listens: a unix socket path, or a loopback TCP port. */
 export type ZapListen =
-  | { readonly socket: string; readonly port?: never }
-  | { readonly port: number; readonly socket?: never };
+  | { readonly socket: string; readonly port?: never; readonly fd?: never }
+  | { readonly port: number; readonly socket?: never; readonly fd?: never }
+  /** A descriptor hanzod passed: one stream carrying every session (see ZapMux). */
+  | { readonly fd: number; readonly socket?: never; readonly port?: never };
 
 /**
  * Serves the environment protocol over ZAP on a local stream: zip's WebTransport edge carries
@@ -119,6 +122,14 @@ export const layer = (listen: ZapListen) =>
           ),
         ).pipe(Effect.scoped, Effect.provideService(ZapAuth, auth), Effect.ignoreCause);
       const run = Effect.runForkWith(context);
+      if (listen.fd !== undefined) {
+        const fd = listen.fd;
+        yield* Effect.acquireRelease(
+          Effect.sync(() => serveMux(fd, (stream) => void run(runSession(stream)))),
+          (close) => Effect.sync(close),
+        );
+        return;
+      }
       yield* Effect.acquireRelease(
         Effect.callback<NodeNet.Server>((resume) => {
           const server = NodeNet.createServer((connection) =>
@@ -140,6 +151,7 @@ export const layer = (listen: ZapListen) =>
 export const ZapListenConfig = Config.all({
   socket: Config.String("HANZO_DEV_ZAP_SOCKET").pipe(Config.option),
   port: Config.Int("HANZO_DEV_ZAP_PORT").pipe(Config.option),
+  fd: Config.Int("HANZO_DEV_ZAP_FD").pipe(Config.option),
   principal: Config.String("HANZO_DEV_ZAP_PRINCIPAL"),
 }).pipe(Config.option);
 
@@ -148,12 +160,14 @@ export const layerFromEnvironment = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ZapListenConfig;
     if (Option.isNone(config)) return Layer.empty;
-    const { socket, port, principal } = config.value;
-    const listen: ZapListen | undefined = Option.isSome(socket)
-      ? { socket: socket.value }
-      : Option.isSome(port)
-        ? { port: port.value }
-        : undefined;
+    const { socket, port, fd, principal } = config.value;
+    const listen: ZapListen | undefined = Option.isSome(fd)
+      ? { fd: fd.value }
+      : Option.isSome(socket)
+        ? { socket: socket.value }
+        : Option.isSome(port)
+          ? { port: port.value }
+          : undefined;
     if (listen === undefined) return Layer.empty;
     const { iamIssuer, iamClientId } = yield* makeHanzoIamConfig();
     const auth = layerIam({ origin: iamIssuer, audience: iamClientId, principal }).pipe(
