@@ -6,3 +6,4 @@ export * from "./chatThreads.ts";
 export * from "./catalog.ts";
 export * from "./local.ts";
 export * from "./shelves.ts";
+export * from "./personas.ts";

@@ -234,6 +234,8 @@ export async function streamChatReply(input: {
   readonly messages: ReadonlyArray<CloudChatMessage>;
   /** Reasoning effort for models that take one; omitted when unset. */
   readonly effort?: string | null | undefined;
+  /** A system message ahead of the turns (a persona's instructions); never stored in the thread. */
+  readonly system?: string | undefined;
   readonly onDelta: (text: string) => void;
   readonly signal?: AbortSignal | undefined;
   readonly options?: CloudChatOptions | undefined;
@@ -251,7 +253,10 @@ export async function streamChatReply(input: {
       }),
       body: JSON.stringify({
         model: input.model,
-        messages: input.messages.map(toWireMessage),
+        messages: [
+          ...(input.system ? [{ role: "system" as const, content: input.system }] : []),
+          ...input.messages.map(toWireMessage),
+        ],
         stream: true,
         ...(input.effort ? { reasoning_effort: input.effort } : {}),
       }),

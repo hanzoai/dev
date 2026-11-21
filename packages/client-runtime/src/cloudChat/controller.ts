@@ -57,6 +57,12 @@ export interface CloudChatState {
   readonly error: CloudChatErrorKind | null;
 }
 
+/** What shapes one turn beyond its words: a persona's instructions and the model it is pinned to. */
+export interface CloudChatTurn {
+  readonly system?: string | undefined;
+  readonly model?: string | undefined;
+}
+
 export interface CloudChatController {
   getState(): CloudChatState;
   subscribe(listener: () => void): () => void;
@@ -65,7 +71,7 @@ export interface CloudChatController {
   loadLocalModels(): Promise<void>;
   selectModel(id: string, effort?: string | null): void;
   /** Attachments ride this request and later ones of the open thread; threads store text only. */
-  send(prompt: string, attachments?: ReadonlyArray<CloudChatAttachment>): Promise<void>;
+  send(prompt: string, attachments?: ReadonlyArray<CloudChatAttachment>, turn?: CloudChatTurn): Promise<void>;
   /** Reads the device copies, then the remote list, into `state.threads`. */
   loadThreads(): Promise<void>;
   openThread(key: string): Promise<void>;
@@ -226,7 +232,7 @@ export function createCloudChatController(input: {
       modelChosen = true;
       set({ model: id, effort });
     },
-    async send(prompt, attachments = []) {
+    async send(prompt, attachments = [], turn = {}) {
       const text = prompt.trim();
       if (text === "" || state.sending) return;
       const user: CloudChatMessage = { role: "user", content: text };
@@ -266,8 +272,9 @@ export function createCloudChatController(input: {
         } else
           reply = await streamChatReply({
             auth,
-            model: state.model,
+            model: turn.model ?? state.model,
             effort: state.effort,
+            system: turn.system,
             messages: request,
             options: input.options,
             onDelta,
