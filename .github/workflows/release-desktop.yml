@@ -565,7 +565,8 @@ jobs:
           case "${{ inputs.platform }}" in
             mac) bundles="dmg,app" ;;
             linux) bundles="appimage,deb" ;;
-            win) bundles="nsis,msi" ;;
+            # MSI takes only a numeric pre-release (<= 65535); nightly versions carry a date.
+            win) bundles="nsis" ;;
           esac
 
           (cd apps/desktop && npx tauri build --verbose --target "${{ inputs.rust_target }}" --bundles "$bundles")
