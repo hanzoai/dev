@@ -187,15 +187,16 @@ function ChatLanding() {
               {linkedMac ? linkedMac.label : <T>Run on your Mac</T>}
             </Button>
             <Button
+              disabled={discovery?.cloud.status === "unavailable"}
               onClick={() => void chat.runInCloud().then(setCloudResult)}
               size="sm"
               variant="outline"
             >
-              <T>Run in the cloud</T>
+              <T>Cloud</T>
             </Button>
-            {cloudNote === "unavailable" ? (
+            {cloudNote === "unavailable" || discovery?.cloud.status === "unavailable" ? (
               <p className="text-xs text-muted-foreground">
-                <T>Cloud machines are not available yet.</T>
+                <T>Not available yet</T>
               </p>
             ) : cloudNote === "failed" ? (
               <p className="text-xs text-muted-foreground">

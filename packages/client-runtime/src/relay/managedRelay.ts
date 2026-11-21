@@ -1,7 +1,7 @@
 import {
   RelayAccessTokenType,
   RelayApi,
-  type RelayClientEnvironmentRecord,
+  RelayClientEnvironmentRecord,
   type RelayClientDeviceRecord,
   RelayConnectEnvironmentEndpoint,
   type RelayDeviceRegistrationRequest,
@@ -34,6 +34,7 @@ import {
 import { encodeOAuthScope, oauthScopeSetEquals } from "@hanzodev/shared/oauthScope";
 import { decodeRelayJwt } from "@hanzodev/shared/relayJwt";
 import { withRelayClientTracing } from "@hanzodev/shared/relayTracing";
+import { DEFAULT_HANZO_API_BASE_URL } from "@hanzodev/shared/hanzoIamAuth";
 import { normalizeSecureRelayUrl } from "@hanzodev/shared/relayUrl";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -46,6 +47,10 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 import * as HttpClientError from "effect/http/HttpClientError";
 import type * as HttpMethod from "effect/http/HttpMethod";
 import * as HttpApiClient from "effect/http-api/HttpApiClient";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
+import { parseSources, type LinkedMachine } from "../discovery/environments.ts";
 import { msg } from "gt-i18n";
 import { NETWORK_BLOCKING_HINT } from "../errors/network.ts";
 import { type MarkedText, markedTextEnglish } from "../errors/translatable.ts";
@@ -575,6 +580,27 @@ function disabledManagedRelayClient(relayUrl: string): ManagedRelayClient["Servi
   });
 }
 
+const SourcesResponse = Schema.Struct({ sources: Schema.Array(Schema.Unknown) });
+
+const sourceEndpoint = (machine: LinkedMachine): RelayClientEnvironmentRecord["endpoint"] => {
+  const httpBaseUrl = machine.zap || `https://zap.hanzo.ai/v1/dev/zap/${machine.id}`;
+  return {
+    httpBaseUrl,
+    wsBaseUrl: httpBaseUrl.replace(/^http/, "ws"),
+    providerKind: "hanzo_relay",
+  };
+};
+
+/** A linked machine of the `/v1/sources` registry as a Hanzo Link environment. */
+const sourceEnvironment = (machine: LinkedMachine): RelayClientEnvironmentRecord =>
+  Schema.decodeSync(RelayClientEnvironmentRecord)({
+    environmentId: machine.id,
+    label: machine.name,
+    endpoint: sourceEndpoint(machine),
+    linkedAt: machine.linkedAt || machine.lastSeen || "1970-01-01T00:00:00.000Z",
+    state: machine.state === "online" ? "online" : "offline",
+  });
+
 /** @public */
 export const make = Effect.fn("ManagedRelayClient.make")(function* (
   options: ManagedRelayClientLayerOptions,
@@ -585,6 +611,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
   }
   const signer = yield* ManagedRelayDpopSigner;
   const client = yield* HttpApiClient.make(RelayApi, { baseUrl: relayUrl });
+  const http = yield* HttpClient.HttpClient;
   const initialTokens = options.accessTokenStore ? yield* options.accessTokenStore.load : [];
   const cachedTokens = yield* SynchronizedRef.make<
     ReadonlyArray<ManagedRelayAccessTokenCacheEntry>
@@ -857,13 +884,17 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
     relayUrl,
     listEnvironments: Effect.fnUntraced(
       function* (input) {
-        return yield* client.client
-          .listEnvironments({ headers: bearerHeaders(input.iamToken) })
-          .pipe(
-            Effect.map((response) => response.environments),
-            Effect.mapError(relayRequestError("list relay-managed environments")),
-            timeoutRelayRequest("Relay environment listing"),
-          );
+        // Hanzo Link environments are the /v1/sources registry: desktops link themselves, phones list them.
+        return yield* HttpClientRequest.get(`${DEFAULT_HANZO_API_BASE_URL}/v1/sources`).pipe(
+          HttpClientRequest.bearerToken(input.iamToken),
+          http.execute,
+          Effect.flatMap(HttpClientResponse.filterStatusOk),
+          Effect.flatMap((response) => response.json),
+          Effect.flatMap(Schema.decodeUnknownEffect(SourcesResponse)),
+          Effect.mapError(relayRequestError("list relay-managed environments")),
+          Effect.map((body) => (parseSources(body) ?? []).map(sourceEnvironment)),
+          timeoutRelayRequest("Relay environment listing"),
+        );
       },
       Effect.withSpan("clientRuntime.managedRelay.listEnvironments"),
       withRelayClientTracing,

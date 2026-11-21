@@ -39,7 +39,7 @@ export function PhoneChatLanding() {
       const notice = sandboxNotice(result, {
         ready: gt("Cloud sandbox ready"),
         readyDetail: gt("Its browser opens from Environments."),
-        unavailable: gt("Cloud sandboxes aren't available yet"),
+        unavailable: gt("Not available yet"),
         unavailableDetail: gt("Keep chatting, or run on your Mac."),
         failed: gt("Couldn't start a cloud sandbox"),
       });
@@ -59,7 +59,7 @@ export function PhoneChatLanding() {
   const chooseTarget = () =>
     Alert.alert(gt("Where should this run?"), gt("Building needs a machine."), [
       { text: gt("Run on your Mac"), onPress: () => run("mac") },
-      { text: gt("Run in the cloud"), onPress: () => run("cloud") },
+      { text: gt("Cloud"), onPress: () => run("cloud") },
       { text: gt("Cancel"), style: "cancel" },
     ]);
 

@@ -70,6 +70,7 @@ import {
   ServerUpdateProgress,
 } from "../ServerUpdateAction";
 import { CloudEnvironmentConnectRows } from "../cloud/CloudEnvironmentConnectList";
+import { CloudEnvironmentRow } from "../cloud/CloudEnvironmentRow";
 import { useHanzoConnectAuthPrompt } from "../account/useHanzoConnectAuthPrompt";
 
 type SavedBackendListRowProps = {
@@ -918,11 +919,14 @@ export function CloudRemoteEnvironmentRows({
   readonly savedEnvironments: ReadonlyArray<EnvironmentPresentation>;
 }) {
   return hasCloudPublicConfig() ? (
-    <CloudEnvironmentConnectRows
-      primaryEnvironmentId={primaryEnvironmentId}
-      savedEnvironments={savedEnvironments}
-      empty={<EmptyRemoteEnvironments />}
-    />
+    <>
+      <CloudEnvironmentConnectRows
+        primaryEnvironmentId={primaryEnvironmentId}
+        savedEnvironments={savedEnvironments}
+        empty={<EmptyRemoteEnvironments />}
+      />
+      <CloudEnvironmentRow />
+    </>
   ) : savedEnvironments.length === 0 ? (
     <EmptyRemoteEnvironments cloudEnabled={false} />
   ) : null;

@@ -6,6 +6,7 @@ import { managedRelaySessionAtom } from "@hanzodev/client-runtime/relay";
 import type { EnvironmentId } from "@hanzodev/contracts";
 import { useRef, useState } from "react";
 import { RefreshControl } from "../../components/ui/RefreshControl";
+import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SettingsScreen } from "./components/SettingsScreen";
@@ -13,6 +14,8 @@ import { CloudEnvironmentRows } from "../connection/CloudEnvironmentRows";
 import { LocalEnvironmentList } from "../connection/LocalEnvironmentList";
 import { PullRequestRoutingSettings } from "../connection/PullRequestRoutingSettings";
 import { splitEnvironmentSections } from "../connection/environmentSections";
+import { AppText as Text } from "../../components/ui/AppText";
+import { useDrawerEnvironments } from "../layout/workspace/useDrawerEnvironments";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { useRemoteConnections } from "../../state/use-remote-environment-registry";
 import { relayEnvironmentDiscovery } from "../../state/relay";
@@ -36,6 +39,7 @@ export function SettingsEnvironmentsRouteScreen() {
     onUpdateEnvironment,
   } = useRemoteConnections();
   const navigation = useNavigation();
+  const { cloud } = useDrawerEnvironments();
   const insets = useSafeAreaInsets();
   const environmentSections = splitEnvironmentSections({
     connectedEnvironments,
@@ -154,6 +158,14 @@ export function SettingsEnvironmentsRouteScreen() {
               }
             : {})}
         />
+        {cloud === null ? null : (
+          <View className="mt-4 flex-row items-center rounded-2xl bg-grouped-card px-4 py-3">
+            <Text className="flex-1 text-base text-foreground">{gt("Cloud")}</Text>
+            <Text className="text-sm text-foreground-muted">
+              {cloud.available ? gt("Available") : gt("Not available yet")}
+            </Text>
+          </View>
+        )}
         <PullRequestRoutingSettings />
       </ScrollView>
     </SettingsScreen>

@@ -380,6 +380,61 @@ describe("ManagedRelayClient", () => {
     }).pipe(Effect.provide(layerManagedRelayTest(fetchFn, undefined, accessTokenStore)));
   });
 
+  it.effect("lists environments from the /v1/sources registry", () => {
+    const requests: Array<{ url: string; authorization: string | null }> = [];
+    const fetchFn = ((input, init) => {
+      requests.push({
+        url: String(input),
+        authorization: new Headers(init?.headers).get("authorization"),
+      });
+      return Promise.resolve(
+        Response.json({
+          sources: [
+            {
+              id: "mac-1",
+              kind: "desktop",
+              name: "Zs Mac",
+              state: "online",
+              linked_at: "2026-11-01T00:00:00Z",
+            },
+            { id: "gone", kind: "desktop", name: "Old", state: "revoked" },
+          ],
+        }),
+      );
+    }) satisfies typeof globalThis.fetch;
+
+    return Effect.gen(function* () {
+      const relayClient = yield* ManagedRelay.ManagedRelayClient;
+      const environments = yield* relayClient.listEnvironments({ iamToken: "iam-token" });
+
+      expect(requests).toEqual([
+        { url: "https://api.hanzo.ai/v1/sources", authorization: "Bearer iam-token" },
+      ]);
+      expect(environments).toMatchObject([
+        { environmentId: "mac-1", label: "Zs Mac", state: "online" },
+      ]);
+    }).pipe(Effect.provide(layerManagedRelayTest(fetchFn)));
+  });
+
+  it.effect("reports an unauthorized /v1/sources as a failed listing", () => {
+    const fetchFn = (() =>
+      Promise.resolve(
+        Response.json({ code: "unauthorized" }, { status: 401 }),
+      )) satisfies typeof globalThis.fetch;
+
+    return Effect.gen(function* () {
+      const relayClient = yield* ManagedRelay.ManagedRelayClient;
+      const error = yield* relayClient
+        .listEnvironments({ iamToken: "iam-token" })
+        .pipe(Effect.flip);
+      expect(error).toMatchObject({
+        _tag: "ManagedRelayRequestFailedError",
+        action: "list relay-managed environments",
+        status: 401,
+      });
+    }).pipe(Effect.provide(layerManagedRelayTest(fetchFn)));
+  });
+
   it.effect("explains a relay deadline 504 on link and keeps its trace ID", () => {
     const fetchFn = (() =>
       Promise.resolve(
@@ -435,9 +490,7 @@ describe("ManagedRelayClient", () => {
 
     return Effect.gen(function* () {
       const relayClient = yield* ManagedRelay.ManagedRelayClient;
-      const error = yield* relayClient
-        .listEnvironments({ iamToken: "iam-token" })
-        .pipe(Effect.flip);
+      const error = yield* relayClient.listDevices({ iamToken: "iam-token" }).pipe(Effect.flip);
 
       expect(error).toMatchObject({
         _tag: "ManagedRelayRequestFailedError",

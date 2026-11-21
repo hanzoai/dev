@@ -168,6 +168,15 @@ export const make = Effect.fn("RelayEnvironmentDiscovery.make")(function* () {
     iamToken: string,
     environment: RelayClientEnvironmentRecord,
   ) {
+    if (environment.state !== undefined) {
+      // The /v1/sources registry already reported this machine's state.
+      yield* updateEnvironment(generation, environment.environmentId, (current) => ({
+        ...current,
+        availability: environment.state ?? "offline",
+        error: Option.none(),
+      }));
+      return;
+    }
     const result = yield* relay
       .getEnvironmentStatus({
         iamToken,
