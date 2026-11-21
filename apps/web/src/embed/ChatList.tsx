@@ -1,7 +1,7 @@
 import { PinIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { orderThreads, refOfThread } from "./chatList";
+import { orderThreads, refOfThread } from "./chatOrder";
 import { useCloudThreads } from "./homeChat";
 import type { DevCloud } from "./runtime";
 

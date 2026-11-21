@@ -8,7 +8,7 @@ import { I18nProvider } from "../i18n/I18nProvider";
 import { startI18n, whenLocaleReady } from "../i18n/runtime";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
 import { HomeComposer } from "./HomeComposer";
-import { threadFor } from "./chatList";
+import { threadFor } from "./chatOrder";
 import { TalkMode } from "./TalkMode";
 import { useHomeChat } from "./homeChat";
 import { prepareTurn } from "./homeSend";

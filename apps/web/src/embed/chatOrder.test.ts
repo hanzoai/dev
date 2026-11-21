@@ -1,7 +1,7 @@
 import type { ThreadSummary } from "@hanzodev/client-runtime/cloud-chat";
 import { describe, expect, it } from "vite-plus/test";
 
-import { orderThreads, refOfThread, threadFor } from "./chatList";
+import { orderThreads, refOfThread, threadFor } from "./chatOrder";
 
 const t = (key: string, over: Partial<ThreadSummary> = {}): ThreadSummary => ({
   key,
