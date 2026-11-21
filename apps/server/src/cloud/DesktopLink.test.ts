@@ -465,7 +465,14 @@ it("a heartbeat's signed bytes are the ones cloud's beatMessage builds", () => {
       zap: "https://mac.example/zap",
       busy: 0,
       providers: [
-        { provider: "claude", instance: "claude-1", kind: "login", state: "ready", plan: "max", shared: true },
+        {
+          provider: "claude",
+          instance: "claude-1",
+          kind: "login",
+          state: "ready",
+          plan: "max",
+          shared: true,
+        },
         { provider: "openai", instance: "key-1", kind: "key", state: "limited", shared: false },
       ],
     }),

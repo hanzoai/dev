@@ -228,7 +228,9 @@ export const beatMessage = (beat: {
     beat.version,
     beat.zap,
     String(beat.busy),
-    ...beat.providers.map((p) => [p.provider, p.instance, p.kind, p.state, p.plan ?? "", String(p.shared)].join(",")),
+    ...beat.providers.map((p) =>
+      [p.provider, p.instance, p.kind, p.state, p.plan ?? "", String(p.shared)].join(","),
+    ),
   ]
     .map((line) => `${line}\n`)
     .join("");
