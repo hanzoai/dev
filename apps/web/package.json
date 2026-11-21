@@ -34,6 +34,7 @@
     "@hanzodev/secret-provider-definitions": "workspace:*",
     "@hanzodev/secret-provider-onepassword": "workspace:*",
     "@hanzodev/shared": "workspace:*",
+    "@hanzodev/usage": "workspace:*",
     "@legendapp/list": "catalog:",
     "@noble/hashes": "catalog:",
     "@pierre/diffs": "catalog:",

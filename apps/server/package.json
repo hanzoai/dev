@@ -52,6 +52,7 @@
     "@hanzodev/provider-muse": "workspace:*",
     "@hanzodev/provider-opencode": "workspace:*",
     "@hanzodev/provider-pi": "workspace:*",
+    "@hanzodev/usage": "workspace:*",
     "@hanzodev/source-control-azure-devops": "workspace:*",
     "@hanzodev/source-control-bitbucket": "workspace:*",
     "@hanzodev/source-control-core": "workspace:*",

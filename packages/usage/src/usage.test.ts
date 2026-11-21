@@ -3,9 +3,8 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 
 import { CATALOG } from "./catalog.ts";
-import { parseClaudeLog, parseCodexLog, priceOf, rollupDays } from "./cost.ts";
 import type { UsageEnv } from "./env.ts";
-import { FETCHERS, parseClaude, parseCodex, parseCopilot, parseHanzo } from "./fetchers.ts";
+import { FETCHERS, parseCopilot, parseHanzo } from "./fetchers.ts";
 import { countdown, evaluate } from "./notify.ts";
 import { ProviderSnapshot, UsageReport } from "./schema.ts";
 import { createUsageService } from "./service.ts";
@@ -47,35 +46,6 @@ describe("catalog", () => {
 });
 
 describe("parsers", () => {
-  it("claude windows and extra usage", () => {
-    const r = parseClaude({
-      five_hour: { utilization: 42, resets_at: "2026-11-20T15:00:00Z" },
-      seven_day: { utilization: 10, resets_at: "2026-11-25T00:00:00Z" },
-      extra_usage: { is_enabled: true, monthly_limit: 5000, used_credits: 1250 },
-    });
-    assert.deepStrictEqual(
-      r.windows.map((w) => [w.label, w.usedPercent]),
-      [
-        ["Session", 42],
-        ["Weekly", 10],
-      ],
-    );
-    assert.deepStrictEqual(r.credits, { currency: "USD", limit: 50, spent: 12.5 });
-  });
-  it("codex windows, plan and credits", () => {
-    const r = parseCodex({
-      plan_type: "pro",
-      rate_limit: {
-        primary_window: { used_percent: 30, limit_window_seconds: 18000, reset_at: 1_800_000_000 },
-        secondary_window: { used_percent: 5, limit_window_seconds: 604800 },
-      },
-      credits: { balance: "12.5" },
-    });
-    assert.strictEqual(r.plan, "pro");
-    assert.strictEqual(r.windows[0]!.windowMinutes, 300);
-    assert.strictEqual(r.windows[1]!.kind, "weekly");
-    assert.strictEqual(r.credits?.balance, 12.5);
-  });
   it("copilot inverts percent_remaining and skips unlimited", () => {
     const r = parseCopilot({
       quota_reset_date: "2026-12-01",
@@ -124,8 +94,18 @@ describe("fetchers", () => {
   });
   it("fails loudly when no credential is present", async () => {
     let msg = "";
-    await FETCHERS.codex!(fakeEnv({}, {})).catch((e: Error) => (msg = e.message));
-    assert.match(msg, /codex login/);
+    await FETCHERS.copilot!(fakeEnv({}, {})).catch((e: Error) => (msg = e.message));
+    assert.match(msg, /GitHub Copilot/);
+  });
+  it("openrouter turns credits into a balance and a used percent", async () => {
+    const env = fakeEnv(
+      {},
+      { "https://openrouter.ai/api/v1/credits": { data: { total_credits: 10, total_usage: 2.5 } } },
+      { OPENROUTER_API_KEY: "k" },
+    );
+    const s = await FETCHERS.openrouter!(env);
+    assert.strictEqual(s.windows[0]!.usedPercent, 25);
+    assert.strictEqual(s.credits?.balance, 7.5);
   });
 });
 
@@ -147,67 +127,6 @@ describe("status", () => {
     assert.strictEqual(ok?.indicator, "minor");
     assert.strictEqual(ok?.incidents[0]?.name, "Elevated errors");
     assert.strictEqual((await fetchStatus(fakeEnv({}, {}), p))?.indicator, "unknown");
-  });
-});
-
-describe("cost", () => {
-  const claudeLine = (id: string, out: number) =>
-    JSON.stringify({
-      type: "assistant",
-      timestamp: "2026-11-20T10:00:00Z",
-      sessionId: "s",
-      requestId: "r" + id,
-      message: {
-        id: "m" + id,
-        model: "claude-sonnet-4-5",
-        usage: {
-          input_tokens: 1000,
-          output_tokens: out,
-          cache_read_input_tokens: 0,
-          cache_creation_input_tokens: 0,
-        },
-      },
-    });
-  it("dedupes streamed claude messages and prices them", () => {
-    const ev = parseClaudeLog(
-      [claudeLine("1", 100), claudeLine("1", 100), claudeLine("2", 200)].join("\n"),
-      "f",
-    );
-    assert.strictEqual(ev.length, 2);
-    assert.closeTo(ev[0]!.costUsd!, (1000 * 3 + 100 * 15) / 1e6, 1e-9);
-  });
-  it("codex splits cached input and leaves unknown models unpriced", () => {
-    const text = [
-      JSON.stringify({ type: "turn_context", payload: { model: "gpt-5-codex" } }),
-      JSON.stringify({
-        type: "event_msg",
-        timestamp: "2026-11-20T10:00:00Z",
-        payload: {
-          type: "token_count",
-          info: {
-            last_token_usage: { input_tokens: 1000, cached_input_tokens: 400, output_tokens: 50 },
-          },
-        },
-      }),
-    ].join("\n");
-    const [e] = parseCodexLog(text, "f");
-    assert.strictEqual(e!.inputTokens, 600);
-    assert.strictEqual(e!.cacheReadTokens, 400);
-    assert.isUndefined(
-      priceOf({
-        model: "mystery",
-        inputTokens: 1,
-        outputTokens: 1,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-      }),
-    );
-  });
-  it("rolls up by day and model", () => {
-    const ev = parseClaudeLog([claudeLine("1", 100), claudeLine("2", 200)].join("\n"), "f");
-    const days = rollupDays(ev);
-    assert.strictEqual(days.length, 1);
-    assert.strictEqual(days[0]!.outputTokens, 300);
   });
 });
 
@@ -270,19 +189,34 @@ describe("tray", () => {
 });
 
 describe("service and report", () => {
-  it("refreshes enabled providers, keeps last good data on failure, and reports metadata only", async () => {
+  const local: ProviderSnapshot = {
+    provider: "claude",
+    fetchedAt: "x",
+    source: "oauth",
+    windows: [{ kind: "session", label: "Session", usedPercent: 50 }],
+  };
+  const cost = [
+    {
+      day: "2026-11-19",
+      provider: "claude",
+      model: "claude-opus-4-5",
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheTokens: 0,
+      costUsd: 0.01,
+    },
+    {
+      day: "2026-10-01",
+      provider: "claude",
+      model: "claude-opus-4-5",
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheTokens: 0,
+    },
+  ];
+  it("merges host limits with fetched ones, alerts on crossings, and reports metadata only", async () => {
     const files = {
       "/h/.hanzo/identities.json": JSON.stringify({ accounts: [{ access_token: "t" }] }),
-      "/h/.claude/projects/p/s.jsonl": JSON.stringify({
-        type: "assistant",
-        timestamp: "2026-11-19T10:00:00Z",
-        message: {
-          id: "a",
-          model: "claude-opus-4-5",
-          content: "SECRET PROMPT TEXT",
-          usage: { input_tokens: 10, output_tokens: 5 },
-        },
-      }),
     };
     const routes = {
       "https://api.hanzo.ai/v1/billing/summary": {
@@ -297,17 +231,47 @@ describe("service and report", () => {
       notifyAtPercent: [80],
       refreshSeconds: 300,
     }));
-    const { summary, alerts } = await svc.refresh();
-    const hanzo = summary.snapshots.find((x) => x.provider === "hanzo")!;
-    assert.strictEqual(hanzo.windows[0]!.usedPercent, 90);
+    const { summary, alerts } = await svc.refresh({ local: [local], cost });
+    assert.strictEqual(
+      summary.snapshots.find((x) => x.provider === "hanzo")!.windows[0]!.usedPercent,
+      90,
+    );
+    assert.strictEqual(
+      summary.snapshots.find((x) => x.provider === "claude")!.windows[0]!.usedPercent,
+      50,
+    );
     assert.deepStrictEqual(
       alerts.map((a) => a.provider),
       ["hanzo"],
     );
-    assert.isTrue(summary.snapshots.some((x) => x.provider === "claude" && x.error));
+    assert.isTrue(summary.snapshots.some((x) => x.provider === "codex" && x.error));
     const report = svc.report("dev-1", new Date("2026-11-01T00:00:00Z"));
     assert.isTrue(isReport(report));
-    assert.strictEqual(report.events.length, 1);
-    assert.notInclude(JSON.stringify(report), "SECRET PROMPT TEXT");
+    assert.strictEqual(report.cost.length, 1);
+  });
+  it("keeps the last good windows when a refresh fails", async () => {
+    const env = fakeEnv({}, {});
+    const svc = createUsageService(env, () => ({
+      providers: {
+        hanzo: { enabled: true },
+        claude: { enabled: false },
+        codex: { enabled: false },
+        copilot: { enabled: false },
+      },
+      trayMode: "merged",
+      notifyAtPercent: [],
+      refreshSeconds: 300,
+    }));
+    const ok: ProviderSnapshot = {
+      provider: "hanzo",
+      fetchedAt: "x",
+      source: "oauth",
+      windows: [{ kind: "monthly", label: "Monthly", usedPercent: 40 }],
+    };
+    await svc.refresh({ local: [ok], cost: [] });
+    const again = await svc.refresh({ local: [], cost: [] });
+    const h = again.summary.snapshots[0]!;
+    assert.strictEqual(h.windows[0]!.usedPercent, 40);
+    assert.isDefined(h.error);
   });
 });

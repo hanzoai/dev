@@ -326,6 +326,10 @@ function registerAppShellCommands(router: AnyRouter, shellElement: Element): () 
       if (!/^\/settings(\/|$)/.test(router.state.location.pathname))
         void router.navigate({ to: "/settings" });
     }),
+    registerMenuAction("open-usage", () => {
+      if (router.state.location.pathname !== "/settings/usage")
+        void router.navigate({ to: "/settings/usage" });
+    }),
     registerMenuAction("open-keybindings", () => {
       if (router.state.location.pathname !== "/settings/keybindings")
         void router.navigate({ to: "/settings/keybindings" });

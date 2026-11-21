@@ -2,8 +2,8 @@
  * The usage data model. One definition, shared by the local usage panel, the tray,
  * and the linked-desktop report that registers a desktop with the cloud.
  *
- * Reports carry metadata only (tokens, model, cost). `content` exists for the user's
- * explicit per-device opt-in and is never populated by the scanners in this package.
+ * Reports carry metadata only: per-day tokens, model and cost, plus limit windows and credits.
+ * Message content is never part of the model.
  */
 import * as Schema from "effect/Schema";
 
@@ -83,24 +83,7 @@ export const ProviderSnapshot = Schema.Struct({
 });
 export type ProviderSnapshot = typeof ProviderSnapshot.Type;
 
-/** One model call, as seen in a local session log. Never carries prompt or completion text unless opted in. */
-export const UsageEvent = Schema.Struct({
-  id: Schema.String,
-  provider: ProviderId,
-  model: Schema.String,
-  at: Instant,
-  inputTokens: Schema.Number,
-  outputTokens: Schema.Number,
-  cacheReadTokens: Schema.Number,
-  cacheWriteTokens: Schema.Number,
-  /** Estimated from the pricing table; absent when the model has no known price. */
-  costUsd: Schema.optional(Schema.Number),
-  sessionId: Schema.optional(Schema.String),
-  /** Opt-in only. */
-  content: Schema.optional(Schema.String),
-});
-export type UsageEvent = typeof UsageEvent.Type;
-
+/** Tokens and estimated cost for one model on one day. Metadata only; never message content. */
 export const CostDay = Schema.Struct({
   day: Schema.String,
   provider: ProviderId,
@@ -118,7 +101,7 @@ export const UsageReport = Schema.Struct({
   deviceId: Schema.String,
   from: Instant,
   to: Instant,
-  events: Schema.Array(UsageEvent),
+  cost: Schema.Array(CostDay),
   snapshots: Schema.Array(ProviderSnapshot),
 });
 export type UsageReport = typeof UsageReport.Type;

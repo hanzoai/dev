@@ -33,6 +33,7 @@ import * as NonBlockingSpawner from "./process/NonBlockingSpawner.ts";
 import * as KeepAwake from "./background/KeepAwake.ts";
 import * as ServerConfig from "./config.ts";
 import { withRootRequestSpans, withUntracedRequests } from "./http.ts";
+import * as UsageHttp from "./usage/http.ts";
 import * as ServerHttp from "./http.ts";
 import {
   guardHttpResponseWriteErrors,
@@ -853,6 +854,7 @@ const layerMakeRoutes = Layer.mergeAll(
     ),
     ServerHttp.layerOtlpTracesProxyRoute,
     ServerHttp.layerHanzoIdentitiesRoute,
+    UsageHttp.layer,
     ServerHttp.layerHanzoAnalyticsRoutes,
     ServerHttp.layerAssetRoute,
     ServerHttp.layerAttachmentUploadRoute,

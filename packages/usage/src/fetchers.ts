@@ -50,122 +50,6 @@ const parseJson = (text: string | undefined): Record<string, unknown> => {
 const firstEnv = (env: UsageEnv, keys: ReadonlyArray<string>) =>
   keys.map((k) => env.env[k]?.trim()).find((v): v is string => !!v);
 
-const claudeToken = async (env: UsageEnv): Promise<string | undefined> => {
-  const fromEnv = env.env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
-  if (fromEnv) return fromEnv;
-  const file = parseJson(await env.readText(`${env.home}/.claude/.credentials.json`));
-  const fromFile = str(obj(file.claudeAiOauth).accessToken);
-  if (fromFile) return fromFile;
-  const keychain = parseJson(await env.keychain("Claude Code-credentials"));
-  return str(obj(keychain.claudeAiOauth).accessToken);
-};
-
-const claudeWindow = (
-  kind: UsageWindow["kind"],
-  label: string,
-  minutes: number,
-  raw: unknown,
-): UsageWindow | undefined => {
-  const w = obj(raw);
-  const used = num(w.utilization);
-  if (used === undefined) return undefined;
-  const resetsAt = iso(w.resets_at);
-  return {
-    kind,
-    label,
-    usedPercent: clamp(used),
-    windowMinutes: minutes,
-    ...(resetsAt ? { resetsAt } : {}),
-  };
-};
-
-export const parseClaude = (
-  body: Record<string, unknown>,
-): Pick<ProviderSnapshot, "windows" | "credits"> => {
-  const windows = [
-    claudeWindow("session", "Session", 300, body.five_hour),
-    claudeWindow("weekly", "Weekly", 10080, body.seven_day),
-    claudeWindow("weekly", "Sonnet", 10080, body.seven_day_sonnet),
-    claudeWindow("weekly", "Opus", 10080, body.seven_day_opus),
-  ].filter((w): w is UsageWindow => !!w);
-  const extra = obj(body.extra_usage);
-  const limit = num(extra.monthly_limit);
-  const spent = num(extra.used_credits);
-  const credits =
-    extra.is_enabled && limit !== undefined
-      ? {
-          currency: "USD",
-          limit: limit / 100,
-          ...(spent !== undefined ? { spent: spent / 100 } : {}),
-        }
-      : undefined;
-  return { windows, ...(credits ? { credits } : {}) };
-};
-
-export const claude: Fetcher = async (env) => {
-  const token = await claudeToken(env);
-  if (!token) throw new NotConfigured("Run `claude` to sign in.");
-  const res = await env.fetch("https://api.anthropic.com/api/oauth/usage", {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/json",
-      "anthropic-beta": "oauth-2025-04-20",
-      "User-Agent": "claude-cli/2.1.0 (external, cli)",
-    },
-  });
-  return { ...base(env, "claude", "oauth"), ...parseClaude(await json(res)) };
-};
-
-export const parseCodex = (
-  body: Record<string, unknown>,
-): Pick<ProviderSnapshot, "windows" | "credits" | "plan"> => {
-  const limits = obj(body.rate_limit);
-  const win = (kind: UsageWindow["kind"], label: string, raw: unknown): UsageWindow | undefined => {
-    const w = obj(raw);
-    const used = num(w.used_percent);
-    if (used === undefined) return undefined;
-    const seconds = num(w.limit_window_seconds);
-    const resetsAt = iso(w.reset_at, true);
-    return {
-      kind,
-      label,
-      usedPercent: clamp(used),
-      ...(seconds ? { windowMinutes: Math.round(seconds / 60) } : {}),
-      ...(resetsAt ? { resetsAt } : {}),
-    };
-  };
-  const secondary = obj(limits.secondary_window);
-  const weekly = (num(secondary.limit_window_seconds) ?? 604800) >= 604800;
-  const windows = [
-    win("session", "Session", limits.primary_window),
-    win(weekly ? "weekly" : "other", weekly ? "Weekly" : "Secondary", secondary),
-  ].filter((w): w is UsageWindow => !!w);
-  const balance = num(obj(body.credits).balance);
-  const plan = str(body.plan_type);
-  return {
-    windows,
-    ...(balance !== undefined ? { credits: { currency: "credits", balance } } : {}),
-    ...(plan ? { plan } : {}),
-  };
-};
-
-export const codex: Fetcher = async (env) => {
-  const home = env.env.CODEX_HOME?.trim() || `${env.home}/.codex`;
-  const auth = parseJson(await env.readText(`${home}/auth.json`));
-  const tokens = obj(auth.tokens);
-  const token = str(tokens.access_token);
-  if (!token) throw new NotConfigured("Run `codex login`.");
-  const accountId = str(tokens.account_id);
-  const res = await env.fetch("https://chatgpt.com/backend-api/wham/usage", {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/json",
-      ...(accountId ? { "ChatGPT-Account-Id": accountId } : {}),
-    },
-  });
-  return { ...base(env, "codex", "oauth"), ...parseCodex(await json(res)) };
-};
-
 const copilotToken = async (env: UsageEnv): Promise<string | undefined> => {
   const direct = firstEnv(env, ["COPILOT_API_TOKEN"]);
   if (direct) return direct;
@@ -319,9 +203,8 @@ export const hanzo: Fetcher = async (env) => {
   return { ...base(env, "hanzo", "oauth"), ...parseHanzo(await json(res)) };
 };
 
+/** Providers whose limits the desktop server already reads (Claude, Codex, ...) are supplied to the service, not fetched here. */
 export const FETCHERS: Readonly<Record<string, Fetcher>> = {
-  claude,
-  codex,
   copilot,
   openrouter,
   deepseek,
