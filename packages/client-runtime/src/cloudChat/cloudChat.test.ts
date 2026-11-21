@@ -6,6 +6,7 @@ import {
   createCloudChatController,
   createSseParser,
   listChatModels,
+  withAuto,
   parseChatModels,
   runInCloud,
   streamChatReply,
@@ -75,6 +76,14 @@ describe("models", () => {
     expect(seen.Authorization).toBe("Bearer tok");
     expect(seen["X-Org-Id"]).toBe("acme");
     expect(models.map((m) => m.id)).toContain("enso");
+  });
+  it("always offers Auto first, once, and sends its id so the gateway routes", async () => {
+    const listed = await listChatModels(auth, {
+      fetch: async () => json(200, { data: [{ id: "enso-auto", outputs: ["text"] }, { id: "enso-flash", outputs: ["text"] }] }),
+    });
+    expect(listed.map((m) => m.id)).toEqual(["enso-auto", "enso-flash"]);
+    expect(listed[0]?.label).toBe("Auto");
+    expect(withAuto([{ id: "zen6-flash", label: "zen6-flash" }]).map((m) => m.id)).toEqual(["enso-auto", "zen6-flash"]);
   });
 });
 

@@ -21,6 +21,16 @@ export const FALLBACK_MODELS: ReadonlyArray<CloudChatModel> = [
   { id: "zen6-flash", label: "zen6-flash" },
 ];
 export const DEFAULT_MODEL_ID = "enso-flash";
+/** Auto: the model id that lets the gateway route each turn (hanzo.app Chat's `ENSO`). */
+export const AUTO_MODEL_ID = "enso-auto";
+
+/** Auto first: it is always offered, whether or not the catalog lists the router. */
+export function withAuto(models: ReadonlyArray<CloudChatModel>): ReadonlyArray<CloudChatModel> {
+  return [
+    { id: AUTO_MODEL_ID, label: "Auto" },
+    ...models.filter((model) => model.id !== AUTO_MODEL_ID),
+  ];
+}
 
 export interface CloudChatModel {
   readonly id: string;
@@ -190,7 +200,7 @@ export async function listChatModels(
   }
   if (!response.ok) throw httpFailure(response.status);
   const models = parseChatModels(await response.json().catch(() => null));
-  return models.length > 0 ? models : FALLBACK_MODELS;
+  return withAuto(models.length > 0 ? models : FALLBACK_MODELS);
 }
 
 /** Reads an OpenAI-compatible SSE reply, calling `onDelta` per chunk; resolves to the full reply. */
