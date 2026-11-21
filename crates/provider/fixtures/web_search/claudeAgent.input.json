@@ -1,0 +1,18 @@
+{
+  "fixture": "web_search",
+  "driver": "claudeAgent",
+  "modelSelection": {
+    "instanceId": "claudeAgent",
+    "model": "claude-sonnet-4-6"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Search the web for FIFA World Cup ticket pricing, then answer exactly: web search fixture complete"
+    }
+  ]
+}

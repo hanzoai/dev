@@ -1,0 +1,23 @@
+{
+  "fixture": "message_steering",
+  "driver": "acpRegistry",
+  "modelSelection": {
+    "instanceId": "acpRegistry",
+    "model": "default"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Respond with exactly: steering fixture initial response"
+    },
+    {
+      "type": "steer",
+      "text": "Actually, respond with exactly: steering fixture observed",
+      "targetRunIndex": 1
+    }
+  ]
+}

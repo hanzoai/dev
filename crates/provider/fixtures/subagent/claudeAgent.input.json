@@ -1,0 +1,18 @@
+{
+  "fixture": "subagent",
+  "driver": "claudeAgent",
+  "modelSelection": {
+    "instanceId": "claudeAgent",
+    "model": "claude-sonnet-4-6"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Spawn 2 subagents, one to read package.json and one to read tsconfig.json"
+    }
+  ]
+}

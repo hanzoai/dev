@@ -1,0 +1,18 @@
+{
+  "fixture": "malformed_session_update",
+  "driver": "acpRegistry",
+  "modelSelection": {
+    "instanceId": "acpRegistry",
+    "model": "default"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Respond with the following text: malformed update fixture ok"
+    }
+  ]
+}

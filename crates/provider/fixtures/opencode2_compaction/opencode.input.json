@@ -1,0 +1,26 @@
+{
+  "fixture": "opencode2_compaction",
+  "driver": "opencode",
+  "modelSelection": {
+    "instanceId": "opencode",
+    "model": "opencode/big-pickle"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Remember the codeword PAPAYA. Reply OK."
+    },
+    {
+      "type": "message",
+      "text": "/compact"
+    },
+    {
+      "type": "message",
+      "text": "What was the codeword? One word."
+    }
+  ]
+}

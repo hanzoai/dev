@@ -1466,7 +1466,9 @@
         "cacheCreationTokens": 0,
         "reasoningTokens": 155,
         "hasSubagents": false,
-        "models": ["gpt-6-sol"],
+        "models": [
+          "gpt-6-sol"
+        ],
         "usageStatus": "complete",
         "inputTokens": 45221,
         "outputTokens": 315

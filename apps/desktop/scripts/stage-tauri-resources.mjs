@@ -207,7 +207,12 @@ function unpack(bytes, name, into) {
   NodeFS.mkdirSync(into, { recursive: true });
   const archive = NodePath.join(into, name);
   NodeFS.writeFileSync(archive, bytes);
-  NodeChildProcess.execFileSync("tar", ["-xf", archive, "-C", into], { stdio: "inherit" });
+  // Windows' own bsdtar reads zip and drive-letter paths; Git's GNU tar, first on a CI PATH, does neither.
+  const tar =
+    process.platform === "win32"
+      ? NodePath.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe")
+      : "tar";
+  NodeChildProcess.execFileSync(tar, ["-xf", archive, "-C", into], { stdio: "inherit" });
   NodeFS.rmSync(archive);
 }
 

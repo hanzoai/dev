@@ -1,0 +1,24 @@
+{
+  "fixture": "opencode2_question",
+  "driver": "opencode",
+  "modelSelection": {
+    "instanceId": "opencode",
+    "model": "opencode/big-pickle"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Before doing anything, use the question tool to ask me which color I prefer, offering the options red and blue. After I answer, reply with only the chosen color."
+    },
+    {
+      "type": "answer_next_user_input_request",
+      "answers": {
+        "q0": "blue"
+      }
+    }
+  ]
+}

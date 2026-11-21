@@ -1,0 +1,24 @@
+{
+  "fixture": "simple",
+  "driver": "opencode",
+  "modelSelection": {
+    "instanceId": "opencode",
+    "model": "openai/gpt-5.4-mini",
+    "options": [
+      {
+        "id": "agent",
+        "value": "build"
+      }
+    ]
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Respond with the following text: fixture simple ok"
+    }
+  ]
+}

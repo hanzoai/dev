@@ -1,0 +1,3018 @@
+[
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atodo_list%3Athread-create%3A<uuid:2>:<uuid:0>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "thread.created",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "projectId": "project:fixture:todo_list:<uuid:0>",
+      "title": "Replay fixture: todo_list",
+      "providerInstanceId": "cursor",
+      "modelSelection": {
+        "instanceId": "cursor",
+        "model": "composer-2.5"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "branch": null,
+      "worktreePath": null,
+      "pullRequests": [],
+      "activeProviderThreadId": null,
+      "lineage": {
+        "parentThreadId": null,
+        "relationshipToParent": null,
+        "rootThreadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>"
+      },
+      "forkedFrom": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "archivedAt": null,
+      "settledOverride": null,
+      "settledAt": null,
+      "snoozedUntil": null,
+      "snoozedAt": null,
+      "lastVisitedAt": null,
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atodo_list%3Amessage-1%3A<uuid:3>:<uuid:1>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "thread.metadata-updated",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "projectId": "project:fixture:todo_list:<uuid:0>",
+      "title": "Replay fixture: todo_list",
+      "providerInstanceId": "cursor",
+      "modelSelection": {
+        "instanceId": "cursor",
+        "model": "composer-2.5"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "branch": null,
+      "worktreePath": null,
+      "pullRequests": [],
+      "activeProviderThreadId": null,
+      "lineage": {
+        "parentThreadId": null,
+        "relationshipToParent": null,
+        "rootThreadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>"
+      },
+      "forkedFrom": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "archivedAt": null,
+      "settledOverride": null,
+      "settledAt": null,
+      "snoozedUntil": null,
+      "snoozedAt": null,
+      "lastVisitedAt": "<time>",
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atodo_list%3Amessage-1%3A<uuid:3>:<uuid:3>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "cursor",
+      "providerInstanceId": "cursor",
+      "providerSessionId": "provider-session:provider-instance:cursor:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": null,
+      "nativeConversationHeadRef": null,
+      "status": "not_loaded",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": null,
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atodo_list%3Amessage-1%3A<uuid:3>:<uuid:4>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "run.created",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "cursor",
+      "modelSelection": {
+        "instanceId": "cursor",
+        "model": "composer-2.5"
+      },
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "starting",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": null,
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atodo_list%3Amessage-1%3A<uuid:3>:<uuid:5>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "run-attempt.created",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "cursor",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "pending",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atodo_list%3Amessage-1%3A<uuid:3>:<uuid:6>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "pending",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atodo_list%3Amessage-1%3A<uuid:3>:<uuid:7>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "checkpoint-scope.created",
+    "payload": {
+      "id": "checkpoint-scope:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:name:root",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentScopeId": null,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "kind": "root_run",
+      "ordinalWithinParent": 0,
+      "advancesAppRunCount": true,
+      "cwd": "<workspace>",
+      "createdAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atodo_list%3Amessage-1%3A<uuid:3>:<uuid:8>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "message:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "role": "user",
+      "text": "Use the update_plan tool to track exactly three steps: inspect package.json, inspect tsconfig.json, report completion. Then read package.json and tsconfig.json, and answer exactly: todo list fixture complete",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atodo_list%3Amessage-1%3A<uuid:3>:<uuid:9>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:message:message%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1%3A<uuid:4>",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000001,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "createdBy": "user",
+      "creationSource": "web",
+      "type": "user_message",
+      "messageId": "message:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "inputIntent": "turn_start",
+      "text": "Use the update_plan tool to track exactly three steps: inspect package.json, inspect tsconfig.json, report completion. Then read package.json and tsconfig.json, and answer exactly: todo list fixture complete",
+      "attachments": []
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:10>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "provider-session.attached",
+    "payload": {
+      "id": "provider-session:provider-instance:cursor:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "cursor",
+      "providerInstanceId": "cursor",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "composer-2.5",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": false,
+          "canForkFromTurn": false,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": true,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "activeSteeringInterruptsTools": true,
+          "activeSteeringAcceptsAttachments": false,
+          "supportsSteeringByInterruptRestart": true,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": true,
+          "streamsPlanText": true,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": false
+        },
+        "approvals": {
+          "supportsCommandApproval": false,
+          "supportsFileReadApproval": false,
+          "supportsFileChangeApproval": false,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": false,
+          "approvalCallbacksAreLiveOnly": false,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": true,
+          "supportsStructuredQuestions": false,
+          "planDeltasHaveItemIds": true
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": true,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": false,
+          "acceptsDeveloperContext": false,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": true,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "strong",
+          "nativeItemIds": "weak",
+          "nativeRequestIds": "none"
+        },
+        "runtimePolicy": {
+          "enforcement": "native"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:11>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:cursor:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "cursor",
+      "providerInstanceId": "cursor",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "composer-2.5",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": false,
+          "canForkFromTurn": false,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": true,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "activeSteeringInterruptsTools": true,
+          "activeSteeringAcceptsAttachments": false,
+          "supportsSteeringByInterruptRestart": true,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": true,
+          "streamsPlanText": true,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": false
+        },
+        "approvals": {
+          "supportsCommandApproval": false,
+          "supportsFileReadApproval": false,
+          "supportsFileChangeApproval": false,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": false,
+          "approvalCallbacksAreLiveOnly": false,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": true,
+          "supportsStructuredQuestions": false,
+          "planDeltasHaveItemIds": true
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": true,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": false,
+          "acceptsDeveloperContext": false,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": true,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "strong",
+          "nativeItemIds": "weak",
+          "nativeRequestIds": "none"
+        },
+        "runtimePolicy": {
+          "enforcement": "native"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:<uuid:12>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "cursor",
+      "providerInstanceId": "cursor",
+      "providerSessionId": "provider-session:provider-instance:cursor:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "cursor",
+        "nativeId": "agent-c00e62bc-d851-4af3-8b1e-9b0ea874172e",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "cursorStoreCwd": "<workspace>"
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:<uuid:13>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "cursor",
+      "modelSelection": {
+        "instanceId": "cursor",
+        "model": "composer-2.5"
+      },
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "running",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:<uuid:14>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeThreadId": "agent-c00e62bc-d851-4af3-8b1e-9b0ea874172e",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "cursor",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:<uuid:15>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "running",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:16>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "cursor",
+        "nativeId": "run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+        "strength": "strong"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:17>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "cursor",
+      "providerInstanceId": "cursor",
+      "providerSessionId": "provider-session:provider-instance:cursor:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "cursor",
+        "nativeId": "agent-c00e62bc-d851-4af3-8b1e-9b0ea874172e",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "cursorStoreCwd": "<workspace>"
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:18>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A1",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A1",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "reasoning",
+      "status": "running",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "reasoning:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:1",
+        "strength": "weak"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:19>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A1",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A1",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "reasoning",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "reasoning:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:1",
+        "strength": "weak"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:20>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A1",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A1",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A1",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "reasoning:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:1",
+        "strength": "weak"
+      },
+      "parentItemId": null,
+      "ordinal": 1000002,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "reasoning",
+      "text": "Planning to use the update_plan tool to track three steps: inspecting package.json, inspecting tsconfig.json, and reporting completion.\n\nChecking available tools. The exact command name may differ from what was requested.",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:21>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A1",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A1",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "assistant_message",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "assistant:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:1",
+        "strength": "weak"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:22>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A1",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "agent",
+      "creationSource": "provider",
+      "id": "message:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A1",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A1",
+      "role": "assistant",
+      "text": "Checking for the `update_plan` tool, then reading the config files.\n",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:23>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A1",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A1",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A1",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "assistant:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:1",
+        "strength": "weak"
+      },
+      "parentItemId": null,
+      "ordinal": 1000003,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "assistant_message",
+      "messageId": "message:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A1",
+      "text": "Checking for the `update_plan` tool, then reading the config files.\n",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:24>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_1a02426d-ad0b-441d-83ff-6c7c497eabe",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:tool_1a02426d-ad0b-441d-83ff-6c7c497eabe",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "running",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_1a02426d-ad0b-441d-83ff-6c7c497eabe",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:25>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_1a02426d-ad0b-441d-83ff-6c7c497eabe",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:tool_1a02426d-ad0b-441d-83ff-6c7c497eabe",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:tool_1a02426d-ad0b-441d-83ff-6c7c497eabe",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_1a02426d-ad0b-441d-83ff-6c7c497eabe",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000004,
+      "status": "running",
+      "title": "Read /tmp/cursor-replay-todo_list/package.json",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "updatedAt": "<time>",
+      "type": "dynamic_tool",
+      "toolName": "Read",
+      "input": {
+        "path": "/tmp/cursor-replay-todo_list/package.json"
+      }
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:26>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_de701439-5e39-4af5-a638-7f0c48e0cda",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:tool_de701439-5e39-4af5-a638-7f0c48e0cda",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "running",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_de701439-5e39-4af5-a638-7f0c48e0cda",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:27>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_de701439-5e39-4af5-a638-7f0c48e0cda",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:tool_de701439-5e39-4af5-a638-7f0c48e0cda",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:tool_de701439-5e39-4af5-a638-7f0c48e0cda",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_de701439-5e39-4af5-a638-7f0c48e0cda",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000005,
+      "status": "running",
+      "title": "Read /tmp/cursor-replay-todo_list/tsconfig.json",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "updatedAt": "<time>",
+      "type": "dynamic_tool",
+      "toolName": "Read",
+      "input": {
+        "path": "/tmp/cursor-replay-todo_list/tsconfig.json"
+      }
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:28>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_1a02426d-ad0b-441d-83ff-6c7c497eabe",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:tool_1a02426d-ad0b-441d-83ff-6c7c497eabe",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_1a02426d-ad0b-441d-83ff-6c7c497eabe",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:29>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_1a02426d-ad0b-441d-83ff-6c7c497eabe",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:tool_1a02426d-ad0b-441d-83ff-6c7c497eabe",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:tool_1a02426d-ad0b-441d-83ff-6c7c497eabe",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_1a02426d-ad0b-441d-83ff-6c7c497eabe",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000004,
+      "status": "completed",
+      "title": "Read /tmp/cursor-replay-todo_list/package.json",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "dynamic_tool",
+      "toolName": "Read",
+      "input": {
+        "path": "/tmp/cursor-replay-todo_list/package.json"
+      },
+      "output": {
+        "content": "{\"name\":\"cursor-read-only-fixture\",\"private\":true,\"scripts\":{\"typecheck\":\"tsc --noEmit\"}}",
+        "totalLines": 1,
+        "fileSize": 89
+      }
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:30>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_de701439-5e39-4af5-a638-7f0c48e0cda",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:tool_de701439-5e39-4af5-a638-7f0c48e0cda",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_de701439-5e39-4af5-a638-7f0c48e0cda",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:31>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_de701439-5e39-4af5-a638-7f0c48e0cda",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:tool_de701439-5e39-4af5-a638-7f0c48e0cda",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:tool_de701439-5e39-4af5-a638-7f0c48e0cda",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_de701439-5e39-4af5-a638-7f0c48e0cda",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000005,
+      "status": "completed",
+      "title": "Read /tmp/cursor-replay-todo_list/tsconfig.json",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "dynamic_tool",
+      "toolName": "Read",
+      "input": {
+        "path": "/tmp/cursor-replay-todo_list/tsconfig.json"
+      },
+      "output": {
+        "content": "{\"compilerOptions\":{\"module\":\"ESNext\",\"strict\":true,\"target\":\"ES2022\"}}",
+        "totalLines": 1,
+        "fileSize": 71
+      }
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:32>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A2",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A2",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "reasoning",
+      "status": "running",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "reasoning:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:2",
+        "strength": "weak"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:33>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A2",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A2",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "reasoning",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "reasoning:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:2",
+        "strength": "weak"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:34>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A2",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A2",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A2",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "reasoning:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:2",
+        "strength": "weak"
+      },
+      "parentItemId": null,
+      "ordinal": 1000006,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "reasoning",
+      "text": "The user explicitly requested the update_plan tool.\n\nSearching the codebase for the update_plan tool. It may have a different name or schema.",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:35>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_22a5930c-4929-45ac-b709-9d00c016cc4",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:tool_22a5930c-4929-45ac-b709-9d00c016cc4",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "running",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_22a5930c-4929-45ac-b709-9d00c016cc4",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:36>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_22a5930c-4929-45ac-b709-9d00c016cc4",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:tool_22a5930c-4929-45ac-b709-9d00c016cc4",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:tool_22a5930c-4929-45ac-b709-9d00c016cc4",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_22a5930c-4929-45ac-b709-9d00c016cc4",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000007,
+      "status": "running",
+      "title": "Searched update_plan",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "updatedAt": "<time>",
+      "type": "file_search",
+      "pattern": "update_plan"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:37>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_22a5930c-4929-45ac-b709-9d00c016cc4",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:tool_22a5930c-4929-45ac-b709-9d00c016cc4",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_22a5930c-4929-45ac-b709-9d00c016cc4",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:38>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_22a5930c-4929-45ac-b709-9d00c016cc4",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:tool_22a5930c-4929-45ac-b709-9d00c016cc4",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:tool_22a5930c-4929-45ac-b709-9d00c016cc4",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_22a5930c-4929-45ac-b709-9d00c016cc4",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000007,
+      "status": "completed",
+      "title": "Searched update_plan",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "file_search",
+      "pattern": "update_plan"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:39>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A3",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A3",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "reasoning",
+      "status": "running",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "reasoning:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:3",
+        "strength": "weak"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:40>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A3",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A3",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "reasoning",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "reasoning:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:3",
+        "strength": "weak"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:41>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A3",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A3",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A3",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "reasoning:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:3",
+        "strength": "weak"
+      },
+      "parentItemId": null,
+      "ordinal": 1000008,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "reasoning",
+      "text": "The update_plan tool is unavailable.\n\nSearching for the update_plan tool across the broader environment and other available tools.\n\nPerhaps update_plan maps to TodoWrite or another dynamic tool. Searching the full dynamic tools catalog now.",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:42>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_efd416ad-5876-466e-9b58-ec8ae6f9ead",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:tool_efd416ad-5876-466e-9b58-ec8ae6f9ead",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "running",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_efd416ad-5876-466e-9b58-ec8ae6f9ead",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:43>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_efd416ad-5876-466e-9b58-ec8ae6f9ead",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:tool_efd416ad-5876-466e-9b58-ec8ae6f9ead",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:tool_efd416ad-5876-466e-9b58-ec8ae6f9ead",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_efd416ad-5876-466e-9b58-ec8ae6f9ead",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000009,
+      "status": "running",
+      "title": "Searched files **/* in cursor-replay-todo_list",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "updatedAt": "<time>",
+      "type": "file_search",
+      "pattern": "**/*"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:44>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_efd416ad-5876-466e-9b58-ec8ae6f9ead",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:tool_efd416ad-5876-466e-9b58-ec8ae6f9ead",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_efd416ad-5876-466e-9b58-ec8ae6f9ead",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:45>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_efd416ad-5876-466e-9b58-ec8ae6f9ead",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:tool_efd416ad-5876-466e-9b58-ec8ae6f9ead",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:tool_efd416ad-5876-466e-9b58-ec8ae6f9ead",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_efd416ad-5876-466e-9b58-ec8ae6f9ead",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000009,
+      "status": "completed",
+      "title": "Searched files **/* in cursor-replay-todo_list",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "file_search",
+      "pattern": "**/*",
+      "results": [
+        {
+          "fileName": "tsconfig.json"
+        },
+        {
+          "fileName": "package.json"
+        },
+        {
+          "fileName": ".git/refs/heads/master"
+        },
+        {
+          "fileName": ".git/logs/HEAD"
+        },
+        {
+          "fileName": ".git/logs/refs/heads/master"
+        },
+        {
+          "fileName": ".git/COMMIT_EDITMSG"
+        },
+        {
+          "fileName": ".git/config"
+        },
+        {
+          "fileName": "README.md"
+        },
+        {
+          "fileName": ".git/HEAD"
+        },
+        {
+          "fileName": ".git/description"
+        },
+        {
+          "fileName": ".git/hooks/pre-push.sample"
+        },
+        {
+          "fileName": ".git/hooks/fsmonitor-watchman.sample"
+        },
+        {
+          "fileName": ".git/hooks/sendemail-validate.sample"
+        },
+        {
+          "fileName": ".git/hooks/post-update.sample"
+        },
+        {
+          "fileName": ".git/hooks/pre-commit.sample"
+        },
+        {
+          "fileName": ".git/hooks/pre-rebase.sample"
+        },
+        {
+          "fileName": ".git/hooks/pre-applypatch.sample"
+        },
+        {
+          "fileName": ".git/hooks/pre-merge-commit.sample"
+        },
+        {
+          "fileName": ".git/hooks/applypatch-msg.sample"
+        },
+        {
+          "fileName": ".git/hooks/commit-msg.sample"
+        },
+        {
+          "fileName": ".git/hooks/pre-receive.sample"
+        },
+        {
+          "fileName": ".git/hooks/prepare-commit-msg.sample"
+        },
+        {
+          "fileName": ".git/hooks/update.sample"
+        },
+        {
+          "fileName": ".git/hooks/push-to-checkout.sample"
+        },
+        {
+          "fileName": ".git/info/exclude"
+        }
+      ]
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:46>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A4",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A4",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "reasoning",
+      "status": "running",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "reasoning:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:4",
+        "strength": "weak"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:47>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A4",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A4",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "reasoning",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "reasoning:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:4",
+        "strength": "weak"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:48>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A4",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A4",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A4",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "reasoning:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:4",
+        "strength": "weak"
+      },
+      "parentItemId": null,
+      "ordinal": 1000010,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "reasoning",
+      "text": "The `update_plan` tool is unavailable in the dynamic tools.\n\nTodoWrite is available for todo list tracking. I'll try calling the missing `update_plan` tool via `CallDynamicTool` under the cursor namespace.",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:49>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_155e8504-fcf0-43b5-a444-19fa79d25cd",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:tool_155e8504-fcf0-43b5-a444-19fa79d25cd",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "running",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_155e8504-fcf0-43b5-a444-19fa79d25cd",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:50>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_155e8504-fcf0-43b5-a444-19fa79d25cd",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:tool_155e8504-fcf0-43b5-a444-19fa79d25cd",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:tool_155e8504-fcf0-43b5-a444-19fa79d25cd",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_155e8504-fcf0-43b5-a444-19fa79d25cd",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000011,
+      "status": "running",
+      "title": "Read /tmp/cursor-replay-todo_list/README.md",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "updatedAt": "<time>",
+      "type": "dynamic_tool",
+      "toolName": "Read",
+      "input": {
+        "path": "/tmp/cursor-replay-todo_list/README.md"
+      }
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:51>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_155e8504-fcf0-43b5-a444-19fa79d25cd",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:tool_155e8504-fcf0-43b5-a444-19fa79d25cd",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_155e8504-fcf0-43b5-a444-19fa79d25cd",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:52>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:tool_155e8504-fcf0-43b5-a444-19fa79d25cd",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:tool_155e8504-fcf0-43b5-a444-19fa79d25cd",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:tool_155e8504-fcf0-43b5-a444-19fa79d25cd",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_155e8504-fcf0-43b5-a444-19fa79d25cd",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000011,
+      "status": "completed",
+      "title": "Read /tmp/cursor-replay-todo_list/README.md",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "dynamic_tool",
+      "toolName": "Read",
+      "input": {
+        "path": "/tmp/cursor-replay-todo_list/README.md"
+      },
+      "output": {
+        "content": "# cursor-agent-sdk-record-todo_list\n",
+        "totalLines": 2,
+        "fileSize": 36
+      }
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:53>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A5",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A5",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "reasoning",
+      "status": "running",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "reasoning:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:5",
+        "strength": "weak"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:54>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A5",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A5",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "reasoning",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "reasoning:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:5",
+        "strength": "weak"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:55>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A5",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A5",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A5",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "reasoning:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:5",
+        "strength": "weak"
+      },
+      "parentItemId": null,
+      "ordinal": 1000012,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "reasoning",
+      "text": "The update_plan tool does not exist.\n\nTodoWrite may be the closest equivalent to update_plan. Searching project documentation for references to update_plan.\n\nUsing TodoWrite to track the three requested steps. Starting with package.json inspection.\n\nBoth files have been read. Now marking all three steps complete in TodoWrite.",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:56>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A2",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A2",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "assistant_message",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "assistant:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:2",
+        "strength": "weak"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:57>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A2",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "agent",
+      "creationSource": "provider",
+      "id": "message:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A2",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A2",
+      "role": "assistant",
+      "text": "Using TodoWrite to track the three steps since `update_plan` isn't available in this session.\n",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:58>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A2",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A2",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A2",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "assistant:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:2",
+        "strength": "weak"
+      },
+      "parentItemId": null,
+      "ordinal": 1000013,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "assistant_message",
+      "messageId": "message:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A2",
+      "text": "Using TodoWrite to track the three steps since `update_plan` isn't available in this session.\n",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:59>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "todo_list",
+      "status": "running",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:60>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "plan.updated",
+    "payload": {
+      "id": "plan:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider:cursor:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:61>",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+      "status": "draft",
+      "kind": "todo_list",
+      "steps": [
+        {
+          "id": "todo-1",
+          "text": "inspect package.json",
+          "status": "completed"
+        }
+      ]
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:62>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000014,
+      "status": "running",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": null,
+      "updatedAt": "<time>",
+      "type": "todo_list",
+      "planId": "plan:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider:cursor:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:61>",
+      "steps": [
+        {
+          "id": "todo-1",
+          "text": "inspect package.json",
+          "status": "completed"
+        }
+      ]
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:63>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "plan.updated",
+    "payload": {
+      "id": "plan:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider:cursor:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:61>",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+      "status": "draft",
+      "kind": "todo_list",
+      "steps": [
+        {
+          "id": "todo-1",
+          "text": "inspect package.json",
+          "status": "completed"
+        },
+        {
+          "id": "todo-2",
+          "text": "inspect tsconfig.json",
+          "status": "completed"
+        }
+      ]
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:64>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000014,
+      "status": "running",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": null,
+      "updatedAt": "<time>",
+      "type": "todo_list",
+      "planId": "plan:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider:cursor:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:61>",
+      "steps": [
+        {
+          "id": "todo-1",
+          "text": "inspect package.json",
+          "status": "completed"
+        },
+        {
+          "id": "todo-2",
+          "text": "inspect tsconfig.json",
+          "status": "completed"
+        }
+      ]
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:65>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "plan.updated",
+    "payload": {
+      "id": "plan:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider:cursor:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:61>",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+      "status": "draft",
+      "kind": "todo_list",
+      "steps": [
+        {
+          "id": "todo-1",
+          "text": "inspect package.json",
+          "status": "completed"
+        },
+        {
+          "id": "todo-2",
+          "text": "inspect tsconfig.json",
+          "status": "completed"
+        },
+        {
+          "id": "todo-3",
+          "text": "report completion",
+          "status": "completed"
+        }
+      ]
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:66>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000014,
+      "status": "running",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": null,
+      "updatedAt": "<time>",
+      "type": "todo_list",
+      "planId": "plan:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider:cursor:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:61>",
+      "steps": [
+        {
+          "id": "todo-1",
+          "text": "inspect package.json",
+          "status": "completed"
+        },
+        {
+          "id": "todo-2",
+          "text": "inspect tsconfig.json",
+          "status": "completed"
+        },
+        {
+          "id": "todo-3",
+          "text": "report completion",
+          "status": "completed"
+        }
+      ]
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:67>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "plan.updated",
+    "payload": {
+      "id": "plan:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider:cursor:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:61>",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+      "status": "draft",
+      "kind": "todo_list",
+      "steps": [
+        {
+          "id": "todo-1",
+          "text": "inspect package.json",
+          "status": "completed"
+        },
+        {
+          "id": "todo-2",
+          "text": "inspect tsconfig.json",
+          "status": "completed"
+        },
+        {
+          "id": "todo-3",
+          "text": "report completion",
+          "status": "completed"
+        }
+      ]
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:68>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000014,
+      "status": "running",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": null,
+      "updatedAt": "<time>",
+      "type": "todo_list",
+      "planId": "plan:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider:cursor:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:61>",
+      "steps": [
+        {
+          "id": "todo-1",
+          "text": "inspect package.json",
+          "status": "completed"
+        },
+        {
+          "id": "todo-2",
+          "text": "inspect tsconfig.json",
+          "status": "completed"
+        },
+        {
+          "id": "todo-3",
+          "text": "report completion",
+          "status": "completed"
+        }
+      ]
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:69>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "todo_list",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:70>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "plan.updated",
+    "payload": {
+      "id": "plan:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider:cursor:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:61>",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+      "status": "active",
+      "kind": "todo_list",
+      "steps": [
+        {
+          "id": "todo-1",
+          "text": "inspect package.json",
+          "status": "completed"
+        },
+        {
+          "id": "todo-2",
+          "text": "inspect tsconfig.json",
+          "status": "completed"
+        },
+        {
+          "id": "todo-3",
+          "text": "report completion",
+          "status": "completed"
+        }
+      ]
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:71>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:todos%3Atool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "tool_dc1d3263-4124-46bf-8b4c-8ab5c136ada",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000014,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "todo_list",
+      "planId": "plan:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider:cursor:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:61>",
+      "steps": [
+        {
+          "id": "todo-1",
+          "text": "inspect package.json",
+          "status": "completed"
+        },
+        {
+          "id": "todo-2",
+          "text": "inspect tsconfig.json",
+          "status": "completed"
+        },
+        {
+          "id": "todo-3",
+          "text": "report completion",
+          "status": "completed"
+        }
+      ]
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:72>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A6",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A6",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "reasoning",
+      "status": "running",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "reasoning:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:6",
+        "strength": "weak"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:73>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A6",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A6",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "reasoning",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "reasoning:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:6",
+        "strength": "weak"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:74>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A6",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A6",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:reasoning%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A6",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "reasoning:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:6",
+        "strength": "weak"
+      },
+      "parentItemId": null,
+      "ordinal": 1000015,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "reasoning",
+      "text": "I will answer exactly: \"todo list fixture complete\".",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:75>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A3",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A3",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "assistant_message",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "assistant:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:3",
+        "strength": "weak"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:76>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A3",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "agent",
+      "creationSource": "provider",
+      "id": "message:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A3",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A3",
+      "role": "assistant",
+      "text": "todo list fixture complete",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:77>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A3",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A3",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A3",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "nativeItemRef": {
+        "driver": "cursor",
+        "nativeId": "assistant:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01:3",
+        "strength": "weak"
+      },
+      "parentItemId": null,
+      "ordinal": 1000016,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "assistant_message",
+      "messageId": "message:provider:cursor:native-item:assistant%3Arun-4bdb1471-360c-45cc-af93-3db7c9a4fd01%3A3",
+      "text": "todo list fixture complete",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:78>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:cursor:native-turn:run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "cursor",
+        "nativeId": "run-4bdb1471-360c-45cc-af93-3db7c9a4fd01",
+        "strength": "strong"
+      },
+      "ordinal": 1,
+      "status": "completed",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "turnTokenUsage": {
+        "usageScope": "main_agent",
+        "cachedInputTokens": 72640,
+        "cacheCreationTokens": 0,
+        "hasSubagents": false,
+        "usageStatus": "complete",
+        "inputTokens": 82789,
+        "outputTokens": 1279
+      }
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acursor%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:79>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "cursor",
+      "providerInstanceId": "cursor",
+      "providerSessionId": "provider-session:provider-instance:cursor:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "cursor",
+        "nativeId": "agent-c00e62bc-d851-4af3-8b1e-9b0ea874172e",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "cursorStoreCwd": "<workspace>"
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:<uuid:80>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeThreadId": "agent-c00e62bc-d851-4af3-8b1e-9b0ea874172e",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "cursor",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "completed",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:<uuid:81>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "cursor",
+      "modelSelection": {
+        "instanceId": "cursor",
+        "model": "composer-2.5"
+      },
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "waiting",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:<uuid:82>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "waiting",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:<uuid:83>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "cursor",
+      "providerInstanceId": "cursor",
+      "providerSessionId": "provider-session:provider-instance:cursor:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "cursor",
+        "nativeId": "agent-c00e62bc-d851-4af3-8b1e-9b0ea874172e",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "idle",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "cursorStoreCwd": "<workspace>"
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:84>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "checkpoint.captured",
+    "payload": {
+      "id": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:0",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:name:root",
+      "runId": null,
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentCheckpointId": null,
+      "ordinalWithinScope": 0,
+      "appRunOrdinal": null,
+      "ref": "refs/hanzo/orchestration-v2/checkpoints/NWJlOWJkNDAzMmE5OWZkZGFhNjllNzZhZmRkNWViODE/ordinal/0",
+      "status": "ready",
+      "files": [],
+      "capturedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:85>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "checkpoint.captured",
+    "payload": {
+      "id": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:name:root",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentCheckpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:0",
+      "ordinalWithinScope": 1,
+      "appRunOrdinal": 1,
+      "ref": "refs/hanzo/orchestration-v2/checkpoints/NWJlOWJkNDAzMmE5OWZkZGFhNjllNzZhZmRkNWViODE/ordinal/1",
+      "status": "ready",
+      "files": [],
+      "capturedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:86>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "cursor",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:cursor:native-item:checkpoint%3Acheckpoint%3Ascope%3Acheckpoint-scope%253Athread%253Athread%25253Afixture%25253Atodo_list%25253Aproject%25253Aproject%2525253Afixture%2525253Atodo_list%2525253A<uuid:0>%25253A<uuid:1>%253Aname%253Aroot%3Aname%3A1",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000017,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "checkpoint",
+      "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:name:root",
+      "files": []
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:87>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "cursor",
+      "modelSelection": {
+        "instanceId": "cursor",
+        "model": "composer-2.5"
+      },
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "completed",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:88>",
+    "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "cursor",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:todo_list:project:project%3Afixture%3Atodo_list%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "completed",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:cursor:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atodo_list%253Aproject%253Aproject%25253Afixture%25253Atodo_list%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Atodo_list%3Aproject%3Aproject%253Afixture%253Atodo_list%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  }
+]

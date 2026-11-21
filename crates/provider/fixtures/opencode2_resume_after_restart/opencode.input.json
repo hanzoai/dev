@@ -1,0 +1,22 @@
+{
+  "fixture": "opencode2_resume_after_restart",
+  "driver": "opencode",
+  "modelSelection": {
+    "instanceId": "opencode",
+    "model": "opencode/big-pickle"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Run the shell command `sleep 25 && echo RESUMED` with the bash tool, then reply with its output."
+    },
+    {
+      "type": "message",
+      "text": "What did I last ask you to run? Answer in one short sentence."
+    }
+  ]
+}

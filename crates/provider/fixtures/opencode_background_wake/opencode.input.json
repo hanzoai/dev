@@ -1,0 +1,29 @@
+{
+  "fixture": "opencode_background_wake",
+  "driver": "opencode",
+  "modelSelection": {
+    "instanceId": "opencode",
+    "model": "openai/gpt-5.4-mini",
+    "options": [
+      {
+        "id": "agent",
+        "value": "build"
+      }
+    ]
+  },
+  "runContinuationWorker": true,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Use the task tool once with background set to true to delegate to the general subagent with the prompt: Respond exactly CHILD_OK. As soon as it is launched, reply exactly PARENT_OK and end your turn without waiting for it."
+    },
+    {
+      "type": "await_run_status",
+      "targetRunIndex": 2,
+      "status": "completed"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "fixture": "claude_background_task_after_root",
+  "driver": "claudeAgent",
+  "modelSelection": {
+    "instanceId": "claudeAgent",
+    "model": "claude-sonnet-4-6"
+  },
+  "runContinuationWorker": true,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Live-test post-settle background Bash wake. Do exactly this in order, with no extra steps.\n\n1) Run this exact command using the Bash tool with run_in_background set to true:\n   sleep 25 && echo L2_BG_DONE\n2) Immediately after starting it, reply with a short message containing exactly L2_STARTED and stop.\n3) Do NOT poll TaskOutput. Do NOT wait for the task. Do not spawn subagents or monitors.\n4) If its completion is reported later, acknowledge it once by replying with exactly L2_WAKE: L2_BG_DONE and stop.\n\nThe point is that your first turn ends while the command is still running."
+    },
+    {
+      "type": "await_run_status",
+      "targetRunIndex": 1,
+      "status": "completed"
+    },
+    {
+      "type": "release_replay_gate",
+      "label": "background_tasks_changed:empty"
+    },
+    {
+      "type": "await_run_status",
+      "targetRunIndex": 2,
+      "status": "running",
+      "waitForTurnItemType": "assistant_message"
+    },
+    {
+      "type": "release_replay_gate",
+      "label": "result:background-wake:1"
+    },
+    {
+      "type": "await_run_status",
+      "targetRunIndex": 2,
+      "status": "completed"
+    }
+  ]
+}

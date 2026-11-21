@@ -203,6 +203,8 @@ export default defineConfig({
       "*.icon/**",
       // The Go module: captured protocol templates are byte-exact.
       "go/**",
+      // Recorded provider fixtures: replays compare them byte for byte.
+      "crates/provider/fixtures/**",
     ],
     sortPackageJson: {},
     overrides: [

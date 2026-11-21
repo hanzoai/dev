@@ -1,0 +1,18 @@
+{
+  "fixture": "subagent",
+  "driver": "cursor",
+  "modelSelection": {
+    "instanceId": "cursor",
+    "model": "composer-2.5"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Spawn 2 subagents, one to read package.json and one to read tsconfig.json"
+    }
+  ]
+}

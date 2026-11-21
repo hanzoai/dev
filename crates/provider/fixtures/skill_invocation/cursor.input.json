@@ -1,0 +1,20 @@
+{
+  "fixture": "skill_invocation",
+  "driver": "cursor",
+  "modelSelection": {
+    "instanceId": "cursor",
+    "model": "composer-2.5"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {
+    ".cursor/skills/review/SKILL.md": "---\nname: review\ndescription: Review the named file for the skill invocation fixture.\n---\nDo not use any tools. Respond with exactly: review skill fixture complete\n"
+  },
+  "steps": [
+    {
+      "type": "message",
+      "text": "$review README.md"
+    }
+  ]
+}

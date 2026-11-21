@@ -1,0 +1,18 @@
+{
+  "fixture": "opencode2_command",
+  "driver": "opencode",
+  "modelSelection": {
+    "instanceId": "opencode",
+    "model": "openrouter/deepseek/deepseek-v4-flash"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "/hello WORLD"
+    }
+  ]
+}

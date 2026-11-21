@@ -1,0 +1,23 @@
+{
+  "fixture": "opencode2_interrupt",
+  "driver": "opencode",
+  "modelSelection": {
+    "instanceId": "opencode",
+    "model": "opencode/big-pickle"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Run the shell command `sleep 60 && echo LATE` with the bash tool, then reply DONE."
+    },
+    {
+      "type": "interrupt",
+      "targetRunIndex": 1,
+      "waitForTurnItemType": "command_execution"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "fixture": "opencode2_nested_background",
+  "driver": "opencode",
+  "modelSelection": {
+    "instanceId": "opencode",
+    "model": "openrouter/deepseek/deepseek-v4-flash"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Use the subagent tool (foreground, do not set background) to delegate to the general subagent with this exact prompt: 'Use the subagent tool with background set to true to delegate to the general subagent with the prompt: Run the shell command `sleep 25` with the shell tool, then reply exactly GRANDCHILD_OK. As soon as it is launched, reply exactly MIDDLE_OK and end your turn without waiting for it.' Wait for that subagent to return, then reply exactly ROOT_OK."
+    },
+    {
+      "type": "await_run_status",
+      "targetRunIndex": 1,
+      "status": "completed"
+    }
+  ]
+}

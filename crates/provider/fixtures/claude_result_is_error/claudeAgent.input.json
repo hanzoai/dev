@@ -1,0 +1,22 @@
+{
+  "fixture": "claude_result_is_error",
+  "driver": "claudeAgent",
+  "modelSelection": {
+    "instanceId": "claudeAgent",
+    "model": "claude-sonnet-4-6"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Say hello before the credentials expire."
+    },
+    {
+      "type": "message",
+      "text": "Try again now that auth is back."
+    }
+  ]
+}

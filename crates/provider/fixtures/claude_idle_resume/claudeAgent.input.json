@@ -1,0 +1,27 @@
+{
+  "fixture": "claude_idle_resume",
+  "driver": "claudeAgent",
+  "modelSelection": {
+    "instanceId": "claudeAgent",
+    "model": "claude-sonnet-4-6"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Respond with exactly: idle resume first turn complete"
+    },
+    {
+      "type": "advance_clock",
+      "duration": "31 minutes",
+      "releasesProviderSession": true
+    },
+    {
+      "type": "message",
+      "text": "Respond with exactly: idle resume second turn complete"
+    }
+  ]
+}
