@@ -1434,6 +1434,9 @@ importers:
       '@pierre/diffs':
         specifier: 1.7.0-beta.4
         version: 1.7.0-beta.4(patch_hash=b24b206d14c79de95be10322b96490b82e41cc13c8a02c7378aaf8e03623431b)(@shikijs/themes@4.2.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@zap-proto/zap':
+        specifier: 1.6.0
+        version: 1.6.0
       effect:
         specifier: 4.1.3
         version: 4.1.3
@@ -1484,6 +1487,15 @@ importers:
       vite-plus:
         specifier: 1.4.0
         version: 1.4.0(@astrojs/compiler-rs@0.5.1)(@types/node@24.12.4)(@vitest/browser-playwright@5.0.5)(@vitest/ui@5.0.5)(@volar/typescript@2.4.28(typescript@6.0.3))(bufferutil@4.1.0)(esbuild@0.28.2)(jiti@2.7.0)(jsdom@30.1.0(@noble/hashes@1.8.0))(playwright@1.64.1)(terser@5.48.0)(typescript@6.0.3)(unrun@0.2.39)(utf-8-validate@6.0.6)(yaml@2.9.0)
+
+  packages/dev:
+    dependencies:
+      react:
+        specifier: ^19
+        version: 19.3.0
+      react-dom:
+        specifier: ^19
+        version: 19.3.0(react@19.3.0)
 
   packages/effect-acp:
     dependencies:
@@ -7479,6 +7491,10 @@ packages:
     engines: {node: '>= 12'}
     cpu: [x64]
     os: [win32]
+
+  '@zap-proto/zap@1.6.0':
+    resolution: {integrity: sha512-1avImBBILyNbwP+PngKAeM0vPfhZTBTeRs+Xge766t3Zdynvn5yVryYyCHrCJXQBNrb+lqa+tWYYsYF7aADaZA==}
+    hasBin: true
 
   abort-controller@3.0.0:
     resolution: {integrity: sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg==}
@@ -16408,6 +16424,8 @@ snapshots:
 
   '@yuuang/ffi-rs-win32-x64-msvc@1.3.2':
     optional: true
+
+  '@zap-proto/zap@1.6.0': {}
 
   abort-controller@3.0.0:
     dependencies:
