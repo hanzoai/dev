@@ -1,6 +1,7 @@
 import {
   cloudChatProviders,
   cloudChatSelection,
+  type CloudChatAttachment,
   type CloudChatModel,
   type LocalChatModel,
 } from "@hanzodev/client-runtime/cloud-chat";
@@ -15,6 +16,7 @@ import { useEnvironmentSettings } from "../hooks/useSettings";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { useTheme } from "../hooks/useTheme";
 import { DraftId, useComposerDraftStore } from "../composerDraftStore";
+import { readAttachments } from "./homeAttachments";
 import { primaryServerKeybindingsAtom } from "../state/server";
 import type {
   ComposerImageAttachment,
@@ -41,7 +43,7 @@ export function HomeComposer(props: {
   sending: boolean;
   disabledReason: string | null;
   onSelect: (model: string, effort: string | null) => void;
-  onSend: (prompt: string, images: ReadonlyArray<ComposerImageAttachment>, files: ReadonlyArray<ComposerFileAttachment>) => void;
+  onSend: (prompt: string, attachments: ReadonlyArray<CloudChatAttachment>) => void;
 }) {
   const settings = useEnvironmentSettings(CLOUD_ENVIRONMENT);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -63,7 +65,9 @@ export function HomeComposer(props: {
   const send = useStableCallback(() => {
     const prompt = promptRef.current.trim();
     if (prompt === "" && imagesRef.current.length === 0 && filesRef.current.length === 0) return;
-    props.onSend(prompt, imagesRef.current, filesRef.current);
+    const images = imagesRef.current;
+    const files = filesRef.current;
+    void readAttachments(images, files).then((attachments) => props.onSend(prompt, attachments));
     useComposerDraftStore.getState().clearComposerContent?.(HOME_DRAFT);
     promptRef.current = "";
   });

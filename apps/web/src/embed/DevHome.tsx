@@ -105,12 +105,12 @@ function Home(props: DevHomeProps): ReactNode {
           sending={state.sending}
           disabledReason={null}
           onSelect={(model, effort) => controller.selectModel(model, effort)}
-          onSend={(prompt) => {
+          onSend={(prompt, attachments) => {
             if (machine && props.onHandoff && props.mode === "dev" && !chat.localSelected) {
               props.onHandoff(machine, prompt);
               return;
             }
-            void controller.send(prompt);
+            void controller.send(prompt, attachments);
           }}
         />
         {props.mode === "dev" ? (
