@@ -72,6 +72,15 @@ function ProviderCard({
   readonly snapshot: ProviderSnapshot;
   readonly now: Date;
 }) {
+  const gt = useGT();
+  const statusLabel: Record<StatusIndicator, string> = {
+    none: gt("Operational"),
+    minor: gt("Minor incident"),
+    major: gt("Major incident"),
+    critical: gt("Outage"),
+    maintenance: gt("Maintenance"),
+    unknown: gt("Status unknown"),
+  };
   const descriptor = providerById(snapshot.provider);
   const status = snapshot.status;
   const credits = snapshot.credits;
