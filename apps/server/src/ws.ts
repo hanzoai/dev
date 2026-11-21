@@ -1448,7 +1448,7 @@ export const layerWsRpc = (
       // Another surface's run on a login runs only where the user shared that login.
       const assertRoutedCommand = Effect.fn("ws.assertRoutedCommand")(
         function* (command: OrchestrationV2Command) {
-          if (!isRoutedSession(currentSession.method)) return;
+          if (!isRoutedSession(currentSession)) return;
           const target = commandProviderTarget(command);
           if (target === null) return;
           const instanceId =

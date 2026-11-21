@@ -473,7 +473,7 @@ function ProvidersSection({
                 {provider.shareable ? (
                   <span className="block">
                     {gt(
-                      "hanzo.app and your other signed-in devices can start runs here. Your login never leaves this computer.",
+                      "On by default for your own devices: hanzo.app and your other signed-in devices can start runs here, and no one else can. Your login never leaves this computer.",
                     )}
                   </span>
                 ) : provider.kind === "login" ? (

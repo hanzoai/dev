@@ -33,6 +33,7 @@ import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
 import { catalogId } from "../usage/HostReadings.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
+import { CLOUD_LINKED_USER_ID } from "./config.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
 import * as SourceUsageSummary from "./SourceUsageSummary.ts";
 import { fail, makeSourceApi, reject, storageFailure } from "./SourceApi.ts";
@@ -72,7 +73,8 @@ type OutboxFile = typeof OutboxFile.Type;
 const OutboxFileJson = Schema.fromJsonString(OutboxFile);
 const decodeOutboxFile = Schema.decodeUnknownOption(OutboxFileJson);
 const encodeOutboxFile = Schema.encodeSync(OutboxFileJson);
-const SharedFile = Schema.Struct({ instances: Schema.Array(Schema.String) });
+// Only the user's explicit choices are stored; an instance with none takes the default (on).
+const SharedFile = Schema.Struct({ choices: Schema.Record(Schema.String, Schema.Boolean) });
 const SharedFileJson = Schema.fromJsonString(SharedFile);
 const decodeSharedFile = Schema.decodeUnknownOption(SharedFileJson);
 const encodeSharedFile = Schema.encodeSync(SharedFileJson);
@@ -199,7 +201,7 @@ const toDesktop = (wire: typeof WireDesktop.Type): Desktop => ({
 /** The state a heartbeat reports for one provider, or null when it has nothing to report. */
 const providerState = (
   provider: ServerProvider,
-  shared: ReadonlySet<string>,
+  choices: Readonly<Record<string, boolean>>,
 ): DesktopProviderRow | null => {
   if (!provider.enabled || !provider.installed) return null;
   if (provider.availability === "unavailable") return null;
@@ -221,24 +223,38 @@ const providerState = (
     state:
       provider.auth.status === "unauthenticated" ? "needs_login" : limited ? "limited" : "ready",
     ...(plan === undefined ? {} : { plan }),
-    shared: shareable && shared.has(provider.instanceId),
+    shared: shareable && (choices[provider.instanceId] ?? true),
     shareable,
   };
 };
 
-const ownerOf = (accessToken: string): string | null => {
+const claimOf = (accessToken: string, name: string): string | null => {
   const payload = accessToken.split(".")[1];
   if (payload === undefined) return null;
   const decoded = Base64Url.decodeString(payload);
   if (decoded._tag !== "Success") return null;
   try {
     const claims: unknown = JSON.parse(decoded.success);
-    const owner =
-      typeof claims === "object" && claims !== null && "owner" in claims ? claims.owner : null;
-    return typeof owner === "string" && owner.length > 0 ? owner : null;
+    const value =
+      typeof claims === "object" && claims !== null && name in claims
+        ? (claims as Record<string, unknown>)[name]
+        : null;
+    return typeof value === "string" && value.length > 0 ? value : null;
   } catch {
     return null;
   }
+};
+
+const ownerOf = (accessToken: string): string | null => claimOf(accessToken, "owner");
+
+/** Whether the account Hanzo Link admits is the account this desktop's token belongs to. */
+const principalMatches = (linkedUser: string, accessToken: string): boolean => {
+  const owner = claimOf(accessToken, "owner");
+  const subject = claimOf(accessToken, "sub");
+  return (
+    subject !== null &&
+    (linkedUser === subject || (owner !== null && linkedUser === `${owner}/${subject}`))
+  );
 };
 
 /** The bytes a heartbeat's `sig` covers; cloud's `beatMessage` builds the same string. */
@@ -398,13 +414,10 @@ const make = Effect.gen(function* () {
 
   const sharedPath = path.join(config.stateDir, SHARED_FILE);
   const readShared = fileSystem.readFileString(sharedPath).pipe(
-    Effect.map(
-      (text) =>
-        new Set(Option.getOrElse(decodeSharedFile(text), () => ({ instances: [] })).instances),
-    ),
+    Effect.map((text) => Option.getOrElse(decodeSharedFile(text), () => ({ choices: {} })).choices),
     Effect.catch((cause) =>
       cause.reason._tag === "NotFound"
-        ? Effect.succeed(new Set<string>())
+        ? Effect.succeed<Readonly<Record<string, boolean>>>({})
         : Effect.fail(storageFailure(cause)),
     ),
   );
@@ -785,12 +798,10 @@ const make = Effect.gen(function* () {
     if (row === undefined || (shared && !row.shareable)) {
       return yield* fail("rejected", "This provider cannot be shared with other surfaces.");
     }
-    const current = yield* readShared;
-    if (shared) current.add(instance);
-    else current.delete(instance);
+    const current = { ...(yield* readShared), [instance]: shared };
     yield* fileSystem.makeDirectory(config.stateDir, { recursive: true }).pipe(
       Effect.andThen(
-        fileSystem.writeFileString(sharedPath, encodeSharedFile({ instances: [...current] }), {
+        fileSystem.writeFileString(sharedPath, encodeSharedFile({ choices: current }), {
           mode: 0o600,
         }),
       ),
@@ -801,15 +812,28 @@ const make = Effect.gen(function* () {
     return yield* buildStatus;
   });
 
+  // A routed run comes through Hanzo Link, which admits only the account this environment is
+  // linked to. It runs here only if that is also the account this desktop is linked as.
   const assertRoutedRun = Effect.fn("DesktopLink.assertRoutedRun")(function* (instance: string) {
+    const refuse = () =>
+      fail("not_shared", "This provider is not shared with your other surfaces.");
+    const record = yield* readRecord;
+    const stored = yield* tokens.getExisting.pipe(Effect.orElseSucceed(() => Option.none()));
+    const linkedUser = yield* secrets
+      .get(CLOUD_LINKED_USER_ID)
+      .pipe(Effect.orElseSucceed(() => Option.none<Uint8Array>()));
+    if (Option.isNone(record) || Option.isNone(stored) || Option.isNone(linkedUser)) {
+      return yield* refuse();
+    }
+    if (!principalMatches(new TextDecoder().decode(linkedUser.value), stored.value.accessToken)) {
+      return yield* refuse();
+    }
     const rows = yield* reportedProviders;
     const row = rows.find((candidate) => candidate.instance === instance);
     const open =
       row !== undefined &&
       (row.kind === "key" || OWN_PROVIDERS.has(row.provider) || (row.shareable && row.shared));
-    if (!open) {
-      return yield* fail("not_shared", "This provider is not shared with your other surfaces.");
-    }
+    if (!open) return yield* refuse();
   });
 
   const outboxStatus = readOutbox.pipe(Effect.map(outboxView));
