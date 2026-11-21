@@ -6,6 +6,7 @@ export type HanzoIamBrandId = "hanzo" | "lux" | "zoo" | "pars";
 export interface HanzoIamBrandConfig {
   readonly id: HanzoIamBrandId;
   readonly label: string;
+  /** Sign-in origin; it only locates OIDC discovery. A token's `iss` is the discovered issuer. */
   readonly issuer: string;
   readonly clientId: string;
   readonly defaultClientId: string;
@@ -15,7 +16,7 @@ export const HANZO_IAM_BRANDS: ReadonlyArray<HanzoIamBrandConfig> = [
   {
     id: "hanzo",
     label: "Hanzo",
-    issuer: "https://hanzo.id",
+    issuer: "https://hanzo.ai",
     clientId: "hanzo-app",
     defaultClientId: "hanzo-app",
   },
@@ -224,6 +225,60 @@ function normalizeIamIssuer(raw: string | null | undefined): string {
 
 export const normalizeHanzoIssuer = normalizeIamIssuer;
 
+interface IamEndpoints {
+  /** The `iss` that discovery advertises: the only value a token's `iss` is compared with. */
+  readonly issuer: string | null;
+  readonly token: string;
+  readonly userinfo: string;
+  readonly jwks: string | null;
+}
+
+const discoveryCache = new Map<string, Promise<IamEndpoints>>();
+
+/**
+ * Token and userinfo endpoints come from OIDC discovery at `<issuer>/.well-known/openid-configuration`,
+ * never from a hard-coded IAM host. A host that serves no discovery document keeps the classic
+ * `/oauth/*` paths on its own origin.
+ */
+export function resolveIamEndpoints(
+  issuer: string,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<IamEndpoints> {
+  const origin = normalizeIamIssuer(issuer);
+  const cached = discoveryCache.get(origin);
+  if (cached) return cached;
+  const classic: IamEndpoints = {
+    issuer: null,
+    token: new URL("/oauth/token", origin).toString(),
+    userinfo: new URL("/oauth/userinfo", origin).toString(),
+    jwks: null,
+  };
+  const pending = (async () => {
+    try {
+      const response = await fetchImpl(new URL("/.well-known/openid-configuration", origin).toString(), {
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) return classic;
+      const doc = (await response.json()) as Record<string, unknown>;
+      const token = typeof doc.token_endpoint === "string" ? doc.token_endpoint : null;
+      const userinfo = typeof doc.userinfo_endpoint === "string" ? doc.userinfo_endpoint : null;
+      return {
+        issuer: typeof doc.issuer === "string" ? doc.issuer : null,
+        token: token ?? classic.token,
+        userinfo: userinfo ?? classic.userinfo,
+        jwks: typeof doc.jwks_uri === "string" ? doc.jwks_uri : null,
+      };
+    } catch {
+      return classic;
+    }
+  })();
+  discoveryCache.set(origin, pending);
+  void pending.then((value) => {
+    if (value === classic) discoveryCache.delete(origin);
+  });
+  return pending;
+}
+
 export function parseHanzoIamVaultJson(raw: string | null | undefined): HanzoIamVaultState {
   if (!raw?.trim()) return EMPTY_HANZO_IAM_VAULT;
   try {
@@ -379,7 +434,8 @@ export function buildHanzoIamAuthorizeUrl(input: {
   readonly scopes?: ReadonlyArray<string>;
 }): string {
   const origin = normalizeIamIssuer(input.issuer);
-  const url = new URL("/oauth/authorize", origin);
+  // Hanzo sign-in starts on hanzo.ai/login with the app's OAuth request; it hands off to IAM.
+  const url = new URL(origin === DEFAULT_HANZO_IAM_ISSUER ? "/login" : "/oauth/authorize", origin);
   url.searchParams.set("client_id", input.clientId);
   url.searchParams.set("redirect_uri", input.redirectUri);
   url.searchParams.set("response_type", "code");
@@ -597,10 +653,10 @@ export async function fetchHanzoIamUserinfo(
   readonly avatarUrl?: string | null;
   readonly organizations?: ReadonlyArray<HanzoIamOrganization>;
 } | null> {
-  const origin = normalizeIamIssuer(issuer);
-  for (const endpoint of ["/api/userinfo", "/oauth/userinfo"]) {
+  const endpoints = await resolveIamEndpoints(issuer, fetchImpl);
+  for (const endpoint of [endpoints.userinfo]) {
     try {
-      const res = await fetchImpl(new URL(endpoint, origin).toString(), {
+      const res = await fetchImpl(endpoint, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
           Accept: "application/json",
@@ -793,7 +849,7 @@ export async function exchangeHanzoIamAuthorizationCode(input: {
     redirect_uri: input.redirectUri,
     code_verifier: input.codeVerifier,
   });
-  const response = await fetchImpl(new URL("/oauth/token", origin).toString(), {
+  const response = await fetchImpl((await resolveIamEndpoints(origin, fetchImpl)).token, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
@@ -839,7 +895,7 @@ export async function refreshHanzoIamAccount(
     client_id: account.clientId,
     refresh_token: account.refreshToken,
   });
-  const response = await fetchImpl(new URL("/oauth/token", account.issuer).toString(), {
+  const response = await fetchImpl((await resolveIamEndpoints(account.issuer, fetchImpl)).token, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",

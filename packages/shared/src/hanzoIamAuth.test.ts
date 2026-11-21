@@ -15,6 +15,7 @@ import {
   resolveActiveHanzoOrgId,
   switchHanzoIamVaultOrg,
   upsertHanzoIamVaultAccount,
+  resolveIamEndpoints,
 } from "./hanzoIamAuth.ts";
 
 function makeJwt(payload: Record<string, unknown>): string {
@@ -23,18 +24,36 @@ function makeJwt(payload: Record<string, unknown>): string {
 }
 
 describe("hanzoIamAuth", () => {
-  it("resolves all four Hanzo ecosystem IAM brands and defaults to hanzo.id", () => {
+  it("reads token and userinfo endpoints from OIDC discovery", async () => {
+    const fetchImpl = (async (url: string) => {
+      expect(url).toBe("https://disco.example/.well-known/openid-configuration");
+      return Response.json({
+        issuer: "https://iam.example",
+        jwks_uri: "https://iam.example/v1/iam/.well-known/jwks",
+        token_endpoint: "https://iam.example/v1/iam/oauth/token",
+        userinfo_endpoint: "https://iam.example/v1/iam/oauth/userinfo",
+      });
+    }) as unknown as typeof fetch;
+    expect(await resolveIamEndpoints("https://disco.example", fetchImpl)).toEqual({
+      issuer: "https://iam.example",
+      jwks: "https://iam.example/v1/iam/.well-known/jwks",
+      token: "https://iam.example/v1/iam/oauth/token",
+      userinfo: "https://iam.example/v1/iam/oauth/userinfo",
+    });
+  });
+
+  it("resolves all four Hanzo ecosystem IAM brands and defaults to hanzo.ai", () => {
     expect(getHanzoIamBrand("hanzo")).toEqual({
       id: "hanzo",
       label: "Hanzo",
-      issuer: "https://hanzo.id",
+      issuer: "https://hanzo.ai",
       clientId: "hanzo-app",
       defaultClientId: "hanzo-app",
     });
     expect(getHanzoIamBrand("lux").issuer).toBe("https://lux.id");
     expect(getHanzoIamBrand("zoo").issuer).toBe("https://zoolabs.id");
     expect(getHanzoIamBrand("pars").issuer).toBe("https://pars.id");
-    expect(getHanzoIamBrand("unknown").issuer).toBe("https://hanzo.id");
+    expect(getHanzoIamBrand("unknown").issuer).toBe("https://hanzo.ai");
   });
 
   it("builds standard OIDC PKCE S256 authorize URLs", () => {
@@ -42,15 +61,15 @@ describe("hanzoIamAuth", () => {
     const challenge = createPkceChallengeS256(verifier);
     const url = new URL(
       buildHanzoIamAuthorizeUrl({
-        issuer: "https://hanzo.id",
+        issuer: "https://hanzo.ai",
         clientId: "hanzo-app",
         redirectUri: "hanzodev://oauth/callback",
         state: "state-123",
         codeChallenge: challenge,
       }),
     );
-    expect(url.origin).toBe("https://hanzo.id");
-    expect(url.pathname).toBe("/oauth/authorize");
+    expect(url.origin).toBe("https://hanzo.ai");
+    expect(url.pathname).toBe("/login");
     expect(url.searchParams.get("client_id")).toBe("hanzo-app");
     expect(url.searchParams.get("redirect_uri")).toBe("hanzodev://oauth/callback");
     expect(url.searchParams.get("code_challenge")).toBe(challenge);
