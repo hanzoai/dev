@@ -32,6 +32,7 @@ export function DevThreadList({
       ref={ref}
       data-dev-threads=""
       className={className}
+      style={{ position: "relative", contain: "layout" }}
       onKeyDown={(event) => moveThroughRows(event, event.currentTarget)}
     />
   );

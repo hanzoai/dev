@@ -21,7 +21,8 @@ export function EmbedShell({ children }: { children: ReactNode }) {
   const threads = useSlot(embed!.slots.threads);
   const workspace = useSlot(embed!.slots.workspace);
   return (
-    <SidebarProvider className="min-h-0! h-full! w-full!" storageKey="dev_embed_sidebar_open">
+    // `contents`: the provider draws no box of its own, so the host's layout is the only layout.
+    <SidebarProvider style={{ display: "contents" }} storageKey="dev_embed_sidebar_open">
       {threads ? createPortal(<ThreadSidebar routeReveal={sidebarRouteReveal} />, threads) : null}
       {workspace ? createPortal(children, workspace) : null}
     </SidebarProvider>

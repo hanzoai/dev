@@ -33,7 +33,15 @@ export function DevWorkspace({
     <div
       className={className}
       data-dev-workspace=""
-      style={{ display: "flex", minWidth: 0, minHeight: 0, flex: 1 }}
+      style={{
+        display: "flex",
+        minWidth: 0,
+        minHeight: 0,
+        flex: 1,
+        // The thread view is the host's pane: its fixed headers and sheets position inside it.
+        position: "relative",
+        contain: "layout paint",
+      }}
     >
       <div ref={ref} style={{ display: "flex", minWidth: 0, minHeight: 0, flex: 1 }} />
       {embed && dock && workspace ? dock({ runtime: embed.runtime, thread: open }) : null}
