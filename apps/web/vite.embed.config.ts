@@ -33,6 +33,7 @@ export default defineConfig({
     lib: {
       entry: { index: "src/embed/index.ts", keymap: "src/embed/keymap.ts" },
       formats: ["es"],
+      cssFileName: "index",
     },
     rollupOptions: { external: ["react", "react-dom", "react/jsx-runtime", "react-dom/client"] },
   },
