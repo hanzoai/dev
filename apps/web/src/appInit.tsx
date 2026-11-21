@@ -5,7 +5,7 @@ import {
 } from "@hanzodev/client-runtime/environment";
 import type { ScopedThreadRef } from "@hanzodev/contracts";
 import type { ClientSettings } from "@hanzodev/contracts/settings";
-import { createBrowserHistory, createHashHistory } from "@tanstack/react-router";
+import { createBrowserHistory, createHashHistory, type RouterHistory } from "@tanstack/react-router";
 import * as Schema from "effect/Schema";
 
 import { applyAppearanceContrast } from "./appearanceContrast";
@@ -254,23 +254,27 @@ function startThreadOverlayRetention(router: AppRouter): void {
  * Starts every app-lifetime service once, before the first render, and returns the router.
  * They run for the life of the page, so their disposers are dropped here.
  */
-export function startAppServices(): AppRouter {
+export function startAppServices(history?: RouterHistory): AppRouter {
+  // A host that embeds the core (src/embed) owns the address, the window and the title.
+  const embedded = history !== undefined;
   // Ahead of the history: the provider auth code must leave the address before anything reads it.
-  startProviderAuthDelivery();
+  if (!embedded) startProviderAuthDelivery();
 
   // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
-  const router = getRouter(isElectron ? createHashHistory() : createBrowserHistory());
+  const router = getRouter(
+    history ?? (isElectron ? createHashHistory() : createBrowserHistory()),
+  );
 
   if (isElectron) {
     syncDocumentElectronPlatformClasses(navigator.platform);
     syncDocumentWindowControlsOverlayClass();
   }
 
-  installDesktopPasteAsText(window.desktopBridge, window);
+  if (!embedded) installDesktopPasteAsText(window.desktopBridge, window);
 
-  startClientAppearance();
+  if (!embedded) startClientAppearance();
   startI18n();
-  startDocumentTitle(router);
+  if (!embedded) startDocumentTitle(router);
   startHostEnvironmentLookup();
   startEnvironmentThemeRepaint();
   startThemeBackground();
