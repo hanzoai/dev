@@ -139,7 +139,7 @@ describe("controller", () => {
     expect(bodies[1]).toMatchObject({ conversationId: "c1" });
   });
 
-  it.each([404, 500])("degrades to a local thread when sync answers %i", async (status) => {
+  it.each([404, 500])("degrades to a local thread when sync answers %i", async (status: number) => {
     const chat = createCloudChatController({
       getAuth: async () => auth,
       options: { fetch: route(() => json(status, {})) },
@@ -178,7 +178,7 @@ describe("controller", () => {
 });
 
 describe("runInCloud", () => {
-  it.each([404, 501])("says unavailable on %i", async (status) => {
+  it.each([404, 501])("says unavailable on %i", async (status: number) => {
     expect(await runInCloud(auth, { fetch: async () => json(status, {}) })).toEqual({ kind: "unavailable" });
   });
   it("starts a session", async () => {

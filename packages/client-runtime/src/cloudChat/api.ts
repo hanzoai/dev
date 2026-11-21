@@ -126,8 +126,8 @@ export async function streamChatReply(input: {
   readonly model: string;
   readonly messages: ReadonlyArray<CloudChatMessage>;
   readonly onDelta: (text: string) => void;
-  readonly signal?: AbortSignal;
-  readonly options?: CloudChatOptions;
+  readonly signal?: AbortSignal | undefined;
+  readonly options?: CloudChatOptions | undefined;
 }): Promise<string> {
   const token = requireToken(input.auth);
   const { fetch, baseUrl } = resolve(input.options ?? {});
@@ -182,7 +182,7 @@ export async function recordTurns(input: {
   readonly auth: CloudChatAuth;
   readonly threadId: string | null;
   readonly messages: ReadonlyArray<CloudChatMessage>;
-  readonly options?: CloudChatOptions;
+  readonly options?: CloudChatOptions | undefined;
 }): Promise<string | null> {
   const token = input.auth.accessToken?.trim();
   if (!token) return null;
