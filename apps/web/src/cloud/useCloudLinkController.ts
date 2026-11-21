@@ -76,16 +76,16 @@ export function useCloudLinkController(environmentId: EnvironmentId | null) {
 
   const reportUpdateFailure = (cause: unknown, reason?: string) => {
     const message =
-      thrownErrorMessage(cause, m) ?? m(msg("Could not update Hanzo Connect access."));
+      thrownErrorMessage(cause, m) ?? m(msg("Could not update Hanzo Link access."));
     const traceId = findErrorTraceId(cause);
-    console.error("[hanzo-connect] Could not update Hanzo Connect", { message, traceId, cause });
+    console.error("[hanzo-connect] Could not update Hanzo Link", { message, traceId, cause });
     setOperationError(
       traceId ? m(msg("{message} Trace ID: {traceId}", { message, traceId })) : message,
     );
     toastManager.add(
       stackedThreadToast({
         type: "error",
-        title: m(msg("Could not update Hanzo Connect")),
+        title: m(msg("Could not update Hanzo Link")),
         description: reason ?? relayFailureReason(cause) ?? message,
         ...(traceId
           ? {
@@ -131,7 +131,7 @@ export function useCloudLinkController(environmentId: EnvironmentId | null) {
       ) {
         reportUpdateFailure(
           new Error(
-            m(msg("This connection needs permission to view and manage Hanzo Connect settings.")),
+            m(msg("This connection needs permission to view and manage Hanzo Link settings.")),
           ),
         );
         return false;
@@ -142,7 +142,7 @@ export function useCloudLinkController(environmentId: EnvironmentId | null) {
       const state = readCachedCloudLinkState(target);
       if (state === null) {
         reportUpdateFailure(
-          new Error(m(msg("Wait until the current Hanzo Connect settings can be read."))),
+          new Error(m(msg("Wait until the current Hanzo Link settings can be read."))),
         );
       }
       return state;
@@ -170,7 +170,7 @@ export function useCloudLinkController(environmentId: EnvironmentId | null) {
           reportUpdateFailure(
             cause,
             relayKeptLink
-              ? m(msg("Disconnected here, but Hanzo Connect still lists it. Remove it in Account."))
+              ? m(msg("Disconnected here, but Hanzo Link still lists it. Remove it in Account."))
               : undefined,
           );
         }
@@ -187,7 +187,7 @@ export function useCloudLinkController(environmentId: EnvironmentId | null) {
       }
       const iamToken = tokenResult.value;
       if (!iamToken) {
-        reportUpdateFailure(new Error(m(msg("Sign in to Hanzo Connect before enabling this."))));
+        reportUpdateFailure(new Error(m(msg("Sign in to Hanzo Link before enabling this."))));
         return false;
       }
       if (cloudChangeReplacesLink(currentLinkState, relayProviderKind, desired)) {
@@ -196,7 +196,7 @@ export function useCloudLinkController(environmentId: EnvironmentId | null) {
             new Error(
               m(
                 msg(
-                  "This connection needs the relay configuration permission to configure Hanzo Connect.",
+                  "This connection needs the relay configuration permission to configure Hanzo Link.",
                 ),
               ),
             ),

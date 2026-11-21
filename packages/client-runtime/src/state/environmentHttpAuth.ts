@@ -97,7 +97,7 @@ const buildEnvironmentAuthHeaders = Effect.fn("environmentHttpAuth.buildEnvironm
 );
 
 /**
- * A DPoP request is Hanzo Connect work, so its span starts an exported trace that
+ * A DPoP request is Hanzo Link work, so its span starts an exported trace that
  * the environment continues; its local caller's span would leave that trace
  * without a root.
  */

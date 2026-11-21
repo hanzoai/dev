@@ -222,7 +222,7 @@ function ProviderLastChecked({ environmentId }: { environmentId: EnvironmentId }
   );
 }
 
-const HANZO_CONNECT_NAME = "Hanzo Connect";
+const HANZO_CONNECT_NAME = "Hanzo Link";
 
 function providerEnvironmentDetail(
   environment: EnvironmentPresentation,

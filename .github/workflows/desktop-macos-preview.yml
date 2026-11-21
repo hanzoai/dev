@@ -70,7 +70,7 @@ jobs:
 
           base_version="$(node -p "require('./apps/desktop/package.json').version")"
           node scripts/update-release-package-versions.ts "${base_version}-pr.${PR_NUMBER}.${GITHUB_RUN_NUMBER}"
-          # Public Hanzo Connect identifiers (relay URL).
+          # Public Hanzo Link identifiers (relay URL).
           cp .env.example .env
 
       # desktop-macos-preview-publish.yml packages this bundle as the preview

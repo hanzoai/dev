@@ -35,7 +35,7 @@ class LocalTracer extends Context.Reference("@hanzodev/shared/relayTracing/Local
   defaultValue: () => Option.none<Tracer.Tracer>(),
 }) {}
 
-/** Export only Hanzo Connect spans; wrap local work with {@link withLocalTracing}. */
+/** Export only Hanzo Link spans; wrap local work with {@link withLocalTracing}. */
 export const withRelayClientTracing = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
 ): Effect.Effect<A, E, R> =>

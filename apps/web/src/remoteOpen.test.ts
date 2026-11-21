@@ -66,7 +66,7 @@ describe("resolveRemoteOpenState", () => {
 
   it("keeps exec behavior for the environment that owns the desktop's Hanzo home", () => {
     // With Local environment off, a background service on this machine can own the
-    // desktop's home and still be reached through Hanzo Connect.
+    // desktop's home and still be reached through Hanzo Link.
     expect(
       resolveRemoteOpenState({
         target: new RelayConnectionTarget({ environmentId, label: "sol" }),

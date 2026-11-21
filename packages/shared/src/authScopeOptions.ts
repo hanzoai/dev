@@ -104,13 +104,13 @@ export const AUTH_SCOPE_OPTIONS: ReadonlyArray<{
   {
     scope: AuthRelayWriteScope,
     title: msg("Manage relay"),
-    description: msg("Update relay preferences or unlink Hanzo Connect."),
+    description: msg("Update relay preferences or unlink Hanzo Link."),
   },
   {
     scope: AuthRelayConfigureScope,
     title: msg("Configure relay (admin)"),
     description: msg(
-      "Set up or replace Hanzo Connect, including its trusted pairing credential issuer.",
+      "Set up or replace Hanzo Link, including its trusted pairing credential issuer.",
     ),
   },
 ];

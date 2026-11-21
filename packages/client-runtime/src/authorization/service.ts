@@ -321,7 +321,7 @@ export const make = Effect.gen(function* () {
   const sessionPending = () =>
     new ConnectionTransientError({
       reason: "session-pending",
-      ...translatableDetail(msg("Waiting for the Hanzo Connect sign-in to load.")),
+      ...translatableDetail(msg("Waiting for the Hanzo Link sign-in to load.")),
     });
 
   const assertSession = Effect.fnUntraced(function* (
@@ -727,7 +727,7 @@ export const make = Effect.gen(function* () {
         return yield* mapDpopSocketError(cachedSocket.failure);
       }
       // An unreachable direct address says nothing about the token, so keep
-      // it for the Hanzo Connect route rather than forcing a relay round trip.
+      // it for the Hanzo Link route rather than forcing a relay round trip.
       if (endpoint !== undefined && cachedSocket.failure._tag !== "EnvironmentAuthInvalidError") {
         return yield* mapDpopSocketError(cachedSocket.failure);
       }
@@ -786,7 +786,7 @@ export const make = Effect.gen(function* () {
       const direct = input.directConnection;
       let expiresAtEpochMs = input.expiresAtEpochMs;
       let now = yield* Clock.currentTimeMillis;
-      // Past expiry the server has closed a Hanzo Connect socket. A direct socket stays open for
+      // Past expiry the server has closed a Hanzo Link socket. A direct socket stays open for
       // its session's whole renewal window, so it keeps retrying until a blocked credential.
       while (direct !== undefined || now < expiresAtEpochMs) {
         // getDpopToken reuses a cached token until it is within the skew of expiry.

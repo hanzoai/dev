@@ -24,13 +24,13 @@ const none = Option.none<boolean>();
 
 it.each([
   {
-    label: "a new machine starts from Hanzo Connect and asks",
+    label: "a new machine starts from Hanzo Link and asks",
     setup: { installed: false, connect: false, lan: false },
     flags: { connect: none, lan: none },
     expected: { routes: { connect: true, lan: false }, ask: ["connect", "lan"] },
   },
   {
-    label: "a build without Hanzo Connect never offers it",
+    label: "a build without Hanzo Link never offers it",
     setup: { installed: false, connect: null, lan: false },
     flags: { connect: none, lan: none },
     expected: { routes: { connect: false, lan: false }, ask: ["lan"] },
@@ -114,7 +114,7 @@ it.each([
     revoked: false,
     on: false,
   },
-] as const)("Hanzo Connect is on for $label: $on", ({ label: _, on, ...link }) => {
+] as const)("Hanzo Link is on for $label: $on", ({ label: _, on, ...link }) => {
   expect(connectEnabled(link)).toBe(on);
 });
 

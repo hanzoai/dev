@@ -76,7 +76,7 @@ describe("connection routes", () => {
     expect(connectionRouteKind(direct("lo", "http://127.0.0.1:3773/"))).toBe("loopback");
     expect(connectionRouteKind(direct("ts6", "http://[fd7a:115c:a1e0::1]:3773/"))).toBe("tailnet");
     expect(connectionRouteLabel(TAILNET)).toBe("Tailscale");
-    expect(connectionRouteLabel(RELAY)).toBe("Hanzo Connect");
+    expect(connectionRouteLabel(RELAY)).toBe("Hanzo Link");
   });
 
   it("knows which addresses reach the same machine on every network", () => {
@@ -108,7 +108,7 @@ describe("connection routes", () => {
     expect(isNearbyAddress("not a url")).toBe(false);
   });
 
-  it("places a new route after faster kinds and ahead of Hanzo Connect", () => {
+  it("places a new route after faster kinds and ahead of Hanzo Link", () => {
     expect(insertRoute([RELAY], LAN)).toEqual([LAN, RELAY]);
     expect(insertRoute([LAN, RELAY], TAILNET)).toEqual([LAN, TAILNET, RELAY]);
     expect(insertRoute([TAILNET], LAN)).toEqual([LAN, TAILNET]);
@@ -150,7 +150,7 @@ describe("learned routes", () => {
     routes?.map((route) => connectionRouteId(route.target)) ?? null;
   const profileOf = (route: ConnectionRoute) => Option.getOrThrow(route.profile);
 
-  it("learns a LAN address over Hanzo Connect, ahead of it, using the Hanzo Connect credential", () => {
+  it("learns a LAN address over Hanzo Link, ahead of it, using the Hanzo Link credential", () => {
     const routes = mergeLearnedRoutes({
       entry: relayOnly,
       activeRoute: RELAY,
@@ -226,7 +226,7 @@ describe("learned routes", () => {
       reported: [tailscale, mesh],
       allowInsecure: true,
     })!;
-    expect(first.map(connectionRouteLabel)).toEqual(["Tailscale", "VPN", "Hanzo Connect"]);
+    expect(first.map(connectionRouteLabel)).toEqual(["Tailscale", "VPN", "Hanzo Link"]);
 
     const corrected = mergeLearnedRoutes({
       entry: entryWithRoutes(relayOnly, first),
@@ -235,7 +235,7 @@ describe("learned routes", () => {
       allowInsecure: true,
     })!;
     expect(ids(corrected)).toEqual(ids(first));
-    expect(corrected.map(connectionRouteLabel)).toEqual(["VPN", "VPN", "Hanzo Connect"]);
+    expect(corrected.map(connectionRouteLabel)).toEqual(["VPN", "VPN", "Hanzo Link"]);
     expect(
       mergeLearnedRoutes({
         entry: entryWithRoutes(relayOnly, corrected),
@@ -315,7 +315,7 @@ describe("learned routes", () => {
       reported: [{ kind: "lan", httpBaseUrl: `${lanOrigin}/` }],
       allowInsecure: true,
     });
-    // The stale route is gone; the address is learned again with Hanzo Connect's credential.
+    // The stale route is gone; the address is learned again with Hanzo Link's credential.
     expect(ids(routes)).toEqual([`learned:${ENVIRONMENT_ID}:${lanOrigin}`, "public", "relay"]);
     expect(profileOf(routes![0]!)).toMatchObject({ authorization: "hanzo-connect" });
   });
@@ -386,7 +386,7 @@ describe("learned routes", () => {
     expect(ids(routesAfterRemoving(overLan, "relay"))).toHaveLength(2);
   });
 
-  it("counts an environment reached only through Hanzo Connect as removed with it", () => {
+  it("counts an environment reached only through Hanzo Link as removed with it", () => {
     const learned = mergeLearnedRoutes({
       entry: relayOnly,
       activeRoute: RELAY,
@@ -416,7 +416,7 @@ describe("learned routes", () => {
     );
   });
 
-  it("keeps the Hanzo Connect credential when learning over a learned Hanzo Connect route", () => {
+  it("keeps the Hanzo Link credential when learning over a learned Hanzo Link route", () => {
     const first = mergeLearnedRoutes({
       entry: relayOnly,
       activeRoute: RELAY,

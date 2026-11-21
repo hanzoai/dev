@@ -189,7 +189,7 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Mints pairing codes that approve one agent sign-in at a set level (`AUTO-…`). */
   mcpApprovalCodes: Schema.optionalKey(Schema.Boolean),
   peerLinkPairingCodes: Schema.optionalKey(Schema.Boolean),
-  /** Agent sign-ins on its Hanzo Connect address are approved on the hosted app, without a code. */
+  /** Agent sign-ins on its Hanzo Link address are approved on the hosted app, without a code. */
   mcpHostedApproval: Schema.optionalKey(Schema.Boolean),
   /** Server answers server.prepareTriage. */
   triage: Schema.optionalKey(Schema.Boolean),

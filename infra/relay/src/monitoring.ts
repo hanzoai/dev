@@ -57,9 +57,9 @@ const relayMonitors: ReadonlyArray<RelayMonitor> = [
   {
     id: "RelayLinkFailureRateMonitor",
     severity: "page",
-    name: "Hanzo Connect relay: links failing",
+    name: "Hanzo Link relay: links failing",
     description:
-      "Share of POST /v1/client/environment-links (turning on Hanzo Connect) answering 5xx over 15 min. Healthy: median 11%, worst 75%. #16810: 87-96%.",
+      "Share of POST /v1/client/environment-links (turning on Hanzo Link) answering 5xx over 15 min. Healthy: median 11%, worst 75%. #16810: 87-96%.",
     query: (dataset) => serverFailurePercent(dataset, LINK_ROUTE, 20),
     operator: "Above",
     threshold: 80,
@@ -69,7 +69,7 @@ const relayMonitors: ReadonlyArray<RelayMonitor> = [
   {
     id: "RelayTunnelFailureRateMonitor",
     severity: "page",
-    name: "Hanzo Connect relay: tunnel recovery failing",
+    name: "Hanzo Link relay: tunnel recovery failing",
     description:
       "Share of host tunnel registration and recovery answering 5xx over 15 min. Hosts whose tunnel drops cannot come back. Healthy: median 4%, worst 52%. #16810: 83-94%.",
     query: (dataset) => serverFailurePercent(dataset, TUNNEL_ROUTES, 200),
@@ -81,7 +81,7 @@ const relayMonitors: ReadonlyArray<RelayMonitor> = [
   {
     id: "RelayConnectReachabilityMonitor",
     severity: "page",
-    name: "Hanzo Connect relay: environments unreachable",
+    name: "Hanzo Link relay: environments unreachable",
     description:
       "Share of environments clients tried to reach that connected at least once in 30 min. Offline hosts keep this below 100%, and retry storms against them do not move it. Healthy: 65-72%.",
     query: (dataset) =>
@@ -100,7 +100,7 @@ const relayMonitors: ReadonlyArray<RelayMonitor> = [
   {
     id: "RelayPushFailureRateMonitor",
     severity: "page",
-    name: "Hanzo Connect relay: push delivery failing",
+    name: "Hanzo Link relay: push delivery failing",
     description:
       "Share of APNs and FCM delivery jobs failing over 15 min, e.g. an expired APNs key or FCM credential. Healthy: APNs under 0.3%, FCM under 4%.",
     query: (dataset) =>
@@ -118,7 +118,7 @@ const relayMonitors: ReadonlyArray<RelayMonitor> = [
   {
     id: "RelayCloudflareRateLimitedMonitor",
     severity: "page",
-    name: "Hanzo Connect relay: Cloudflare API rate limited",
+    name: "Hanzo Link relay: Cloudflare API rate limited",
     description:
       "Cloudflare API 429s, plus calls the relay refused while paused after one, per 10 min. Sustained at this level, links and recoveries stall. Peak 429s before #16810: 1,286; during it: ~11k.",
     query: (dataset) =>
@@ -131,7 +131,7 @@ const relayMonitors: ReadonlyArray<RelayMonitor> = [
   {
     id: "RelayTrafficDroppedMonitor",
     severity: "page",
-    name: "Hanzo Connect relay: traffic dropped",
+    name: "Hanzo Link relay: traffic dropped",
     description:
       "Relay requests per 10 min collapsed: Worker down, broken deploy, or trace export stopped. Healthy minimum: ~69k.",
     query: (dataset) => `['${dataset}']\n| where kind == "server"\n| summarize requests = count()`,
@@ -144,7 +144,7 @@ const relayMonitors: ReadonlyArray<RelayMonitor> = [
   {
     id: "RelayCloudflareRateLimitWarningMonitor",
     severity: "warn",
-    name: "Hanzo Connect relay: Cloudflare API near its limit",
+    name: "Hanzo Link relay: Cloudflare API near its limit",
     description:
       "Any sustained Cloudflare API 429s or paused calls. 429 bursts ran for days before #16810; raise the account limit or cut call volume before they grow.",
     query: (dataset) =>
@@ -157,7 +157,7 @@ const relayMonitors: ReadonlyArray<RelayMonitor> = [
   {
     id: "RelayLinkChronicFailureMonitor",
     severity: "warn",
-    name: "Hanzo Connect relay: links degraded",
+    name: "Hanzo Link relay: links degraded",
     description:
       "Share of links answering 5xx over 6 h, mostly 9 s deadline 504s from slow provisioning. Healthy days: 10-18%. Degraded days before #16810: 28-33%.",
     query: (dataset) => serverFailurePercent(dataset, LINK_ROUTE, 100),
@@ -169,7 +169,7 @@ const relayMonitors: ReadonlyArray<RelayMonitor> = [
   {
     id: "RelayDatabaseLatencyMonitor",
     severity: "warn",
-    name: "Hanzo Connect relay: database slow",
+    name: "Hanzo Link relay: database slow",
     description:
       "p90 Postgres query time over 15 min, in ms. Every relay request runs several queries in sequence, so this sets how close provisioning gets to the 9 s deadline. Healthy: ~200 ms.",
     query: (dataset) =>
@@ -183,7 +183,7 @@ const relayMonitors: ReadonlyArray<RelayMonitor> = [
     id: "RelayTunnelCleanupStoppedMonitor",
     // Pages because nothing else surfaces it: unnoticed, it ran 2026-11-15..18 while 27k+ idle tunnels piled up.
     severity: "page",
-    name: "Hanzo Connect relay: tunnel cleanup stopped",
+    name: "Hanzo Link relay: tunnel cleanup stopped",
     description:
       "Tunnel cleanup sweeps that finished in 2 h. Healthy: 24. The cron is not running, or every sweep fails, as during the 2026-10-19 Cloudflare 429s and from 2026-11-15 when listing tunnels timed out. Idle tunnels pile up and are billed meanwhile.",
     query: (dataset) =>
@@ -198,7 +198,7 @@ const relayMonitors: ReadonlyArray<RelayMonitor> = [
   {
     id: "RelayTunnelCleanupFailingMonitor",
     severity: "warn",
-    name: "Hanzo Connect relay: tunnel deletions failing",
+    name: "Hanzo Link relay: tunnel deletions failing",
     description:
       "Cloudflare tunnel deletions that failed in 30 min. Healthy: 0; the worst 30 min so far had 3. The relay logs a warning with the Cloudflare error for each.",
     query: (dataset) =>
@@ -396,7 +396,7 @@ export const RelayMonitoring = Effect.fn("RelayMonitoring")(function* (traces: A
         // Shared with the whole org. An empty owner only means that for API
         // tokens; deploys with a personal token would make it private.
         owner: "X-AXIOM-EVERYONE",
-        description: `Hanzo Connect relay health. Alerts and runbook: ${RUNBOOK_URL}`,
+        description: `Hanzo Link relay health. Alerts and runbook: ${RUNBOOK_URL}`,
         refreshTime: 60,
         schemaVersion: 2,
         timeWindowStart: "qr-now-24h",

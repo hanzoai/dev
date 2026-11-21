@@ -288,7 +288,7 @@ export const readCloudLinkState: (input: {
     );
   });
 
-/** Runs the environment's Hanzo Connect reachability check now; the link state then reports it. */
+/** Runs the environment's Hanzo Link reachability check now; the link state then reports it. */
 export const checkCloudReachability: (input: {
   readonly target: CloudLinkTarget;
 }) => Effect.Effect<EnvironmentConnectReachability, CloudEnvironmentLinkError, CloudLinkServices> =
@@ -303,8 +303,8 @@ export const checkCloudReachability: (input: {
         request: ({ client, headers }) => client.checkReachability({ headers }),
       },
       {
-        message: msg("Could not check Hanzo Connect."),
-        withDetail: msg("Could not check Hanzo Connect: {detail}"),
+        message: msg("Could not check Hanzo Link."),
+        withDetail: msg("Could not check Hanzo Link: {detail}"),
       },
     );
   });
@@ -372,7 +372,7 @@ export const unlinkEnvironmentFromCloud: (input: {
           decodedRelayClientError(
             m(
               msg(
-                "Disconnected locally, but Hanzo Connect did not confirm it removed this environment",
+                "Disconnected locally, but Hanzo Link did not confirm it removed this environment",
               ),
             ),
           ),

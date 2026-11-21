@@ -208,7 +208,7 @@ const ROUTE_TITLES: Readonly<Record<string, string>> = {
   AddProject: msg("Add project"),
   ThreadFiles: msg("Files"),
   SettingsLegal: msg("Legal"),
-  ConnectOnboarding: msg("Set up {product}", { product: "Hanzo Connect" }),
+  ConnectOnboarding: msg("Set up {product}", { product: "Hanzo Link" }),
   Connections: msg("Environments"),
   ConnectionsNew: msg("Add Environment"),
 };

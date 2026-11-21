@@ -222,7 +222,7 @@ describe("createManagedRelayQueryManager", () => {
       yield* TestClock.adjust("12 seconds");
 
       expect((yield* Fiber.join(readFiber)).message).toBe(
-        "Timed out obtaining the Hanzo Connect session token.",
+        "Timed out obtaining the Hanzo Link session token.",
       );
       expect(readIamToken).toHaveBeenCalledTimes(3);
     }),

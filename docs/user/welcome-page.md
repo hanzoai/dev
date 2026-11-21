@@ -9,7 +9,7 @@ To see the page again, go to **Settings → About → Welcome page** and select
 **Open**. Direct links, such as Settings, open normally before setup is done.
 
 The hosted app at hanzo.bot does not open the page. With no computer connected,
-it asks you to sign in to Hanzo Connect, then to install Hanzo Dev and run
+it asks you to sign in to Hanzo Link, then to install Hanzo Dev and run
 `hanzo connect` on your computer. From home, it adds compatible computers linked to your account and
 opens the app. To add more computers later, use **Settings → Environments**.
 
@@ -54,12 +54,12 @@ without one. Checked projects are still imported.
 ## Phone
 
 Select **Set up** and scan the code with your phone. It opens the App Store on an
-iPhone and Google Play on Android. Then select **Sign in to Hanzo Connect** and allow
+iPhone and Google Play on Android. Then select **Sign in to Hanzo Link** and allow
 this computer when Hanzo Dev asks, so the app can reach it. Sign in to the app with
 the same account. If you are signed in but this computer is not shared yet, select
-**Set up Hanzo Connect**. If Hanzo Connect is on but the app cannot reach this computer,
-select **Check Hanzo Connect** to see why. The page leaves the phone out on builds
-without Hanzo Connect, or when your organization turns it off. You can still pair the
+**Set up Hanzo Link**. If Hanzo Link is on but the app cannot reach this computer,
+select **Check Hanzo Link** to see why. The page leaves the phone out on builds
+without Hanzo Link, or when your organization turns it off. You can still pair the
 app with a code from **Settings → Sharing & access**.
 
 ## Projects

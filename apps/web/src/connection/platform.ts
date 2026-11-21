@@ -380,7 +380,7 @@ const layerCapabilities = Layer.effectContext(
         if (session === null) {
           return yield* new ConnectionBlockedError({
             reason: "authentication",
-            detail: m(msg("Sign in to Hanzo Connect to connect this environment.")),
+            detail: m(msg("Sign in to Hanzo Link to connect this environment.")),
           });
         }
         const token = yield* session.readIamToken().pipe(
@@ -395,7 +395,7 @@ const layerCapabilities = Layer.effectContext(
         if (token === null) {
           return yield* new ConnectionBlockedError({
             reason: "authentication",
-            detail: m(msg("The Hanzo Connect session is unavailable.")),
+            detail: m(msg("The Hanzo Link session is unavailable.")),
           });
         }
         return token;

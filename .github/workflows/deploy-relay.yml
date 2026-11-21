@@ -1,4 +1,4 @@
-name: Deploy Hanzo Connect relay
+name: Deploy Hanzo Link relay
 
 on:
   push:

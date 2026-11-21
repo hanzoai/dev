@@ -11,7 +11,7 @@ import { useCloudLinkState } from "./cloudLinkState";
 import { hasCloudPublicConfig } from "./publicConfig";
 import { resolveHanzoConnectTurnOn } from "./hanzoConnectState";
 
-/** Whether this client can turn on Hanzo Connect for `environmentId`, and if not, why. */
+/** Whether this client can turn on Hanzo Link for `environmentId`, and if not, why. */
 export function useHanzoConnectTurnOn(environmentId: EnvironmentId | null) {
   const canReadRelay = useEnvironmentScope(environmentId, AuthRelayReadScope);
   const canWriteRelay = useEnvironmentScope(environmentId, AuthRelayWriteScope);

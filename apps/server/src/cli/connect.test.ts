@@ -182,7 +182,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))
       Effect.gen(function* () {
         const { printed, warnings } = yield* runConnect(deadPid, { portFreed: true });
 
-        assert.include(printed, "Hanzo Connect is disabled locally.");
+        assert.include(printed, "Hanzo Link is disabled locally.");
         assert.notInclude(warnings.join("\n"), "Restart that server");
       }),
     );
@@ -236,7 +236,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer))
         const { requests, printed, warnings } = yield* runConnect(process.pid);
 
         assert.deepEqual(requests, ["POST /v1/connect/unlink"]);
-        assert.include(printed, "Hanzo Connect is disabled locally.");
+        assert.include(printed, "Hanzo Link is disabled locally.");
         assert.notInclude(warnings.join("\n"), "cloudflared process");
       }),
     );

@@ -26,10 +26,10 @@ export const layer = Layer.effectDiscard(
       Effect.timeout("10 seconds"),
       Effect.retry({ schedule: Schedule.exponential("2 seconds"), times: 3 }),
       Effect.tap((pending) =>
-        pending ? Effect.logInfo("Hanzo Connect is delivering held webhook requests") : Effect.void,
+        pending ? Effect.logInfo("Hanzo Link is delivering held webhook requests") : Effect.void,
       ),
       Effect.catchCause((cause) =>
-        Effect.logWarning("Could not ask Hanzo Connect to deliver held webhook requests", {
+        Effect.logWarning("Could not ask Hanzo Link to deliver held webhook requests", {
           cause,
         }),
       ),

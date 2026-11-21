@@ -434,7 +434,7 @@ export const resolveServerConfig = Effect.fn("config.resolveServerConfig")(funct
     Option.fromUndefinedOr(bootstrap?.host),
   );
   // Private networks only, so clients learn a LAN address and prefer it over
-  // Hanzo Connect. `hanzo service install` writes HANZO_DEV_LAN=false for a new
+  // Hanzo Link. `hanzo service install` writes HANZO_DEV_LAN=false for a new
   // service; one installed before HANZO_DEV_LAN existed keeps listening.
   const lan = resolveOptionPrecedence(normalizedFlags.lan, Option.fromUndefinedOr(env.lan));
   const privateNetworkOnly =

@@ -75,7 +75,7 @@ function ConfiguredHanzoConnectSidebarSignIn() {
         <SidebarMenuButton onClick={openAuthPrompt}>
           <LogInIcon />
           <span>
-            <T>Sign in to Hanzo Connect</T>
+            <T>Sign in to Hanzo Link</T>
           </span>
         </SidebarMenuButton>
       </SidebarMenuItem>

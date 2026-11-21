@@ -7,20 +7,20 @@ import { m } from "../i18n/messages";
 const isRequestFailed = Schema.is(ManagedRelay.ManagedRelayRequestFailedError);
 const isRequestTimeout = Schema.is(ManagedRelay.ManagedRelayRequestTimeoutError);
 
-/** One short line for an error toast saying why a Hanzo Connect request failed. */
+/** One short line for an error toast saying why a Hanzo Link request failed. */
 export function relayFailureReason(cause: unknown): string | null {
   for (let current = cause, depth = 0; current instanceof Error && depth < 4; depth += 1) {
-    if (isRequestTimeout(current)) return m(msg("Hanzo Connect timed out. Try again."));
+    if (isRequestTimeout(current)) return m(msg("Hanzo Link timed out. Try again."));
     if (isRequestFailed(current)) {
       if (current.transportFailed)
-        return m(msg("Could not reach Hanzo Connect. Check your network."));
+        return m(msg("Could not reach Hanzo Link. Check your network."));
       if (current.relayError) {
         return current.relayError._tag === "RelayInternalError"
-          ? m(msg("Hanzo Connect is unavailable. Try again."))
+          ? m(msg("Hanzo Link is unavailable. Try again."))
           : relayRequestFailureDetail(current);
       }
-      if (current.status === 504) return m(msg("Hanzo Connect timed out. Try again."));
-      if ((current.status ?? 0) >= 500) return m(msg("Hanzo Connect is unavailable. Try again."));
+      if (current.status === 504) return m(msg("Hanzo Link timed out. Try again."));
+      if ((current.status ?? 0) >= 500) return m(msg("Hanzo Link is unavailable. Try again."));
       return relayRequestFailureDetail(current);
     }
     current = current.cause;
