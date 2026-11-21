@@ -1,6 +1,8 @@
 # Hanzo Dev
 
-Hanzo Dev is a minimal GUI for coding agents. A Node WebSocket server wraps Hanzo's native coding agents (`Hanzo` via `hanzo-dev serve` / `dev serve`, and `Hanzo Gen` via `hanzoai/gen` / `gen`) first and foremost, alongside external provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity, Kiro, Pi, Muse Code, fx), serving web, desktop, and mobile (`iOS` & `Android`) clients.
+Hanzo Dev (`github.com/hanzoai/dev`, renamed from `hanzoai/dev-desktop`) is a minimal GUI for coding agents. A Node server wraps Hanzo's native coding agents (`Hanzo` via `hanzo-dev serve` / `dev serve`, and `Hanzo Gen` via `hanzoai/gen` / `gen`) first and foremost, alongside external provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity, Kiro, Pi, Muse Code, fx), serving web, desktop, and mobile (`iOS` & `Android`) clients over ZAP.
+
+Related repos: `hanzoai/dev-v1` is the old Rust terminal agent; the CLI going forward is `hanzo`. `hanzo-inc/dev` is the wasm runtime behind cloud `/v1/dev`.
 
 You can think of Hanzo Dev as an open source "bring-your-own-subscription" alternative to apps like Claude Desktop, Codex App, Cursor Glass and Conductor.
 
@@ -14,11 +16,11 @@ Hanzo Dev is truly open. We share our roadmap, we share how we think about thing
 
 ### 2. Performance without compromise
 
-Lots of apps have gotten bogged down with bad tech decisions and "slop". We have not, and we're proud of the performance of Hanzo Dev. We regularly audit for performance regressions, often caused by sending too much data over websockets, css animations causing gpu spikes, lists being hard to render, and more. Make sure all changes are considerate of performance impact.
+Lots of apps have gotten bogged down with bad tech decisions and "slop". We have not, and we're proud of the performance of Hanzo Dev. We regularly audit for performance regressions, often caused by sending too much data over the wire, css animations causing gpu spikes, lists being hard to render, and more. Make sure all changes are considerate of performance impact.
 
 ### 3. Remote ready
 
-The architecture of Hanzo Dev's websocket layer (`hanzo`) enables a lot of awesome remote features. These have become core to the product. Whether users are connecting directly over their local network, using Tailscale, or leaning in fully with Hanzo Connect (our tunnel solution, also in this repo), we need to make sure new features are properly supported.
+The architecture of Hanzo Dev's ZAP transport layer (`hanzo`) enables a lot of awesome remote features. These have become core to the product. Whether users are connecting directly over their local network, using Tailscale, or leaning in fully with Hanzo Connect (our tunnel solution, also in this repo), we need to make sure new features are properly supported.
 
 ### 4. Multi-surface
 
@@ -60,7 +62,7 @@ We need to be on the same page with terminology. When communicating, use this la
 
 1. **Killing by pattern.** Never `pkill -f`, `pgrep | kill`, or `kill` a PID you found by matching a name, path, or worktree string. Your own agent process has this worktree's path in its argv, and this machine runs several other dev servers at once. Kill only a PID you captured at spawn, or the owner of your port from `ss -H -ltnp` after confirming `/proc/<pid>/cwd` is your worktree.
 2. **Writing to the live install.** `~/.hanzo-dev/userdata` is the developer's real Hanzo Dev database, in use while you work. Reading it and copying from it are fine, and a good way to get real test data (see Test data). Never start a server against it, never open it read-write, never clean it up.
-3. **Baking in origins.** Never set `VITE_HTTP_URL` or `VITE_WS_URL` for dev. Dev is single-origin and Vite proxies `/api`, `/ws`, `/oauth`, and `/.well-known`. Setting them bakes localhost into the bundle and silently breaks every remote browser.
+3. **Baking in origins.** Never set `VITE_HTTP_URL` or `VITE_WS_URL` for dev. Dev is single-origin and Vite proxies the prefixes in `packages/shared/src/devProxy.ts`. Setting them bakes localhost into the bundle and silently breaks every remote browser.
 
 ## Hit every surface
 
@@ -179,13 +181,13 @@ Most code changes do not need an internal documentation change. Agents can read 
 
 ## How it works
 
-Clients send typed WebSocket requests. The server turns them into _commands_. The _orchestrator_ (`apps/server/src/orchestration-v2/Orchestrator.ts`) serializes commands and decides _events_ without doing any I/O. The _event sink_ commits those events, the _projections_ the UI reads, the _command receipt_, and _outbox_ effects in one transaction. The _effect worker_ then runs the effects, such as starting a provider turn or capturing a checkpoint, and feeds results back as commands. Provider CLIs run as subprocesses; per-provider _adapters_ translate their native protocols into orchestration events. Each turn ends with a _checkpoint_, a hidden git ref, so the app can diff and restore.
+Clients send typed requests over ZAP. The server turns them into _commands_. The _orchestrator_ (`apps/server/src/orchestration-v2/Orchestrator.ts`) serializes commands and decides _events_ without doing any I/O. The _event sink_ commits those events, the _projections_ the UI reads, the _command receipt_, and _outbox_ effects in one transaction. The _effect worker_ then runs the effects, such as starting a provider turn or capturing a checkpoint, and feeds results back as commands. Provider CLIs run as subprocesses; per-provider _adapters_ translate their native protocols into orchestration events. Each turn ends with a _checkpoint_, a hidden git ref, so the app can diff and restore.
 
 Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/internals/glossary.md`
 
 ## Where code lives
 
-- `apps/server` - WebSocket, orchestration, providers, checkpointing. Effect-heavy: read [Effect services](docs/internals/effect-services.md) before adding server code, and `.repos/effect/LLMS.md` for the Effect library itself.
+- `apps/server` - ZAP transport, orchestration, providers, checkpointing. Effect-heavy: read [Effect services](docs/internals/effect-services.md) before adding server code, and `.repos/effect/LLMS.md` for the Effect library itself.
 - `apps/web` - React/Vite UI. `apps/desktop` wraps it, `apps/mobile` is React Native, `apps/marketing` is the site.
 - `packages/contracts` - Effect/Schema contracts plus small derived helpers. No heavy runtime logic.
 - `packages/shared` - shared runtime utils, subpath exports, no barrel.
@@ -196,7 +198,7 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 
 - Complexity belongs at the adapter boundary. Orchestration stays pure, UI stays dumb.
 - Client mutations use `createEnvironmentRpcCommand`. Add protected methods to `CLIENT_GUARDED_RPC_SCOPES` in contracts and use the command's `permissionAtom` for UI availability. Grants are checked at execution against the destination environment; the server remains authoritative. Keep raw RPC clients inside `rpc/`, and extend the permission behavior tests when adding a protected method.
-- Server features are services; transports stay thin. A `ws.ts` RPC handler, HTTP route, or MCP tool decodes input, calls one service method, and maps errors. See [Effect services](docs/internals/effect-services.md).
+- Server features are services; transports stay thin. A `ws.ts` RPC handler, ZAP session, HTTP route, or MCP tool decodes input, calls one service method, and maps errors. See [Effect services](docs/internals/effect-services.md).
 - `apps/web/src/components/ui` exports own their look. Pick a `variant` or `size`; do not restyle one with `className`. If none fits and the look is a generic concept, add a variant to the component; a look that belongs to one feature stays in that feature's own component, not in `components/ui`. Layout classes (width, flex, margin, position) belong on the parent. `shadcn/no-restyle` fails lint on violations. See [Web UI](docs/internals/web-ui.md).
 - Reusable Effect functions use `Effect.fn("Service.operation")` with a stable span name, not a
   function wrapping `Effect.gen`. Keep `Effect.gen` for inline programs and layer construction.
@@ -215,6 +217,26 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 - Security is important, but should not be over-indexed on, especially for dev mode/maintainer-only features.
 - Before a security audit or triaging a vulnerability report, read [SECURITY.md](SECURITY.md) for the trust model and what is intended.
 
+## Transport
+
+ZAP is native everywhere. A client talks to an environment in ZAP messages: a u32-LE length plus one ZAP router envelope carrying one frame of the environment protocol (`packages/contracts`). No WebSocket bridges.
+
+- Browser: ZAP over WebTransport (HTTP/3), `@zap-proto/web` (`packages/client-runtime/src/rpc/zapSocket.ts`, `zaps:` socket URLs).
+- Local: a unix socket or loopback port, `HANZO_DEV_ZAP_SOCKET` / `HANZO_DEV_ZAP_PORT` (`apps/server/src/zap/`).
+- Migrating to ZAP: the WebSocket RPC paths still in `ws.ts` and `session.ts` (desktop loopback, mobile, device, voice, preview, shell-snapshot streams). New work targets ZAP; do not add WebSocket paths.
+
+## Cloud backend
+
+`/v1/dev` (HIP-1330, amended by HIP-1350) is the one cloud backend for desktop, mobile, and web. `POST /v1/dev/sessions {runtime: sandbox|wasm|auto|source}` returns `{id, label, zap, sandbox?}`; the ZAP session is `https://zap.hanzo.ai/v1/dev/zap/<id>`. Linked sources live in `/v1/sources` (`apps/server/src/cloud/DesktopLink.ts`).
+
+Provider policy (HIP-1350 table): a subscription login never leaves its device; an API key goes to Hanzo KMS once.
+
+## Hard rules
+
+- No brand names of other companies in user-facing copy, except as provider names.
+- Commits are authored as `Zach Kelling <z@zeekay.io>` with the single trailer `Co-authored-by: Hanzo Dev <dev@hanzo.ai>`.
+- Copy says "Done", not "Settled" (internal names unchanged).
+
 ## Native Hanzo Stack Integration (Agent, IAM Multi-Account & Mobile Remote Control)
 
 - **Native Hanzo Agent (#1 Default Provider) & Hanzo Gen (`hanzoai/gen`, #2 Provider)**:
@@ -223,17 +245,22 @@ Architecture and its constraints: `docs/internals/overview.md`. Glossary: `docs/
 - **Canonical Hanzo Dev UI Chrome (Shared with `@hanzo/ui` & `@hanzo/gui`)**:
   - Top-left header renders mirrored `PanelLeftIcon` (exact mirror of `PanelRightIcon` on the far right), followed by `[Hanzo H-Icon] Dev` (without repeating `"Hanzo"`) and `←` `→` history buttons.
   - Draft hero headline renders `"Build what's next."` cleanly across web, desktop, and mobile (`DraftHeroHeadline.tsx`, `DraftHeroProjectHeading.tsx`, `NewTaskDraftScreen.tsx`), and Hanzo IAM / Cloud controls live in Settings (`⌘,`) & Command Palette (`⌘K`) rather than cluttering the bottom-left sidebar.
-- **Unified Desktop, Mobile & Web IAM Shell (Clerk-Free)**:
-  - Shared OIDC PKCE (`S256`) + multi-account vault (`hanzo.dev.iam.vault.v1`) in `packages/shared/src/hanzoIamAuth.ts` supports `hanzo.id`, `lux.id`, `zoolabs.id`, and `pars.id`, deep-link callback parsing (`hanzo://` and `hanzodev://`), persistent `X-Org-Id` organization switching (`switchHanzoIamVaultOrg`, `buildHanzoApiHeaders`), subscription plan & credit meter (`Go $8/mo`, `Pro $15/mo`, `Team`, `Ultra $195/mo`, `billing.hanzo.ai`), and unified `?org=<orgId>` surface launchers (`hanzo.app`, `hanzo.bot`, `hanzo.team`, `platform.hanzo.ai`).
-  - Desktop (`apps/desktop/src-tauri/src/{auth,backend,bridge,commands,snapshot,ssh,menu,main}.rs`) encrypts the IAM vault in the OS Keychain via Rust `keyring` (`apple-native`, `windows-native`, `sync-secret-service`), registers `hanzo://`, `hanzodev://`, and `hanzo-dev://` deep-link handlers, supervises direct SSH port-forwarded remote environments (`ssh.rs`), captures native OS screen-region `SnapShot`s (`snapshot.rs`, `CmdOrCtrl+Shift+2`), checks/downloads GitHub release updates, manages `~/.local/bin/hanzo-dev-app` CLI installation without shadowing `~/.local/bin/dev`, and bundles standalone `.app`/`.dmg`/`.AppImage`/`.exe`/`.msi` installers via `apps/desktop/scripts/stage-tauri-resources.mjs` with zero Electron packages or CI remnants.
-  - Web & Desktop UI (`apps/web/src/cloud/hanzoWebAuth.tsx`, `SidebarChrome.tsx`) exposes the Unified Account & Organization Control Center from the bottom-left sidebar pill, Command Palette, and native Tauri menu (`Account & Org`, `Plans & Usage`, `Surfaces & Access`, plus `Hanzo Connect` and `Mobile clients`).
+- **Unified Desktop, Mobile & Web IAM Shell (Clerk removed)**:
+  - Shared OIDC PKCE (`S256`) + multi-account vault (`hanzo.dev.iam.vault.v1`) in `packages/shared/src/hanzoIamAuth.ts` supports the Hanzo, Lux, Zoo, and Pars issuers (`HANZO_IAM_BRANDS`). Hanzo sign-in starts at `https://hanzo.ai/login`; the issuer, token, userinfo, and JWKS come from OIDC discovery at `https://hanzo.ai/.well-known/openid-configuration` through `resolveIamEndpoints` (TTL-refreshed). Never hard-code an IAM host. Login and pay live on hanzo.ai. Deep-link callback parsing (`hanzo://` and `hanzodev://`), persistent `X-Org-Id` organization switching (`switchHanzoIamVaultOrg`, `buildHanzoApiHeaders`), subscription plan & credit meter (`Go $8/mo`, `Pro $15/mo`, `Team`, `Ultra $195/mo`, `billing.hanzo.ai`), and unified `?org=<orgId>` surface launchers (`hanzo.app`, `hanzo.bot`, `hanzo.team`, `platform.hanzo.ai`).
+  - Desktop (`apps/desktop/src-tauri/src/{auth,backend,bridge,commands,snapshot,ssh,main}.rs`) encrypts the IAM vault in the OS Keychain via Rust `keyring` (`apple-native`, `windows-native`, `sync-secret-service`), registers `hanzo://`, `hanzodev://`, and `hanzo-dev://` deep-link handlers, supervises direct SSH port-forwarded remote environments (`ssh.rs`), captures native OS screen-region `SnapShot`s (`snapshot.rs`, `CmdOrCtrl+Shift+2`), checks/downloads GitHub release updates, manages `~/.local/bin/hanzo-dev-app` CLI installation without shadowing `~/.local/bin/dev`, and bundles standalone `.app`/`.dmg`/`.AppImage`/`.exe`/`.msi` installers via `apps/desktop/scripts/stage-tauri-resources.mjs` with zero Electron packages or CI remnants.
+  - Web & Desktop UI (`apps/web/src/cloud/hanzoWebAuth.tsx`, `SidebarChrome.tsx`) exposes the Unified Account & Organization Control Center from the bottom-left sidebar pill, Command Palette, and in-app menus (`Account & Org`, `Plans & Usage`, `Surfaces & Access`, plus `Hanzo Connect` and `Mobile clients`).
   - Mobile (`apps/mobile/src/features/cloud/hanzoMobileAuth.tsx`, `HanzoConnectProfilePage.tsx`, `App.tsx`) persists accounts and active `X-Org-Id` in `expo-secure-store`, handles `hanzo://` and `hanzodev://` OAuth callbacks, and renders the unified Org Switcher, Plan/Usage meter, ecosystem surface launchers, and registered servers.
 - **Local AI (Zen 6 / Qwen3+ Only), Validator Node (`hanzod`) & Embedded Engine Manager**:
-  - `packages/shared/src/localAi.ts` and `apps/web/src/components/local-ai/LocalAiManagerModal.tsx` (reachable via Settings `⌘,`, Command Palette `⌘K`, `⌥⌘L`, sidebar `Local AI` pill, and Desktop menu) manage canonical **Zen 6** / `qwen3+` weights (`zen6-flash:0.6b`/`qwen3:0.6b`, `zen6-flash`/`qwen3:4b`, `zen6`/`qwen3:8b`, `zen6:14b`/`qwen3:14b`, `zen6-max`/`qwen3:30b-a3b`, `zen6-coder`/`qwen3-coder:30b`, `zen-vl`/`qwen3-vl:8b`, plus bare `zen` alias) with a strict `!/qwen2|zen[45]/i` guard, live probes for `Ollama` (`127.0.0.1:11434`), `Embedded Hanzo Engine` (`127.0.0.1:36900`), and `hanzod` validator RPC/mesh (`127.0.0.1:9630` `/v1/health` + `/ext/bc/C/rpc` `eth_blockNumber`, `:9631` staking), plus LAN inference discovery (`apps/desktop/src-tauri/src/{commands,bridge}.rs`).
+  - `packages/shared/src/localAi.ts` and `apps/web/src/components/local-ai/LocalAiManagerModal.tsx` (reachable via Settings `⌘,`, Command Palette `⌘K`, `⌥⌘L`, and sidebar `Local AI` pill) manage canonical **Zen 6** / `qwen3+` weights (`zen6-flash:0.6b`/`qwen3:0.6b`, `zen6-flash`/`qwen3:4b`, `zen6`/`qwen3:8b`, `zen6:14b`/`qwen3:14b`, `zen6-max`/`qwen3:30b-a3b`, `zen6-coder`/`qwen3-coder:30b`, `zen-vl`/`qwen3-vl:8b`, plus bare `zen` alias) with a strict `!/qwen2|zen[45]/i` guard, live probes for `Ollama` (`127.0.0.1:11434`), `Embedded Hanzo Engine` (`127.0.0.1:36900`), and `hanzod` validator RPC/mesh (`127.0.0.1:9630` `/v1/health` + `/ext/bc/C/rpc` `eth_blockNumber`, `:9631` staking), plus LAN inference discovery (`apps/desktop/src-tauri/src/{commands,bridge}.rs`).
 - **Voice `Fn` Gestures, Visible Stop Control, Voice-to-Action Review & Mic Lease**:
   - `packages/client-runtime/src/voice-input/{fnVoiceController,micLease}.ts` provides `Hold Fn` push-to-talk, `Double-tap Fn` hands-free toggle, `⇧⌘M` / `Ctrl+Shift+M` voice toggle, and `BroadcastChannel('hanzo-mic-lease')` + `localStorage` cross-window microphone preemption, wired into `apps/web/src/speech/` and `apps/mobile/src/features/voice-input/`.
   - `apps/web/src/components/chat/ComposerSpeechButton.tsx` and `VoiceActionReviewCard.tsx` provide an always-visible composer mic trigger, a high-contrast destructive **Stop** button while listening, and structured Voice-to-Action review/correction cards for mutating commands (`assign ... to ...`, `move ... to ...`, `switch org to ...`).
-  - `apps/desktop/src-tauri/src/{main,menu,bridge}.rs` registers global `⇧⌘I` (`CommandOrControl+Shift+I` New Thread) and `⇧⌘J` (`CommandOrControl+Shift+J` Spotlight / Command Palette), safe macOS `Reopen` window restoration, and in-app `⌘K`, `⌘N` / `⇧⌘O`, `⌘B`, `⇧⌘M`, `⌘,`, `⌘/`, and `⌥⌘L`.
+  - `apps/desktop/src-tauri/src/{main,bridge}.rs` registers global `⇧⌘I` (`CommandOrControl+Shift+I` New Thread) and `⇧⌘J` (`CommandOrControl+Shift+J` Spotlight / Command Palette), safe macOS `Reopen` window restoration, and in-app `⌘K`, `⌘N` / `⇧⌘O`, `⌘B`, `⇧⌘M`, `⌘,`, `⌘/`, and `⌥⌘L`.
+- **UI conventions**:
+  - Menus are in-app context menus only; the native menu is deleted (`menu.rs` still on `main`, to be removed with its handlers).
+  - One-line thread rows are the default. One composer chip covers project plus workspace. The model picker has a decision-model filter.
+  - Typeface is Zen (`@hanzo/font`). The Dev icon is `</>`. Copy says "Done", never "Settled".
+  - Usage module: `packages/usage` (`@hanzodev/usage`), derived from CodexBar (MIT, notice in `NOTICE`).
 - **Native + Web + Server Analytics & Journey Tracking (`hanzoAnalytics`)**:
   - `packages/shared/src/hanzoAnalytics.ts` implements normalized Hanzo Analytics (`/v1/event` & Enhanced Ecommerce schema: `page_view`, `app_launched`, `desktop_app_launched`, `global_shortcut_triggered`, `deep_link_received`, `login`, `org_switched`, `begin_checkout`, `purchase`, `voice_dictation_toggled`, `voice_action_reviewed`, `local_ai_opened`, `surface_handoff`) with deterministic `event_id` deduplication for `order_id`/`transaction_id`, daily `session_id` rotation, `utm_*` extraction, sensitive query scrubbing, and `X-Org-Id` context.
   - `apps/server/src/analyticsHub.ts` and `apps/server/src/http.ts` expose `POST /_/beacon`, `POST /api/analytics/event`, and `GET /api/analytics/recent` (100-event ring buffer + non-blocking cloud forwarder), proxied in single-origin dev via `packages/shared/src/devProxy.ts` and exposed on `window.hanzo.track(...)` via `apps/web/src/analytics/hanzoWebAnalytics.ts`.
