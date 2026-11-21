@@ -3422,6 +3422,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     <ComposerAttachButton
       addComposerAttachments={addComposerAttachments}
       focusComposer={focusComposer}
+      onInsertText={(text) => {
+        insertComposerTextAtEndStable(text);
+      }}
     />
   ) : null;
   return (

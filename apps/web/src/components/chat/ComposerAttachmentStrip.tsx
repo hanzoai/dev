@@ -7,8 +7,22 @@ import type {
 } from "@hanzodev/contracts";
 import { formatAttachmentSize } from "@hanzodev/client-runtime/state/attachments";
 import { T, useGT, useMessages } from "gt-react";
-import { CircleAlertIcon, ImageIcon, PaperclipIcon, PlayIcon, XIcon } from "lucide-react";
-import { type ComponentProps, useLayoutEffect, useRef } from "react";
+import {
+  BotIcon,
+  BrainIcon,
+  CircleAlertIcon,
+  GlobeIcon,
+  ImageIcon,
+  PaletteIcon,
+  PaperclipIcon,
+  PlayIcon,
+  PlugIcon,
+  PlusIcon,
+  ScrollTextIcon,
+  TelescopeIcon,
+  XIcon,
+} from "lucide-react";
+import { type ComponentProps, useLayoutEffect, useRef, useState } from "react";
 
 import {
   type ComposerFileAttachment,
@@ -36,6 +50,15 @@ import { AttachmentFilePreview } from "../files/AttachmentFilePreview";
 import { AttachmentImage } from "../media/AttachmentImage";
 import { Button } from "../ui/button";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
+import {
+  Menu,
+  MenuCheckboxItem,
+  MenuItem,
+  MenuPopup,
+  MenuSeparator,
+  MenuShortcut,
+  MenuTrigger,
+} from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
 import { composerFloatingLayerProps } from "./composerEventScope";
@@ -731,15 +754,41 @@ export function ComposerQueuedAttachmentRow({
   );
 }
 
+const COMPOSER_MEMORY_STORAGE_KEY = "hanzo.dev.composer.memory";
+
+function readComposerMemory(): boolean {
+  try {
+    return window.localStorage.getItem(COMPOSER_MEMORY_STORAGE_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
 export function ComposerAttachButton({
   addComposerAttachments,
   focusComposer,
+  onInsertText,
 }: {
   readonly addComposerAttachments: (files: File[]) => Promise<boolean>;
   readonly focusComposer: () => void;
+  readonly onInsertText?: (text: string) => void;
 }) {
   const gt = useGT();
   const inputRef = useRef<HTMLInputElement>(null);
+  const [memoryEnabled, setMemoryEnabled] = useState<boolean>(readComposerMemory);
+
+  const insertAndFocus = (snippet: string) => {
+    onInsertText?.(snippet);
+    focusComposer();
+  };
+
+  const toggleMemory = (next: boolean) => {
+    setMemoryEnabled(next);
+    try {
+      window.localStorage.setItem(COMPOSER_MEMORY_STORAGE_KEY, String(next));
+    } catch {}
+  };
+
   return (
     <>
       <input
@@ -758,26 +807,129 @@ export function ComposerAttachButton({
           });
         }}
       />
-      <Tooltip>
-        <TooltipTrigger
+      <Menu>
+        <MenuTrigger
           render={
             <Button
               type="button"
               variant="ghost"
               size="icon-sm"
+              data-slot="composer-plus-trigger"
               onPointerDown={(event) => event.preventDefault()}
-              onClick={() => inputRef.current?.click()}
-              aria-label={gt("Attach files")}
+              aria-label={gt("Add files, agents, skills and more")}
             />
           }
         >
-          {/* The clip's weight sits in its upper loop; 1px down reads as centered on the row. */}
-          <PaperclipIcon className="translate-y-px" />
-        </TooltipTrigger>
-        <TooltipPopup>
-          <T>Attach files</T>
-        </TooltipPopup>
-      </Tooltip>
+          <PlusIcon className="size-4" />
+        </MenuTrigger>
+        <MenuPopup align="start" side="top" sideOffset={8} className="w-72">
+          <MenuItem onClick={() => inputRef.current?.click()}>
+            <PaperclipIcon className="size-4 shrink-0 text-muted-foreground" />
+            <span className="flex min-w-0 flex-1 items-baseline gap-2 truncate">
+              <span className="font-medium text-foreground">{gt("Add photos & files")}</span>
+              <span className="truncate text-xs text-muted-foreground">
+                {gt("Upload from computer")}
+              </span>
+            </span>
+            <MenuShortcut>Ctrl+U</MenuShortcut>
+          </MenuItem>
+          {onInsertText ? (
+            <>
+              <MenuItem onClick={() => insertAndFocus("Create an image of ")}>
+                <ImageIcon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="flex min-w-0 flex-1 items-baseline gap-2 truncate">
+                  <span className="font-medium text-foreground">{gt("Create image")}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {gt("Visualize anything")}
+                  </span>
+                </span>
+              </MenuItem>
+              <MenuItem onClick={() => insertAndFocus("Search the web for ")}>
+                <GlobeIcon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="flex min-w-0 flex-1 items-baseline gap-2 truncate">
+                  <span className="font-medium text-foreground">{gt("Web search")}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {gt("Find real-time news and info")}
+                  </span>
+                </span>
+              </MenuItem>
+              <MenuItem onClick={() => insertAndFocus("Run deep research on ")}>
+                <TelescopeIcon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="flex min-w-0 flex-1 items-baseline gap-2 truncate">
+                  <span className="font-medium text-foreground">{gt("Deep research")}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {gt("Get a detailed report")}
+                  </span>
+                </span>
+              </MenuItem>
+              <MenuItem onClick={() => insertAndFocus("ultrathink ")}>
+                <BrainIcon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="flex min-w-0 flex-1 items-baseline gap-2 truncate">
+                  <span className="font-medium text-foreground">{gt("Thinking")}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {gt("For detailed answers")}
+                  </span>
+                </span>
+              </MenuItem>
+              <MenuSeparator />
+              <MenuItem onClick={() => insertAndFocus("@")}>
+                <BotIcon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="flex min-w-0 flex-1 items-baseline gap-2 truncate">
+                  <span className="font-medium text-foreground">{gt("Agents & files")}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {gt("Bring specialized agents or files")}
+                  </span>
+                </span>
+                <MenuShortcut>@</MenuShortcut>
+              </MenuItem>
+              <MenuItem onClick={() => insertAndFocus("$")}>
+                <ScrollTextIcon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="flex min-w-0 flex-1 items-baseline gap-2 truncate">
+                  <span className="font-medium text-foreground">{gt("Skills")}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {gt("Use workspace skills and workflows")}
+                  </span>
+                </span>
+                <MenuShortcut>$</MenuShortcut>
+              </MenuItem>
+              <MenuItem
+                onClick={() => insertAndFocus("Use @hanzo/ui and @hanzo/design brand tokens: ")}
+              >
+                <PaletteIcon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="flex min-w-0 flex-1 items-baseline gap-2 truncate">
+                  <span className="font-medium text-foreground">{gt("Design system")}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {gt("Apply brand tokens and UI components")}
+                  </span>
+                </span>
+              </MenuItem>
+              <MenuItem onClick={() => insertAndFocus("/")}>
+                <PlugIcon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="flex min-w-0 flex-1 items-baseline gap-2 truncate">
+                  <span className="font-medium text-foreground">{gt("Plugins & commands")}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {gt("Connect external tools and APIs")}
+                  </span>
+                </span>
+                <MenuShortcut>/</MenuShortcut>
+              </MenuItem>
+              <MenuSeparator />
+              <MenuCheckboxItem
+                checked={memoryEnabled}
+                onCheckedChange={(checked) => toggleMemory(Boolean(checked))}
+              >
+                <BrainIcon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="flex min-w-0 flex-1 items-baseline gap-2 truncate">
+                  <span className="font-medium text-foreground">{gt("Memory")}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {gt("Remember context across chats")}
+                  </span>
+                </span>
+              </MenuCheckboxItem>
+            </>
+          ) : null}
+        </MenuPopup>
+      </Menu>
     </>
   );
 }
