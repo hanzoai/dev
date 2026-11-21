@@ -138,7 +138,20 @@ export function cloudChatServerConfig(
 ): ServerConfig {
   return {
     environment: { capabilities: {} },
-    settings: DEFAULT_SERVER_SETTINGS,
+    // Settings decide whether an instance is on; the Local group has none by default.
+    settings:
+      local === undefined
+        ? DEFAULT_SERVER_SETTINGS
+        : {
+            ...DEFAULT_SERVER_SETTINGS,
+            providerInstances: {
+              ...DEFAULT_SERVER_SETTINGS.providerInstances,
+              [LOCAL_CHAT_DRIVER]: {
+                driver: ProviderDriverKind.make(LOCAL_CHAT_DRIVER),
+                enabled: true,
+              },
+            },
+          },
     providers: cloudChatProviders(models, local),
   } as unknown as ServerConfig;
 }

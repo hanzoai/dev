@@ -9,10 +9,12 @@ import {
 import type { ServerConfig } from "@hanzodev/contracts";
 import type { DiscoveryFetch } from "@hanzodev/client-runtime/discovery";
 import { fetch as expoFetch } from "expo/fetch";
+import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
 import { hanzoMobileAuthStore, useAuth } from "../cloud/hanzoMobileAuth";
 import { cloudThreadStore } from "./cloud-thread-store";
+import { linkedMacHost, linkedMacHostAtom } from "./local-chat-host";
 
 export type { CloudChatModel, CloudChatState };
 
@@ -20,6 +22,8 @@ export interface CloudChat {
   /** Whether a prompt can be answered without an environment: true while signed in. */
   readonly available: boolean;
   readonly models: readonly CloudChatModel[];
+  /** Whether the linked Mac is connected, so its models can be used. */
+  readonly macOnline: boolean;
   /** The catalog as the server config the thread composer and its model picker read. */
   readonly serverConfig: ServerConfig;
   readonly state: CloudChatState;
@@ -48,6 +52,7 @@ const shared = (): CloudChatController => {
     controller = createCloudChatController({
       getAuth,
       store: cloudThreadStore,
+      local: linkedMacHost,
       options: { fetch: streamingFetch },
     });
     void controller.loadModels();
@@ -63,12 +68,18 @@ export function useCloudChat(): CloudChat {
   useEffect(() => {
     if (isSignedIn) void chat.loadThreads();
   }, [chat, isSignedIn, userId]);
+  const mac = useAtomValue(linkedMacHostAtom);
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- the Mac's models are listed when it connects and its offline state is read when it leaves
+  useEffect(() => {
+    void chat.loadLocalModels();
+  }, [chat, mac]);
   const state = useSyncExternalStore(chat.subscribe, chat.getState, chat.getState);
   return useMemo(
     () => ({
       available: isSignedIn,
       models: state.models,
-      serverConfig: cloudChatServerConfig(state.models),
+      macOnline: state.macOnline,
+      serverConfig: cloudChatServerConfig(state.models, state.localModels),
       state,
       send: chat.send,
       selectModel: chat.selectModel,

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   cloudChatProviders,
   cloudChatSelection,
+  cloudChatServerConfig,
   createCloudChatController,
   createLocalChatHost,
   isLocalChatSlug,
@@ -146,5 +147,15 @@ describe("local chat host", () => {
       },
     });
     await expect(down.models()).rejects.toMatchObject({ kind: "offline" });
+  });
+});
+
+describe("local chat server config", () => {
+  it("turns the Local instance on so the picker lists it", () => {
+    const models = [{ id: "enso", label: "Enso" }];
+    const on = cloudChatServerConfig(models, [{ id: "zen4" }]).settings.providerInstances;
+    expect(Object.entries(on).find(([id]) => id === "local")?.[1].enabled).toBe(true);
+    const off = cloudChatServerConfig(models).settings.providerInstances;
+    expect(Object.keys(off)).not.toContain("local");
   });
 });
