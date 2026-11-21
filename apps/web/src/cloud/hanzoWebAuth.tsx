@@ -1113,7 +1113,7 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
                       </div>
                       <div className="text-xs text-muted-foreground">
                         <T>
-                          Manage local Qwen3+ models (:11434), Hanzo Engine (:36900), and hanzod
+                          Manage local Zen models (:11434), Hanzo Engine (:36900), and hanzod
                           (:9630)
                         </T>
                       </div>

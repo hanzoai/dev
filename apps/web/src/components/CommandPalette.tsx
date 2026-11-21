@@ -1774,7 +1774,6 @@ function OpenCommandPaletteDialog(props: {
     searchTerms: [
       "local ai",
       "ollama",
-      "qwen3",
       "zen6",
       "zen6-coder",
       "zen",

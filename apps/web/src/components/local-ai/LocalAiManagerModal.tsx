@@ -69,7 +69,7 @@ export function LocalAiSettingsSection() {
         devicePreference
         title={gt("Zen local models")}
         description={gt(
-          "Manage local Qwen3+ weights on Ollama (:11434) and Embedded Hanzo Engine (:36900).",
+          "Manage local Zen weights on Ollama (:11434) and Embedded Hanzo Engine (:36900).",
         )}
         status={
           snapshot === null
@@ -114,7 +114,7 @@ export function LocalAiSettingsSection() {
         devicePreference
         title={gt("Embedded engine & LAN discovery")}
         description={gt(
-          "Load HuggingFace or GGUF Qwen3 weights on :36900 and discover inference nodes on LAN.",
+          "Load HuggingFace or GGUF Zen weights on :36900 and discover inference nodes on LAN.",
         )}
         control={
           <Button variant="outline" size="sm" onClick={() => openLocalAiManager("engine")}>
@@ -601,7 +601,7 @@ function LocalAiManagerModalBody({
                             onClick={() => void handlePullModel(model.id)}
                           >
                             <DownloadIcon className="size-3.5" />
-                            <T>Pull Qwen3+</T>
+                            <T>Pull Zen model</T>
                           </Button>
                         )}
                       </div>
@@ -722,7 +722,7 @@ function LocalAiManagerModalBody({
 
               <div className="space-y-2 rounded-xl border border-border p-4">
                 <div className="text-xs font-semibold">
-                  <T>Load HuggingFace or GGUF Qwen3+ Weights into :36900</T>
+                  <T>Load HuggingFace or GGUF Zen weights into :36900</T>
                 </div>
                 <div className="flex gap-2">
                   <input

@@ -72,7 +72,7 @@ export interface LocalAiStackSnapshot {
 }
 
 /**
- * Strict evergreen Zen / Qwen3+ model policy guard: rejects any legacy `qwen2`, `zen4`, or `zen5`
+ * Strict evergreen Zen model policy guard: rejects any legacy `qwen2`, `zen4`, or `zen5`
  * weight or alias across catalog entries, Ollama tags, Engine models, and LAN discovery results.
  */
 export function isAllowedLocalAiModel(modelId: string | null | undefined): boolean {
