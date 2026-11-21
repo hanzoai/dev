@@ -431,3 +431,36 @@ describe("thread actions", () => {
     expect(chat.getState().threads.map((t) => t.key)).toEqual(["c2"]);
   });
 });
+
+describe("private chat", () => {
+  const reply = () =>
+    new Response(
+      "data: " + JSON.stringify({ choices: [{ delta: { content: "ok" } }] }) + "\n\ndata: [DONE]\n\n",
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+  it("is never listed, saved or recorded, and a new conversation is normal again", async () => {
+    const urls: string[] = [];
+    const saved: unknown[] = [];
+    const controller = createCloudChatController({
+      getAuth: async () => auth,
+      options: {
+        fetch: async (url: string) => {
+          urls.push(String(url));
+          return String(url).includes("/chat/completions") ? reply() : json(200, { conversationId: "c-1" });
+        },
+      },
+      store: { load: async () => [], save: async (_o, thread) => void saved.push(thread) },
+    });
+    controller.setGhost(true);
+    await controller.send("secret");
+    expect(controller.getState().messages.at(-1)?.content).toBe("ok");
+    expect(controller.getState().threads).toEqual([]);
+    expect(saved).toEqual([]);
+    expect(urls.some((u) => u.includes("/agents/chat/conversations"))).toBe(false);
+    controller.reset();
+    expect(controller.getState().ghost).toBe(false);
+    await controller.send("kept");
+    expect(controller.getState().threads).toHaveLength(1);
+    expect(urls.some((u) => u.includes("/agents/chat/conversations"))).toBe(true);
+  });
+});

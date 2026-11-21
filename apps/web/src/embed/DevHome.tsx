@@ -1,5 +1,5 @@
 import { enhancePrompt, said } from "@hanzodev/client-runtime/cloud-chat";
-import { CheckIcon, CloudIcon, LaptopIcon, UserRoundIcon } from "lucide-react";
+import { CheckIcon, CloudIcon, GhostIcon, LaptopIcon, UserRoundIcon } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import ChatMarkdown from "../components/ChatMarkdown";
@@ -189,6 +189,18 @@ function Home(props: DevHomeProps): ReactNode {
             />
           ) : null}
           <TalkMode cloud={props.cloud} />
+          <button
+            type="button"
+            aria-label="Private chat"
+            aria-pressed={state.ghost}
+            title={state.ghost ? "Private chat is on: this conversation is not saved" : "Private chat"}
+            data-testid="private-chat"
+            disabled={state.sending}
+            onClick={() => controller.setGhost(!state.ghost)}
+            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent aria-pressed:text-foreground"
+          >
+            <GhostIcon className="size-4" fill={state.ghost ? "currentColor" : "none"} />
+          </button>
         </div>
       </div>
     </div>

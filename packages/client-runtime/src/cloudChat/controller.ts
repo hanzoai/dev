@@ -55,6 +55,8 @@ export interface CloudChatState {
   readonly sync: ThreadSync;
   readonly sending: boolean;
   readonly error: CloudChatErrorKind | null;
+  /** Private chat: the open conversation is kept in memory only, never saved, listed or recorded. */
+  readonly ghost: boolean;
 }
 
 /** What shapes one turn beyond its words: a persona's instructions and the model it is pinned to. */
@@ -81,7 +83,9 @@ export interface CloudChatController {
   renameThread(key: string, title: string): Promise<void>;
   pinThread(key: string, pinned: boolean): Promise<void>;
   deleteThread(key: string): Promise<void>;
-  /** A new, empty conversation. */
+  /** Private chat on or off for the open conversation; a ghost turn is never saved to the device or the cloud. */
+  setGhost(on: boolean): void;
+  /** A new, empty conversation (a normal one: ghost is off). */
   reset(): void;
 }
 
@@ -116,6 +120,7 @@ export function createCloudChatController(input: {
     sync: "local",
     sending: false,
     error: null,
+    ghost: false,
   };
   let state = initial;
   let modelChosen = false;
@@ -135,7 +140,7 @@ export function createCloudChatController(input: {
   /** Saves the open thread to the device and the list; failures never reach the chat. */
   const persist = (auth: CloudChatAuth) => {
     const key = state.threadKey;
-    if (key === null || state.messages.length === 0) return;
+    if (state.ghost || key === null || state.messages.length === 0) return;
     const last = state.messages.at(-1);
     const settled =
       last?.role === "assistant" && last.content === ""
@@ -292,8 +297,9 @@ export function createCloudChatController(input: {
       const all = [...history, answer];
       set({ messages: all, sending: false });
       persist(auth);
-      // A local conversation stays on the phone and the Mac: nothing is recorded at hanzo.app.
-      if (onLocal) return;
+      // A local conversation stays on the phone and the Mac, and a private one stays in memory:
+      // nothing is recorded at hanzo.app.
+      if (onLocal || state.ghost) return;
       const threadId = await recordTurns({
         auth: await input.getAuth().catch(() => ({ accessToken: null })),
         threadId: state.threadId,
@@ -328,7 +334,7 @@ export function createCloudChatController(input: {
       try {
         const messages = await loadChatThread(await input.getAuth(), threadId, input.options);
         attached = new Map();
-        set({ messages, threadId, sync: "synced", error: null });
+        set({ messages, threadId, sync: "synced", error: null, ghost: false });
       } catch (cause) {
         set({ error: kindOf(cause) });
       }
@@ -357,6 +363,7 @@ export function createCloudChatController(input: {
         threadId: entry.remoteId,
         sync: entry.remoteId ? "synced" : "local",
         error: null,
+        ghost: false,
       });
     },
     async renameThread(key, title) {
@@ -379,10 +386,26 @@ export function createCloudChatController(input: {
       if (entry.remoteId !== null) void deleteRemoteThread(auth, entry.remoteId, input.options);
       await save(auth, key, entry, { deleted: true });
     },
+    setGhost(on) {
+      if (state.ghost === on) return;
+      // Turning it on drops the conversation from the list: it was not private until now.
+      const key = state.threadKey;
+      set({
+        ghost: on,
+        ...(on && key !== null ? { threads: state.threads.filter((entry) => entry.key !== key) } : {}),
+      });
+    },
     reset() {
       synced = 0;
       attached = new Map();
-      set({ messages: [], threadId: null, threadKey: null, sync: "local", error: null });
+      set({
+        messages: [],
+        threadId: null,
+        threadKey: null,
+        sync: "local",
+        error: null,
+        ghost: false,
+      });
     },
   };
 }

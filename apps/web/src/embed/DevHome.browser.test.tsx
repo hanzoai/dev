@@ -72,4 +72,28 @@ describe("DevHome", () => {
     await vi.waitFor(() => expect(completions).toHaveLength(1));
     await expect.element(page.getByTestId("enhance-undo")).toBeVisible();
   });
+
+  it("offers a private-chat toggle in chat mode, off until pressed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        String(url).includes("/v1/models") ? Response.json(models) : new Response("{}", { status: 404 }),
+      ),
+    );
+    await using screen = await render(
+      <DevHome
+        cloud={{ api: "https://api.test", token: async () => "t" }}
+        mode="chat"
+        environments={environments}
+        environment={null}
+        onEnvironment={() => {}}
+      />,
+      { router: false },
+    );
+    const ghost = page.getByTestId("private-chat");
+    await expect.element(ghost).toBeVisible();
+    await expect.element(ghost).toHaveAttribute("aria-pressed", "false");
+    await ghost.click();
+    await expect.element(ghost).toHaveAttribute("aria-pressed", "true");
+  });
 });
