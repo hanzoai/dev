@@ -188,3 +188,34 @@ describe("runInCloud", () => {
     expect(result).toEqual({ kind: "started", sessionId: "s1" });
   });
 });
+
+describe("threads", () => {
+  it("lists summaries and reopens a thread", async () => {
+    const { listChatThreads, loadChatThread } = await import("./index.ts");
+    const seen: string[] = [];
+    const fetch = async (url: string) => {
+      seen.push(url);
+      return url.endsWith("/conversations")
+        ? json(200, { conversations: [{ id: "t1", title: "Hi", updatedAt: "2026-01-01" }, { title: "no id" }] })
+        : json(200, {
+            messages: [
+              { role: "user", content: "a" },
+              { role: "tool", content: "x" },
+              { role: "assistant", content: "b" },
+            ],
+          });
+    };
+    expect(await listChatThreads(auth, { fetch })).toEqual([
+      { id: "t1", title: "Hi", updatedAt: "2026-01-01" },
+    ]);
+    const controller = createCloudChatController({ getAuth: async () => auth, options: { fetch } });
+    await controller.open("t1");
+    expect(controller.getState().messages).toEqual([
+      { role: "user", content: "a" },
+      { role: "assistant", content: "b" },
+    ]);
+    expect(controller.getState().threadId).toBe("t1");
+    expect(await loadChatThread(auth, "t1", { fetch })).toHaveLength(2);
+    expect(seen).toContain("https://api.hanzo.ai/v1/agents/chat/conversations/t1");
+  });
+});

@@ -12,6 +12,7 @@ import {
   type CloudChatModel,
   type CloudChatOptions,
 } from "./api.ts";
+import { loadChatThread } from "./threads.ts";
 
 export type ThreadSync = "local" | "synced";
 
@@ -32,6 +33,8 @@ export interface CloudChatController {
   loadModels(): Promise<void>;
   selectModel(id: string): void;
   send(prompt: string): Promise<void>;
+  /** Replaces the conversation with a saved thread; later turns append to it. */
+  open(threadId: string): Promise<void>;
   reset(): void;
 }
 
@@ -114,6 +117,15 @@ export function createCloudChatController(input: {
       });
       if (threadId !== null) set({ threadId, sync: "synced" });
       else set({ sync: "local" });
+    },
+    async open(threadId) {
+      if (state.sending) return;
+      try {
+        const messages = await loadChatThread(await input.getAuth(), threadId, input.options);
+        set({ messages, threadId, sync: "synced", error: null });
+      } catch (cause) {
+        set({ error: kindOf(cause) });
+      }
     },
     reset() {
       set({ messages: [], threadId: null, sync: "local", error: null });
