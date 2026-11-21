@@ -15,5 +15,5 @@
     "react-dom": "^19"
   },
   "publishConfig": { "access": "public" },
-  "repository": { "type": "git", "url": "git+https://github.com/hanzoai/dev-desktop.git", "directory": "packages/dev" }
+  "repository": { "type": "git", "url": "git+https://github.com/hanzoai/dev.git", "directory": "packages/dev" }
 }
