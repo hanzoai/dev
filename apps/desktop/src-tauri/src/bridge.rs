@@ -317,7 +317,6 @@ pub fn build_initialization_script(config: &BackendRuntimeConfig, local_enabled:
     onDockIconModeChange: (listener) => listenEvent("desktop:dock-icon-mode-changed", (mode) => {{
       if (mode === "branded" || mode === "minimal") listener(mode);
     }}),
-    showContextMenu: (items, position) => invoke("desktop_show_context_menu", {{ items, position: position || null }}),
     receiveProviderAuthCallback: async () => "",
     cancelProviderAuthCallback: async () => undefined,
     startFileDrag: async () => false,

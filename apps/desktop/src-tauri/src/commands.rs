@@ -12,8 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::{AppHandle, Emitter, LogicalPosition, Manager, Runtime, State, Theme};
+use tauri::{AppHandle, Emitter, Manager, State, Theme};
 use tauri_plugin_dialog::DialogExt;
 
 const GITHUB_RELEASES_API: &str = "https://api.github.com/repos/hanzoai/dev-desktop/releases";
@@ -69,7 +68,6 @@ pub struct AppState {
     pub ssh_tunnels: SshTunnelSupervisor,
     pub pending_deep_links: Mutex<Vec<String>>,
     pub web_links_ready: Mutex<bool>,
-    pub pending_context_menu: Mutex<Option<(String, tokio::sync::oneshot::Sender<Option<String>>)>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -79,29 +77,6 @@ pub struct SshHostRecord {
     pub username: Option<String>,
     pub port: Option<u16>,
     pub source: &'static str,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ContextMenuItemInput {
-    pub id: String,
-    pub label: String,
-    #[serde(default)]
-    pub disabled: Option<bool>,
-    #[serde(default)]
-    pub header: Option<bool>,
-    #[serde(default)]
-    pub separator_before: Option<bool>,
-    #[serde(default)]
-    pub checked: Option<bool>,
-    #[serde(default)]
-    pub children: Option<Vec<ContextMenuItemInput>>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ContextMenuPosition {
-    pub x: f64,
-    pub y: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1646,89 +1621,6 @@ pub async fn desktop_web_links_set_ready(
         let _ = app.emit("desktop:web-link-open", url);
     }
     Ok(())
-}
-
-fn append_context_menu_items<R: Runtime>(
-    app: &AppHandle<R>,
-    token: &str,
-    items: &[ContextMenuItemInput],
-    append_fn: &mut dyn FnMut(&dyn tauri::menu::IsMenuItem<R>) -> tauri::Result<()>,
-) -> tauri::Result<()> {
-    for item in items {
-        if item.separator_before.unwrap_or(false) {
-            let sep = PredefinedMenuItem::separator(app)?;
-            append_fn(&sep)?;
-        }
-        let enabled = !item.disabled.unwrap_or(false) && !item.header.unwrap_or(false);
-        let menu_id = format!("ctx:{token}:{}", item.id);
-        if let Some(children) = &item.children {
-            let submenu = Submenu::new(app, &item.label, enabled)?;
-            let mut sub_append = |child: &dyn tauri::menu::IsMenuItem<R>| submenu.append(child);
-            append_context_menu_items(app, token, children, &mut sub_append)?;
-            append_fn(&submenu)?;
-        } else if let Some(checked) = item.checked {
-            let check =
-                CheckMenuItem::with_id(app, menu_id, &item.label, enabled, checked, None::<&str>)?;
-            append_fn(&check)?;
-        } else {
-            let leaf = MenuItem::with_id(app, menu_id, &item.label, enabled, None::<&str>)?;
-            append_fn(&leaf)?;
-        }
-    }
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn desktop_show_context_menu(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    items: Vec<ContextMenuItemInput>,
-    position: Option<ContextMenuPosition>,
-) -> Result<Option<String>, String> {
-    let Some(window) = app.get_webview_window("main") else {
-        return Ok(None);
-    };
-    let token = generate_random_hex(8);
-    let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
-    if let Ok(mut slot) = state.pending_context_menu.lock() {
-        *slot = Some((token.clone(), tx));
-    }
-
-    let app_for_main = app.clone();
-    let (done_tx, done_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
-    app.run_on_main_thread(move || {
-        let res = (|| -> tauri::Result<()> {
-            let menu = Menu::new(&app_for_main)?;
-            let mut append = |entry: &dyn tauri::menu::IsMenuItem<tauri::Wry>| menu.append(entry);
-            append_context_menu_items(&app_for_main, &token, &items, &mut append)?;
-            if let Some(pos) = position {
-                window.popup_menu_at(&menu, LogicalPosition::new(pos.x, pos.y))?;
-            } else {
-                window.popup_menu(&menu)?;
-            }
-            Ok(())
-        })()
-        .map_err(|e| e.to_string());
-        let _ = done_tx.send(res);
-    })
-    .map_err(|e| e.to_string())?;
-
-    let _ = done_rx.await;
-
-    #[cfg(target_os = "macos")]
-    let wait_window = Duration::from_millis(120);
-    #[cfg(not(target_os = "macos"))]
-    let wait_window = Duration::from_secs(25);
-
-    match tokio::time::timeout(wait_window, rx).await {
-        Ok(Ok(selected)) => Ok(selected),
-        _ => {
-            if let Ok(mut slot) = state.pending_context_menu.lock() {
-                *slot = None;
-            }
-            Ok(None)
-        }
-    }
 }
 
 #[cfg(test)]

@@ -179,7 +179,6 @@ fn main() {
                 ssh_tunnels: SshTunnelSupervisor::new(),
                 pending_deep_links: Mutex::new(Vec::new()),
                 web_links_ready: Mutex::new(false),
-                pending_context_menu: Mutex::new(None),
             });
 
             let app_handle = app.handle().clone();
@@ -278,7 +277,6 @@ fn main() {
             commands::desktop_preview_capture_screenshot,
             commands::desktop_preview_save_recording,
             commands::desktop_web_links_set_ready,
-            commands::desktop_show_context_menu,
             dock_icon::get_dock_icon_mode,
             dock_icon::set_dock_icon_mode,
         ]);

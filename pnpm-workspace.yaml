@@ -183,6 +183,11 @@ overrides:
   "@vercel/config>zod": 4.6.7
 
 packageExtensions:
+  # Only the next/font bindings use next; the CSS entry Dev loads needs none.
+  "@hanzo/font@*":
+    peerDependenciesMeta:
+      next:
+        optional: true
   # Our patch makes @effect/vitest import vite-plus/test. A catalog: spec here
   # resolves through the vite-plus override above.
   "@effect/vitest@*":
@@ -283,3 +288,4 @@ minimumReleaseAgeExclude:
   - "@anthropic-ai/claude-agent-sdk@0.3.321"
   - "@pierre/diffs@1.7.0-beta.4"
   - "@pierre/highlights@0.5.0"
+  - "@hanzo/font@1.11.0"

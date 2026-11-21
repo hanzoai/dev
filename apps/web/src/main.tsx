@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 
-import "@fontsource-variable/inter";
+import "@hanzo/font/css";
 import "./index.css";
 
 import { HanzoManagedAuthShell } from "./cloud/hanzoWebAuth";

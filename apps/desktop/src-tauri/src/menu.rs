@@ -1,9 +1,8 @@
-use crate::commands::AppState;
 use crate::dock_icon::{self, DockIconMode};
 #[cfg(target_os = "macos")]
 use tauri::menu::{CheckMenuItem, MenuItemKind};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use tauri::{AppHandle, Emitter, Runtime};
 
 pub const MENU_ID_DOCK_ICON_BRANDED: &str = "dock-icon:branded";
 pub const MENU_ID_DOCK_ICON_MINIMAL: &str = "dock-icon:minimal";
@@ -192,21 +191,6 @@ pub fn sync_dock_icon_menu<R: Runtime>(app: &AppHandle<R>, mode: DockIconMode) {
 pub fn sync_dock_icon_menu<R: Runtime>(_app: &AppHandle<R>, _mode: DockIconMode) {}
 
 pub fn handle_menu_event(app: &AppHandle, raw_id: &str) {
-    if let Some(rest) = raw_id.strip_prefix("ctx:") {
-        if let Some((token, selected_id)) = rest.split_once(':') {
-            if let Some(state) = app.try_state::<AppState>() {
-                if let Ok(mut pending) = state.pending_context_menu.lock() {
-                    if pending.as_ref().map(|(t, _)| t == token).unwrap_or(false) {
-                        if let Some((_, tx)) = pending.take() {
-                            let _ = tx.send(Some(selected_id.to_string()));
-                        }
-                    }
-                }
-            }
-        }
-        return;
-    }
-
     if raw_id == MENU_ID_DOCK_ICON_BRANDED {
         if let Err(err) = dock_icon::set_and_persist_mode(app, DockIconMode::Branded) {
             log::warn!("Failed to set Branded Dock icon from menu: {err}");

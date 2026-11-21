@@ -1,9 +1,4 @@
-import type {
-  ConfirmDialogOptions,
-  ContextMenuItem,
-  ContextMenuSource,
-  LocalApi,
-} from "@hanzodev/contracts";
+import type { ConfirmDialogOptions, ContextMenuItem, LocalApi } from "@hanzodev/contracts";
 import { msg } from "gt-react";
 
 import { isWebUrl } from "./browser/webUrl";
@@ -52,18 +47,10 @@ export function createLocalApi(): LocalApi {
       show: async <T extends string>(
         items: readonly ContextMenuItem<T>[],
         position?: { x: number; y: number },
-        source?: ContextMenuSource,
-      ): Promise<T | null> => {
-        if (window.desktopBridge) {
-          return window.desktopBridge.showContextMenu(items, position, source) as Promise<T | null>;
-        }
-        return showContextMenuFallback(items, position);
-      },
-      // Unlike native menus, the DOM fallback needs dismissal when underlying state disappears.
+      ): Promise<T | null> => showContextMenuFallback(items, position),
+      // The menu is DOM, so it needs dismissal when underlying state disappears.
       close: async () => {
-        if (!window.desktopBridge) {
-          dismissContextMenu();
-        }
+        dismissContextMenu();
       },
     },
     persistence: {

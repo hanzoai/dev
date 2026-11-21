@@ -1,3 +1,5 @@
+import "@hanzo/font/css";
+
 export { DevProvider } from "./DevProvider";
 export { DevThreadList } from "./DevThreadList";
 export { DevStart } from "./DevStart";

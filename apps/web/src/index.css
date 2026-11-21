@@ -168,10 +168,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(hanzo-mo
    the variables and Settings -> Appearance can override them at runtime. The
    default stacks are mirrored in `appearanceFonts.ts`. */
 @theme {
-  --font-sans:
-    -apple-system, BlinkMacSystemFont, "Inter Variable", "Segoe UI", system-ui, sans-serif;
-  --font-mono:
-    ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  --font-sans: "Zen", system-ui, sans-serif;
+  --font-mono: "Zen Mono", monospace;
 }
 
 @theme inline {
