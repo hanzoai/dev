@@ -26,8 +26,8 @@ const DISCOVERY = {
 };
 
 // The user's browser follows the issuer's redirect to the loopback; Node http stands in for it.
-// @effect-diagnostics-next-line globalFetch:off
 const visitLoopback = (state: string) =>
+  // @effect-diagnostics-next-line globalFetch:off
   fetch(`http://127.0.0.1:34338/callback?code=issued-code&state=${state}`);
 
 const respond = (

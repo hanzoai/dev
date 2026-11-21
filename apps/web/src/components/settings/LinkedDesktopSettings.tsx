@@ -10,6 +10,7 @@ import {
   type Desktop,
   type DesktopLinkStatus,
   type DesktopOutbox,
+  type DesktopProviderRow,
   type DesktopProviderState,
   type ProviderAccount,
   type ProviderRouteClass,
@@ -80,7 +81,7 @@ export function LinkedDesktopSettings() {
       {environmentId !== null && data !== null && data.desktop !== null ? (
         <>
           <DesktopsSection environmentId={environmentId} thisDesktopId={data.desktop.id} />
-          <ProvidersSection providers={data.providers} />
+          <ProvidersSection environmentId={environmentId} providers={data.providers} />
         </>
       ) : null}
       {environmentId !== null && data !== null && data.signedIn ? (
@@ -428,17 +429,31 @@ function DesktopRow({
 }
 
 function ProvidersSection({
+  environmentId,
   providers,
 }: {
-  readonly providers: ReadonlyArray<DesktopProviderState>;
+  readonly environmentId: EnvironmentIdProp;
+  readonly providers: ReadonlyArray<DesktopProviderRow>;
 }) {
   const gt = useGT();
+  const reportFailure = useFailureToast();
+  const setShared = useAtomCommand(desktopEnvironment.setShared, { reportFailure: false });
+  const canShare = useAtomValue(desktopEnvironment.setShared.permissionAtom(environmentId));
   const stateLabel = (state: DesktopProviderState["state"]) =>
     state === "ready"
       ? gt("Ready")
       : state === "needs_login"
         ? gt("Needs login")
         : gt("Limit reached");
+  const toggle = async (provider: DesktopProviderRow, shared: boolean) => {
+    const result = await setShared({
+      environmentId,
+      input: { instance: provider.instance, shared },
+    });
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      reportFailure(gt("Could not change sharing"), squashAtomCommandFailure(result));
+    }
+  };
   return (
     <SettingsSection title={gt("Providers on this desktop")}>
       {providers.length === 0 ? (
@@ -449,14 +464,39 @@ function ProvidersSection({
             key={provider.instance}
             title={provider.instance}
             description={
-              provider.plan === undefined
-                ? stateLabel(provider.state)
-                : `${provider.plan} · ${stateLabel(provider.state)}`
+              <>
+                {provider.plan === undefined
+                  ? stateLabel(provider.state)
+                  : `${provider.plan} · ${stateLabel(provider.state)}`}
+                {provider.shareable ? (
+                  <span className="block">
+                    {gt(
+                      "hanzo.app and your other signed-in devices can start runs here. Your login never leaves this computer.",
+                    )}
+                  </span>
+                ) : provider.kind === "login" ? (
+                  <span className="block">
+                    {gt("Hanzo does not offer this provider to other surfaces.")}
+                  </span>
+                ) : null}
+              </>
             }
             control={
-              <Badge variant="outline" size="sm">
-                {routeLabel(gt, providerRouteClass(provider))}
-              </Badge>
+              provider.shareable ? (
+                <label className="flex items-center gap-2 text-sm">
+                  {gt("Share with my other surfaces")}
+                  <Switch
+                    aria-label={gt("Share with my other surfaces")}
+                    checked={provider.shared}
+                    disabled={!canShare}
+                    onCheckedChange={(next) => void toggle(provider, next)}
+                  />
+                </label>
+              ) : (
+                <Badge variant="outline" size="sm">
+                  {routeLabel(gt, providerRouteClass(provider))}
+                </Badge>
+              )
             }
           />
         ))
@@ -467,8 +507,8 @@ function ProvidersSection({
 
 // HIP-1350 Provider policy: a subscription login is `local`, a key is `key`. The `desktop`
 // class stays empty until a provider's terms allow it.
-const providerRouteClass = (provider: DesktopProviderState): ProviderRouteClass =>
-  provider.kind === "key" ? "key" : "local";
+const providerRouteClass = (provider: DesktopProviderRow): ProviderRouteClass =>
+  provider.kind === "key" ? "key" : provider.shared ? "desktop" : "local";
 
 const routeLabel = (gt: ReturnType<typeof useGT>, route: ProviderRouteClass) =>
   route === "local"

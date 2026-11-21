@@ -2768,6 +2768,8 @@ export const layerWsRpc = (
         [WS_METHODS.desktopsOutbox]: (_input) => desktopLink.outbox,
         [WS_METHODS.desktopsSetSendNothing]: (input) =>
           desktopLink.setSendNothing(input.sendNothing),
+        [WS_METHODS.desktopsSetShared]: (input) =>
+          desktopLink.setShared(input.instance, input.shared),
         [WS_METHODS.providerAccountsList]: (_input) =>
           Effect.map(providerAccounts.list, (accounts) => ({ accounts })),
         [WS_METHODS.providerAccountsAdd]: (input) => providerAccounts.add(input),

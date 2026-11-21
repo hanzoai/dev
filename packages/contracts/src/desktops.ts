@@ -23,6 +23,21 @@ export const DesktopProviderState = Schema.Struct({
 });
 export type DesktopProviderState = typeof DesktopProviderState.Type;
 
+/** Provider catalog names whose subscription login includes class `desktop` (HIP-1350). */
+export const DESKTOP_ROUTABLE_PROVIDERS = ["claude", "codex", "copilot"] as const;
+
+/** A provider row on this desktop: the heartbeat state plus whether the user can share it. */
+export const DesktopProviderRow = Schema.Struct({
+  ...DesktopProviderState.fields,
+  shareable: Schema.Boolean,
+});
+export type DesktopProviderRow = typeof DesktopProviderRow.Type;
+
+export const DesktopSetSharedInput = Schema.Struct({
+  instance: TrimmedNonEmptyString,
+  shared: Schema.Boolean,
+});
+
 export const DesktopPresence = Schema.Literals(["online", "offline", "revoked"]);
 
 export const DesktopSourceKind = Schema.Literals(["desktop", "browser"]);
@@ -62,7 +77,7 @@ export const DesktopLinkStatus = Schema.Struct({
   lastHeartbeatAt: Schema.NullOr(IsoDateTime),
   level: DesktopReportLevel,
   /** Provider state this install reports, built the way each heartbeat builds it. */
-  providers: Schema.Array(DesktopProviderState),
+  providers: Schema.Array(DesktopProviderRow),
   /** The exact JSON of the last heartbeat sent, or what the next one will send. */
   report: Schema.Struct({ body: Schema.String, sent: Schema.Boolean }),
 });

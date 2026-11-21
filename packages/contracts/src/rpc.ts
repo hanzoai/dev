@@ -21,6 +21,7 @@ import {
   DesktopLinkInput,
   DesktopOutbox,
   DesktopSendNothingInput,
+  DesktopSetSharedInput,
   ProviderAccount,
   ProviderAccountAddInput,
   ProviderAccountListResult,
@@ -615,6 +616,7 @@ export const WS_METHODS = {
   desktopsRevoke: "desktops.revoke",
   desktopsOutbox: "desktops.outbox",
   desktopsSetSendNothing: "desktops.setSendNothing",
+  desktopsSetShared: "desktops.setShared",
   providerAccountsList: "providerAccounts.list",
   providerAccountsAdd: "providerAccounts.add",
   providerAccountsRemove: "providerAccounts.remove",
@@ -1169,6 +1171,12 @@ const WsDesktopsOutboxRpc = Rpc.make(WS_METHODS.desktopsOutbox, {
 const WsDesktopsSetSendNothingRpc = Rpc.make(WS_METHODS.desktopsSetSendNothing, {
   payload: DesktopSendNothingInput,
   success: DesktopOutbox,
+  error: desktopsError,
+});
+
+const WsDesktopsSetSharedRpc = Rpc.make(WS_METHODS.desktopsSetShared, {
+  payload: DesktopSetSharedInput,
+  success: DesktopLinkStatus,
   error: desktopsError,
 });
 
@@ -2445,6 +2453,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsDesktopsRevokeRpc,
   WsDesktopsOutboxRpc,
   WsDesktopsSetSendNothingRpc,
+  WsDesktopsSetSharedRpc,
   WsProviderAccountsListRpc,
   WsProviderAccountsAddRpc,
   WsProviderAccountsRemoveRpc,

@@ -479,3 +479,32 @@ it("a heartbeat's signed bytes are the ones cloud's beatMessage builds", () => {
     "hanzo-source-heartbeat/1\nsrc_0123456789abcdef0123456789abcdef\n2026-11-20T10:00:00Z\n1.8.4\nhttps://mac.example/zap\n0\nclaude,claude-1,login,ready,max,true\nopenai,key-1,key,limited,,false\n",
   );
 });
+
+it.effect(
+  "sharing a login is local, off by default, and reaches Hanzo at once in both directions",
+  () =>
+    Effect.gen(function* () {
+      const { requests, layer } = yield* harness;
+      yield* Effect.gen(function* () {
+        const desktopLink = yield* DesktopLink.DesktopLink;
+        yield* Effect.yieldNow;
+        yield* desktopLink.link({});
+        yield* Queue.take(requests);
+        const first = yield* Queue.take(requests);
+        assert.equal(JSON.parse(first.body).providers[0].shared, false);
+
+        const on = yield* desktopLink.setShared("claude", true);
+        assert.equal(on.providers.find((row) => row.instance === "claude")?.shared, true);
+        const beat = yield* Queue.take(requests);
+        assert.equal(JSON.parse(beat.body).providers[0].shared, true);
+        assert.equal(JSON.parse(beat.body).providers[0].shareable, undefined);
+
+        yield* desktopLink.setShared("claude", false);
+        const off = yield* Queue.take(requests);
+        assert.equal(JSON.parse(off.body).providers[0].shared, false);
+
+        const refused = yield* desktopLink.setShared("not-an-instance", true).pipe(Effect.flip);
+        assert.equal(refused.reason, "rejected");
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.provide(NodeServices.layer)),
+);
