@@ -52,6 +52,12 @@ jobs:
           test -s packages/dev/dist/index.js
           test -s packages/dev/dist/index.css
 
+      # A host bundles this library itself: no file may call require("react"), and every package it
+      # imports bare must be one package.json lists, or the host's bundler cannot resolve it.
+      - name: Check the library for a host's bundler
+        if: steps.ahead.outputs.release == 'true'
+        run: node scripts/embed-dist-check.ts
+
       - name: Read the npm token from KMS
         if: steps.ahead.outputs.release == 'true'
         id: npm

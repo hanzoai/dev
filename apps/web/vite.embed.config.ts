@@ -7,6 +7,9 @@ import { defineConfig, type Plugin } from "vite-plus";
 import { tailwindPlugins } from "./vite/tailwind";
 import pkg from "./package.json" with { type: "json" };
 
+// The packages the host bundles itself: React and the CommonJS that requires it.
+const HOST_MODULES = /^(?:react(?:-dom)?|use-sync-external-store|@tanstack\/react-(?:router|store))(?:\/|$)/;
+
 // The Office engines are 75 to 108 MB of worker each; a host's static export cannot carry them.
 // The embed draws one notice in their place (src/embed/OfficeUnavailable.tsx); the desktop
 // app and the web client build with the engines as before.
@@ -84,8 +87,9 @@ export default defineConfig({
       formats: ["es"],
       cssFileName: "index",
     },
-    // React stays the host's, all of it: `react/compiler-runtime` and `react/jsx-runtime` too. A bundled
-    // copy of any of them calls `require("react")`, which a host's ES-module bundler cannot answer.
-    rollupOptions: { external: (id: string) => /^react(-dom)?(\/|$)/.test(id) },
+    // React stays the host's, all of it, and so does whatever reaches it through CommonJS
+    // (`use-sync-external-store`, behind the router): a bundled copy calls `require("react")`,
+    // which a host's ES-module bundler cannot answer. The host installs them (package.json).
+    rollupOptions: { external: (id: string) => HOST_MODULES.test(id) },
   },
 });
