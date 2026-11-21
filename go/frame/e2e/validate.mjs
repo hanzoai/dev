@@ -10,12 +10,16 @@ import { createRequire } from "node:module";
 const req = createRequire(C + "package.json");
 const Schema = await import(req.resolve("effect/Schema"));
 const RpcSchema = await import(req.resolve("effect/rpc/RpcSchema"));
+const contracts = await import(C + "src/index.ts");
+// The session's non-frame methods answer with the bodies of the Dev server's HTTP routes.
+const calls = { descriptor: contracts.ExecutionEnvironmentDescriptor, session: contracts.AuthSessionState, shell: contracts.OrchestrationV2ShellHttpSnapshot };
 const tags = new Map(); // requestId -> tag
 let bad = 0, ok = 0;
 const fail = (where, e) => { bad++; console.log("FAIL", where, String(e.message ?? e).slice(0, 600)); };
 const dec = (s, v, where) => { try { Schema.decodeUnknownSync(Schema.toCodecJson(s))(v); ok++; } catch (e) { fail(where, e); } };
 for (const line of fs.readFileSync(process.argv[3], "utf8").split("\n").filter(Boolean)) {
   const { step, dir, f } = JSON.parse(line);
+  if (dir === "call") { dec(calls[step], f, `call ${step}`); continue; }
   if (f._tag === "Request") {
     tags.set(f.id, f.tag);
     const rpc = WsRpcGroup.requests.get(f.tag);

@@ -51,19 +51,24 @@ func (a *Adapter) archived(id int) error {
 	return a.exit(id, r)
 }
 
+// shellBody is the thread list as the shell's snapshot carries it. The caller
+// holds a.mu.
+func (a *Adapter) shellBody(s *O) *O {
+	threads := make([]*O, 0, len(a.st.threads))
+	for _, th := range a.st.Threads {
+		threads = append(threads, th.Shell.Clone())
+	}
+	s.Set("snapshotSequence", a.st.Seq).Set("threads", threads).Set("archivedThreads", []any{})
+	return s.Set("projects", []*O{a.st.Project.Clone()})
+}
+
 // subscribeShell answers the thread list: a snapshot, the end marker the
 // client asked for, and from then on every change to a thread.
 func (a *Adapter) subscribeShell(id int, p *O) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	s := load("shellsnapshot")
-	snap := s.Obj("snapshot")
-	threads := make([]*O, 0, len(a.st.threads))
-	for _, th := range a.st.Threads {
-		threads = append(threads, th.Shell.Clone())
-	}
-	snap.Set("snapshotSequence", a.st.Seq).Set("threads", threads).Set("archivedThreads", []any{})
-	snap.Set("projects", []*O{a.st.Project.Clone()})
+	a.shellBody(s.Obj("snapshot"))
 	a.subs[id] = &sub{kind: subShell}
 	vals := []any{s}
 	if b, _ := p.Get("requestCompletionMarker").(bool); b {

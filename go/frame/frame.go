@@ -69,6 +69,9 @@ type Config struct {
 	// Project is the id of the one project a chat session has, the scratch
 	// space its threads live in. It is derived from the environment when empty.
 	Project string
+	// SessionExpires is when the caller's token lapses, as the session method
+	// reports it; zero when it does not.
+	SessionExpires time.Time
 	// Sequence is where a new session's sequence of events starts: the
 	// sequence of the snapshot the client already holds.
 	Sequence int

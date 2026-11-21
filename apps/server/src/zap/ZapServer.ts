@@ -1,6 +1,8 @@
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- The local ZAP stream is a platform socket.
 import * as NodeNet from "node:net";
+import { authScopeResponse, type AuthSessionState } from "@hanzodev/contracts";
 import * as Config from "effect/Config";
+import * as DateTime from "effect/DateTime";
 import * as NetAddress from "effect/net/NetAddress";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -15,7 +17,10 @@ import * as AnalyticsService from "../telemetry/AnalyticsService.ts";
 import { makeHanzoIamConfig } from "../cloud/publicConfig.ts";
 import { RpcSessions } from "../ws.ts";
 import { layerIam, ZapAuth } from "./ZapAuth.ts";
-import { serveZapStream, type ZapStream } from "./ZapSession.ts";
+import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import { makeShellSnapshotAnswer } from "../orchestration-v2/http.ts";
+import { serveZapStream, ZapShellError, type ZapCalls, type ZapStream } from "./ZapSession.ts";
 
 // A connection of the local ZAP stream (a unix socket, or loopback TCP) read as a byte stream.
 const streamOf = (socket: NodeNet.Socket): ZapStream => {
@@ -68,8 +73,39 @@ export const layer = (listen: ZapListen) =>
       const sessions = yield* RpcSessions;
       const auth = yield* ZapAuth;
       const context = yield* Effect.context<AnalyticsService.AnalyticsService>();
+      const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
+      const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+      const answerShellSnapshot = yield* makeShellSnapshotAnswer;
+      // The environment's three HTTP answers, as calls on the session: the same code.
+      const calls: ZapCalls = {
+        descriptor: serverEnvironment.getDescriptor,
+        // What `/v1/auth/session` answers for a caller the stream has already authenticated.
+        session: (session) =>
+          serverAuth.getDescriptor().pipe(
+            Effect.map(
+              (auth) =>
+                ({
+                  authenticated: true,
+                  auth,
+                  ...authScopeResponse(session.scopes),
+                  sessionMethod: session.method,
+                  ...(session.expiresAt ? { expiresAt: DateTime.toUtc(session.expiresAt) } : {}),
+                }) satisfies AuthSessionState,
+            ),
+          ),
+        shell: (_session, query) =>
+          answerShellSnapshot({
+            ...(query.omitIdleSubagents === true || query.omitIdleSubagents === "1"
+              ? { omitIdleSubagents: "1" }
+              : {}),
+            ...(query.omitOlderSettled === true || query.omitOlderSettled === "1"
+              ? { omitOlderSettled: "1" }
+              : {}),
+            ...(query.resumeFrom === undefined ? {} : { resumeFrom: String(query.resumeFrom) }),
+          }).pipe(Effect.mapError((cause) => new ZapShellError({ cause }))),
+      };
       const runSession = (stream: ZapStream) =>
-        serveZapStream(stream, (session, socket) =>
+        serveZapStream(stream, calls, (session, socket) =>
           Effect.scoped(
             Effect.gen(function* () {
               const attach = yield* sessions.serve({
