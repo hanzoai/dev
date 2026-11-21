@@ -3,7 +3,6 @@ import { tokenizeCliArgs } from "./cliArgs.ts";
 import {
   BUILT_IN_LOCAL_ENGINES,
   HANZOD_ENGINE_BASE_URL,
-  LOCAL_HANZO_ENGINE_STANDALONE_BASE_URL,
   localEngineAction,
   localEngineInstanceId,
   localEngineNativeUrl,
@@ -21,13 +20,12 @@ const asFetch = (impl: (url: string) => Promise<Response>) =>
   ) as unknown as typeof globalThis.fetch;
 
 describe("local engine registry", () => {
-  it("ships Hanzo Engine (hanzod route, standalone fallback), Ollama, and LM Studio", () => {
+  it("ships Hanzo Engine (the hanzod route), Ollama, and LM Studio", () => {
     expect(BUILT_IN_LOCAL_ENGINES.map((e) => [e.name, e.kind, e.baseUrl])).toEqual([
       ["Hanzo Engine", "hanzo-engine", "http://127.0.0.1:3690/v1/engine"],
       ["Ollama", "ollama", "http://127.0.0.1:11434/v1"],
       ["LM Studio", "lm-studio", "http://127.0.0.1:1234/v1"],
     ]);
-    expect(BUILT_IN_LOCAL_ENGINES[0]?.fallbackBaseUrl).toBe(LOCAL_HANZO_ENGINE_STANDALONE_BASE_URL);
   });
 
   it("parses stored custom engines, dropping invalid and duplicate rows", () => {
@@ -121,17 +119,15 @@ describe("engine probes", () => {
     expect(status.models).toEqual([{ id: "qwen3-8b", zen: false }]);
   });
 
-  it("falls back to the standalone engine port when hanzod does not answer", async () => {
+  it("is offline when hanzod does not answer; there is no second port", async () => {
+    const seen: string[] = [];
     const fetchImpl = asFetch(async (url) => {
-      if (url === `${LOCAL_HANZO_ENGINE_STANDALONE_BASE_URL}/models`) {
-        return json({ data: [{ id: "zen6" }] });
-      }
+      seen.push(url);
       throw new Error("ECONNREFUSED");
     });
     const status = await probeLocalEngine(BUILT_IN_LOCAL_ENGINES[0]!, { fetchImpl });
-    expect(status.online).toBe(true);
-    expect(status.baseUrl).toBe(LOCAL_HANZO_ENGINE_STANDALONE_BASE_URL);
-    expect(status.models).toEqual([{ id: "zen6", zen: true }]);
+    expect(status.online).toBe(false);
+    expect(seen).toEqual([`${HANZOD_ENGINE_BASE_URL}/models`]);
   });
 
   it("prefers the hanzod route when it answers", async () => {

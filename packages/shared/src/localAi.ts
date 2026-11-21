@@ -7,8 +7,6 @@ export interface LocalEngine {
   readonly name: string;
   readonly kind: LocalEngineKind;
   readonly baseUrl: string;
-  /** Tried when `baseUrl` does not answer; lets Hanzo Engine fall back to its standalone port until hanzod is the default. */
-  readonly fallbackBaseUrl?: string;
 }
 
 export interface LocalModel {
@@ -29,17 +27,11 @@ export interface LocalEngineStatus {
 export type LocalEngineAction = "pull" | "load" | null;
 
 export const HANZOD_ENGINE_BASE_URL = "http://127.0.0.1:3690/v1/engine";
-export const LOCAL_HANZO_ENGINE_STANDALONE_BASE_URL = "http://127.0.0.1:36900/v1";
 export const LOCAL_HANZOD_RPC_BASE_URL = "http://127.0.0.1:9630";
 const LOCAL_HANZOD_STAKING_PORT = 9631;
 
 export const BUILT_IN_LOCAL_ENGINES: ReadonlyArray<LocalEngine> = [
-  {
-    name: "Hanzo Engine",
-    kind: "hanzo-engine",
-    baseUrl: HANZOD_ENGINE_BASE_URL,
-    fallbackBaseUrl: LOCAL_HANZO_ENGINE_STANDALONE_BASE_URL,
-  },
+  { name: "Hanzo Engine", kind: "hanzo-engine", baseUrl: HANZOD_ENGINE_BASE_URL },
   { name: "Ollama", kind: "ollama", baseUrl: "http://127.0.0.1:11434/v1" },
   { name: "LM Studio", kind: "lm-studio", baseUrl: "http://127.0.0.1:1234/v1" },
 ];
@@ -141,15 +133,14 @@ export async function probeLocalEngine(
 ): Promise<LocalEngineStatus> {
   const fetchImpl = options?.fetchImpl ?? globalThis.fetch;
   const timeoutMs = options?.timeoutMs ?? 1_500;
-  for (const baseUrl of [engine.baseUrl, engine.fallbackBaseUrl]) {
-    if (!baseUrl) continue;
-    const startedAt = Date.now();
-    try {
-      const response = await fetchImpl(`${baseUrl}/models`, {
-        method: "GET",
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      if (!response.ok) continue;
+  const baseUrl = engine.baseUrl;
+  const startedAt = Date.now();
+  try {
+    const response = await fetchImpl(`${baseUrl}/models`, {
+      method: "GET",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (response.ok) {
       const latencyMs = Math.max(0, Date.now() - startedAt);
       const body = await response.json().catch(() => null);
       return {
@@ -159,9 +150,9 @@ export async function probeLocalEngine(
         latencyMs,
         models: normalizeLocalModels(body, engine.kind),
       };
-    } catch {
-      // Unreachable or timed out; try the fallback, then report offline.
     }
+  } catch {
+    // Unreachable or timed out: report offline.
   }
   return { engine, online: false, baseUrl: engine.baseUrl, latencyMs: null, models: [] };
 }
