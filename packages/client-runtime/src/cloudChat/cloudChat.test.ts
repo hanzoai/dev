@@ -188,3 +188,133 @@ describe("runInCloud", () => {
     expect(result).toEqual({ kind: "started", sessionId: "s1" });
   });
 });
+
+const memoryStore = () => {
+  const rows = new Map<string, import("./index.ts").StoredThread>();
+  return {
+    rows,
+    load: async (_owner: string) => [...rows.values()],
+    save: async (_owner: string, thread: import("./index.ts").StoredThread) => void rows.set(thread.key, thread),
+  };
+};
+
+describe("stream assembly", () => {
+  it("grows the assistant message token by token, then settles", async () => {
+    const seen: string[] = [];
+    const chat = createCloudChatController({
+      getAuth: async () => auth,
+      options: {
+        fetch: async (url) =>
+          url.endsWith("/v1/chat/completions")
+            ? sse([frame("Hel").slice(0, 12), frame("Hel").slice(12), frame("lo"), frame(", wor"), frame("ld"), "data: [DONE]\n\n"])
+            : json(404, {}),
+      },
+    });
+    chat.subscribe(() => {
+      const last = chat.getState().messages.at(-1);
+      if (last?.role === "assistant") seen.push(last.content);
+    });
+    await chat.send("hi");
+    const distinct = seen.filter((value, i) => value !== seen[i - 1]);
+    expect(distinct).toEqual(["", "Hel", "Hello", "Hello, wor", "Hello, world"]);
+    expect(chat.getState().sending).toBe(false);
+  });
+});
+
+describe("thread persistence", () => {
+  const completions = (url: string) =>
+    url.endsWith("/v1/chat/completions") ? sse([frame("Pong"), "data: [DONE]\n\n"]) : null;
+
+  it("keeps the thread on the device when sync fails, and reopens it", async () => {
+    const store = memoryStore();
+    const chat = createCloudChatController({
+      getAuth: async () => auth,
+      store,
+      createKey: () => "k1",
+      options: { fetch: async (url) => completions(url) ?? json(500, {}) },
+    });
+    await chat.send("Ping");
+    expect(store.rows.get("k1")).toMatchObject({
+      remoteId: null,
+      title: "Ping",
+      synced: 0,
+      messages: [
+        { role: "user", content: "Ping" },
+        { role: "assistant", content: "Pong" },
+      ],
+    });
+    const restarted = createCloudChatController({
+      getAuth: async () => auth,
+      store,
+      options: { fetch: async () => json(404, {}) },
+    });
+    await restarted.loadThreads();
+    expect(restarted.getState().threads.map((t) => t.title)).toEqual(["Ping"]);
+    await restarted.openThread("k1");
+    expect(restarted.getState().messages.map((m) => m.content)).toEqual(["Ping", "Pong"]);
+  });
+
+  it("resends turns the remote store missed once sync recovers", async () => {
+    const store = memoryStore();
+    let healthy = false;
+    const bodies: { messages: unknown[] }[] = [];
+    const chat = createCloudChatController({
+      getAuth: async () => auth,
+      store,
+      createKey: () => "k1",
+      options: {
+        fetch: async (url, init) => {
+          if (url.endsWith("/conversations")) {
+            if (!healthy) return json(503, {});
+            bodies.push(JSON.parse(String(init?.body)));
+            return json(200, { conversationId: "c9" });
+          }
+          return completions(url) ?? json(404, {});
+        },
+      },
+    });
+    await chat.send("one");
+    healthy = true;
+    await chat.send("two");
+    expect(bodies[0]?.messages).toHaveLength(4);
+    expect(store.rows.get("k1")).toMatchObject({ remoteId: "c9", synced: 4 });
+  });
+
+  it("merges remote threads with device copies and reads a remote-only one", async () => {
+    const store = memoryStore();
+    await store.save("u", { key: "k1", remoteId: "c1", title: "Mine", updatedAt: 1000, synced: 2, messages: [{ role: "user", content: "a" }] });
+    const chat = createCloudChatController({
+      getAuth: async () => auth,
+      store,
+      options: {
+        fetch: async (url) =>
+          url.endsWith("/conversations")
+            ? json(200, { conversations: [
+                { id: "c1", title: "Mine renamed", updatedAt: new Date(5000).toISOString() },
+                { id: "c2", title: "Other device", updatedAt: new Date(3000).toISOString() },
+              ] })
+            : url.endsWith("/conversations/c2")
+              ? json(200, { id: "c2", messages: [{ id: "1", role: "user", content: "hey" }, { id: "2", role: "assistant", content: "yo" }] })
+              : json(404, {}),
+      },
+    });
+    await chat.loadThreads();
+    expect(chat.getState().threads.map((t) => [t.key, t.title])).toEqual([
+      ["k1", "Mine renamed"],
+      ["c2", "Other device"],
+    ]);
+    await chat.openThread("c2");
+    expect(chat.getState().messages.map((m) => m.content)).toEqual(["hey", "yo"]);
+    expect(chat.getState().threadId).toBe("c2");
+  });
+
+  it("lists nothing, quietly, when the thread endpoint is missing", async () => {
+    const chat = createCloudChatController({
+      getAuth: async () => auth,
+      options: { fetch: async () => json(501, {}) },
+    });
+    await chat.loadThreads();
+    expect(chat.getState().threads).toEqual([]);
+    expect(chat.getState().error).toBeNull();
+  });
+});

@@ -12,6 +12,16 @@ import {
   type CloudChatModel,
   type CloudChatOptions,
 } from "./api.ts";
+import {
+  listRemoteThreads,
+  mergeThreads,
+  readRemoteThread,
+  summaryOf,
+  threadTitle,
+  type StoredThread,
+  type ThreadStore,
+  type ThreadSummary,
+} from "./threads.ts";
 
 export type ThreadSync = "local" | "synced";
 
@@ -19,7 +29,12 @@ export interface CloudChatState {
   readonly messages: ReadonlyArray<CloudChatMessage>;
   readonly models: ReadonlyArray<CloudChatModel>;
   readonly model: string;
+  /** The hanzo.app thread id, once the remote store has accepted the thread. */
   readonly threadId: string | null;
+  /** Device key of the open thread; null before the first message. */
+  readonly threadKey: string | null;
+  /** Every known thread, newest first: device copies merged with the remote list. */
+  readonly threads: ReadonlyArray<ThreadSummary>;
   /** `local` until the hanzo.app thread store accepts the turns; chat works either way. */
   readonly sync: ThreadSync;
   readonly sending: boolean;
@@ -32,6 +47,10 @@ export interface CloudChatController {
   loadModels(): Promise<void>;
   selectModel(id: string): void;
   send(prompt: string): Promise<void>;
+  /** Reads the device copies, then the remote list, into `state.threads`. */
+  loadThreads(): Promise<void>;
+  openThread(key: string): Promise<void>;
+  /** A new, empty conversation. */
   reset(): void;
 }
 
@@ -42,22 +61,56 @@ export interface CloudChatController {
 export function createCloudChatController(input: {
   readonly getAuth: () => Promise<CloudChatAuth>;
   readonly options?: CloudChatOptions;
+  /** Device copy of threads: a thread survives restart when sync fails. */
+  readonly store?: ThreadStore;
+  readonly createKey?: () => string;
+  readonly now?: () => number;
 }): CloudChatController {
+  const createKey =
+    input.createKey ?? (() => `t-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`);
+  const now = input.now ?? Date.now;
   const initial: CloudChatState = {
     messages: [],
     models: FALLBACK_MODELS,
     model: DEFAULT_MODEL_ID,
     threadId: null,
+    threadKey: null,
+    threads: [],
     sync: "local",
     sending: false,
     error: null,
   };
   let state = initial;
   let modelChosen = false;
+  /** Turns the remote store already holds for the open thread. */
+  let synced = 0;
+  let writes: Promise<void> = Promise.resolve();
   const listeners = new Set<() => void>();
   const set = (patch: Partial<CloudChatState>) => {
     state = { ...state, ...patch };
     for (const listener of listeners) listener();
+  };
+  const ownerOf = (auth: CloudChatAuth) => auth.userId ?? "anonymous";
+  /** Saves the open thread to the device and the list; failures never reach the chat. */
+  const persist = (auth: CloudChatAuth) => {
+    const key = state.threadKey;
+    if (key === null || state.messages.length === 0) return;
+    const last = state.messages.at(-1);
+    const settled =
+      last?.role === "assistant" && last.content === "" ? state.messages.slice(0, -1) : state.messages;
+    const thread: StoredThread = {
+      key,
+      remoteId: state.threadId,
+      title: threadTitle(state.messages),
+      updatedAt: now(),
+      messages: settled,
+      synced,
+    };
+    const others = state.threads.filter((entry) => entry.key !== key);
+    set({ threads: [summaryOf(thread), ...others] });
+    const { store } = input;
+    if (store === undefined) return;
+    writes = writes.then(() => store.save(ownerOf(auth), thread)).catch(() => undefined);
   };
   const kindOf = (cause: unknown): CloudChatErrorKind =>
     cause instanceof CloudChatError ? cause.kind : "failed";
@@ -85,10 +138,17 @@ export function createCloudChatController(input: {
       if (text === "" || state.sending) return;
       const user: CloudChatMessage = { role: "user", content: text };
       const history = [...state.messages, user];
-      set({ messages: [...history, { role: "assistant", content: "" }], sending: true, error: null });
+      set({
+        messages: [...history, { role: "assistant", content: "" }],
+        sending: true,
+        error: null,
+        ...(state.threadKey === null ? { threadKey: createKey() } : {}),
+      });
       let reply = "";
+      let auth: CloudChatAuth = { accessToken: null };
       try {
-        const auth = await input.getAuth();
+        auth = await input.getAuth();
+        persist(auth);
         reply = await streamChatReply({
           auth,
           model: state.model,
@@ -100,23 +160,59 @@ export function createCloudChatController(input: {
           },
         });
       } catch (cause) {
-        set({ messages: reply === "" ? history : [...history, { role: "assistant", content: reply }], sending: false, error: kindOf(cause) });
+        set({
+          messages: reply === "" ? history : [...history, { role: "assistant", content: reply }],
+          sending: false,
+          error: kindOf(cause),
+        });
+        persist(auth);
         return;
       }
       const answer: CloudChatMessage = { role: "assistant", content: reply };
-      set({ messages: [...history, answer], sending: false });
-      const auth = await input.getAuth().catch(() => ({ accessToken: null }));
+      const all = [...history, answer];
+      set({ messages: all, sending: false });
+      persist(auth);
       const threadId = await recordTurns({
-        auth,
+        auth: await input.getAuth().catch(() => ({ accessToken: null })),
         threadId: state.threadId,
-        messages: [user, answer],
+        messages: all.slice(synced),
         options: input.options,
       });
-      if (threadId !== null) set({ threadId, sync: "synced" });
-      else set({ sync: "local" });
+      if (threadId !== null) {
+        synced = all.length;
+        set({ threadId, sync: "synced" });
+      } else set({ sync: "local" });
+      persist(auth);
+    },
+    async loadThreads() {
+      const auth = await input.getAuth().catch(() => ({ accessToken: null }) as CloudChatAuth);
+      const stored = (await input.store?.load(ownerOf(auth)).catch(() => [])) ?? [];
+      const local = stored.map(summaryOf);
+      set({ threads: mergeThreads(local, state.threads.filter((entry) => entry.local)) });
+      const remote = await listRemoteThreads(auth, input.options);
+      set({ threads: mergeThreads(state.threads, remote) });
+    },
+    async openThread(key) {
+      if (state.sending) return;
+      const auth = await input.getAuth().catch(() => ({ accessToken: null }) as CloudChatAuth);
+      const entry = state.threads.find((thread) => thread.key === key);
+      if (entry === undefined) return;
+      const stored = entry.local
+        ? ((await input.store?.load(ownerOf(auth)).catch(() => []))?.find((t) => t.key === key) ?? null)
+        : null;
+      let messages = stored?.messages ?? null;
+      if (messages === null && entry.remoteId !== null)
+        messages = await readRemoteThread(auth, entry.remoteId, input.options);
+      if (messages === null) {
+        set({ error: "unavailable" });
+        return;
+      }
+      synced = stored?.synced ?? messages.length;
+      set({ messages, threadKey: key, threadId: entry.remoteId, sync: entry.remoteId ? "synced" : "local", error: null });
     },
     reset() {
-      set({ messages: [], threadId: null, sync: "local", error: null });
+      synced = 0;
+      set({ messages: [], threadId: null, threadKey: null, sync: "local", error: null });
     },
   };
 }

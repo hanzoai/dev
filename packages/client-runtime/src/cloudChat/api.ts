@@ -34,6 +34,8 @@ export interface CloudChatMessage {
 export interface CloudChatAuth {
   readonly accessToken: string | null;
   readonly orgId?: string | null;
+  /** Scopes the device copy of threads; absent means one shared anonymous scope. */
+  readonly userId?: string | null;
 }
 
 export interface CloudChatOptions {
@@ -52,7 +54,7 @@ export class CloudChatError extends Error {
   }
 }
 
-const resolve = (options: CloudChatOptions) => ({
+export const resolveCloudChatOptions = (options: CloudChatOptions) => ({
   fetch: options.fetch ?? ((input: string, init?: RequestInit) => globalThis.fetch(input, init)),
   baseUrl: (options.baseUrl ?? CLOUD_CHAT_BASE_URL).replace(/\/+$/, ""),
 });
@@ -106,7 +108,7 @@ export async function listChatModels(
   options: CloudChatOptions = {},
 ): Promise<ReadonlyArray<CloudChatModel>> {
   const token = requireToken(auth);
-  const { fetch, baseUrl } = resolve(options);
+  const { fetch, baseUrl } = resolveCloudChatOptions(options);
   let response: Response;
   try {
     response = await fetch(`${baseUrl}/v1/models`, {
@@ -130,7 +132,7 @@ export async function streamChatReply(input: {
   readonly options?: CloudChatOptions | undefined;
 }): Promise<string> {
   const token = requireToken(input.auth);
-  const { fetch, baseUrl } = resolve(input.options ?? {});
+  const { fetch, baseUrl } = resolveCloudChatOptions(input.options ?? {});
   let response: Response;
   try {
     response = await fetch(`${baseUrl}/v1/chat/completions`, {
@@ -162,7 +164,7 @@ export async function streamChatReply(input: {
   };
   const reader = response.body?.getReader();
   if (reader === undefined) {
-    // React Native's fetch does not expose a stream: decode the whole body at once.
+    // A fetch without a streaming body (React Native's built-in): decode it all at once.
     apply(parser.push(await response.text()));
   } else {
     const decoder = new TextDecoder();
@@ -186,7 +188,7 @@ export async function recordTurns(input: {
 }): Promise<string | null> {
   const token = input.auth.accessToken?.trim();
   if (!token) return null;
-  const { fetch, baseUrl } = resolve(input.options ?? {});
+  const { fetch, baseUrl } = resolveCloudChatOptions(input.options ?? {});
   try {
     const response = await fetch(`${baseUrl}/v1/agents/chat/conversations`, {
       method: "POST",
