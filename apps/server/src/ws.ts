@@ -3655,167 +3655,170 @@ export const layer = Layer.unwrap(
       const reportProfiles = yield* serverBrowser.profileReporter;
       return yield* Effect.gen(function* () {
         const { protocol, attach } = yield* input.mount;
-          yield* RpcServer.make(ServerWsRpcGroup, WS_RPC_SERVER_OPTIONS).pipe(
-            Effect.provideService(RpcServer.Protocol, withOutputWindow(protocol)),
-            Effect.provide(
-              Layer.merge(
-                RpcAuthorization.layer(session.scopes, (method, payload) => {
-                  // Anonymous product signal: the feature and its enum variant,
-                  // credited to the connecting client's surface only.
-                  const usage = featureUsage(method, payload);
-                  return usage === undefined
-                    ? Effect.void
-                    : analytics
-                        .record("feature.used", {
-                          ...usage,
-                          ...(clientAnalyticsProps.surface === undefined
-                            ? {}
-                            : { surface: clientAnalyticsProps.surface }),
-                        })
-                        .pipe(Effect.ignore);
-                }),
-                rpcInstrumentationLayer,
+        yield* RpcServer.make(ServerWsRpcGroup, WS_RPC_SERVER_OPTIONS).pipe(
+          Effect.provideService(RpcServer.Protocol, withOutputWindow(protocol)),
+          Effect.provide(
+            Layer.merge(
+              RpcAuthorization.layer(session.scopes, (method, payload) => {
+                // Anonymous product signal: the feature and its enum variant,
+                // credited to the connecting client's surface only.
+                const usage = featureUsage(method, payload);
+                return usage === undefined
+                  ? Effect.void
+                  : analytics
+                      .record("feature.used", {
+                        ...usage,
+                        ...(clientAnalyticsProps.surface === undefined
+                          ? {}
+                          : { surface: clientAnalyticsProps.surface }),
+                      })
+                      .pipe(Effect.ignore);
+              }),
+              rpcInstrumentationLayer,
+            ),
+          ),
+          Effect.forkScoped,
+        );
+        return attach;
+      }).pipe(
+        Effect.provide(
+          layerWsRpc(
+            session,
+            clientAnalyticsProps,
+            serverBrowser,
+            reportProfiles,
+            input.settingsClient,
+          ).pipe(
+            Layer.provideMerge(RpcSerialization.layerJson),
+            // Handler-context reporters see only request defects, not server-wide defects.
+            Layer.provide(DefectReporter.layer),
+            Layer.provide(AcpRegistrySessions.layer),
+            Layer.provide(Layer.succeed(SqlClient.SqlClient, sql)),
+            Layer.provide(ProviderMaintenanceRunner.layer),
+            Layer.provide(Layer.succeed(NpmRelease.NpmRelease, npmRelease)),
+            Layer.provide(Layer.succeed(ServerSelfUpdate.ServerSelfUpdate, serverSelfUpdate)),
+            // Share server-lifetime PR caches so WS mutations invalidate every client's HTTP diffs.
+            Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
+            Layer.provide(Layer.succeed(IssueService.IssueService, issues)),
+            Layer.provide(Layer.succeed(ThreadIssueService.ThreadIssueService, threadIssues)),
+            Layer.provide(
+              Layer.succeed(IssueTrackerConnections.IssueTrackerConnections, issueTrackers),
+            ),
+            Layer.provide(OtlpEndpointCheck.layer),
+            Layer.provide(
+              Layer.succeed(
+                PullRequestReviewGuideService.PullRequestReviewGuideService,
+                reviewGuides,
               ),
             ),
-            Effect.forkScoped,
-          );
-          return attach;
-        }).pipe(
-          Effect.provide(
-            layerWsRpc(
-              session,
-              clientAnalyticsProps,
-              serverBrowser,
-              reportProfiles,
-              input.settingsClient,
-            ).pipe(
-              Layer.provideMerge(RpcSerialization.layerJson),
-              // Handler-context reporters see only request defects, not server-wide defects.
-              Layer.provide(DefectReporter.layer),
-              Layer.provide(AcpRegistrySessions.layer),
-              Layer.provide(Layer.succeed(SqlClient.SqlClient, sql)),
-              Layer.provide(ProviderMaintenanceRunner.layer),
-              Layer.provide(Layer.succeed(NpmRelease.NpmRelease, npmRelease)),
-              Layer.provide(Layer.succeed(ServerSelfUpdate.ServerSelfUpdate, serverSelfUpdate)),
-              // Share server-lifetime PR caches so WS mutations invalidate every client's HTTP diffs.
-              Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
-              Layer.provide(Layer.succeed(IssueService.IssueService, issues)),
-              Layer.provide(Layer.succeed(ThreadIssueService.ThreadIssueService, threadIssues)),
-              Layer.provide(
-                Layer.succeed(IssueTrackerConnections.IssueTrackerConnections, issueTrackers),
-              ),
-              Layer.provide(OtlpEndpointCheck.layer),
-              Layer.provide(
-                Layer.succeed(
-                  PullRequestReviewGuideService.PullRequestReviewGuideService,
-                  reviewGuides,
-                ),
-              ),
-              Layer.provide(Layer.succeed(PeerLinks.PeerLinks, peerLinks)),
-              Layer.provide(Layer.succeed(PeerLinkRequests.PeerLinkRequests, peerLinkRequests)),
-              Layer.provide(
-                SourceControlDiscovery.layer.pipe(
-                  Layer.provide(
-                    SourceControlProviderRegistry.layer.pipe(
-                      Layer.provide(SourceControlBuiltInDrivers.layer),
-                      Layer.provideMerge(GitVcsDriver.layer),
-                      Layer.provide(
-                        VcsDriverRegistry.layer.pipe(Layer.provide(VcsProjectConfig.layer)),
-                      ),
+            Layer.provide(Layer.succeed(PeerLinks.PeerLinks, peerLinks)),
+            Layer.provide(Layer.succeed(PeerLinkRequests.PeerLinkRequests, peerLinkRequests)),
+            Layer.provide(
+              SourceControlDiscovery.layer.pipe(
+                Layer.provide(
+                  SourceControlProviderRegistry.layer.pipe(
+                    Layer.provide(SourceControlBuiltInDrivers.layer),
+                    Layer.provideMerge(GitVcsDriver.layer),
+                    Layer.provide(
+                      VcsDriverRegistry.layer.pipe(Layer.provide(VcsProjectConfig.layer)),
                     ),
                   ),
                 ),
               ),
             ),
           ),
-        );
+        ),
+      );
     });
     return Layer.merge(
       // Sessions run in the context the server was built with, which carries every handler's
       // services; a transport mounts one from a fiber forked there.
       Layer.succeed(RpcSessions, { serve: serveRpc as RpcSessions["Service"]["serve"] }),
       HttpRouter.add(
-      "GET",
-      "/ws",
-      Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest;
-        const url = requestUrl(request);
-        if (Option.isNone(url) || !hasCompatibleOrchestrationProtocol(url.value)) {
-          return HttpServerResponse.jsonUnsafe(
-            {
-              code: "orchestration_protocol_incompatible",
-              message: `Update this client to one that supports orchestration protocol ${ORCHESTRATION_PROTOCOL_VERSION}.`,
-              orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
-            },
-            { status: 426 },
+        "GET",
+        "/ws",
+        Effect.gen(function* () {
+          const request = yield* HttpServerRequest.HttpServerRequest;
+          const url = requestUrl(request);
+          if (Option.isNone(url) || !hasCompatibleOrchestrationProtocol(url.value)) {
+            return HttpServerResponse.jsonUnsafe(
+              {
+                code: "orchestration_protocol_incompatible",
+                message: `Update this client to one that supports orchestration protocol ${ORCHESTRATION_PROTOCOL_VERSION}.`,
+                orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
+              },
+              { status: 426 },
+            );
+          }
+          const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+          const sessions = yield* SessionStore.SessionStore;
+          const analytics = yield* AnalyticsService.AnalyticsService;
+          const session = yield* serverAuth.authenticateWebSocketUpgrade(request, "rpc").pipe(
+            Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
+              failEnvironmentAuthInvalid(
+                EnvironmentAuth.serverAuthCredentialReason(error),
+                EnvironmentAuth.serverAuthDpopFailureReason(error),
+              ),
+            ),
+            Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
+              failEnvironmentInternal("internal_error", error),
+            ),
           );
-        }
-        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-        const sessions = yield* SessionStore.SessionStore;
-        const analytics = yield* AnalyticsService.AnalyticsService;
-        const session = yield* serverAuth.authenticateWebSocketUpgrade(request, "rpc").pipe(
-          Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
-            failEnvironmentAuthInvalid(
-              EnvironmentAuth.serverAuthCredentialReason(error),
-              EnvironmentAuth.serverAuthDpopFailureReason(error),
+          // Desktop bootstrap sessions connect to their own backend, including same-machine WSL.
+          if (session.subject === "desktop-bootstrap") {
+            delete NodeHttpServerRequest.toIncomingMessage(request).headers[
+              "sec-websocket-extensions"
+            ];
+          }
+          const clientAnalyticsProps = readClientAnalyticsProps(request);
+          yield* analytics.recordOwners(readClientOwners(request), "client");
+          const rpcWebSocketHttpEffect = yield* serveRpc({
+            session,
+            clientAnalyticsProps,
+            settingsClient: readSettingsClient(url.value),
+            mount: Effect.map(
+              RpcServer.makeProtocolWithHttpEffectWebsocket,
+              ({ protocol, httpEffect }) => ({
+                protocol,
+                attach: httpEffect,
+              }),
             ),
-          ),
-          Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
-            failEnvironmentInternal("internal_error", error),
-          ),
-        );
-        // Desktop bootstrap sessions connect to their own backend, including same-machine WSL.
-        if (session.subject === "desktop-bootstrap") {
-          delete NodeHttpServerRequest.toIncomingMessage(request).headers[
-            "sec-websocket-extensions"
-          ];
-        }
-        const clientAnalyticsProps = readClientAnalyticsProps(request);
-        yield* analytics.recordOwners(readClientOwners(request), "client");
-        const rpcWebSocketHttpEffect = yield* serveRpc({
-          session,
-          clientAnalyticsProps,
-          settingsClient: readSettingsClient(url.value),
-          mount: Effect.map(RpcServer.makeProtocolWithHttpEffectWebsocket, ({ protocol, httpEffect }) => ({
-            protocol,
-            attach: httpEffect,
-          })),
-        });
-        const framedRpcWebSocketHttpEffect = url.value.searchParams.has(
-          SOCKET_FRAME_PARTS_QUERY_PARAM,
-        )
-          ? rpcWebSocketHttpEffect.pipe(
-              Effect.provideService(
-                HttpServerRequest.HttpServerRequest,
-                // The RPC server upgrades the request itself, so its socket is
-                // wrapped through the request it reads.
-                Object.create(request, {
-                  upgrade: { value: Effect.map(request.upgrade, splitLargeSocketFrames) },
-                }),
+          });
+          const framedRpcWebSocketHttpEffect = url.value.searchParams.has(
+            SOCKET_FRAME_PARTS_QUERY_PARAM,
+          )
+            ? rpcWebSocketHttpEffect.pipe(
+                Effect.provideService(
+                  HttpServerRequest.HttpServerRequest,
+                  // The RPC server upgrades the request itself, so its socket is
+                  // wrapped through the request it reads.
+                  Object.create(request, {
+                    upgrade: { value: Effect.map(request.upgrade, splitLargeSocketFrames) },
+                  }),
+                ),
+              )
+            : rpcWebSocketHttpEffect;
+          return yield* Effect.acquireUseRelease(
+            sessions.markConnected(session.sessionId),
+            () =>
+              Effect.raceFirst(
+                framedRpcWebSocketHttpEffect,
+                sessions.awaitInvalidation(session.sessionId, session.proofKeyThumbprint).pipe(
+                  Effect.as(HttpServerResponse.empty()),
+                  Effect.catchTags({
+                    SessionCredentialVerificationError: (error) =>
+                      failEnvironmentInternal("internal_error", error),
+                  }),
+                ),
               ),
-            )
-          : rpcWebSocketHttpEffect;
-        return yield* Effect.acquireUseRelease(
-          sessions.markConnected(session.sessionId),
-          () =>
-            Effect.raceFirst(
-              framedRpcWebSocketHttpEffect,
-              sessions.awaitInvalidation(session.sessionId, session.proofKeyThumbprint).pipe(
-                Effect.as(HttpServerResponse.empty()),
-                Effect.catchTags({
-                  SessionCredentialVerificationError: (error) =>
-                    failEnvironmentInternal("internal_error", error),
-                }),
-              ),
-            ),
-          () => sessions.markDisconnected(session.sessionId),
-        );
-      }).pipe(
-        Effect.catchTags({
-          EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
-          EnvironmentInternalError: HttpServerRespondable.toResponse,
-        }),
-      ),
+            () => sessions.markDisconnected(session.sessionId),
+          );
+        }).pipe(
+          Effect.catchTags({
+            EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+            EnvironmentInternalError: HttpServerRespondable.toResponse,
+          }),
+        ),
       ),
     );
   }),

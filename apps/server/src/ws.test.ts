@@ -57,14 +57,12 @@ import * as Jwk from "effect/jose/Jwk";
 import * as Jwks from "effect/jose/Jwks";
 import * as Jwt from "effect/jose/Jwt";
 import * as Schema from "effect/Schema";
-import { Http3Server, WebTransport } from "@fails-components/webtransport";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- The test client connects to the local ZAP stream.
+import * as NodeNet from "node:net";
 import { buildRequest, parseResponse } from "@zap-proto/zap";
 import { lengthPrefixed, splitMessages, ZAP_FRAME_METHOD } from "@hanzodev/shared/zapFrames";
 import * as ZapAuth from "./zap/ZapAuth.ts";
 import * as ZapServer from "./zap/ZapServer.ts";
-import { selfSignedCertificate } from "./testUtils/selfSignedCertificate.ts";
-// @effect-diagnostics-next-line nodeBuiltinImport:off -- Finds a free UDP port for the QUIC listener.
-import * as Dgram from "node:dgram";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
@@ -929,7 +927,7 @@ const layerConfigSources = Layer.mergeAll(
 );
 
 // The services a `Ws.layer` route needs to build, with the capabilities a session does not reach left unused.
-const layerWsRouteServices = (...extra: ReadonlyArray<Layer.Layer<never>>) =>
+const layerWsRouteServices = () =>
   Layer.mergeAll(
     layerUnusedConfigRpcServices,
     Layer.mock(ServerBrowser.ServerBrowser)({
@@ -966,7 +964,6 @@ const layerWsRouteServices = (...extra: ReadonlyArray<Layer.Layer<never>>) =>
     }),
     ProviderInstallationGate.layer,
     FetchHttpClient.layer,
-    ...extra,
   );
 
 it.live.each([
@@ -978,7 +975,8 @@ it.live.each([
   "negotiates compression for $subject sessions (framed=$framed)",
   ({ subject, extensions, framed }) =>
     Effect.gen(function* () {
-      const services = layerWsRouteServices(
+      const services = Layer.mergeAll(
+        layerWsRouteServices(),
         Layer.mock(EnvironmentAuth.EnvironmentAuth)({
           authenticateWebSocketUpgrade: () =>
             Effect.succeed({
@@ -2661,24 +2659,14 @@ const IamToken = Schema.Struct({
   name: Schema.String,
 });
 
-const freeUdpPort = Effect.callback<number>((resume) => {
-  const socket = Dgram.createSocket("udp4");
-  socket.bind(0, "127.0.0.1", () => {
-    const { port } = socket.address();
-    socket.close(() => resume(Effect.succeed(port)));
-  });
-});
-
-// One session over ZAP on WebTransport, end to end: a client opens a QUIC stream, presents a
+// One session over ZAP on a local stream, end to end: a client opens a QUIC stream, presents a
 // Hanzo IAM token as the cap of its first envelope, and asks for a thread through the same
 // environment protocol the WebSocket route serves.
-it.live("serves a thread over ZAP on WebTransport, authenticated by a Hanzo IAM token", () =>
+it.live("serves a thread over ZAP on a local stream, authenticated by a Hanzo IAM token", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const directory = yield* fileSystem.makeTempDirectoryScoped();
-    const certificate = selfSignedCertificate();
-    yield* fileSystem.writeFileString(`${directory}/cert.pem`, certificate.cert);
-    yield* fileSystem.writeFileString(`${directory}/key.pem`, certificate.privateKey);
+    const socketPath = `${directory}/zap.sock`;
 
     const keys = yield* Jwk.generateKeyPair({ algorithm: "ES256" });
     const signingKey = yield* Jwk.importPrivate(keys.privateKey, "ES256");
@@ -2699,81 +2687,75 @@ it.live("serves a thread over ZAP on WebTransport, authenticated by a Hanzo IAM 
         { kid: "test" },
       ).pipe(Effect.map(Redacted.value));
 
-    const port = yield* freeUdpPort;
-    yield* Layer.build(
-      ZapServer.layer({
-        host: "127.0.0.1",
-        port,
-        path: "/v1/dev/zap/cell",
-        certPath: `${directory}/cert.pem`,
-        keyPath: `${directory}/key.pem`,
-      }).pipe(
-        Layer.provide(
-          ZapAuth.layerIam({ issuer: IAM_ISSUER, audience: IAM_AUDIENCE, principal: "hanzo/z" }).pipe(
-            Layer.provide(Layer.mergeAll(Jwks.layerLocal(keySet), NodeCrypto.layer)),
-          ),
+    const zapLayer = ZapServer.layer({ socket: socketPath }).pipe(
+      Layer.provide(
+        ZapAuth.layerIam({ issuer: IAM_ISSUER, audience: IAM_AUDIENCE, principal: "hanzo/z" }).pipe(
+          Layer.provide(Layer.mergeAll(Jwks.layerLocal(keySet), NodeCrypto.layer)),
         ),
-        Layer.provideMerge(Ws.layer.pipe(Layer.provide(HttpRouter.layer))),
-        Layer.provide(
-          layerWsRouteServices(
-            Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
-            Layer.mock(ThreadManagement.ThreadManagementService)({
-              getThreadTitles: () => Effect.succeed({ [ThreadId.make("thread-1")]: "Hello over ZAP" }),
-            }),
-          ),
-        ),
-        Layer.provide(layerConfigSources),
       ),
+      Layer.provideMerge(Ws.layer.pipe(Layer.provide(HttpRouter.layer))),
+      Layer.provide(
+        Layer.mergeAll(
+          layerWsRouteServices(),
+          Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
+          Layer.mock(ThreadManagement.ThreadManagementService)({
+            getThreadTitles: () =>
+              Effect.succeed({ [ThreadId.make("thread-1")]: "Hello over ZAP" }),
+          }),
+        ),
+      ),
+      Layer.provide(layerConfigSources),
     );
+    // `Ws.layer` types its handlers' services as RPC requests; the fixture above provides each.
+    yield* Layer.build(zapLayer as unknown as Layer.Layer<never>);
 
     // A session: send one frame as the first envelope with the token as its cap, read one frame.
     const call = (token: string | null) =>
-      Effect.promise(async () => {
-        const transport = new WebTransport(`https://127.0.0.1:${port}/v1/dev/zap/cell`, {
-          serverCertificateHashes: [{ algorithm: "sha-256", value: certificate.hash }],
-        });
-        try {
-          await transport.ready;
-          const stream = await transport.createBidirectionalStream();
-          const frame = JSON.stringify({
-            _tag: "Request",
-            id: "1",
-            tag: ORCHESTRATION_V2_WS_METHODS.getThreadTitles,
-            payload: { threadIds: ["thread-1"] },
-            headers: [],
-          });
-          await stream.writable.getWriter().write(
-            lengthPrefixed(
-              buildRequest({
-                method: ZAP_FRAME_METHOD,
-                promiseID: 1,
-                target: 0,
-                cap: token === null ? new Uint8Array(0) : new TextEncoder().encode(token),
-                payload: new TextEncoder().encode(frame),
-              }),
-            ),
-          );
-          const reader = stream.readable.getReader();
-          let buffered: Uint8Array = new Uint8Array(0);
-          for (;;) {
-            const { value, done } = await reader.read();
-            if (done) return null;
-            const joined = new Uint8Array(buffered.byteLength + value.byteLength);
-            joined.set(buffered);
-            joined.set(value, buffered.byteLength);
-            const { messages, rest } = splitMessages(joined);
-            buffered = rest;
-            if (messages[0] !== undefined) return parseResponse(messages[0]);
-          }
-        } finally {
-          transport.close();
-        }
-      });
+      Effect.promise(
+        () =>
+          new Promise<ReturnType<typeof parseResponse> | null>((resolve, reject) => {
+            const connection = NodeNet.connect(socketPath);
+            let buffered: Uint8Array = new Uint8Array(0);
+            connection.on("error", reject);
+            connection.on("close", () => resolve(null));
+            connection.on("data", (chunk: Uint8Array) => {
+              const joined = new Uint8Array(buffered.byteLength + chunk.byteLength);
+              joined.set(buffered);
+              joined.set(chunk, buffered.byteLength);
+              const { messages, rest } = splitMessages(joined);
+              buffered = rest;
+              if (messages[0] !== undefined) {
+                resolve(parseResponse(messages[0]));
+                connection.destroy();
+              }
+            });
+            const frame = JSON.stringify({
+              _tag: "Request",
+              id: "1",
+              tag: ORCHESTRATION_V2_WS_METHODS.getThreadTitles,
+              payload: { threadIds: ["thread-1"] },
+              headers: [],
+            });
+            connection.write(
+              lengthPrefixed(
+                buildRequest({
+                  method: ZAP_FRAME_METHOD,
+                  promiseID: 1,
+                  target: 0,
+                  cap: token === null ? new Uint8Array(0) : new TextEncoder().encode(token),
+                  payload: new TextEncoder().encode(frame),
+                }),
+              ),
+            );
+          }),
+      );
 
     const accepted = yield* call(yield* mint({}));
     assert.equal(accepted?.status, 200);
     const reply = JSON.parse(new TextDecoder().decode(accepted?.body));
-    const exit = (Array.isArray(reply) ? reply : [reply]).find((message) => message._tag === "Exit");
+    const exit = (Array.isArray(reply) ? reply : [reply]).find(
+      (message) => message._tag === "Exit",
+    );
     assert.deepEqual(exit?.exit, { _tag: "Success", value: { "thread-1": "Hello over ZAP" } });
 
     // Each of these gets a 401 and no frame reaches the protocol.

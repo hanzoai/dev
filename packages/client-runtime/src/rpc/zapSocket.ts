@@ -56,7 +56,10 @@ async function open(url: string): Promise<Session> {
  * envelope whose payload is the frame; each envelope the runtime sends back carries one
  * frame as its body. One bidirectional stream per session.
  */
-export const layerZapSocket = (url: string, options: { readonly openTimeout: Duration.Input; readonly bearer: string | null }) =>
+export const layerZapSocket = (
+  url: string,
+  options: { readonly openTimeout: Duration.Input; readonly bearer: string | null },
+) =>
   Layer.sync(Socket.Socket, () => {
     let session: Promise<Session> | null = null;
     const connect = () => (session ??= open(url));

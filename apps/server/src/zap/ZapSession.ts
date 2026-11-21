@@ -26,7 +26,8 @@ export interface ZapStream {
   readonly close: () => void;
 }
 
-const closed = () => new Socket.SocketError({ reason: new Socket.SocketCloseError({ code: 1000 }) });
+const closed = () =>
+  new Socket.SocketError({ reason: new Socket.SocketCloseError({ code: 1000 }) });
 const readError = (cause: unknown) =>
   new Socket.SocketError({ reason: new Socket.SocketReadError({ cause }) });
 const writeError = (cause: unknown) =>
@@ -44,7 +45,8 @@ const messageReader = (stream: ZapStream) => {
       joined.set(rest);
       joined.set(chunk, rest.byteLength);
       const split = splitMessages(joined);
-      if (split.rest.byteLength > ZAP_MAX_MESSAGE_BYTES + 4) throw new Error("ZAP message too large");
+      if (split.rest.byteLength > ZAP_MAX_MESSAGE_BYTES + 4)
+        throw new Error("ZAP message too large");
       rest = split.rest;
       ready.push(...split.messages);
     }
@@ -127,7 +129,9 @@ export const serveZapStream = Effect.fn("ZapSession.serve")(function* <E, R>(
     }),
     writer: Effect.succeed({
       write: (chunk) =>
-        typeof chunk === "object" && "code" in chunk ? Effect.sync(() => stream.close()) : send(chunk),
+        typeof chunk === "object" && "code" in chunk
+          ? Effect.sync(() => stream.close())
+          : send(chunk),
       writeAll: (chunks) => Effect.forEach(chunks, send, { discard: true }),
     }),
   });
@@ -138,5 +142,7 @@ export const serveZapStream = Effect.fn("ZapSession.serve")(function* <E, R>(
     expiresAt === undefined
       ? Effect.never
       : Effect.sleep(Duration.millis(Math.max(0, DateTime.toEpochMillis(expiresAt) - now)));
-  yield* Effect.raceFirst(serve(session.value, socket), expiry).pipe(Effect.ensuring(Effect.sync(() => stream.close())));
+  yield* Effect.raceFirst(serve(session.value, socket), expiry).pipe(
+    Effect.ensuring(Effect.sync(() => stream.close())),
+  );
 });
