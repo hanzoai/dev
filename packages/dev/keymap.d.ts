@@ -24,7 +24,13 @@ export interface KeymapRow {
 /** The command a key press asks for, or null. `editableFocus` is true while a field has focus. */
 export function resolveCommand(
   event: KeymapEvent,
-  context?: { editableFocus?: boolean; terminalFocus?: boolean; previewFocus?: boolean },
+  context?: {
+    editableFocus?: boolean;
+    terminalFocus?: boolean;
+    previewFocus?: boolean;
+    /** The host owns the window (its desktop app), so ⌘1 to ⌘9 are sections, not browser tabs. */
+    hostDesktop?: boolean;
+  },
 ): KeybindingCommand | null;
 
 /** The shortcut a command has now, as a person reads it, or null when it is unbound. */
