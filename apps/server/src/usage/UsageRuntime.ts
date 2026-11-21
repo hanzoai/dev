@@ -94,7 +94,8 @@ export const createUsageRuntime = (stateDir: string, host: HostFacts) => {
       const s = await current(host);
       const alerts = pending.map((a) => alertText(a, names[a.provider] ?? a.provider, now));
       pending = [];
-      return { tray: trayModel(s.snapshots, names, settings.trayMode, now), alerts };
+      const tray = trayModel(s.snapshots, names, settings.trayMode, now);
+      return { tray: settings.showInMenuBar ? tray : { ...tray, title: "" }, alerts };
     },
   };
 };

@@ -223,6 +223,7 @@ describe("service and report", () => {
     const svc = createUsageService(fakeEnv(files, routes), () => ({
       providers: {},
       trayMode: "merged",
+      showInMenuBar: false,
       notifyAtPercent: [80],
       refreshSeconds: 300,
     }));
@@ -256,6 +257,7 @@ describe("service and report", () => {
         copilot: { enabled: false },
       },
       trayMode: "merged",
+      showInMenuBar: false,
       notifyAtPercent: [],
       refreshSeconds: 300,
     }));

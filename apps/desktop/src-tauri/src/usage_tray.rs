@@ -14,12 +14,12 @@ use tauri_plugin_notification::NotificationExt;
 
 const TRAY_ID: &str = "usage";
 const POLL_SECONDS: u64 = 60;
-const ICON_SIZE: u32 = 22;
+/// 18pt at @2x. Strokes are 3px (1.5pt), the weight of the neighbouring system icons.
+const ICON_SIZE: u32 = 36;
 
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct TrayModel {
     pub title: String,
-    pub fill: f64,
     pub lines: Vec<String>,
 }
 
@@ -39,29 +39,43 @@ pub fn parse_payload(raw: &str) -> Result<TrayPayload, serde_json::Error> {
     serde_json::from_str(raw)
 }
 
-/// A vertical gauge: outline plus a fill that rises with `fill` (0-100). Black on transparent,
-/// so macOS renders it as a template image in the menu bar's own colour.
-pub fn gauge_rgba(fill: f64) -> Vec<u8> {
+/// The Dev mark `</>`, black on transparent so macOS renders it as a template image in the menu
+/// bar's own colour. The reading itself is the title text beside it.
+pub fn glyph_rgba() -> Vec<u8> {
     let size = ICON_SIZE as usize;
-    let mut px = vec![0u8; size * size * 4];
-    let (x0, x1, y0, y1) = (7usize, 14usize, 3usize, 18usize);
-    let inner = (y1 - y0 - 1) as f64;
-    let filled = ((fill.clamp(0.0, 100.0) / 100.0) * inner).round() as usize;
-    for y in y0..=y1 {
-        for x in x0..=x1 {
-            let edge = y == y0 || y == y1 || x == x0 || x == x1;
-            let in_fill = y > y1 - 1 - filled && y < y1;
-            if edge || in_fill {
-                let i = (y * size + x) * 4;
-                px[i + 3] = 255;
+    let mut alpha = vec![0f32; size * size];
+    let mut stroke = |a: (f32, f32), b: (f32, f32), width: f32, level: f32| {
+        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+        let len2 = dx * dx + dy * dy;
+        for y in 0..size {
+            for x in 0..size {
+                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                let t = (((px - a.0) * dx + (py - a.1) * dy) / len2).clamp(0.0, 1.0);
+                let dist = ((px - (a.0 + t * dx)).powi(2) + (py - (a.1 + t * dy)).powi(2)).sqrt();
+                let cover = (width / 2.0 + 0.5 - dist).clamp(0.0, 1.0) * level;
+                let cell = &mut alpha[y * size + x];
+                *cell = cell.max(cover);
             }
         }
+    };
+    // Centred on the 36px grid (x and y mid-point 18); 3px strokes on half-pixel coordinates
+    // keep the horizontal extents on whole pixels.
+    let p = |x: f32, y: f32| (x + 0.5, y + 0.5);
+    let w = 3.0;
+    stroke(p(10.0, 9.0), p(3.0, 17.0), w, 1.0);
+    stroke(p(3.0, 17.0), p(10.0, 25.0), w, 1.0);
+    stroke(p(20.0, 7.0), p(14.0, 27.0), w, 1.0);
+    stroke(p(24.0, 9.0), p(31.0, 17.0), w, 1.0);
+    stroke(p(31.0, 17.0), p(24.0, 25.0), w, 1.0);
+    let mut px = vec![0u8; size * size * 4];
+    for (i, a) in alpha.iter().enumerate() {
+        px[i * 4 + 3] = (a * 255.0).round() as u8;
     }
     px
 }
 
-fn icon(fill: f64) -> Image<'static> {
-    Image::new_owned(gauge_rgba(fill), ICON_SIZE, ICON_SIZE)
+fn icon() -> Image<'static> {
+    Image::new_owned(glyph_rgba(), ICON_SIZE, ICON_SIZE)
 }
 
 fn build_menu(app: &AppHandle, lines: &[String]) -> tauri::Result<Menu<tauri::Wry>> {
@@ -136,7 +150,7 @@ async fn fetch_payload(app: &AppHandle) -> Result<TrayPayload, String> {
 }
 
 fn apply(app: &AppHandle, tray: &TrayIcon, payload: &TrayPayload) {
-    let _ = tray.set_icon(Some(icon(payload.tray.fill)));
+    let _ = tray.set_icon(Some(icon()));
     #[cfg(target_os = "macos")]
     {
         let _ = tray.set_icon_as_template(true);
@@ -163,7 +177,7 @@ fn apply(app: &AppHandle, tray: &TrayIcon, payload: &TrayPayload) {
 pub fn start(app: &AppHandle) -> tauri::Result<()> {
     let menu = build_menu(app, &[])?;
     let tray = TrayIconBuilder::with_id(TRAY_ID)
-        .icon(icon(0.0))
+        .icon(icon())
         .icon_as_template(true)
         .tooltip("Hanzo Dev usage")
         .menu(&menu)
@@ -204,7 +218,7 @@ mod tests {
 
     #[test]
     fn parses_the_server_payload() {
-        let raw = r#"{"tray":{"title":"73%","fill":73,"lines":["Claude: Session 73%"]},
+        let raw = r#"{"tray":{"title":"73%","lines":["Claude: Session 73%"]},
                       "alerts":[{"title":"Claude: Session at 82%","body":"Resets in 2h 05m."}]}"#;
         let p = parse_payload(raw).unwrap();
         assert_eq!(p.tray.title, "73%");
@@ -212,10 +226,17 @@ mod tests {
     }
 
     #[test]
-    fn gauge_fill_rises_with_usage() {
-        let lit = |fill: f64| gauge_rgba(fill).chunks(4).filter(|p| p[3] == 255).count();
-        assert!(lit(0.0) < lit(50.0));
-        assert!(lit(50.0) < lit(100.0));
-        assert_eq!(gauge_rgba(10.0).len(), (ICON_SIZE * ICON_SIZE * 4) as usize);
+    fn glyph_is_alpha_only_and_drawn() {
+        let px = glyph_rgba();
+        assert_eq!(px.len(), (ICON_SIZE * ICON_SIZE * 4) as usize);
+        assert!(px.chunks(4).filter(|p| p[3] > 200).count() > 100);
+        assert!(px.chunks(4).all(|p| p[0] == 0 && p[1] == 0 && p[2] == 0));
+        // Vertically centred: as much empty space above the glyph as below it.
+        let size = ICON_SIZE as usize;
+        let rows: Vec<usize> = (0..size)
+            .filter(|y| (0..size).any(|x| px[(y * size + x) * 4 + 3] > 40))
+            .collect();
+        let (top, bottom) = (rows[0], size - 1 - rows[rows.len() - 1]);
+        assert!(top.abs_diff(bottom) <= 1, "top {top} bottom {bottom}");
     }
 }

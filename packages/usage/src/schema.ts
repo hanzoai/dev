@@ -127,6 +127,8 @@ export type ProviderSetting = typeof ProviderSetting.Type;
 export const UsageSettings = Schema.Struct({
   providers: Schema.Record(Schema.String, ProviderSetting),
   trayMode: TrayMode,
+  /** Show the reading beside the menu-bar icon. Off by default: the icon alone is the Dev mark. */
+  showInMenuBar: Schema.Boolean,
   notifyAtPercent: Schema.Array(Percent),
   refreshSeconds: Schema.Number,
 });
@@ -135,6 +137,7 @@ export type UsageSettings = typeof UsageSettings.Type;
 export const defaultUsageSettings: UsageSettings = {
   providers: {},
   trayMode: "merged",
+  showInMenuBar: false,
   notifyAtPercent: [80, 95],
   refreshSeconds: 300,
 };

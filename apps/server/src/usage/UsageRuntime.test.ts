@@ -31,7 +31,10 @@ describe("UsageRuntime", () => {
     const again = createUsageRuntime(stateDir, { platform: "linux", home, env: {} });
     assert.strictEqual((await again.settings()).providers.hanzo?.enabled, true);
 
-    const { tray, alerts } = await again.tray(async () => ({ local: [], cost: [] }), new Date("2026-11-20T12:00:00Z"));
+    const { tray, alerts } = await again.tray(
+      async () => ({ local: [], cost: [] }),
+      new Date("2026-11-20T12:00:00Z"),
+    );
     assert.deepStrictEqual(alerts, []);
     assert.match(tray.lines[0] ?? "", /^Hanzo: /);
     assert.strictEqual(tray.title, "");

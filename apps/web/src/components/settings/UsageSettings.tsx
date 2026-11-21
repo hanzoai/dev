@@ -219,6 +219,20 @@ export function UsageSettingsPanel() {
             }
           />
           <SettingsRow
+            title={gt("Show usage in menu bar")}
+            description={gt(
+              "Put the reading beside the icon. Off, the menu bar shows only the icon.",
+            )}
+            control={
+              <input
+                type="checkbox"
+                aria-label={gt("Show usage in menu bar")}
+                checked={settings.showInMenuBar}
+                onChange={(e) => void update({ ...settings, showInMenuBar: e.target.checked })}
+              />
+            }
+          />
+          <SettingsRow
             title={gt("Alert thresholds")}
             description={gt(
               "A notification fires the first time a window crosses each percentage.",
