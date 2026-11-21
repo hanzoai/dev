@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { page } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 
 import { render } from "../../test/render";
 import { DevHome } from "./DevHome";
@@ -95,5 +95,79 @@ describe("DevHome", () => {
     await expect.element(ghost).toHaveAttribute("aria-pressed", "false");
     await ghost.click();
     await expect.element(ghost).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("sends a turn in Cloud with no environment: Enter and the Send button POST a chat completion with the bearer, and no environment is discovered", async () => {
+    const posts: Array<{ url: string; auth: string | null; body: unknown }> = [];
+    const wellKnown: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const u = String(url);
+        if (u.includes(".well-known/hanzo/environment")) wellKnown.push(u);
+        if (u.includes("/v1/models")) return Response.json(models);
+        if (u.endsWith("/v1/chat/completions")) {
+          const headers = new Headers(init?.headers as HeadersInit);
+          posts.push({ url: u, auth: headers.get("authorization"), body: JSON.parse(String(init?.body)) });
+          return new Response('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n', {
+            headers: { "content-type": "text/event-stream" },
+          });
+        }
+        return new Response("{}", { status: 404 });
+      }),
+    );
+    await using screen = await render(
+      <DevHome
+        cloud={{ api: "https://api.test", token: async () => "iam-token" }}
+        mode="chat"
+        environments={environments}
+        environment="cloud"
+        onEnvironment={() => {}}
+      />,
+      { router: false },
+    );
+    await page.getByTestId("composer-editor").click();
+    await page.getByTestId("composer-editor").fill("Reply with ok");
+    await page.getByRole("button", { name: /submit message/i }).click();
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]?.auth).toBe("Bearer iam-token");
+    expect(wellKnown).toEqual([]);
+  });
+
+  it("sends a turn in Cloud with no environment: Enter POSTs a chat completion with the bearer, and no environment is discovered", async () => {
+    const posts: Array<{ url: string; auth: string | null; body: unknown }> = [];
+    const wellKnown: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const u = String(url);
+        if (u.includes(".well-known/hanzo/environment")) wellKnown.push(u);
+        if (u.includes("/v1/models")) return Response.json(models);
+        if (u.endsWith("/v1/chat/completions")) {
+          const headers = new Headers(init?.headers as HeadersInit);
+          posts.push({ url: u, auth: headers.get("authorization"), body: JSON.parse(String(init?.body)) });
+          return new Response('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n', {
+            headers: { "content-type": "text/event-stream" },
+          });
+        }
+        return new Response("{}", { status: 404 });
+      }),
+    );
+    await using screen = await render(
+      <DevHome
+        cloud={{ api: "https://api.test", token: async () => "iam-token" }}
+        mode="chat"
+        environments={environments}
+        environment="cloud"
+        onEnvironment={() => {}}
+      />,
+      { router: false },
+    );
+    await page.getByTestId("composer-editor").click();
+    await page.getByTestId("composer-editor").fill("Reply with ok");
+    await userEvent.keyboard("{Enter}");
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]?.auth).toBe("Bearer iam-token");
+    expect(wellKnown).toEqual([]);
   });
 });

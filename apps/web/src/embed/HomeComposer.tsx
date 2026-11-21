@@ -110,6 +110,7 @@ export function HomeComposer(props: {
           composerDraftTarget={HOME_DRAFT}
           environmentId={CLOUD_ENVIRONMENT}
           canOperateThread
+          environmentless
           attachmentUploadsCapabilityKnown
           supportsAttachmentUploads={false}
           supportsQuestionAttachments={false}

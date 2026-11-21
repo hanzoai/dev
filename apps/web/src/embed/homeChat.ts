@@ -20,23 +20,29 @@ import type { DevCloud, DevEnvironment } from "./runtime";
  * The linked Mac is the controller's `local` host: its models come from `GET /v1/local-ai/models` and
  * a turn on one goes to `POST /v1/local-ai/chat` at that Mac, never to api.hanzo.ai.
  */
-const controllers = new Map<string, { controller: CloudChatController; local: LocalChatHost | null }>();
+const controllers = new Map<
+  string,
+  { controller: CloudChatController; local: LocalChatHost | null; cloud: DevCloud }
+>();
 
 export function controllerFor(cloud: DevCloud) {
   let held = controllers.get(cloud.api);
   if (held === undefined) {
-    const box: { controller: CloudChatController; local: LocalChatHost | null } = {
+    const box: { controller: CloudChatController; local: LocalChatHost | null; cloud: DevCloud } = {
       controller: undefined as never,
       local: null,
+      cloud,
     };
     box.controller = createCloudChatController({
-      getAuth: async () => ({ accessToken: await cloud.token(), orgId: cloud.org ?? null }),
+      getAuth: async () => ({ accessToken: await box.cloud.token(), orgId: box.cloud.org ?? null }),
       options: { baseUrl: cloud.api },
       local: () => box.local,
     });
     held = box;
     controllers.set(cloud.api, held);
   }
+  // The host may hand a new token source (a refreshed session); the one controller reads the latest.
+  held.cloud = cloud;
   return held;
 }
 

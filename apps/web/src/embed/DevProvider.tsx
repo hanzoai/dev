@@ -1,3 +1,4 @@
+import "./embedded";
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -9,7 +10,7 @@ import { I18nProvider } from "../i18n/I18nProvider";
 import { whenLocaleReady } from "../i18n/runtime";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
 import { useAtomCommand } from "../state/use-atom-command";
-import { createSlot, EmbedContext, markEmbedded, useEmbed, type EmbedState } from "./context";
+import { createSlot, EmbedContext, useEmbed, type EmbedState } from "./context";
 import type { DevRuntime } from "./runtime";
 
 // Services are app-lifetime singletons; one router per page.
@@ -17,7 +18,6 @@ let started: { readonly router: EmbedState["router"] } | null = null;
 
 function start() {
   if (started === null) {
-    markEmbedded();
     started = { router: startAppServices(createMemoryHistory({ initialEntries: ["/"] })) };
   }
   return started.router;

@@ -1,3 +1,4 @@
+import "./embedded";
 import { enhancePrompt, said } from "@hanzodev/client-runtime/cloud-chat";
 import { CheckIcon, CloudIcon, GhostIcon, LaptopIcon, UserRoundIcon } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";

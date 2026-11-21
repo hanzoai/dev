@@ -364,6 +364,8 @@ export interface ChatComposerProps {
   composerDraftTarget: ScopedThreadRef | DraftId;
   environmentId: EnvironmentId;
   canOperateThread: boolean;
+  /** A host composer with no environment behind it (the cloud chat): there is no session scope to read. */
+  environmentless?: boolean;
   attachmentUploadsCapabilityKnown: boolean;
   supportsAttachmentUploads: boolean;
   supportsQuestionAttachments: boolean;
@@ -502,6 +504,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerDraftTarget,
     environmentId,
     canOperateThread,
+    environmentless = false,
     attachmentUploadsCapabilityKnown,
     supportsAttachmentUploads,
     supportsQuestionAttachments,
@@ -2219,7 +2222,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       submitAfterDictation(() => submitComposerRef.current(dispatchMode, submissionIntent));
       return false;
     }
-    if (submissionBlocked || !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) {
+    if (
+      submissionBlocked ||
+      !(environmentless || readEnvironmentScope(environmentId, AuthOrchestrationOperateScope))
+    ) {
       event?.preventDefault();
       return false;
     }
@@ -2347,7 +2353,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const saveCitationDraftToPromptStable = useStableCallback(saveCitationDraftToPrompt);
   const compactThreadContext = () => {
     if (
-      !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope) ||
+      !(environmentless || readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) ||
       compactDisabled ||
       noProviderAvailable ||
       activePendingApproval !== null ||
