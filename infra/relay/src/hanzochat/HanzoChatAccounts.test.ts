@@ -1,5 +1,4 @@
 import { describe, expect, it } from "@effect/vitest";
-import { vi } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as TestClock from "effect/testing/TestClock";

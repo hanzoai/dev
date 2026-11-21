@@ -53,6 +53,7 @@ export function ensoTabAnchor(entries: ReadonlyArray<ProviderInstanceEntry>) {
   return entries.find((entry) => entry.driverKind === "hanzo")?.instanceId ?? null;
 }
 
+const ENSO = "Enso";
 const PICKER_TOOLTIP_SIDE = "left" as const;
 const PICKER_TOOLTIP_SIDE_OFFSET = 8;
 
@@ -229,7 +230,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                             className="relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-md transition-colors hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none"
                             onClick={() => handleSelect("enso")}
                             type="button"
-                            aria-label="Enso"
+                            aria-label={ENSO}
                             aria-pressed={props.selectedInstanceId === "enso"}
                           >
                             <EnsoRing gap={0} className="size-5 shrink-0" />
@@ -241,7 +242,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                         sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
                         align="center"
                       >
-                        Enso
+                        {ENSO}
                       </TooltipPopup>
                     </Tooltip>
                   </div>

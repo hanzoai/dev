@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useEffect } from "react";
 
 import { embedTools, useEmbed } from "./context";
 import { moveThroughRows } from "./focus";
@@ -23,8 +23,9 @@ export function DevThreadList({
   className?: string;
 }) {
   const embed = useEmbed();
-  const ref = useCallback((el: HTMLDivElement | null) => embed?.slots.threads.set(el), [embed]);
+  const ref = (el: HTMLDivElement | null) => embed?.slots.threads.set(el);
   useThreadRef(embed, active, onOpen);
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- keeps the shared embedTools store in step with this prop
   useEffect(() => embedTools.set(tools), [tools]);
   return (
     <div

@@ -2,6 +2,8 @@ import type { ColorValue } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import { withUniwind } from "uniwind";
 
+const DEV = "Dev";
+
 const ThemedPath = withUniwind(Path);
 
 /** The Dev mark `</>`, the same strokes as the desktop tray glyph. */
@@ -12,7 +14,7 @@ export function DevMark(props: {
 }) {
   return (
     <Svg
-      accessibilityLabel="Dev"
+      accessibilityLabel={DEV}
       height={props.height}
       width={props.height * 1.2}
       viewBox="0 0 36 34"

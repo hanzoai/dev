@@ -1,4 +1,4 @@
-import { useCallback, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 import { useEmbed } from "./context";
 import { useHasWorkspace } from "./capabilities";
@@ -25,7 +25,7 @@ export function DevWorkspace({
   className?: string;
 }) {
   const embed = useEmbed();
-  const ref = useCallback((el: HTMLDivElement | null) => embed?.slots.workspace.set(el), [embed]);
+  const ref = (el: HTMLDivElement | null) => embed?.slots.workspace.set(el);
   const open = useThreadRef(embed, thread, onNavigate);
   // The code tools hang on a workspace: a conversation has no dock until a project is attached.
   const workspace = useHasWorkspace(open);
