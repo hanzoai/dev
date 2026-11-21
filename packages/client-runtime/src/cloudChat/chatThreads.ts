@@ -1,3 +1,4 @@
+// @effect-diagnostics globalFetch:off -- Cloud chat is a plain promise client shared with React Native and the browser; it has no Effect runtime.
 /**
  * Saved cloud threads. Same store `recordTurns` writes to:
  *   - list  GET /v1/agents/chat/conversations       -> summaries (id, title, last append)
@@ -26,7 +27,7 @@ const text = (value: unknown): string | null =>
   typeof value === "string" && value !== "" ? value : null;
 
 /** Thread summaries from a list body: a bare array, or one under `conversations` / `data`. */
-export function parseChatThreads(body: unknown): ReadonlyArray<CloudChatThread> {
+function parseChatThreads(body: unknown): ReadonlyArray<CloudChatThread> {
   const wrapper = record(body);
   const list = Array.isArray(body) ? body : (wrapper?.conversations ?? wrapper?.data);
   if (!Array.isArray(list)) return [];
@@ -45,7 +46,7 @@ export function parseChatThreads(body: unknown): ReadonlyArray<CloudChatThread> 
 }
 
 /** User and assistant messages of one thread body, in order. Tool and system turns are skipped. */
-export function parseChatThreadMessages(body: unknown): ReadonlyArray<CloudChatMessage> {
+function parseChatThreadMessages(body: unknown): ReadonlyArray<CloudChatMessage> {
   const list = record(body)?.messages;
   if (!Array.isArray(list)) return [];
   const messages: CloudChatMessage[] = [];

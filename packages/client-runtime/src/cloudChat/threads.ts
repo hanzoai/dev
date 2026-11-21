@@ -112,7 +112,7 @@ function toMillis(value: unknown): number {
   return 0;
 }
 
-export function parseThreadList(body: unknown): ReadonlyArray<ThreadSummary> {
+function parseThreadList(body: unknown): ReadonlyArray<ThreadSummary> {
   const list = isRecord(body) ? body.conversations : undefined;
   if (!Array.isArray(list)) return [];
   const out: ThreadSummary[] = [];
@@ -131,7 +131,7 @@ export function parseThreadList(body: unknown): ReadonlyArray<ThreadSummary> {
   return out;
 }
 
-export function parseThreadMessages(body: unknown): ReadonlyArray<CloudChatMessage> {
+function parseThreadMessages(body: unknown): ReadonlyArray<CloudChatMessage> {
   const list = isRecord(body) ? body.messages : undefined;
   if (!Array.isArray(list)) return [];
   const out: CloudChatMessage[] = [];

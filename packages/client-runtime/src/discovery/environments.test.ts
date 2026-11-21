@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   createCloudSession,
@@ -57,7 +57,7 @@ describe("discoverEnvironments", () => {
     expect(calls).toEqual(["GET https://api.hanzo.ai/v1/sources"]);
   });
 
-  it.each([404, 501])("degrades %i to unavailable", async (status) => {
+  it.each([404, 501])("degrades %i to unavailable", async (status: number) => {
     const result = await discoverEnvironments(auth, known, { fetch: async () => json(status, {}) });
     expect(result.sources.status).toBe("unavailable");
     expect(result.cloud.status).toBe("unavailable");

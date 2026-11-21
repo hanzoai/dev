@@ -16,7 +16,7 @@ import { HANZO_REASONING_CAPABILITIES } from "@hanzodev/shared/model";
 
 import type { CloudChatModel } from "./api.ts";
 
-export const REASONING_EFFORT_ID = "reasoningEffort";
+const REASONING_EFFORT_ID = "reasoningEffort";
 
 /** The catalog's owner names that stand for a provider the picker already knows. */
 const OWNERS: Readonly<Record<string, string>> = {

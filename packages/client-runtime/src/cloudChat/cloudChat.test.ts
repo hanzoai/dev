@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+// @effect-diagnostics globalDate:off -- Test fixtures build timestamps outside an Effect runtime.
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   CloudChatError,

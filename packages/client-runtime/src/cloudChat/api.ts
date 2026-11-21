@@ -1,3 +1,4 @@
+// @effect-diagnostics extendsNativeError:off globalFetch:off -- Cloud chat is a plain promise client shared with React Native and the browser; it has no Effect runtime.
 /**
  * Cloud chat with no environment. Same backend as hanzo.app's Chat:
  *   - replies   POST /v1/chat/completions (SSE, OpenAI-compatible)

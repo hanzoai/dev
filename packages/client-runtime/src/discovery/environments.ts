@@ -1,10 +1,11 @@
+// @effect-diagnostics globalFetch:off -- Discovery is a plain promise client shared with React Native and the browser.
 /**
  * Environment discovery after Hanzo IAM sign-in: linked machines (`/v1/sources`),
  * an offered cloud session (`/v1/dev/sessions`), and saved/relay environments.
  * Cloud sessions are only created by an explicit `createCloudSession` call.
  */
 
-export const DEFAULT_DISCOVERY_API_BASE_URL = "https://api.hanzo.ai";
+const DEFAULT_DISCOVERY_API_BASE_URL = "https://api.hanzo.ai";
 
 export type DiscoveryFetch = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -133,7 +134,7 @@ function classify(status: number): DiscoverySourceStatus {
   return status === 404 || status === 501 ? "unavailable" : "error";
 }
 
-export async function listLinkedMachines(
+async function listLinkedMachines(
   auth: DiscoveryAuth,
   options: DiscoveryOptions = {},
 ): Promise<{ readonly machines: ReadonlyArray<LinkedMachine>; readonly report: DiscoveryReport }> {

@@ -1,3 +1,4 @@
+// @effect-diagnostics globalDate:off globalRandom:off -- Cloud chat is a plain promise client shared with React Native and the browser; it has no Effect runtime.
 import {
   CloudChatError,
   DEFAULT_MODEL_ID,
