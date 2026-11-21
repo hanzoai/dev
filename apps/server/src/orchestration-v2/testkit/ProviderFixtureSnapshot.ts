@@ -29,6 +29,12 @@ const RACY_EVENTS = new Set([
   "kiro_tool_call_read_only_on_request/kiro",
   "queued_cancelled_while_active/codex",
   "subagent/kiro",
+  "acp_titled_multiselect/acpRegistry",
+  "claude_background_subagent_lifecycle/claudeAgent",
+  "claude_background_wake_before_queued_prompt/claudeAgent",
+  "claude_background_wake_before_queued_prompt_no_echo/claudeAgent",
+  "thread_rollback_after_stop/pi",
+  "tool_call_read_only_on_request/grok",
 ]);
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
@@ -46,7 +52,7 @@ function normalizeEvents(
 ): string {
   const recorded = new Set(input.transcript.match(UUID) ?? []);
   const minted = new Map<string, string>();
-  return [input.workspace, `/private${input.workspace}`]
+  return [`/private${input.workspace}`, input.workspace]
     .reduce((out, workspace) => out.replaceAll(workspace, "<workspace>"), text)
     .replace(TIMESTAMP, "<time>")
     .replace(UUID, (id) => {

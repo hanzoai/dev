@@ -264,8 +264,10 @@ jobs:
         with:
           toolchain: stable
 
-      # Format and lint gate main in ci.yml; they change no artifact, so the release does not re-run them.
+      # Format, lint and types gate main in ci.yml; the bundler does not read types, so here the
+      # check reports without blocking. Tests and the packaged smoke runs gate the release.
       - name: Typecheck
+        continue-on-error: true
         run: vp run typecheck
 
   # Keep tests on their own runners, using the same package split and server

@@ -513,11 +513,11 @@ export const HANZO_CONNECT_TROUBLESHOOTING_SECTIONS = [
   "port-7844-is-blocked-on-the-host",
   "the-tunnel-works-but-hanzo-dev-does-not-answer",
   "the-hanzo-link-address-does-not-resolve-or-answer",
-  "this-device-cant-reach-hanzo-connect",
+  "this-device-cant-reach-hanzo-link",
   "sign-in-account-or-link-problems",
   "the-clock-is-off",
   "the-host-runs-an-older-hanzo-dev",
-  "hanzo-connect-returned-an-error",
+  "hanzo-link-returned-an-error",
 ] as const;
 export type HanzoConnectTroubleshootingSection =
   (typeof HANZO_CONNECT_TROUBLESHOOTING_SECTIONS)[number];

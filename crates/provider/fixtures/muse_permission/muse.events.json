@@ -275,7 +275,7 @@
       "driver": "muse",
       "providerInstanceId": "muse",
       "status": "ready",
-      "cwd": "/private<workspace>",
+      "cwd": "<workspace>",
       "model": "muse-spark-1.3-contributor",
       "capabilities": {
         "sessions": {
@@ -388,7 +388,7 @@
       "driver": "muse",
       "providerInstanceId": "muse",
       "status": "ready",
-      "cwd": "/private<workspace>",
+      "cwd": "<workspace>",
       "model": "muse-spark-1.3-contributor",
       "capabilities": {
         "sessions": {
@@ -613,7 +613,7 @@
       "driver": "muse",
       "providerInstanceId": "muse",
       "status": "running",
-      "cwd": "/private<workspace>",
+      "cwd": "<workspace>",
       "model": "muse-spark-1.3-contributor",
       "capabilities": {
         "sessions": {
@@ -726,7 +726,7 @@
       "driver": "muse",
       "providerInstanceId": "muse",
       "status": "waiting",
-      "cwd": "/private<workspace>",
+      "cwd": "<workspace>",
       "model": "muse-spark-1.3-contributor",
       "capabilities": {
         "sessions": {
@@ -1147,7 +1147,7 @@
       "driver": "muse",
       "providerInstanceId": "muse",
       "status": "waiting",
-      "cwd": "/private<workspace>",
+      "cwd": "<workspace>",
       "model": "muse-spark-1.3-contributor",
       "capabilities": {
         "sessions": {
@@ -1260,7 +1260,7 @@
       "driver": "muse",
       "providerInstanceId": "muse",
       "status": "running",
-      "cwd": "/private<workspace>",
+      "cwd": "<workspace>",
       "model": "muse-spark-1.3-contributor",
       "capabilities": {
         "sessions": {
@@ -1373,7 +1373,7 @@
       "driver": "muse",
       "providerInstanceId": "muse",
       "status": "ready",
-      "cwd": "/private<workspace>",
+      "cwd": "<workspace>",
       "model": "muse-spark-1.3-contributor",
       "capabilities": {
         "sessions": {
@@ -2561,7 +2561,7 @@
       "driver": "muse",
       "providerInstanceId": "muse",
       "status": "ready",
-      "cwd": "/private<workspace>",
+      "cwd": "<workspace>",
       "model": "muse-spark-1.3-contributor",
       "capabilities": {
         "sessions": {
@@ -2797,7 +2797,7 @@
       "driver": "muse",
       "providerInstanceId": "muse",
       "status": "running",
-      "cwd": "/private<workspace>",
+      "cwd": "<workspace>",
       "model": "muse-spark-1.3-contributor",
       "capabilities": {
         "sessions": {
@@ -2910,7 +2910,7 @@
       "driver": "muse",
       "providerInstanceId": "muse",
       "status": "waiting",
-      "cwd": "/private<workspace>",
+      "cwd": "<workspace>",
       "model": "muse-spark-1.3-contributor",
       "capabilities": {
         "sessions": {
@@ -3362,7 +3362,7 @@
       "driver": "muse",
       "providerInstanceId": "muse",
       "status": "running",
-      "cwd": "/private<workspace>",
+      "cwd": "<workspace>",
       "model": "muse-spark-1.3-contributor",
       "capabilities": {
         "sessions": {
@@ -3475,7 +3475,7 @@
       "driver": "muse",
       "providerInstanceId": "muse",
       "status": "ready",
-      "cwd": "/private<workspace>",
+      "cwd": "<workspace>",
       "model": "muse-spark-1.3-contributor",
       "capabilities": {
         "sessions": {

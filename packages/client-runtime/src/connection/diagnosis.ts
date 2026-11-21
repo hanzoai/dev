@@ -310,7 +310,7 @@ function helpSection(
 ): HanzoConnectTroubleshootingSection {
   switch (located.cause) {
     case "offline":
-      return "this-device-cant-reach-hanzo-connect";
+      return "this-device-cant-reach-hanzo-link";
     case "outdated":
       return "the-host-runs-an-older-hanzo-dev";
     case "clock_skew":
@@ -321,7 +321,7 @@ function helpSection(
     case "tunnel_not_enabled":
       return "sign-in-account-or-link-problems";
     case "relay_error":
-      return "hanzo-connect-returned-an-error";
+      return "hanzo-link-returned-an-error";
     case "released":
     case "tunnel_down":
     case "tunnel_pending":
@@ -344,13 +344,13 @@ function helpSection(
     failure?.reason === "timeout";
   switch (located.hop) {
     case "device":
-      return "this-device-cant-reach-hanzo-connect";
+      return "this-device-cant-reach-hanzo-link";
     case "relay":
       return failure?.reason === "authentication"
         ? "sign-in-account-or-link-problems"
-        : "this-device-cant-reach-hanzo-connect";
+        : "this-device-cant-reach-hanzo-link";
     case "tunnel":
-      return onThisDevice ? "this-device-cant-reach-hanzo-connect" : "the-hosts-tunnel-is-offline";
+      return onThisDevice ? "this-device-cant-reach-hanzo-link" : "the-hosts-tunnel-is-offline";
     case "server":
       return failure?.reason === "authentication" || failure?.reason === "permission"
         ? "sign-in-account-or-link-problems"
