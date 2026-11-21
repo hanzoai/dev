@@ -156,17 +156,17 @@ export function AutoSettleSettingsRows(props: {
           />
         </SettingsSection>
       ) : null}
-      <SettingsSection title={gt("Auto-settle")}>
+      <SettingsSection title={gt("Auto-done")}>
         <SettingsSwitchRow
           icon="arrow.triangle.branch"
-          label={gt("Auto-settle merged threads")}
+          label={gt("Auto-done merged threads")}
           value={referenceSettings.sidebarAutoSettleOnMerge}
           disabled={disabledFor("sidebarAutoSettleOnMerge")}
           onValueChange={(value) => writeToAll({ sidebarAutoSettleOnMerge: value })}
         />
         <SettingsSwitchRow
           icon="clock"
-          label={gt("Auto-settle inactive threads")}
+          label={gt("Auto-done inactive threads")}
           value={afterDays !== null}
           disabled={disabledFor("sidebarAutoSettleAfterDays")}
           onValueChange={(value) =>
@@ -191,13 +191,13 @@ export function AutoSettleSettingsRows(props: {
         <SettingsSection title={gt("Across environments")}>
           <View className="gap-3 p-4">
             <Text className="text-base text-foreground">
-              <T>Auto-settle defaults differ</T>
+              <T>Auto-done defaults differ</T>
             </Text>
             <Text className="text-sm text-foreground-muted">
               {mismatches.map((mismatch) => mismatch.label).join(", ")}
             </Text>
             <Button
-              label={gt("Apply auto-settle defaults")}
+              label={gt("Apply auto-done defaults")}
               tone="secondary"
               disabled={disabledFor("sidebarAutoSettleOnMerge", "sidebarAutoSettleAfterDays")}
               onPress={() => writeToAll(autoSettlePatch)}

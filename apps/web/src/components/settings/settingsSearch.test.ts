@@ -218,7 +218,7 @@ describe("searchSettings", () => {
   it("finds rows by the titles shown on their pages", () => {
     for (const [title, id] of [
       ["Automatic worktree cleanup", "storage-worktrees"],
-      ["Delete settled worktrees", "storage-worktrees"],
+      ["Delete done worktrees", "storage-worktrees"],
       ["Delete old browser artifacts", "storage-artifacts"],
       ["Delete old rotated logs", "storage-artifacts"],
       ["Custom search URL", "browser-search-engine"],
@@ -295,7 +295,7 @@ describe("auto-settlement search availability", () => {
       isWslSettingsRowVisible: false,
       hasThreadAutoSettlement: availability.eligibleEnvironmentIds.length > 0,
     });
-    expect(searchSettings("auto-settle", items).map((item) => item.id)).toEqual([
+    expect(searchSettings("auto-done", items).map((item) => item.id)).toEqual([
       "auto-settle-inactive-threads",
       "auto-settle-merged-threads",
       "days-before-auto-settle",

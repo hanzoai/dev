@@ -18,7 +18,7 @@ export function AutoSettleDaysField(props: AutoSettleDaysFieldProps) {
       {...props}
       min={MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS}
       max={MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS}
-      label={gt("Days before auto-settle")}
+      label={gt("Days before auto-done")}
       formatValue={(value) =>
         gt("{count, plural, one {{count} day} other {{count} days}}", { count: value })
       }

@@ -265,7 +265,7 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: m(msg("Failed to un-settle thread")),
+          title: m(msg("Failed to reopen thread")),
           description: thrownErrorMessage(error, m) ?? m(msg("An error occurred.")),
         }),
       );
@@ -660,11 +660,11 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
       icon={<CheckCircle2Icon />}
       label={
         settledAt
-          ? gt("Settled {time}", { time: formatRelativeTimeLabel(settledAt, undefined, messages) })
-          : gt("Settled", { $context: "thread status" })
+          ? gt("Done {time}", { time: formatRelativeTimeLabel(settledAt, undefined, messages) })
+          : gt("Done", { $context: "thread status" })
       }
       clockMinute={nowMinute}
-      actionLabel={isUnsettling ? gt("Un-settling...") : gt("Un-settle")}
+      actionLabel={isUnsettling ? gt("Reopening...") : gt("Reopen")}
       actionDisabled={!canOperateThread || isUnsettling}
       onAction={() => void handleUnsettleActiveThreadStable()}
     />
@@ -698,7 +698,7 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
       }
       if (settleAndAdvance(activeThreadRef)) return;
       void settleThread(activeThreadRef).then(
-        toastThreadActionFailure(m(msg("Failed to settle thread"))),
+        toastThreadActionFailure(m(msg("Failed to mark thread done"))),
       );
     },
     "thread.pin": ({ event }) => {

@@ -756,7 +756,7 @@ function ThreadDetailBody(
     const actionLabel = lifecycleSnoozed
       ? gt("Wake now")
       : settled
-        ? gt("Un-settle", { $context: "verb, thread action" })
+        ? gt("Reopen", { $context: "verb, thread action" })
         : gt("Dismiss");
     const wake =
       lifecycleSnoozed &&
@@ -772,14 +772,14 @@ function ThreadDetailBody(
           ? gt("Snoozed", { $context: "thread state" })
           : gt("Snoozed, {time} left", { time: wake })
         : settled
-          ? gt("Settled", { $context: "thread state" })
+          ? gt("Done", { $context: "thread state" })
           : gt("Woke from snooze"),
       action: {
         label: statusPending
           ? lifecycleSnoozed
             ? gt("Waking...")
             : settled
-              ? gt("Un-settling...")
+              ? gt("Reopening...")
               : gt("Dismissing...")
           : actionLabel,
         accessibilityLabel: actionLabel,

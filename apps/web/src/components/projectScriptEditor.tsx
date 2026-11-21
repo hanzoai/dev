@@ -549,7 +549,7 @@ function ProjectScriptEditorForm({
             </label>
             <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm dark:border-transparent dark:bg-white/[0.035]">
               <span>
-                <T>Run in the thread's worktree when the thread settles</T>
+                <T>Run in the thread's worktree when the thread is marked done</T>
               </span>
               <Switch
                 checked={runOnSettle}
@@ -558,7 +558,7 @@ function ProjectScriptEditorForm({
             </label>
             <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm dark:border-transparent dark:bg-white/[0.035]">
               <span>
-                <T>Stop this action when the thread settles</T>
+                <T>Stop this action when the thread is marked done</T>
               </span>
               <Switch
                 checked={stopOnSettle}

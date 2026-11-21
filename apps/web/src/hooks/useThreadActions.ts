@@ -87,7 +87,7 @@ export class ThreadSettlementUnsupportedError extends Schema.TaggedError<ThreadS
   override get message(): string {
     return m(
       msg(
-        "This environment's server does not support settling yet. Update the server to use Settle.",
+        "This environment's server does not support marking threads done yet. Update the server to use Mark done.",
       ),
     );
   }
@@ -142,7 +142,7 @@ export class ThreadAutoSettleOptOutUnsupportedError extends Schema.TaggedError<T
   override get message(): string {
     return m(
       msg(
-        "This environment's server does not support turning auto-settle off per thread yet. Update the server to use it.",
+        "This environment's server does not support turning auto-done off per thread yet. Update the server to use it.",
       ),
     );
   }
@@ -874,7 +874,7 @@ export function useThreadActions() {
       action: "Settled",
       claim: action,
       undo: () => runUndoPlan(target, undoPlan),
-      failureTitle: m(msg("Failed to undo settle")),
+      failureTitle: m(msg("Failed to undo mark done")),
     });
     return result;
   };

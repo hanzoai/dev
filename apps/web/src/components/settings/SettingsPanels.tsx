@@ -24,6 +24,7 @@ import {
   type ResponseStreamingMode,
   type QuitConfirmationMode,
   SidebarProjectSortOrder,
+  SidebarThreadRows,
   ScreenReaderAnnouncements,
   ToolCallVisibility,
 } from "@hanzodev/contracts/settings";
@@ -149,6 +150,12 @@ const SIDEBAR_PROJECT_SORT_ORDER_LABELS: Record<SidebarProjectSortOrder, string>
   manual: msg("Manual"),
 };
 const isSidebarProjectSortOrder = Schema.is(SidebarProjectSortOrder);
+
+const SIDEBAR_THREAD_ROWS_LABELS: Record<SidebarThreadRows, string> = {
+  one_line: msg("One line"),
+  two_lines: msg("Two lines"),
+};
+const isSidebarThreadRows = Schema.is(SidebarThreadRows);
 
 const TIMESTAMP_FORMAT_LABELS = {
   locale: msg("System default"),
@@ -530,18 +537,21 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.sidebarProjectSortOrder !== DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder
       ? [gt("Project order")]
       : []),
+    ...(settings.sidebarThreadRows !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadRows
+      ? [gt("Thread rows")]
+      : []),
     ...(settings.sidebarWorkingShelfEnabled !== DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled
       ? [gt("Working section")]
       : []),
     ...(settings.sidebarAutoSettleAfterDays !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
-      ? [gt("Auto-settle inactive threads")]
+      ? [gt("Auto-done inactive threads")]
       : []),
     ...(settings.sidebarAutoSettleKeepPullRequests !==
     DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleKeepPullRequests
       ? [gt("Keep threads with a PR")]
       : []),
     ...(settings.sidebarAutoSettleOnMerge !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge
-      ? [gt("Auto-settle merged threads")]
+      ? [gt("Auto-done merged threads")]
       : []),
     ...(settings.autoResumeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads
       ? [gt("Resume after usage limits")]
@@ -719,6 +729,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarProjectSortOrder: DEFAULT_UNIFIED_SETTINGS.sidebarProjectSortOrder,
+      sidebarThreadRows: DEFAULT_UNIFIED_SETTINGS.sidebarThreadRows,
       sidebarWorkingShelfEnabled: DEFAULT_UNIFIED_SETTINGS.sidebarWorkingShelfEnabled,
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
       sidebarAutoSettleKeepPullRequests: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleKeepPullRequests,
@@ -819,7 +830,7 @@ function AutoSettleDaysInput({
           setField(cancelAutoSettleDaysField(field));
         }
       }}
-      aria-label={gt("Days of inactivity before auto-settle")}
+      aria-label={gt("Days of inactivity before auto-done")}
     />
   );
 }
@@ -930,6 +941,46 @@ export function GeneralSettingsPanel() {
                 {SidebarProjectSortOrder.literals.map((sortOrder) => (
                   <SelectItem hideIndicator key={sortOrder} value={sortOrder}>
                     {m(SIDEBAR_PROJECT_SORT_ORDER_LABELS[sortOrder])}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+        <SettingsRow
+          {...setting("thread-rows")}
+          description={
+            <T>
+              One line shows the title, time, and status. Two lines add the project, branch, and
+              preview. This device only.
+            </T>
+          }
+          resetAction={
+            settings.sidebarThreadRows !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadRows ? (
+              <SettingResetButton
+                ariaLabel={gt("Reset thread rows to default")}
+                onClick={() =>
+                  updateSettings({ sidebarThreadRows: DEFAULT_UNIFIED_SETTINGS.sidebarThreadRows })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.sidebarThreadRows}
+              onValueChange={(value) => {
+                if (isSidebarThreadRows(value)) updateSettings({ sidebarThreadRows: value });
+              }}
+            >
+              <SelectTrigger size="sm" className="w-full sm:w-44" aria-label={gt("Thread rows")}>
+                <SelectValue>
+                  {m(SIDEBAR_THREAD_ROWS_LABELS[settings.sidebarThreadRows])}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {SidebarThreadRows.literals.map((rows) => (
+                  <SelectItem hideIndicator key={rows} value={rows}>
+                    {m(SIDEBAR_THREAD_ROWS_LABELS[rows])}
                   </SelectItem>
                 ))}
               </SelectPopup>
@@ -2028,19 +2079,19 @@ export function ThreadsSettingsPanel() {
       </SettingsSection>
 
       {hasServerTargets ? (
-        <SettingsSection id="auto-settle" title={gt("Auto-settle")}>
+        <SettingsSection id="auto-settle" title={gt("Auto-done")}>
           <SettingsRow
             serverScoped
             settingKeys={["sidebarAutoSettleOnMerge"]}
             {...setting("auto-settle-merged-threads")}
             description={gt(
-              "Settle a thread when its pull request merges. Closed pull requests still settle automatically.",
+              "Mark a thread done when its pull request merges. Closed pull requests still mark it done automatically.",
             )}
             resetAction={
               settings.sidebarAutoSettleOnMerge !==
               DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge ? (
                 <SettingResetButton
-                  ariaLabel={gt("Reset auto-settle on merge to default")}
+                  ariaLabel={gt("Reset auto-done on merge to default")}
                   onClick={() =>
                     updateSettings({
                       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
@@ -2056,7 +2107,7 @@ export function ThreadsSettingsPanel() {
                 onCheckedChange={(checked) =>
                   updateSettings({ sidebarAutoSettleOnMerge: Boolean(checked) })
                 }
-                aria-label={gt("Auto-settle merged threads")}
+                aria-label={gt("Auto-done merged threads")}
               />
             }
           />
@@ -2065,12 +2116,14 @@ export function ThreadsSettingsPanel() {
             serverScoped
             settingKeys={["sidebarAutoSettleAfterDays"]}
             {...setting("auto-settle-inactive-threads")}
-            description={gt("Sidebar threads with no activity for this long settle automatically.")}
+            description={gt(
+              "Sidebar threads with no activity for this long are marked done automatically.",
+            )}
             resetAction={
               settings.sidebarAutoSettleAfterDays !==
               DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays ? (
                 <SettingResetButton
-                  ariaLabel={gt("Reset auto-settle to default")}
+                  ariaLabel={gt("Reset auto-done to default")}
                   onClick={() =>
                     updateSettings({
                       sidebarAutoSettleAfterDays:
@@ -2089,7 +2142,7 @@ export function ThreadsSettingsPanel() {
                     sidebarAutoSettleAfterDays: checked ? AUTO_SETTLE_DEFAULT_DAYS : null,
                   })
                 }
-                aria-label={gt("Auto-settle inactive threads")}
+                aria-label={gt("Auto-done inactive threads")}
               />
             }
           />
@@ -2098,7 +2151,7 @@ export function ThreadsSettingsPanel() {
               serverScoped
               settingKeys={["sidebarAutoSettleAfterDays"]}
               title={setting("days-before-auto-settle").title}
-              description={gt("Any new activity un-settles a thread automatically.")}
+              description={gt("Any new activity reopens a thread automatically.")}
               control={
                 <AutoSettleDaysInput
                   value={settings.sidebarAutoSettleAfterDays}
@@ -2115,7 +2168,7 @@ export function ThreadsSettingsPanel() {
               settingKeys={["sidebarAutoSettleKeepPullRequests"]}
               title={gt("Keep threads with a PR")}
               description={gt(
-                "Inactivity does not settle threads with a pull request. Merge and close still do.",
+                "Inactivity does not mark threads with a pull request done. Merge and close still do.",
               )}
               control={
                 <ScopedSwitch

@@ -771,7 +771,7 @@ export function WorktreeCleanupSection() {
                     true,
                 ) && (
                   <SettingsRow
-                    title={gt("Delete settled worktrees")}
+                    title={gt("Delete done worktrees")}
                     managedPaths={lockablePath("worktreeSettledAfterDays")}
                     status={[
                       ruleStatus("worktreeSettledAfterDays"),
@@ -782,12 +782,12 @@ export function WorktreeCleanupSection() {
                       .filter(Boolean)
                       .join(". ")}
                     description={gt(
-                      "Remove worktrees this many days after their thread settles. Set 0 days to remove them at the next cleanup. Branches and thread history are kept.",
+                      "Remove worktrees this many days after their thread is marked done. Set 0 days to remove them at the next cleanup. Branches and thread history are kept.",
                     )}
                     serverScoped={!isProjectScope}
                     control={
                       <RetentionControl
-                        label={gt("Delete settled worktrees")}
+                        label={gt("Delete done worktrees")}
                         value={settings.worktreeSettledAfterDays}
                         minimum={0}
                         onChange={(worktreeSettledAfterDays, onFailed) =>

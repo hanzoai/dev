@@ -14,7 +14,7 @@ import { InlineButton } from "../ui/button";
 import { SidebarMenuItem } from "../ui/sidebar";
 
 const SHORT_SUMMARY = {
-  Settled: msg("{count, plural, =1 {Settled,} other {Settled {count},}}"),
+  Settled: msg("{count, plural, =1 {Done,} other {Done {count},}}"),
   Snoozed: msg("{count, plural, =1 {Snoozed,} other {Snoozed {count},}}"),
   Unpinned: msg("{count, plural, =1 {Unpinned,} other {Unpinned {count},}}"),
   Archived: msg("{count, plural, =1 {Archived,} other {Archived {count},}}"),

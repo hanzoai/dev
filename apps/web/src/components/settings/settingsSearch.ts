@@ -291,7 +291,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "project-defaults",
     searchTerms: [
       msg(
-        "disk storage automatic delete deleted archived threads old inactive merged settled unchanged worktrees retention days project inherit off custom",
+        "disk storage automatic delete deleted archived threads old inactive merged done unchanged worktrees retention days project inherit off custom",
       ),
     ],
   },
@@ -489,6 +489,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [msg("combine matching repositories environments sidebar")],
   },
   {
+    id: "thread-rows",
+    title: msg("Thread rows"),
+    to: "/settings/general",
+    searchTerms: [msg("sidebar one line two lines compact dense project branch preview")],
+  },
+  {
     id: "project-order",
     title: msg("Project order"),
     to: "/settings/general",
@@ -525,14 +531,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: msg("Boring sidebar (group by project)"),
     to: "/settings/labs",
     searchTerms: [msg("beta folders project tree classic sidebar")],
-  },
-  {
-    id: "boring-sidebar-multiline",
-    title: msg("Two-line folder rows"),
-    to: "/settings/labs",
-    // Shown inside the boring sidebar row only while it is on, so search lands on the parent.
-    targetId: "boring-sidebar",
-    searchTerms: [msg("beta boring sidebar folder rows multiline branch pull request details")],
   },
   {
     id: "tool-call-visibility",
@@ -714,7 +712,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "auto-settle-inactive-threads",
-    title: msg("Auto-settle inactive threads"),
+    title: msg("Auto-done inactive threads"),
     to: "/settings/threads",
     searchTerms: [msg("sidebar inactivity days no activity automatically")],
     requiresThreadAutoSettlement: true,
@@ -729,7 +727,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "auto-settle-merged-threads",
-    title: msg("Auto-settle merged threads"),
+    title: msg("Auto-done merged threads"),
     to: "/settings/threads",
     searchTerms: [msg("pull request merge closed automatically sidebar")],
     requiresThreadAutoSettlement: true,
@@ -740,13 +738,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: msg("Keep threads with a PR"),
     to: "/settings/threads",
     targetId: "auto-settle-inactive-threads",
-    searchTerms: [msg("pull request inactivity auto-settle merge close sidebar")],
+    searchTerms: [msg("pull request inactivity auto-done merge close sidebar")],
     requiresThreadAutoSettlement: true,
     scope: "project-defaults",
   },
   {
     id: "days-before-auto-settle",
-    title: msg("Days of inactivity before auto-settle"),
+    title: msg("Days of inactivity before auto-done"),
     to: "/settings/threads",
     targetId: "auto-settle-inactive-threads",
     searchTerms: [msg("thread timeout activity sidebar")],

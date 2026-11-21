@@ -1,4 +1,10 @@
-import { ArrowLeftIcon, ChartNoAxesColumnIcon, ChevronLeftIcon, ChevronRightIcon, SettingsIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ChartNoAxesColumnIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  SettingsIcon,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { T, useGT } from "gt-react";
 import { memo } from "react";
@@ -150,7 +156,7 @@ function HistoryNavigationButton({
           />
         }
       >
-        <Icon className="size-3.5" />
+        <Icon className="size-4" />
       </TooltipTrigger>
       <TooltipPopup side="bottom">
         {label}

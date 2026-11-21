@@ -299,10 +299,10 @@ export function threadDragAction(
   if (destination === "settled")
     return source === "settled"
       ? null
-      : resolve(msg("Settle", { $context: "verb, thread action" }));
+      : resolve(msg("Mark done", { $context: "verb, thread action" }));
   if (source === destination) return resolve(msg("Reorder", { $context: "verb, thread action" }));
   if (destination === "pinned") return resolve(msg("Pin", { $context: "verb, thread action" }));
   if (source === "pinned") return resolve(msg("Unpin", { $context: "verb, thread action" }));
-  if (source === "settled") return resolve(msg("Unsettle", { $context: "verb, thread action" }));
+  if (source === "settled") return resolve(msg("Reopen", { $context: "verb, thread action" }));
   return resolve(msg("Unsnooze", { $context: "verb, thread action" }));
 }

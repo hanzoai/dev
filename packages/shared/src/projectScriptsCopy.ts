@@ -9,9 +9,9 @@ export function projectScriptMenuLabel(
 ): string {
   const name = script.name;
   if (script.runOnWorktreeCreate && script.runOnSettle) {
-    return resolve(msg("{name} (setup, on settle)", { name }));
+    return resolve(msg("{name} (setup, when done)", { name }));
   }
   if (script.runOnWorktreeCreate) return resolve(msg("{name} (setup)", { name }));
-  if (script.runOnSettle) return resolve(msg("{name} (on settle)", { name }));
+  if (script.runOnSettle) return resolve(msg("{name} (when done)", { name }));
   return name;
 }

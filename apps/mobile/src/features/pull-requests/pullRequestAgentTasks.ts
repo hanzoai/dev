@@ -36,7 +36,7 @@ export function pullRequestAgentThreadActions(
       subtitle: thread.archivedAt
         ? resolve(msg("Archived thread"))
         : thread.settled
-          ? resolve(msg("Settled thread"))
+          ? resolve(msg("Done thread"))
           : resolve(msg("Continue thread")),
       image: "bubble.left.and.bubble.right",
       attributes: { disabled: task !== "ask" && Boolean(thread.archivedAt) },
@@ -49,7 +49,7 @@ export function pullRequestAgentThreadActions(
       : []),
     ...active,
     ...(settled.length
-      ? [{ id: `${task}:settled`, title: resolve(msg("Settled threads")), subactions: settled }]
+      ? [{ id: `${task}:settled`, title: resolve(msg("Done threads")), subactions: settled }]
       : []),
   ];
 }

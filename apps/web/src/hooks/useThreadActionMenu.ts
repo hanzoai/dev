@@ -228,12 +228,10 @@ export function useThreadActionMenu(input: {
           return;
         }
         case "settle":
-          await reportFailure(m(msg("Failed to settle thread")), () => settleThread(threadRef));
+          await reportFailure(m(msg("Failed to mark thread done")), () => settleThread(threadRef));
           return;
         case "unsettle":
-          await reportFailure(m(msg("Failed to un-settle thread")), () =>
-            unsettleThread(threadRef),
-          );
+          await reportFailure(m(msg("Failed to reopen thread")), () => unsettleThread(threadRef));
           return;
         case "unsnooze":
           await reportFailure(m(msg("Failed to wake thread")), () => unsnoozeThread(threadRef));
@@ -249,7 +247,7 @@ export function useThreadActionMenu(input: {
         }
         case "auto-settle:enabled":
         case "auto-settle:disabled":
-          await reportFailure(m(msg("Failed to update auto-settle")), () =>
+          await reportFailure(m(msg("Failed to update auto-done")), () =>
             setThreadAutoSettle(threadRef, action === "auto-settle:enabled"),
           );
           return;

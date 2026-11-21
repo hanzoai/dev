@@ -604,7 +604,7 @@ describe("thread action undo", () => {
     state.failedAction = "unsettle";
     await readThreadUndoNotice()!.undo();
     expect(state.requests.map(({ action }) => action)).toEqual(["settle", "unsettle"]);
-    expect(state.alerts.at(-1)?.title).toBe("Could not un-settle thread");
+    expect(state.alerts.at(-1)?.title).toBe("Could not reopen thread");
   });
 
   it("rechecks the destination permission before undoing", async () => {

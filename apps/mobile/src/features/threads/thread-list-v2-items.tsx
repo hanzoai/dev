@@ -185,7 +185,11 @@ function ThreadListV2Duration(props: {
 }
 
 const CARD_MENU_ACTIONS: MenuAction[] = [
-  { id: "settle", title: msg("Settle", { $context: "verb, thread action" }), image: "checkmark" },
+  {
+    id: "settle",
+    title: msg("Mark done", { $context: "verb, thread action" }),
+    image: "checkmark",
+  },
   {
     id: "delete",
     title: msg("Delete", { $context: "verb, thread action" }),
@@ -197,7 +201,7 @@ const CARD_MENU_ACTIONS: MenuAction[] = [
 const SLIM_MENU_ACTIONS: MenuAction[] = [
   {
     id: "unsettle",
-    title: msg("Un-settle", { $context: "verb, thread action" }),
+    title: msg("Reopen", { $context: "verb, thread action" }),
     image: "arrow.uturn.backward",
   },
   {
@@ -338,10 +342,10 @@ const SHELF_COPY = {
     expand: msg("Expands the snoozed threads."),
   },
   settled: {
-    label: msg("Settled", { $context: "thread list section" }),
-    count: msg("{count, plural, one {{count} settled thread} other {{count} settled threads}}"),
-    collapse: msg("Collapses the settled threads."),
-    expand: msg("Expands the settled threads."),
+    label: msg("Done", { $context: "thread list section" }),
+    count: msg("{count, plural, one {{count} done thread} other {{count} done threads}}"),
+    collapse: msg("Collapses the done threads."),
+    expand: msg("Expands the done threads."),
   },
 } as const;
 
@@ -400,7 +404,7 @@ export const ThreadListV2ShowMoreRow = memo(function ThreadListV2ShowMoreRow(pro
       : props.state === "failed"
         ? gt("Could not load older threads. Retry")
         : gt(
-            "{count, plural, one {Show more ({count} settled hidden)} other {Show more ({count} settled hidden)}}",
+            "{count, plural, one {Show more ({count} done hidden)} other {Show more ({count} done hidden)}}",
             { count: props.hiddenCount },
           );
   return (
@@ -409,7 +413,7 @@ export const ThreadListV2ShowMoreRow = memo(function ThreadListV2ShowMoreRow(pro
       accessibilityLabel={
         props.state === undefined
           ? gt(
-              "{count, plural, one {Show {count} more settled threads} other {Show {count} more settled threads}}",
+              "{count, plural, one {Show {count} more done threads} other {Show {count} more done threads}}",
               {
                 count: Math.min(props.hiddenCount, THREAD_LIST_V2_SETTLED_PAGE_COUNT),
               },
@@ -1040,7 +1044,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         ? [
             {
               id: "auto-settle",
-              title: gt("Auto-settle behavior"),
+              title: gt("Auto-done behavior"),
               image: "timer",
               subactions: [
                 {
@@ -1316,19 +1320,19 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     }
     return swipeActions.primary === "unsettle"
       ? {
-          accessibilityLabel: gt("Un-settle {title}", { title: thread.title }),
+          accessibilityLabel: gt("Reopen {title}", { title: thread.title }),
           icon: "arrow.uturn.backward" as const,
-          label: gt("Un-settle", { $context: "verb, thread action" }),
-          swipeHint: gt("Opens the thread. Swipe left to un-settle."),
-          swipeSnoozeHint: gt("Opens the thread. Swipe left for un-settle and snooze actions."),
+          label: gt("Reopen", { $context: "verb, thread action" }),
+          swipeHint: gt("Opens the thread. Swipe left to reopen."),
+          swipeSnoozeHint: gt("Opens the thread. Swipe left for reopen and snooze actions."),
           onPress: handleUnsettle,
         }
       : {
-          accessibilityLabel: gt("Settle {title}", { title: thread.title }),
+          accessibilityLabel: gt("Mark {title} done", { title: thread.title }),
           icon: "checkmark" as const,
-          label: gt("Settle", { $context: "verb, thread action" }),
-          swipeHint: gt("Opens the thread. Swipe left to settle."),
-          swipeSnoozeHint: gt("Opens the thread. Swipe left for settle and snooze actions."),
+          label: gt("Mark done", { $context: "verb, thread action" }),
+          swipeHint: gt("Opens the thread. Swipe left to mark done."),
+          swipeSnoozeHint: gt("Opens the thread. Swipe left for mark done and snooze actions."),
           onPress: handleSettle,
         };
   }, [

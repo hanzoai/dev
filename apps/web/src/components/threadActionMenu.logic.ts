@@ -168,10 +168,14 @@ export function buildThreadActionMenuItems(
           state.isSettled
             ? {
                 id: "unsettle" as const,
-                label: resolve(msg("Un-settle thread")),
+                label: resolve(msg("Reopen thread")),
                 icon: "circle-check",
               }
-            : { id: "settle" as const, label: resolve(msg("Settle thread")), icon: "circle-check" },
+            : {
+                id: "settle" as const,
+                label: resolve(msg("Mark thread done")),
+                icon: "circle-check",
+              },
         ]
       : []),
     ...(state.supports.snooze
@@ -240,7 +244,7 @@ export function buildThreadActionMenuItems(
       ? [
           {
             id: "auto-settle" as const,
-            label: resolve(msg("Auto-settle behavior")),
+            label: resolve(msg("Auto-done behavior")),
             icon: "timer",
             children: [
               {

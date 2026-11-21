@@ -69,7 +69,7 @@ const SECTION_LABELS = {
   pinned: msg("Pinned", { $context: "thread list section" }),
   active: msg("Active", { $context: "thread list section" }),
   snoozed: msg("Snoozed", { $context: "thread list section" }),
-  settled: msg("Settled", { $context: "thread list section" }),
+  settled: msg("Done", { $context: "thread list section" }),
 } as const;
 
 function ArrangementRow(props: {
@@ -414,7 +414,7 @@ function ThreadArrangementSheet(props: { onClose: () => void }) {
                 accessibilityLabel={gt("Close arrange threads")}
               />
               <Text className="px-5 pb-3 text-sm text-foreground-muted">
-                <T>Drag to reorder, pin, or settle. Changes save when you drop.</T>
+                <T>Drag to reorder, pin, or mark done. Changes save when you drop.</T>
               </Text>
               <View
                 onLayout={(event) => {
@@ -556,7 +556,7 @@ function ThreadArrangementSheet(props: { onClose: () => void }) {
                                 : olderSettledShelf.failed
                                   ? gt("Could not load older threads. Retry")
                                   : gt(
-                                      "{count, plural, one {Show more ({count} settled hidden)} other {Show more ({count} settled hidden)}}",
+                                      "{count, plural, one {Show more ({count} done hidden)} other {Show more ({count} done hidden)}}",
                                       {
                                         count: settledCount - visibleSettled.length,
                                       },

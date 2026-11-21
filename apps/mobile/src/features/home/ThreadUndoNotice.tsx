@@ -86,7 +86,7 @@ export function ThreadUndoNotice(props: { readonly visible: boolean }) {
       <Toast
         message={
           notice.action === "Settled"
-            ? gt("Settled thread")
+            ? gt("Done thread")
             : notice.action === "Snoozed"
               ? gt("Snoozed thread")
               : gt("Unpinned thread")

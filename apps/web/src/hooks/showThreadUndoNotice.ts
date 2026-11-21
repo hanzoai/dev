@@ -32,7 +32,7 @@ type UndoNotice = {
 export const useThreadUndoNotice = create<{ notice: UndoNotice | null }>(() => ({ notice: null }));
 
 const SUMMARY = {
-  Settled: msg("Settled {count, plural, one {{count} thread} other {{count} threads}}"),
+  Settled: msg("Marked {count, plural, one {{count} thread} other {{count} threads}} done"),
   Snoozed: msg("Snoozed {count, plural, one {{count} thread} other {{count} threads}}"),
   Unpinned: msg("Unpinned {count, plural, one {{count} thread} other {{count} threads}}"),
   Archived: msg("Archived {count, plural, one {{count} thread} other {{count} threads}}"),
@@ -40,7 +40,7 @@ const SUMMARY = {
 } satisfies Record<UndoOptions["action"], string>;
 
 const UNDONE = {
-  Settled: msg("Undid settle of {count, plural, one {{count} thread} other {{count} threads}}"),
+  Settled: msg("Undid marking {count, plural, one {{count} thread} other {{count} threads}} done"),
   Snoozed: msg("Undid snooze of {count, plural, one {{count} thread} other {{count} threads}}"),
   Unpinned: msg("Undid unpin of {count, plural, one {{count} thread} other {{count} threads}}"),
   Archived: msg("Undid archive of {count, plural, one {{count} thread} other {{count} threads}}"),

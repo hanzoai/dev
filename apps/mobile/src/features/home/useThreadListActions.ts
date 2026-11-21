@@ -62,8 +62,8 @@ const ACTION_FAILURES: Record<ThreadListAction, string> = {
   archive: msg("The thread could not be archived."),
   unarchive: msg("The thread could not be unarchived."),
   delete: msg("The thread could not be deleted."),
-  settle: msg("The thread could not be settled."),
-  unsettle: msg("The thread could not be un-settled."),
+  settle: msg("The thread could not be marked done."),
+  unsettle: msg("The thread could not be reopened."),
 };
 
 function actionFailureMessage(action: ThreadListAction, cause: Cause.Cause<unknown>): string {
@@ -81,8 +81,8 @@ function selectionHaptic(): void {
 function actionFailureTitle(action: ThreadListAction): string {
   if (action === "archive") return m(msg("Could not archive thread"));
   if (action === "unarchive") return m(msg("Could not unarchive thread"));
-  if (action === "settle") return m(msg("Could not settle thread"));
-  if (action === "unsettle") return m(msg("Could not un-settle thread"));
+  if (action === "settle") return m(msg("Could not mark thread done"));
+  if (action === "unsettle") return m(msg("Could not reopen thread"));
   return m(msg("Could not delete thread"));
 }
 
@@ -140,7 +140,7 @@ function useThreadActionExecutor(
           actionFailureTitle(action),
           m(
             msg(
-              "This environment's server does not support settling yet. Update the server to use Settle.",
+              "This environment's server does not support marking threads done yet. Update the server to use Mark done.",
             ),
           ),
         );
@@ -298,7 +298,7 @@ export function useThreadListActions(): {
                   const failureTitle =
                     action === "Unpinned"
                       ? m(msg("Could not undo unpin"))
-                      : m(msg("Could not undo settle"));
+                      : m(msg("Could not undo mark done"));
                   if (!checkThreadOperationPermission(thread, failureTitle)) return false;
                   const result = await snoozeMutation({
                     environmentId: thread.environmentId,
@@ -547,10 +547,10 @@ export function useThreadListActions(): {
   const setThreadAutoSettle = async (thread: EnvironmentThreadShell, enabled: boolean) => {
     if (!environmentSupportsAutoSettleOptOut(thread.environmentId)) {
       Dialog.alert(
-        m(msg("Could not update auto-settle")),
+        m(msg("Could not update auto-done")),
         m(
           msg(
-            "This environment's server does not support turning auto-settle off per thread yet. Update the server to use it.",
+            "This environment's server does not support turning auto-done off per thread yet. Update the server to use it.",
           ),
         ),
       );
@@ -564,10 +564,10 @@ export function useThreadListActions(): {
     if (result._tag === "Failure") {
       const error = Cause.squash(result.cause);
       Dialog.alert(
-        m(msg("Could not update auto-settle")),
+        m(msg("Could not update auto-done")),
         error instanceof Error && errorDisplayMessage(error, m) !== null
           ? (errorDisplayMessage(error, m) ?? error.message)
-          : m(msg("The auto-settle setting could not be changed.")),
+          : m(msg("The auto-done setting could not be changed.")),
       );
       return false;
     }
