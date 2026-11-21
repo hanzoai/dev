@@ -26,7 +26,7 @@ jobs:
   deploy_relay:
     name: Deploy production relay
     # A manual run from another branch would deploy that branch to production.
-    if: github.repository == 'hanzoai/dev' && github.ref == 'refs/heads/main'
+    if: github.repository == 'hanzoai/dev-desktop' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment:
