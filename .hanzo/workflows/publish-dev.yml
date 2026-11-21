@@ -1,8 +1,8 @@
-# Publishes @hanzo/dev (packages/dev), the Dev core as a library, when its package.json
+# Publishes @hanzo/dev-core (packages/dev), the Dev core as a library, when its package.json
 # names a version npm does not serve yet. hanzo.ai takes it from npm. The question is asked
 # of the registry, not of the diff, so a re-run is idempotent. The npm token is read from
 # KMS at run time (NPM_TOKEN at the org root, env prod).
-name: Publish @hanzo/dev
+name: Publish @hanzo/dev-core
 
 on:
   push:
