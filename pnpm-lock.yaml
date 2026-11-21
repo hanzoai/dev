@@ -976,6 +976,9 @@ importers:
       '@hanzo/font':
         specifier: 1.11.0
         version: 1.11.0
+      '@hanzo/voice':
+        specifier: 0.1.19
+        version: 0.1.19(react@19.3.0)
       '@hanzodev/client-runtime':
         specifier: workspace:*
         version: link:../../packages/client-runtime
@@ -4334,6 +4337,11 @@ packages:
     peerDependenciesMeta:
       next:
         optional: true
+
+  '@hanzo/voice@0.1.19':
+    resolution: {integrity: sha512-YutRs56u2jAq/DcVujvKLDSq7JeeTdUxk5iIQM4LF7L0WMCD/UL5aiVQEdDIvUP71BrSg2LL0UYTWFNnSrSeXw==}
+    peerDependencies:
+      react: '>=18'
 
   '@hanzodev/mobile-highlights-native@file:apps/mobile/modules/hanzo-highlights':
     resolution: {directory: apps/mobile/modules/hanzo-highlights, type: directory}
@@ -14006,6 +14014,10 @@ snapshots:
   '@hanzo/browser@0.1.0': {}
 
   '@hanzo/font@1.11.0': {}
+
+  '@hanzo/voice@0.1.19(react@19.3.0)':
+    dependencies:
+      react: 19.3.0
 
   '@hanzodev/mobile-highlights-native@file:apps/mobile/modules/hanzo-highlights(react-native-nitro-modules@0.37.2(react-native@0.88.1(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.1(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.3.0))':
     dependencies:

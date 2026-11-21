@@ -8,6 +8,7 @@ import { I18nProvider } from "../i18n/I18nProvider";
 import { startI18n, whenLocaleReady } from "../i18n/runtime";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
 import { HomeComposer } from "./HomeComposer";
+import { TalkMode } from "./TalkMode";
 import { useHomeChat } from "./homeChat";
 import { prepareTurn } from "./homeSend";
 import type { DevCloud, DevEnvironment } from "./runtime";
@@ -180,6 +181,7 @@ function Home(props: DevHomeProps): ReactNode {
               onEnvironment={props.onEnvironment}
             />
           ) : null}
+          <TalkMode cloud={props.cloud} />
         </div>
       </div>
     </div>

@@ -28,6 +28,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@effect/atom-react": "catalog:",
     "@hanzo/font": "1.11.0",
+    "@hanzo/voice": "0.1.19",
     "@hanzodev/client-runtime": "workspace:*",
     "@hanzodev/contracts": "workspace:*",
     "@hanzodev/provider-core": "workspace:*",
