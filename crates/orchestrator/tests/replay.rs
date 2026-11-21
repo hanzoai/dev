@@ -31,3 +31,8 @@ fn replay(corpus: &str, minimum: usize) -> Result<(), Box<dyn std::error::Error>
 fn dispatch_mode_limit() -> Result<(), Box<dyn std::error::Error>> {
     replay(include_str!("../corpus/dispatch_mode_limit.jsonl"), 3000)
 }
+
+#[test]
+fn model_switch() -> Result<(), Box<dyn std::error::Error>> {
+    replay(include_str!("../corpus/model_switch.jsonl"), 1000)
+}
