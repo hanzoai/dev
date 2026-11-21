@@ -63,7 +63,16 @@ export default defineConfig({
     "import.meta.env.VITE_RELEASE_CHANNEL": JSON.stringify(""),
     "import.meta.env.APP_VERSION": JSON.stringify(pkg.version),
   },
-  resolve: { tsconfigPaths: true, dedupe: ["react", "react-dom"] },
+  resolve: {
+    tsconfigPaths: true,
+    dedupe: ["react", "react-dom"],
+    alias: [
+      {
+        find: /^use-sync-external-store\/(shim(\/index\.js)?|(shim\/)?with-selector(\.js)?)$/,
+        replacement: new URL("./vite/syncExternalStore.ts", import.meta.url).pathname,
+      },
+    ],
+  },
   build: {
     outDir: "../../packages/dev/dist",
     emptyOutDir: true,
