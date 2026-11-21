@@ -5,7 +5,7 @@ import Foundation
 import HanzoEngineFFI
 #endif
 
-/// One Zen model this phone can run, from Hanzo's model host (the `zenlm` org). The file is a GGUF the
+/// A Zen model this phone can run (0.5 GB, 0.9 GiB resident; a 3B Q4_K_M needs 3.7 GiB and was not coherent on the simulator), from Hanzo's model host (the `zenlm` org). The file is a GGUF the
 /// engine loads on Metal; `sha256` is the host's published digest and a download must match it.
 private struct Entry {
   let id: String
@@ -22,11 +22,7 @@ private let models: [Entry] = [
   Entry(
     id: "zen6-nano-2b", name: "Zen 6 Nano 2B", repo: "zenlm/zen6-nano-2b",
     file: "zen6-nano-2b-PQ2_0.gguf", bytes: 517_313_216,
-    sha256: "b248a5db9793e886a5e4eb9cc59d0dbd7494dc2835462a98e69ead6c28ffbb4c", memory: 4),
-  Entry(
-    id: "zen-eco-3b-agent", name: "Zen Eco 3B Agent", repo: "zenlm/zen-eco-4b-agent-gguf",
-    file: "zen-eco-3b-agent-q4_k_m.gguf", bytes: 1_929_902_464,
-    sha256: "b86c2dff0701c3e8b0b0917da068bce86b36722ad6f304f59687072710631a92", memory: 8),
+    sha256: "b248a5db9793e886a5e4eb9cc59d0dbd7494dc2835462a98e69ead6c28ffbb4c", memory: 4)
 ]
 
 private let host = "https://huggingface.co"
