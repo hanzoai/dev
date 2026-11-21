@@ -32,29 +32,36 @@ describe("discoverEnvironments", () => {
     const calls: Array<string> = [];
     const fetch: DiscoveryFetch = async (url, init) => {
       calls.push(`${init?.method} ${url}`);
-      return json(200, { sources: [mac, { ...mac, id: "m2", name: "Gone", state: "revoked" }] });
+      return url.endsWith("/v1/sources")
+        ? json(200, { sources: [mac, { ...mac, id: "m2", name: "Gone", state: "revoked" }] })
+        : json(405, {});
     };
     const result = await discoverEnvironments(auth, known, { fetch });
-    expect(result.environments.map((e) => `${e.type}:${e.id}`)).toEqual(["linked:m1", "saved:s1"]);
+    expect(result.environments.map((e) => `${e.type}:${e.id}`)).toEqual([
+      "linked:m1",
+      "cloud:cloud",
+      "saved:s1",
+    ]);
     expect(result.sources.status).toBe("ok");
+    expect(result.cloud.status).toBe("ok");
     expect(result.showLinkPrompt).toBe(false);
-    expect(calls).toEqual(["GET https://api.hanzo.ai/v1/sources"]);
+    expect(calls.toSorted()).toEqual([
+      "GET https://api.hanzo.ai/v1/dev/sessions",
+      "GET https://api.hanzo.ai/v1/sources",
+    ]);
   });
 
-  it("offers cloud, never spawning it, when no machine is linked", async () => {
-    const calls: Array<string> = [];
-    const fetch: DiscoveryFetch = async (url, init) => {
-      calls.push(`${init?.method} ${url}`);
-      return json(200, { sources: [] });
-    };
+  it("lists cloud as not available yet when its route is not deployed", async () => {
+    const fetch: DiscoveryFetch = async (url) =>
+      url.endsWith("/v1/sources") ? json(200, { sources: [] }) : json(404, {});
     const result = await discoverEnvironments(auth, known, { fetch });
     expect(result.environments.map((e) => `${e.type}:${e.id}`)).toEqual([
       "cloud:cloud",
       "saved:s1",
       "relay:m1",
     ]);
+    expect(result.cloud.status).toBe("unavailable");
     expect(result.showLinkPrompt).toBe(true);
-    expect(calls).toEqual(["GET https://api.hanzo.ai/v1/sources"]);
   });
 
   it.each([404, 501])("degrades %i to unavailable", async (status: number) => {
@@ -62,21 +69,23 @@ describe("discoverEnvironments", () => {
     expect(result.sources.status).toBe("unavailable");
     expect(result.cloud.status).toBe("unavailable");
     expect(result.showLinkPrompt).toBe(true);
-    expect(result.environments.map((e) => e.id)).toEqual(["s1", "m1"]);
+    expect(result.environments.map((e) => e.id)).toEqual(["cloud", "s1", "m1"]);
   });
 
   it("degrades a network failure to unavailable", async () => {
-    const result = await discoverEnvironments(auth, [], {
+    const result = await discoverEnvironments(auth, known, {
       fetch: async () => {
         throw new TypeError("network");
       },
     });
     expect(result.sources.status).toBe("unavailable");
+    expect(result.cloud.status).toBe("unavailable");
   });
 
   it("reports 500 as error", async () => {
-    const result = await discoverEnvironments(auth, [], { fetch: async () => json(500, {}) });
+    const result = await discoverEnvironments(auth, known, { fetch: async () => json(500, {}) });
     expect(result.sources.status).toBe("error");
+    expect(result.cloud.status).toBe("error");
   });
 
   it("makes no request without a token", async () => {

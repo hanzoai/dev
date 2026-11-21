@@ -1,0 +1,23 @@
+{
+  "fixture": "muse_workflow",
+  "driver": "muse",
+  "modelSelection": {
+    "instanceId": "muse",
+    "model": "muse-spark-1.3-contributor"
+  },
+  "runContinuationWorker": true,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Use your workflow tool to launch a workflow with exactly TWO agents: one labeled 'ping' that replies with the word PING, and one labeled 'pong' that replies with the word PONG. Launch it and end your turn; do not wait for it."
+    },
+    {
+      "type": "await_run_status",
+      "targetRunIndex": 2,
+      "status": "completed"
+    }
+  ]
+}

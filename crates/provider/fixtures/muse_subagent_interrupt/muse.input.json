@@ -1,0 +1,23 @@
+{
+  "fixture": "muse_subagent_interrupt",
+  "driver": "muse",
+  "modelSelection": {
+    "instanceId": "muse",
+    "model": "muse-spark-1.3-contributor"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Spawn one subagent whose only task is to run the shell command `sleep 30` and then reply with exactly: Done. Wait for it to finish, then reply with exactly what it said."
+    },
+    {
+      "type": "interrupt",
+      "targetRunIndex": 1,
+      "waitForTurnItemType": "subagent"
+    }
+  ]
+}

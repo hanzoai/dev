@@ -1,0 +1,23 @@
+{
+  "fixture": "opencode2_background",
+  "driver": "opencode",
+  "modelSelection": {
+    "instanceId": "opencode",
+    "model": "opencode/big-pickle"
+  },
+  "runContinuationWorker": true,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Use the subagent tool with background enabled to delegate to the general subagent with the prompt: 'Run the shell command `sleep 20` with the bash tool and then reply exactly CHILD_OK.' As soon as it is launched, reply exactly PARENT_OK and end your turn without waiting for it."
+    },
+    {
+      "type": "await_run_status",
+      "targetRunIndex": 2,
+      "status": "completed"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 import { discoverEnvironments } from "@hanzodev/client-runtime/discovery";
 import { describe, expect, it } from "vite-plus/test";
 
-import { drawerMacs, resolveMacTap } from "./drawer-macs.logic";
+import { drawerCloud, drawerMacs, resolveMacTap } from "./drawer-macs.logic";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -52,5 +52,27 @@ describe("resolveMacTap", () => {
     expect(resolveMacTap({ macId: "a", ...sets })).toBe("open");
     expect(resolveMacTap({ macId: "b", ...sets })).toBe("connect");
     expect(resolveMacTap({ macId: "z", ...sets })).toBe("settings");
+  });
+});
+
+describe("drawerCloud", () => {
+  it("lists Cloud as available when the sessions route is deployed", async () => {
+    const discovery = await discoverEnvironments({ accessToken: "t" }, [], {
+      fetch: async (url) =>
+        url.endsWith("/v1/sources") ? json(200, { sources: [] }) : json(405, {}),
+    });
+    expect(drawerCloud(discovery)).toEqual({ available: true });
+  });
+
+  it("lists Cloud as not available yet when the route is missing", async () => {
+    const discovery = await discoverEnvironments({ accessToken: "t" }, [], {
+      fetch: async (url) =>
+        url.endsWith("/v1/sources") ? json(200, { sources: [] }) : json(404, {}),
+    });
+    expect(drawerCloud(discovery)).toEqual({ available: false });
+  });
+
+  it("is absent before discovery runs", () => {
+    expect(drawerCloud(null)).toBeNull();
   });
 });

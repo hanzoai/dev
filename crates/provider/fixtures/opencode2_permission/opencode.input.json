@@ -1,0 +1,33 @@
+{
+  "fixture": "opencode2_permission",
+  "driver": "opencode",
+  "modelSelection": {
+    "instanceId": "opencode",
+    "model": "opencode/big-pickle"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": "approval-required",
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Run the shell command `echo FIRST` with the bash tool. After it completes, run `echo SECOND` with the bash tool. Then reply with what happened."
+    },
+    {
+      "type": "approve_next_runtime_request"
+    },
+    {
+      "type": "approve_next_runtime_request",
+      "decision": "decline"
+    },
+    {
+      "type": "approve_next_runtime_request",
+      "decision": "decline"
+    },
+    {
+      "type": "approve_next_runtime_request",
+      "decision": "decline"
+    }
+  ]
+}

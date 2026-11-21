@@ -334,7 +334,7 @@ function helpSection(
     case "refused":
     case "timeout":
     case "unknown":
-      return "the-hanzo-connect-address-does-not-resolve-or-answer";
+      return "the-hanzo-link-address-does-not-resolve-or-answer";
     case null:
       break;
   }

@@ -1,0 +1,27 @@
+{
+  "fixture": "claude_compact_after_resume_wake",
+  "driver": "claudeAgent",
+  "modelSelection": {
+    "instanceId": "claudeAgent",
+    "model": "claude-sonnet-4-6"
+  },
+  "runContinuationWorker": true,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Reply with exactly: compact probe first turn"
+    },
+    {
+      "type": "advance_clock",
+      "duration": "31 minutes",
+      "releasesProviderSession": true
+    },
+    {
+      "type": "message",
+      "text": "/compact"
+    }
+  ]
+}

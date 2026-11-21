@@ -1,0 +1,22 @@
+{
+  "fixture": "multi_turn",
+  "driver": "muse",
+  "modelSelection": {
+    "instanceId": "muse",
+    "model": "muse-spark-1.3-contributor"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Respond with exactly: first fixture turn complete"
+    },
+    {
+      "type": "message",
+      "text": "Respond with exactly: second fixture turn complete"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "fixture": "claude_local_bash_task",
+  "driver": "claudeAgent",
+  "modelSelection": {
+    "instanceId": "claudeAgent",
+    "model": "claude-sonnet-4-6"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Run a local Bash typecheck command, then answer exactly: claude local bash task fixture complete"
+    }
+  ]
+}

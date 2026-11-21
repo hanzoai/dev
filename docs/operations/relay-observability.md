@@ -151,7 +151,7 @@ account limit, which Cloudflare raised to 20,000 calls per 5 minutes in October 
 was about 2,100).
 
 **Traffic dropped.** The Worker is down, a deploy broke it, or spans stopped reaching Axiom. Check
-`https://relay.dev.hanzo.ai/health` first.
+the configured relay's `/health` first.
 
 **Tunnel cleanup stopped / tunnel deletions failing.** Monitors for the five-minute reaper that deletes
 idle Cloudflare tunnels. "Stopped" pages after two hours without a finished sweep, so it also fires

@@ -1,0 +1,18 @@
+{
+  "fixture": "claude_nested_subagent_model",
+  "driver": "claudeAgent",
+  "modelSelection": {
+    "instanceId": "claudeAgent",
+    "model": "claude-sonnet-4-6"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Live-test nested subagents. Do exactly this, with no extra steps.\n\n1) Call the Agent tool once with subagent_type \"general-purpose\", model \"haiku\", run_in_background false, and this prompt:\n   \"Call the Agent tool once with subagent_type \\\"general-purpose\\\", run_in_background false, no model parameter, and the prompt: Reply with exactly NESTED_LEAF_OK. Then reply with exactly what that agent said.\"\n2) When it finishes, reply with exactly what it said."
+    }
+  ]
+}

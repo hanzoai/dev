@@ -7,6 +7,8 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
 
 #[derive(Clone)]
 pub struct BackendRuntimeConfig {
@@ -58,6 +60,8 @@ pub struct BackendSupervisor {
     pub config: BackendRuntimeConfig,
     shutting_down: Arc<AtomicBool>,
     child_pid: Arc<AtomicU32>,
+    /// True while the backend is hanzod's worker; false when the app runs it itself.
+    via_daemon: Arc<AtomicBool>,
 }
 
 pub fn pick_available_port(preferred_start: u16) -> u16 {
@@ -382,8 +386,8 @@ mod hanzod {
         Some((it.next()??, it.next()??, it.next()??))
     }
 
-    /// Put the bundled hanzod at `~/.hanzo/bin` if it is newer than what is there; never
-    /// downgrade. The previous binary is kept beside it for rollback.
+    /// Put the bundled hanzod at `~/.hanzo/bin` if it is newer than what is there, or the same
+    /// version built differently; never downgrade. The previous binary is kept beside it for rollback.
     fn install() -> Option<PathBuf> {
         let target = installed();
         let Some(bundle) = bundled() else {
@@ -391,7 +395,11 @@ mod hanzod {
         };
         let ours = version_of(&bundle);
         let theirs = target.is_file().then(|| version_of(&target)).flatten();
-        if ours.is_some() && (theirs.is_none() || ours > theirs) {
+        let newer = ours > theirs
+            || (ours.is_some()
+                && ours == theirs
+                && sha256_of(&bundle).ok() != sha256_of(&target).ok());
+        if ours.is_some() && (theirs.is_none() || newer) {
             let dir = target.parent()?;
             std::fs::create_dir_all(dir).ok()?;
             let part = dir.join("hanzod.part");
@@ -453,11 +461,13 @@ impl BackendSupervisor {
     pub fn start(config: BackendRuntimeConfig, local_enabled: bool) -> Self {
         let shutting_down = Arc::new(AtomicBool::new(false));
         let child_pid = Arc::new(AtomicU32::new(0));
+        let via_daemon = Arc::new(AtomicBool::new(true));
 
         if local_enabled {
             let cfg = config.clone();
             let stop_flag = Arc::clone(&shutting_down);
             let pid_slot = Arc::clone(&child_pid);
+            let daemon_flag = Arc::clone(&via_daemon);
 
             tauri::async_runtime::spawn(async move {
                 let mut backoff_ms = 500u64;
@@ -535,6 +545,7 @@ impl BackendSupervisor {
 
                     match outcome {
                         Ok(pid) => {
+                            daemon_flag.store(true, Ordering::SeqCst);
                             pid_slot.store(pid, Ordering::SeqCst);
                             backoff_ms = 500;
                             // hanzod restarts the worker on the next session if it dies and
@@ -542,7 +553,46 @@ impl BackendSupervisor {
                             tokio::time::sleep(Duration::from_secs(30)).await;
                         }
                         Err(err) => {
-                            eprintln!("[hanzo-tauri] hanzod: {err}");
+                            // Without hanzod the app runs the backend itself, as before.
+                            eprintln!("[hanzo-tauri] hanzod: {err}; running the Dev backend directly");
+                            daemon_flag.store(false, Ordering::SeqCst);
+                            let Ok(bootstrap_json) = serde_json::to_vec(&bootstrap) else {
+                                break;
+                            };
+                            let mut cmd = Command::new(&program);
+                            cmd.args(&args)
+                                .current_dir(&backend_cwd)
+                                .env("PATH", augmented_path())
+                                .env("HANZO_DEV_DESKTOP_HOST_SCOPE", &cfg.host_scope)
+                                .env_remove("HANZO_DEV_PORT")
+                                .env_remove("HANZO_DEV_MODE")
+                                .env_remove("HANZO_DEV_NO_BROWSER")
+                                .env_remove("HANZO_DEV_HOST")
+                                .stdin(Stdio::piped())
+                                .stdout(Stdio::inherit())
+                                .stderr(Stdio::inherit());
+                            match cmd.spawn() {
+                                Ok(mut child) => {
+                                    if let Some(pid) = child.id() {
+                                        pid_slot.store(pid, Ordering::SeqCst);
+                                    }
+                                    if let Some(mut stdin) = child.stdin.take() {
+                                        let _ = stdin.write_all(&bootstrap_json).await;
+                                        let _ = stdin.shutdown().await;
+                                    }
+                                    let _ = child.wait().await;
+                                    pid_slot.store(0, Ordering::SeqCst);
+                                    if stop_flag.load(Ordering::SeqCst) {
+                                        break;
+                                    }
+                                }
+                                Err(err) => {
+                                    eprintln!(
+                                        "[hanzo-tauri] Failed to spawn {}: {err}",
+                                        program.display()
+                                    );
+                                }
+                            }
                             if started.elapsed() > Duration::from_secs(15) {
                                 backoff_ms = 500;
                             }
@@ -558,22 +608,37 @@ impl BackendSupervisor {
             config,
             shutting_down,
             child_pid,
+            via_daemon,
         }
     }
 
-    /// Tell hanzod this app no longer needs its Dev worker. The daemon itself keeps running: it
-    /// is the machine's, not this app's.
+    /// Stop the backend this app started. As hanzod's worker it is released to the daemon, which
+    /// keeps running (it is the machine's, not this app's); run directly it is terminated.
     pub fn shutdown(&self) {
         self.shutting_down.store(true, Ordering::SeqCst);
-        if self.child_pid.swap(0, Ordering::SeqCst) == 0 {
+        let pid = self.child_pid.swap(0, Ordering::SeqCst);
+        if pid == 0 {
             return;
         }
-        let _ = tauri::async_runtime::block_on(async {
-            tokio::time::timeout(
-                Duration::from_secs(3),
-                hanzod::call("DELETE", "/v1/dev/session", vec![]),
-            )
-            .await
-        });
+        if self.via_daemon.load(Ordering::SeqCst) {
+            let _ = tauri::async_runtime::block_on(async {
+                tokio::time::timeout(
+                    Duration::from_secs(3),
+                    hanzod::call("DELETE", "/v1/dev/session", vec![]),
+                )
+                .await
+            });
+            return;
+        }
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(pid as i32, libc::SIGTERM);
+        }
+        #[cfg(windows)]
+        {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .status();
+        }
     }
 }

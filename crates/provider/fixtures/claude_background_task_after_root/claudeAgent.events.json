@@ -1,0 +1,2430 @@
+[
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aclaude_background_task_after_root%3Athread-create%3A<uuid:2>:<uuid:0>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "thread.created",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "projectId": "project:fixture:claude_background_task_after_root:<uuid:0>",
+      "title": "Replay fixture: claude_background_task_after_root",
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "branch": null,
+      "worktreePath": null,
+      "pullRequests": [],
+      "activeProviderThreadId": null,
+      "lineage": {
+        "parentThreadId": null,
+        "relationshipToParent": null,
+        "rootThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>"
+      },
+      "forkedFrom": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "archivedAt": null,
+      "settledOverride": null,
+      "settledAt": null,
+      "snoozedUntil": null,
+      "snoozedAt": null,
+      "lastVisitedAt": null,
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aclaude_background_task_after_root%3Amessage-1%3A<uuid:3>:<uuid:1>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "thread.metadata-updated",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "projectId": "project:fixture:claude_background_task_after_root:<uuid:0>",
+      "title": "Replay fixture: claude_background_task_after_root",
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "branch": null,
+      "worktreePath": null,
+      "pullRequests": [],
+      "activeProviderThreadId": null,
+      "lineage": {
+        "parentThreadId": null,
+        "relationshipToParent": null,
+        "rootThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>"
+      },
+      "forkedFrom": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "archivedAt": null,
+      "settledOverride": null,
+      "settledAt": null,
+      "snoozedUntil": null,
+      "snoozedAt": null,
+      "lastVisitedAt": "<time>",
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aclaude_background_task_after_root%3Amessage-1%3A<uuid:3>:<uuid:3>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": null,
+      "nativeConversationHeadRef": null,
+      "status": "not_loaded",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": null,
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aclaude_background_task_after_root%3Amessage-1%3A<uuid:3>:<uuid:4>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run.created",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "starting",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": null,
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aclaude_background_task_after_root%3Amessage-1%3A<uuid:3>:<uuid:5>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run-attempt.created",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "claudeAgent",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "pending",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aclaude_background_task_after_root%3Amessage-1%3A<uuid:3>:<uuid:6>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "pending",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aclaude_background_task_after_root%3Amessage-1%3A<uuid:3>:<uuid:7>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "checkpoint-scope.created",
+    "payload": {
+      "id": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:name:root",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentScopeId": null,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "kind": "root_run",
+      "ordinalWithinParent": 0,
+      "advancesAppRunCount": true,
+      "cwd": "<workspace>",
+      "createdAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aclaude_background_task_after_root%3Amessage-1%3A<uuid:3>:<uuid:8>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "message:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "role": "user",
+      "text": "Live-test post-settle background Bash wake. Do exactly this in order, with no extra steps.\n\n1) Run this exact command using the Bash tool with run_in_background set to true:\n   sleep 25 && echo L2_BG_DONE\n2) Immediately after starting it, reply with a short message containing exactly L2_STARTED and stop.\n3) Do NOT poll TaskOutput. Do NOT wait for the task. Do not spawn subagents or monitors.\n4) If its completion is reported later, acknowledge it once by replying with exactly L2_WAKE: L2_BG_DONE and stop.\n\nThe point is that your first turn ends while the command is still running.",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aclaude_background_task_after_root%3Amessage-1%3A<uuid:3>:<uuid:9>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:message:message%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1%3A<uuid:4>",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000001,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "createdBy": "user",
+      "creationSource": "web",
+      "type": "user_message",
+      "messageId": "message:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "inputIntent": "turn_start",
+      "text": "Live-test post-settle background Bash wake. Do exactly this in order, with no extra steps.\n\n1) Run this exact command using the Bash tool with run_in_background set to true:\n   sleep 25 && echo L2_BG_DONE\n2) Immediately after starting it, reply with a short message containing exactly L2_STARTED and stop.\n3) Do NOT poll TaskOutput. Do NOT wait for the task. Do not spawn subagents or monitors.\n4) If its completion is reported later, acknowledge it once by replying with exactly L2_WAKE: L2_BG_DONE and stop.\n\nThe point is that your first turn ends while the command is still running.",
+      "attachments": []
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:10>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-session.attached",
+    "payload": {
+      "id": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "claude-sonnet-4-6",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": false,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkWhileSourceRunning": true,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "activeSteeringInterruptsTools": true,
+          "supportsSteeringByInterruptRestart": false,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": false,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": true
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": true,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": true,
+          "acceptsDeveloperContext": true,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": true,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": false
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "native"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:11>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "claude-sonnet-4-6",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": false,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkWhileSourceRunning": true,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "activeSteeringInterruptsTools": true,
+          "supportsSteeringByInterruptRestart": false,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": false,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": true
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": true,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": true,
+          "acceptsDeveloperContext": true,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": true,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": false
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "native"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:12>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "ec24a006-617b-4324-b516-57a7afff15a4",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "title": "Replay fixture: claude_background_task_after_root"
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:13>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "running",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:14>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeThreadId": "ec24a006-617b-4324-b516-57a7afff15a4",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "claudeAgent",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:15>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "running",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:16>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_background_task_after_root%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_background_task_after_root%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "claudeAgent",
+        "nativeId": "turn:run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+        "strength": "weak"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:17>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "ec24a006-617b-4324-b516-57a7afff15a4",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "title": "Replay fixture: claude_background_task_after_root",
+        "claudeAttachmentBudget": {
+          "bytesUsed": 595,
+          "pagesUsed": 0
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:18>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_background_task_after_root%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_background_task_after_root%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "claudeAgent",
+        "nativeId": "turn:run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+        "strength": "strong"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "tokenUsage": {
+        "usedTokens": 91,
+        "maxTokens": 200000,
+        "inputTokens": 2,
+        "cachedInputTokens": 0,
+        "outputTokens": 89,
+        "reasoningOutputTokens": 0,
+        "updatedAt": "<time>"
+      },
+      "model": "claude-sonnet-4-6"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:19>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:toolu_01DAnwwvVvLM1cTfzrm6kkor",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:claudeAgent:native-item:toolu_01DAnwwvVvLM1cTfzrm6kkor",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "running",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_background_task_after_root%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_background_task_after_root%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "toolu_01DAnwwvVvLM1cTfzrm6kkor",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:20>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:toolu_01DAnwwvVvLM1cTfzrm6kkor",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:claudeAgent:native-item:toolu_01DAnwwvVvLM1cTfzrm6kkor",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:claudeAgent:native-item:toolu_01DAnwwvVvLM1cTfzrm6kkor",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_background_task_after_root%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_background_task_after_root%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "toolu_01DAnwwvVvLM1cTfzrm6kkor",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000002,
+      "status": "running",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": null,
+      "updatedAt": "<time>",
+      "type": "command_execution",
+      "input": "sleep 25 && echo L2_BG_DONE"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:21>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "ec24a006-617b-4324-b516-57a7afff15a4",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [
+        {
+          "command": "sleep 25 && echo L2_BG_DONE",
+          "itemId": "turn-item:provider:claudeAgent:native-item:toolu_01DAnwwvVvLM1cTfzrm6kkor",
+          "sourceThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+          "taskId": "bc9gkn8ei",
+          "description": "sleep 25 && echo L2_BG_DONE",
+          "nativeItemId": "toolu_01DAnwwvVvLM1cTfzrm6kkor",
+          "kind": "command"
+        }
+      ],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "title": "Replay fixture: claude_background_task_after_root",
+        "claudeAttachmentBudget": {
+          "bytesUsed": 595,
+          "pagesUsed": 0
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:22>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "ec24a006-617b-4324-b516-57a7afff15a4",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [
+        {
+          "command": "sleep 25 && echo L2_BG_DONE",
+          "itemId": "turn-item:provider:claudeAgent:native-item:toolu_01DAnwwvVvLM1cTfzrm6kkor",
+          "sourceThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+          "taskId": "bc9gkn8ei",
+          "description": "sleep 25 && echo L2_BG_DONE",
+          "nativeItemId": "toolu_01DAnwwvVvLM1cTfzrm6kkor",
+          "kind": "command"
+        }
+      ],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "title": "Replay fixture: claude_background_task_after_root",
+        "claudeAttachmentBudget": {
+          "bytesUsed": 595,
+          "pagesUsed": 0
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:23>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:toolu_01DAnwwvVvLM1cTfzrm6kkor",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:claudeAgent:native-item:toolu_01DAnwwvVvLM1cTfzrm6kkor",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_background_task_after_root%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_background_task_after_root%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "toolu_01DAnwwvVvLM1cTfzrm6kkor",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:24>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:toolu_01DAnwwvVvLM1cTfzrm6kkor",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:claudeAgent:native-item:toolu_01DAnwwvVvLM1cTfzrm6kkor",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:claudeAgent:native-item:toolu_01DAnwwvVvLM1cTfzrm6kkor",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_background_task_after_root%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_background_task_after_root%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "toolu_01DAnwwvVvLM1cTfzrm6kkor",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000002,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "command_execution",
+      "input": "sleep 25 && echo L2_BG_DONE",
+      "output": "Command running in background with ID: bc9gkn8ei. Output is being written to: /tmp/claude-replay-claude_background_task_after_root/tasks/bc9gkn8ei.output. You will be notified when it completes. To check interim output, use Read on that file path."
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:25>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_background_task_after_root%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_background_task_after_root%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "claudeAgent",
+        "nativeId": "turn:run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+        "strength": "strong"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "tokenUsage": {
+        "usedTokens": 11,
+        "maxTokens": 200000,
+        "inputTokens": 2,
+        "cachedInputTokens": 0,
+        "outputTokens": 9,
+        "reasoningOutputTokens": 0,
+        "updatedAt": "<time>"
+      },
+      "model": "claude-sonnet-4-6"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:26>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:12ddebd6-6f2d-4223-be97-56ed454f7d15",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:claudeAgent:native-item:12ddebd6-6f2d-4223-be97-56ed454f7d15",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "assistant_message",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_background_task_after_root%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_background_task_after_root%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "12ddebd6-6f2d-4223-be97-56ed454f7d15",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:27>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:12ddebd6-6f2d-4223-be97-56ed454f7d15",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "agent",
+      "creationSource": "provider",
+      "id": "message:provider:claudeAgent:native-item:12ddebd6-6f2d-4223-be97-56ed454f7d15",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:claudeAgent:native-item:12ddebd6-6f2d-4223-be97-56ed454f7d15",
+      "role": "assistant",
+      "text": "L2_STARTED",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:28>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:12ddebd6-6f2d-4223-be97-56ed454f7d15",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:claudeAgent:native-item:12ddebd6-6f2d-4223-be97-56ed454f7d15",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:claudeAgent:native-item:12ddebd6-6f2d-4223-be97-56ed454f7d15",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_background_task_after_root%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_background_task_after_root%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "12ddebd6-6f2d-4223-be97-56ed454f7d15",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000003,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "assistant_message",
+      "messageId": "message:provider:claudeAgent:native-item:12ddebd6-6f2d-4223-be97-56ed454f7d15",
+      "text": "L2_STARTED",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:29>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_background_task_after_root%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_background_task_after_root%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "claudeAgent",
+        "nativeId": "turn:run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+        "strength": "strong"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "tokenUsage": {
+        "usedTokens": 11,
+        "maxTokens": 200000,
+        "inputTokens": 2,
+        "cachedInputTokens": 0,
+        "outputTokens": 9,
+        "reasoningOutputTokens": 0,
+        "updatedAt": "<time>"
+      },
+      "model": "claude-sonnet-4-6"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:30>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_background_task_after_root%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_background_task_after_root%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "claudeAgent",
+        "nativeId": "12ddebd6-6f2d-4223-be97-56ed454f7d15",
+        "strength": "weak"
+      },
+      "ordinal": 1,
+      "status": "completed",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "turnTokenUsage": {
+        "usageScope": "main_agent",
+        "cachedInputTokens": 0,
+        "cacheCreationTokens": 0,
+        "hasSubagents": false,
+        "models": [
+          "claude-sonnet-4-6"
+        ],
+        "otherUsage": {
+          "inputTokens": 0,
+          "outputTokens": 0
+        },
+        "usageStatus": "complete",
+        "inputTokens": 2,
+        "outputTokens": 9
+      },
+      "model": "claude-sonnet-4-6"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:31>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "ec24a006-617b-4324-b516-57a7afff15a4",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [
+        {
+          "command": "sleep 25 && echo L2_BG_DONE",
+          "itemId": "turn-item:provider:claudeAgent:native-item:toolu_01DAnwwvVvLM1cTfzrm6kkor",
+          "sourceThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+          "taskId": "bc9gkn8ei",
+          "description": "sleep 25 && echo L2_BG_DONE",
+          "nativeItemId": "toolu_01DAnwwvVvLM1cTfzrm6kkor",
+          "kind": "command"
+        }
+      ],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "title": "Replay fixture: claude_background_task_after_root",
+        "claudeAttachmentBudget": {
+          "bytesUsed": 595,
+          "pagesUsed": 0
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:32>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeThreadId": "ec24a006-617b-4324-b516-57a7afff15a4",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "claudeAgent",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "completed",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:33>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "waiting",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:34>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "waiting",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:35>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "ec24a006-617b-4324-b516-57a7afff15a4",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "idle",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [
+        {
+          "command": "sleep 25 && echo L2_BG_DONE",
+          "itemId": "turn-item:provider:claudeAgent:native-item:toolu_01DAnwwvVvLM1cTfzrm6kkor",
+          "sourceThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+          "taskId": "bc9gkn8ei",
+          "description": "sleep 25 && echo L2_BG_DONE",
+          "nativeItemId": "toolu_01DAnwwvVvLM1cTfzrm6kkor",
+          "kind": "command"
+        }
+      ],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "title": "Replay fixture: claude_background_task_after_root",
+        "claudeAttachmentBudget": {
+          "bytesUsed": 595,
+          "pagesUsed": 0
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:36>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "checkpoint.captured",
+    "payload": {
+      "id": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:0",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:name:root",
+      "runId": null,
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentCheckpointId": null,
+      "ordinalWithinScope": 0,
+      "appRunOrdinal": null,
+      "ref": "refs/hanzo/orchestration-v2/checkpoints/YjM2Y2RhMWFkNWZhOGExYWRhOGQ0NmZkZGQ3YzE1NDQ/ordinal/0",
+      "status": "ready",
+      "files": [],
+      "capturedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:37>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "checkpoint.captured",
+    "payload": {
+      "id": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:name:root",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentCheckpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:0",
+      "ordinalWithinScope": 1,
+      "appRunOrdinal": 1,
+      "ref": "refs/hanzo/orchestration-v2/checkpoints/YjM2Y2RhMWFkNWZhOGExYWRhOGQ0NmZkZGQ3YzE1NDQ/ordinal/1",
+      "status": "ready",
+      "files": [],
+      "capturedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:38>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:claudeAgent:native-item:checkpoint%3Acheckpoint%3Ascope%3Acheckpoint-scope%253Athread%253Athread%25253Afixture%25253Aclaude_background_task_after_root%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_background_task_after_root%2525253A<uuid:0>%25253A<uuid:1>%253Aname%253Aroot%3Aname%3A1",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000004,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "checkpoint",
+      "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:name:root",
+      "files": []
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:39>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "completed",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:40>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "completed",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:provider-continuation%3Amessage%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1%3A<uuid:41>:<uuid:42>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "ec24a006-617b-4324-b516-57a7afff15a4",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "idle",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 2,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [
+        {
+          "command": "sleep 25 && echo L2_BG_DONE",
+          "itemId": "turn-item:provider:claudeAgent:native-item:toolu_01DAnwwvVvLM1cTfzrm6kkor",
+          "sourceThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+          "taskId": "bc9gkn8ei",
+          "description": "sleep 25 && echo L2_BG_DONE",
+          "nativeItemId": "toolu_01DAnwwvVvLM1cTfzrm6kkor",
+          "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+          "kind": "command"
+        }
+      ],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "title": "Replay fixture: claude_background_task_after_root",
+        "claudeAttachmentBudget": {
+          "bytesUsed": 595,
+          "pagesUsed": 0
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:provider-continuation%3Amessage%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1%3A<uuid:41>:<uuid:43>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run.created",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ordinal": 2,
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:41>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:attempt:1",
+      "status": "starting",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": null,
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null,
+      "workStartedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:provider-continuation%3Amessage%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1%3A<uuid:41>:<uuid:44>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run-attempt.created",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:attempt:1",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "providerInstanceId": "claudeAgent",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "pending",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:provider-continuation%3Amessage%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1%3A<uuid:41>:<uuid:45>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "kind": "root_turn",
+      "status": "pending",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:provider-continuation%3Amessage%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1%3A<uuid:41>:<uuid:46>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "checkpoint-scope.created",
+    "payload": {
+      "id": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:name:root",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "parentScopeId": null,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "kind": "root_run",
+      "ordinalWithinParent": 0,
+      "advancesAppRunCount": true,
+      "cwd": "<workspace>",
+      "createdAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:provider-continuation%3Amessage%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1%3A<uuid:41>:<uuid:47>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "notification": {
+        "source": {
+          "kind": "background_command"
+        },
+        "outcome": "completed",
+        "summary": "Command \"sleep 25 && echo L2_BG_DONE\" finished"
+      },
+      "createdBy": "agent",
+      "creationSource": "provider",
+      "id": "message:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:41>",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "role": "user",
+      "text": "Background command \"sleep 25 && echo L2_BG_DONE\" completed (exit code 0)",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:provider-continuation%3Amessage%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1%3A<uuid:41>:<uuid:48>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:message:message%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1%3A<uuid:41>",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 2000001,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "notification",
+      "source": {
+        "kind": "background_command"
+      },
+      "outcome": "completed",
+      "summary": "Command \"sleep 25 && echo L2_BG_DONE\" finished"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:49>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "claude-sonnet-4-6",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": false,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkWhileSourceRunning": true,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "activeSteeringInterruptsTools": true,
+          "supportsSteeringByInterruptRestart": false,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": false,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": true
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": true,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": true,
+          "acceptsDeveloperContext": true,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": true,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": false
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "native"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:50>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "ec24a006-617b-4324-b516-57a7afff15a4",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 2,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [
+        {
+          "command": "sleep 25 && echo L2_BG_DONE",
+          "itemId": "turn-item:provider:claudeAgent:native-item:toolu_01DAnwwvVvLM1cTfzrm6kkor",
+          "sourceThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+          "taskId": "bc9gkn8ei",
+          "description": "sleep 25 && echo L2_BG_DONE",
+          "nativeItemId": "toolu_01DAnwwvVvLM1cTfzrm6kkor",
+          "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+          "kind": "command"
+        }
+      ],
+      "contextUsage": {
+        "usedTokens": 11,
+        "maxTokens": 200000
+      },
+      "nativeMetadata": {
+        "title": "Replay fixture: claude_background_task_after_root",
+        "claudeAttachmentBudget": {
+          "bytesUsed": 595,
+          "pagesUsed": 0
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:51>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ordinal": 2,
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:41>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:attempt:1",
+      "status": "running",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null,
+      "workStartedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:52>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:attempt:1",
+      "nativeThreadId": "ec24a006-617b-4324-b516-57a7afff15a4",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "providerInstanceId": "claudeAgent",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:53>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "kind": "root_turn",
+      "status": "running",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:54>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_background_task_after_root%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_background_task_after_root%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A2%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:attempt:1",
+      "nativeTurnRef": {
+        "driver": "claudeAgent",
+        "nativeId": "turn:run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:attempt:1",
+        "strength": "weak"
+      },
+      "ordinal": 2,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:55>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_background_task_after_root%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_background_task_after_root%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A2%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:attempt:1",
+      "nativeTurnRef": {
+        "driver": "claudeAgent",
+        "nativeId": "turn:run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:attempt:1",
+        "strength": "strong"
+      },
+      "ordinal": 2,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "tokenUsage": {
+        "usedTokens": 11,
+        "maxTokens": 200000,
+        "inputTokens": 2,
+        "cachedInputTokens": 0,
+        "outputTokens": 9,
+        "reasoningOutputTokens": 0,
+        "updatedAt": "<time>"
+      },
+      "model": "claude-sonnet-4-6"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:56>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:provider:claudeAgent:native-item:39c3f18d-5ec3-48ab-b309-2119f5efb6c5",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:claudeAgent:native-item:39c3f18d-5ec3-48ab-b309-2119f5efb6c5",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "kind": "assistant_message",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_background_task_after_root%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_background_task_after_root%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A2%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "39c3f18d-5ec3-48ab-b309-2119f5efb6c5",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:57>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:provider:claudeAgent:native-item:39c3f18d-5ec3-48ab-b309-2119f5efb6c5",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "agent",
+      "creationSource": "provider",
+      "id": "message:provider:claudeAgent:native-item:39c3f18d-5ec3-48ab-b309-2119f5efb6c5",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "nodeId": "node:provider:claudeAgent:native-item:39c3f18d-5ec3-48ab-b309-2119f5efb6c5",
+      "role": "assistant",
+      "text": "L2_WAKE: L2_BG_DONE",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:58>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:provider:claudeAgent:native-item:39c3f18d-5ec3-48ab-b309-2119f5efb6c5",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:claudeAgent:native-item:39c3f18d-5ec3-48ab-b309-2119f5efb6c5",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "nodeId": "node:provider:claudeAgent:native-item:39c3f18d-5ec3-48ab-b309-2119f5efb6c5",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_background_task_after_root%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_background_task_after_root%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A2%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "39c3f18d-5ec3-48ab-b309-2119f5efb6c5",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 2000002,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "assistant_message",
+      "messageId": "message:provider:claudeAgent:native-item:39c3f18d-5ec3-48ab-b309-2119f5efb6c5",
+      "text": "L2_WAKE: L2_BG_DONE",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:59>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "ec24a006-617b-4324-b516-57a7afff15a4",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 2,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [
+        {
+          "command": "sleep 25 && echo L2_BG_DONE",
+          "itemId": "turn-item:provider:claudeAgent:native-item:toolu_01DAnwwvVvLM1cTfzrm6kkor",
+          "sourceThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+          "taskId": "bc9gkn8ei",
+          "description": "sleep 25 && echo L2_BG_DONE",
+          "nativeItemId": "toolu_01DAnwwvVvLM1cTfzrm6kkor",
+          "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+          "kind": "command"
+        }
+      ],
+      "contextUsage": {
+        "usedTokens": 11,
+        "maxTokens": 200000
+      },
+      "nativeMetadata": {
+        "title": "Replay fixture: claude_background_task_after_root",
+        "claudeAttachmentBudget": {
+          "bytesUsed": 595,
+          "pagesUsed": 0
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:60>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_background_task_after_root%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_background_task_after_root%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A2%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:attempt:1",
+      "nativeTurnRef": {
+        "driver": "claudeAgent",
+        "nativeId": "39c3f18d-5ec3-48ab-b309-2119f5efb6c5",
+        "strength": "weak"
+      },
+      "ordinal": 2,
+      "status": "completed",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "turnTokenUsage": {
+        "usageScope": "main_agent",
+        "cachedInputTokens": 0,
+        "cacheCreationTokens": 0,
+        "hasSubagents": false,
+        "models": [
+          "claude-sonnet-4-6"
+        ],
+        "usageStatus": "complete",
+        "inputTokens": 2,
+        "outputTokens": 9
+      },
+      "model": "claude-sonnet-4-6"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:61>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "ec24a006-617b-4324-b516-57a7afff15a4",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 2,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": {
+        "usedTokens": 11,
+        "maxTokens": 200000
+      },
+      "nativeMetadata": {
+        "title": "Replay fixture: claude_background_task_after_root",
+        "claudeAttachmentBudget": {
+          "bytesUsed": 595,
+          "pagesUsed": 0
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:62>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:attempt:1",
+      "nativeThreadId": "ec24a006-617b-4324-b516-57a7afff15a4",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "providerInstanceId": "claudeAgent",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "completed",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:63>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ordinal": 2,
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:41>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:attempt:1",
+      "status": "waiting",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null,
+      "workStartedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:64>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "kind": "root_turn",
+      "status": "waiting",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:65>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "ec24a006-617b-4324-b516-57a7afff15a4",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "idle",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 2,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": {
+        "usedTokens": 11,
+        "maxTokens": 200000
+      },
+      "nativeMetadata": {
+        "title": "Replay fixture: claude_background_task_after_root",
+        "claudeAttachmentBudget": {
+          "bytesUsed": 595,
+          "pagesUsed": 0
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:<uuid:66>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "checkpoint.captured",
+    "payload": {
+      "id": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:2",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:name:root",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "parentCheckpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "ordinalWithinScope": 2,
+      "appRunOrdinal": 2,
+      "ref": "refs/hanzo/orchestration-v2/checkpoints/YjM2Y2RhMWFkNWZhOGExYWRhOGQ0NmZkZGQ3YzE1NDQ/ordinal/2",
+      "status": "ready",
+      "files": [],
+      "capturedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:<uuid:67>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:claudeAgent:native-item:checkpoint%3Acheckpoint%3Ascope%3Acheckpoint-scope%253Athread%253Athread%25253Afixture%25253Aclaude_background_task_after_root%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_background_task_after_root%2525253A<uuid:0>%25253A<uuid:1>%253Aname%253Aroot%3Aname%3A2",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 2000003,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "checkpoint",
+      "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:2",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:name:root",
+      "files": []
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:<uuid:68>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "ordinal": 2,
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:41>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:attempt:1",
+      "status": "completed",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:2",
+      "contextHandoffId": null,
+      "workStartedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:<uuid:69>",
+    "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "threadId": "thread:fixture:claude_background_task_after_root:project:project%3Afixture%3Aclaude_background_task_after_root%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "kind": "root_turn",
+      "status": "completed",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_background_task_after_root%253Aproject%253Aproject%25253Afixture%25253Aclaude_background_task_after_root%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_background_task_after_root%3Aproject%3Aproject%253Afixture%253Aclaude_background_task_after_root%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  }
+]

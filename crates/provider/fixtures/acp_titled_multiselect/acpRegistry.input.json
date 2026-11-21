@@ -1,0 +1,28 @@
+{
+  "fixture": "acp_titled_multiselect",
+  "driver": "acpRegistry",
+  "modelSelection": {
+    "instanceId": "acpRegistry",
+    "model": "default"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": "plan",
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Ask which areas this fixture should cover, allowing several. After receiving the answer, respond exactly: titled multi-select fixture complete"
+    },
+    {
+      "type": "answer_next_user_input_request",
+      "answers": {
+        "fixture_areas": [
+          "ui",
+          "unknown",
+          "schemas"
+        ]
+      }
+    }
+  ]
+}

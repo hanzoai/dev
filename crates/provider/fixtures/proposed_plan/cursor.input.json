@@ -1,0 +1,18 @@
+{
+  "fixture": "proposed_plan",
+  "driver": "cursor",
+  "modelSelection": {
+    "instanceId": "cursor",
+    "model": "composer-2.5"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": "plan",
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Create a short implementation plan for adding deterministic replay fixtures. Do not ask questions. Present the final plan in a proposed plan block."
+    }
+  ]
+}

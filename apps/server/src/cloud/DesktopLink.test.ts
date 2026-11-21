@@ -222,6 +222,7 @@ it.effect("a heartbeat reports provider state only and is signed by the device k
         "version",
         "zap",
       ]);
+      assert.equal(JSON.parse(heartbeat.body).zap, "https://zap.hanzo.ai/v1/dev/zap/src_1");
       assert.deepEqual(JSON.parse(heartbeat.body).providers, [
         {
           provider: "claude",
@@ -265,7 +266,7 @@ it.effect("a heartbeat reports provider state only and is signed by the device k
         "src_1\n" +
         "1970-01-01T00:00:00.000Z\n" +
         `${JSON.parse(heartbeat.body).version}\n` +
-        "\n" +
+        "https://zap.hanzo.ai/v1/dev/zap/src_1\n" +
         "0\n" +
         "claude,claude,login,ready,max,true\n" +
         "codex,codex,login,needs_login,,true\n";

@@ -1,0 +1,35 @@
+{
+  "fixture": "opencode2_inbox",
+  "driver": "opencode",
+  "modelSelection": {
+    "instanceId": "opencode",
+    "model": "opencode/big-pickle"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Run the shell command `sleep 12 && echo A` with the bash tool, then reply DONE_A."
+    },
+    {
+      "type": "queue_message",
+      "text": "Reply exactly QUEUED_B."
+    },
+    {
+      "type": "queue_message",
+      "text": "Reply exactly QUEUED_C."
+    },
+    {
+      "type": "cancel_queued_run",
+      "targetRunIndex": 3
+    },
+    {
+      "type": "steer",
+      "text": "Also mention the word STEERED in your final reply.",
+      "targetRunIndex": 1
+    }
+  ]
+}

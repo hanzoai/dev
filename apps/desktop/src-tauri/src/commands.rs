@@ -522,10 +522,9 @@ pub async fn desktop_set_iam_vault(
     .await)
 }
 
-#[tauri::command]
-pub async fn desktop_get_local_environment_bearer_token(
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+/// The one bearer token this app holds for its own backend. A new exchange revokes the previous
+/// session for the same subject, so the window and the menu-bar helper must share this token.
+pub async fn local_bearer_token(state: &AppState) -> Result<String, String> {
     let mut guard = state.bearer_token.lock().await;
     if let Some(existing) = guard.as_ref() {
         return Ok(existing.clone());
@@ -537,6 +536,13 @@ pub async fn desktop_get_local_environment_bearer_token(
     .await?;
     *guard = Some(token.clone());
     Ok(token)
+}
+
+#[tauri::command]
+pub async fn desktop_get_local_environment_bearer_token(
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    local_bearer_token(&state).await
 }
 
 #[tauri::command]

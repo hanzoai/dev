@@ -1,0 +1,29 @@
+{
+  "fixture": "muse_permission",
+  "driver": "muse",
+  "modelSelection": {
+    "instanceId": "muse",
+    "model": "muse-spark-1.3-contributor"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": "approval-required",
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Run the shell command `touch muse-approved.txt` with your shell tool, then reply DONE."
+    },
+    {
+      "type": "approve_next_runtime_request"
+    },
+    {
+      "type": "message",
+      "text": "Run the shell command `touch muse-declined.txt` with your shell tool once. If it is rejected, do not retry; reply REJECTED."
+    },
+    {
+      "type": "approve_next_runtime_request",
+      "decision": "decline"
+    }
+  ]
+}

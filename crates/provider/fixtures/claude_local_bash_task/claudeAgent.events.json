@@ -1,0 +1,1511 @@
+[
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aclaude_local_bash_task%3Athread-create%3A<uuid:2>:<uuid:0>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "thread.created",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "projectId": "project:fixture:claude_local_bash_task:<uuid:0>",
+      "title": "Replay fixture: claude_local_bash_task",
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "branch": null,
+      "worktreePath": null,
+      "pullRequests": [],
+      "activeProviderThreadId": null,
+      "lineage": {
+        "parentThreadId": null,
+        "relationshipToParent": null,
+        "rootThreadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>"
+      },
+      "forkedFrom": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "archivedAt": null,
+      "settledOverride": null,
+      "settledAt": null,
+      "snoozedUntil": null,
+      "snoozedAt": null,
+      "lastVisitedAt": null,
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aclaude_local_bash_task%3Amessage-1%3A<uuid:3>:<uuid:1>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "thread.metadata-updated",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "projectId": "project:fixture:claude_local_bash_task:<uuid:0>",
+      "title": "Replay fixture: claude_local_bash_task",
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "branch": null,
+      "worktreePath": null,
+      "pullRequests": [],
+      "activeProviderThreadId": null,
+      "lineage": {
+        "parentThreadId": null,
+        "relationshipToParent": null,
+        "rootThreadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>"
+      },
+      "forkedFrom": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "archivedAt": null,
+      "settledOverride": null,
+      "settledAt": null,
+      "snoozedUntil": null,
+      "snoozedAt": null,
+      "lastVisitedAt": "<time>",
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aclaude_local_bash_task%3Amessage-1%3A<uuid:3>:<uuid:3>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": null,
+      "nativeConversationHeadRef": null,
+      "status": "not_loaded",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": null,
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aclaude_local_bash_task%3Amessage-1%3A<uuid:3>:<uuid:4>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run.created",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "starting",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": null,
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aclaude_local_bash_task%3Amessage-1%3A<uuid:3>:<uuid:5>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run-attempt.created",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "claudeAgent",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "pending",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aclaude_local_bash_task%3Amessage-1%3A<uuid:3>:<uuid:6>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "pending",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aclaude_local_bash_task%3Amessage-1%3A<uuid:3>:<uuid:7>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "checkpoint-scope.created",
+    "payload": {
+      "id": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:name:root",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentScopeId": null,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "kind": "root_run",
+      "ordinalWithinParent": 0,
+      "advancesAppRunCount": true,
+      "cwd": "<workspace>",
+      "createdAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aclaude_local_bash_task%3Amessage-1%3A<uuid:3>:<uuid:8>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "message:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "role": "user",
+      "text": "Run a local Bash typecheck command, then answer exactly: claude local bash task fixture complete",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aclaude_local_bash_task%3Amessage-1%3A<uuid:3>:<uuid:9>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:message:message%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1%3A<uuid:4>",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000001,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "createdBy": "user",
+      "creationSource": "web",
+      "type": "user_message",
+      "messageId": "message:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "inputIntent": "turn_start",
+      "text": "Run a local Bash typecheck command, then answer exactly: claude local bash task fixture complete",
+      "attachments": []
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:10>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-session.attached",
+    "payload": {
+      "id": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "claude-sonnet-4-6",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": false,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkWhileSourceRunning": true,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "activeSteeringInterruptsTools": true,
+          "supportsSteeringByInterruptRestart": false,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": false,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": true
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": true,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": true,
+          "acceptsDeveloperContext": true,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": true,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": false
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "native"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:11>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "claude-sonnet-4-6",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": false,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkWhileSourceRunning": true,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "activeSteeringInterruptsTools": true,
+          "supportsSteeringByInterruptRestart": false,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": false,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": true
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": true,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": true,
+          "acceptsDeveloperContext": true,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": true,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": false
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "native"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:<uuid:12>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "6a8f8455-10bc-4e31-8e30-b0ea9f88b911",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "title": "Replay fixture: claude_local_bash_task"
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:<uuid:13>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "running",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:<uuid:14>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeThreadId": "6a8f8455-10bc-4e31-8e30-b0ea9f88b911",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "claudeAgent",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:<uuid:15>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "running",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:16>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_local_bash_task%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_local_bash_task%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "claudeAgent",
+        "nativeId": "turn:run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+        "strength": "weak"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:17>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "6a8f8455-10bc-4e31-8e30-b0ea9f88b911",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "title": "Replay fixture: claude_local_bash_task",
+        "claudeAttachmentBudget": {
+          "bytesUsed": 98,
+          "pagesUsed": 0
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:18>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_local_bash_task%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_local_bash_task%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "claudeAgent",
+        "nativeId": "turn:run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+        "strength": "strong"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "tokenUsage": {
+        "usedTokens": 2,
+        "maxTokens": 200000,
+        "inputTokens": 1,
+        "cachedInputTokens": 0,
+        "outputTokens": 1,
+        "reasoningOutputTokens": 0,
+        "updatedAt": "<time>"
+      },
+      "model": "claude-sonnet-4-6"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:19>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:97898e28-ee4e-4fcf-80c3-5c790c502a42",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:claudeAgent:native-item:97898e28-ee4e-4fcf-80c3-5c790c502a42",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "assistant_message",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_local_bash_task%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_local_bash_task%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "97898e28-ee4e-4fcf-80c3-5c790c502a42",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:20>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:97898e28-ee4e-4fcf-80c3-5c790c502a42",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "agent",
+      "creationSource": "provider",
+      "id": "message:provider:claudeAgent:native-item:97898e28-ee4e-4fcf-80c3-5c790c502a42",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:claudeAgent:native-item:97898e28-ee4e-4fcf-80c3-5c790c502a42",
+      "role": "assistant",
+      "text": "I'll run the typecheck command now.",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:21>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:97898e28-ee4e-4fcf-80c3-5c790c502a42",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:claudeAgent:native-item:97898e28-ee4e-4fcf-80c3-5c790c502a42",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:claudeAgent:native-item:97898e28-ee4e-4fcf-80c3-5c790c502a42",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_local_bash_task%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_local_bash_task%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "97898e28-ee4e-4fcf-80c3-5c790c502a42",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000002,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "assistant_message",
+      "messageId": "message:provider:claudeAgent:native-item:97898e28-ee4e-4fcf-80c3-5c790c502a42",
+      "text": "I'll run the typecheck command now.",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:22>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:toolu_01QHaWEM6vnYqxYPvpqv6Xq4",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:claudeAgent:native-item:toolu_01QHaWEM6vnYqxYPvpqv6Xq4",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "running",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_local_bash_task%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_local_bash_task%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "toolu_01QHaWEM6vnYqxYPvpqv6Xq4",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:23>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:toolu_01QHaWEM6vnYqxYPvpqv6Xq4",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:claudeAgent:native-item:toolu_01QHaWEM6vnYqxYPvpqv6Xq4",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:claudeAgent:native-item:toolu_01QHaWEM6vnYqxYPvpqv6Xq4",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_local_bash_task%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_local_bash_task%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "toolu_01QHaWEM6vnYqxYPvpqv6Xq4",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000003,
+      "status": "running",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": null,
+      "updatedAt": "<time>",
+      "type": "command_execution",
+      "input": "vp run --filter @hanzodev/web typecheck 2>&1 | tail -30"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:24>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "6a8f8455-10bc-4e31-8e30-b0ea9f88b911",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [
+        {
+          "command": "vp run --filter @hanzodev/web typecheck 2>&1 | tail -30",
+          "itemId": "turn-item:provider:claudeAgent:native-item:toolu_01QHaWEM6vnYqxYPvpqv6Xq4",
+          "sourceThreadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+          "taskId": "bw28jiyac",
+          "description": "vp run --filter @hanzodev/web typecheck 2>&1 | tail -30",
+          "nativeItemId": "toolu_01QHaWEM6vnYqxYPvpqv6Xq4",
+          "kind": "command"
+        }
+      ],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "title": "Replay fixture: claude_local_bash_task",
+        "claudeAttachmentBudget": {
+          "bytesUsed": 98,
+          "pagesUsed": 0
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:25>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "6a8f8455-10bc-4e31-8e30-b0ea9f88b911",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "title": "Replay fixture: claude_local_bash_task",
+        "claudeAttachmentBudget": {
+          "bytesUsed": 98,
+          "pagesUsed": 0
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:26>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:toolu_01QHaWEM6vnYqxYPvpqv6Xq4",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:claudeAgent:native-item:toolu_01QHaWEM6vnYqxYPvpqv6Xq4",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_local_bash_task%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_local_bash_task%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "toolu_01QHaWEM6vnYqxYPvpqv6Xq4",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:27>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:toolu_01QHaWEM6vnYqxYPvpqv6Xq4",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:claudeAgent:native-item:toolu_01QHaWEM6vnYqxYPvpqv6Xq4",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:claudeAgent:native-item:toolu_01QHaWEM6vnYqxYPvpqv6Xq4",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_local_bash_task%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_local_bash_task%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "toolu_01QHaWEM6vnYqxYPvpqv6Xq4",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000003,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "command_execution",
+      "input": "vp run --filter @hanzodev/web typecheck 2>&1 | tail -30",
+      "output": "~/apps/web$ tsgo --noEmit cache disabled"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:28>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_local_bash_task%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_local_bash_task%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "claudeAgent",
+        "nativeId": "turn:run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+        "strength": "strong"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "tokenUsage": {
+        "usedTokens": 2,
+        "maxTokens": 200000,
+        "inputTokens": 1,
+        "cachedInputTokens": 0,
+        "outputTokens": 1,
+        "reasoningOutputTokens": 0,
+        "updatedAt": "<time>"
+      },
+      "model": "claude-sonnet-4-6"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:29>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:89be9e65-097b-47e8-849b-be723386b72f",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:claudeAgent:native-item:89be9e65-097b-47e8-849b-be723386b72f",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "assistant_message",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_local_bash_task%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_local_bash_task%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "89be9e65-097b-47e8-849b-be723386b72f",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:30>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:89be9e65-097b-47e8-849b-be723386b72f",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "agent",
+      "creationSource": "provider",
+      "id": "message:provider:claudeAgent:native-item:89be9e65-097b-47e8-849b-be723386b72f",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:claudeAgent:native-item:89be9e65-097b-47e8-849b-be723386b72f",
+      "role": "assistant",
+      "text": "claude local bash task fixture complete",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:31>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:89be9e65-097b-47e8-849b-be723386b72f",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:claudeAgent:native-item:89be9e65-097b-47e8-849b-be723386b72f",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:claudeAgent:native-item:89be9e65-097b-47e8-849b-be723386b72f",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_local_bash_task%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_local_bash_task%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "89be9e65-097b-47e8-849b-be723386b72f",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000004,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "assistant_message",
+      "messageId": "message:provider:claudeAgent:native-item:89be9e65-097b-47e8-849b-be723386b72f",
+      "text": "claude local bash task fixture complete",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:32>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_local_bash_task%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_local_bash_task%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "claudeAgent",
+        "nativeId": "turn:run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+        "strength": "strong"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "tokenUsage": {
+        "usedTokens": 2,
+        "maxTokens": 200000,
+        "inputTokens": 1,
+        "cachedInputTokens": 0,
+        "outputTokens": 1,
+        "reasoningOutputTokens": 0,
+        "updatedAt": "<time>"
+      },
+      "model": "claude-sonnet-4-6"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:33>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aclaude_local_bash_task%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_local_bash_task%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "claudeAgent",
+        "nativeId": "89be9e65-097b-47e8-849b-be723386b72f",
+        "strength": "weak"
+      },
+      "ordinal": 1,
+      "status": "completed",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "turnTokenUsage": {
+        "usageScope": "main_agent",
+        "cachedInputTokens": 0,
+        "cacheCreationTokens": 0,
+        "hasSubagents": false,
+        "models": [
+          "claude-sonnet-4-6"
+        ],
+        "otherUsage": {
+          "inputTokens": 0,
+          "outputTokens": 0
+        },
+        "usageStatus": "complete",
+        "inputTokens": 2,
+        "outputTokens": 2
+      },
+      "model": "claude-sonnet-4-6"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:34>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "6a8f8455-10bc-4e31-8e30-b0ea9f88b911",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "title": "Replay fixture: claude_local_bash_task",
+        "claudeAttachmentBudget": {
+          "bytesUsed": 98,
+          "pagesUsed": 0
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:<uuid:35>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeThreadId": "6a8f8455-10bc-4e31-8e30-b0ea9f88b911",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "claudeAgent",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "completed",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:<uuid:36>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "waiting",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:<uuid:37>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "waiting",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:<uuid:38>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "6a8f8455-10bc-4e31-8e30-b0ea9f88b911",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "idle",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "title": "Replay fixture: claude_local_bash_task",
+        "claudeAttachmentBudget": {
+          "bytesUsed": 98,
+          "pagesUsed": 0
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:39>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "checkpoint.captured",
+    "payload": {
+      "id": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:0",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:name:root",
+      "runId": null,
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentCheckpointId": null,
+      "ordinalWithinScope": 0,
+      "appRunOrdinal": null,
+      "ref": "refs/hanzo/orchestration-v2/checkpoints/ZjBiMjRjYTgxYTkxMTlkM2M1OTljNjMzMTMwMzA4OTE/ordinal/0",
+      "status": "ready",
+      "files": [],
+      "capturedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:40>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "checkpoint.captured",
+    "payload": {
+      "id": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:name:root",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentCheckpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:0",
+      "ordinalWithinScope": 1,
+      "appRunOrdinal": 1,
+      "ref": "refs/hanzo/orchestration-v2/checkpoints/ZjBiMjRjYTgxYTkxMTlkM2M1OTljNjMzMTMwMzA4OTE/ordinal/1",
+      "status": "ready",
+      "files": [],
+      "capturedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:41>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:claudeAgent:native-item:checkpoint%3Acheckpoint%3Ascope%3Acheckpoint-scope%253Athread%253Athread%25253Afixture%25253Aclaude_local_bash_task%25253Aproject%25253Aproject%2525253Afixture%2525253Aclaude_local_bash_task%2525253A<uuid:0>%25253A<uuid:1>%253Aname%253Aroot%3Aname%3A1",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000005,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "checkpoint",
+      "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:name:root",
+      "files": []
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:42>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "completed",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:43>",
+    "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:claude_local_bash_task:project:project%3Afixture%3Aclaude_local_bash_task%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "completed",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aclaude_local_bash_task%253Aproject%253Aproject%25253Afixture%25253Aclaude_local_bash_task%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Aclaude_local_bash_task%3Aproject%3Aproject%253Afixture%253Aclaude_local_bash_task%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  }
+]

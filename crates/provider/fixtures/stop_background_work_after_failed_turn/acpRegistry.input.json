@@ -1,0 +1,22 @@
+{
+  "fixture": "stop_background_work_after_failed_turn",
+  "driver": "acpRegistry",
+  "modelSelection": {
+    "instanceId": "acpRegistry",
+    "model": "default"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Start the dev server in the background with `bun run dev` and keep it running."
+    },
+    {
+      "type": "stop_background_work",
+      "targetRunIndex": 1
+    }
+  ]
+}

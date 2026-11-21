@@ -1,0 +1,1448 @@
+[
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aopencode2_command%3Athread-create%3A<uuid:2>:<uuid:0>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "thread.created",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "projectId": "project:fixture:opencode2_command:<uuid:0>",
+      "title": "Replay fixture: opencode2_command",
+      "providerInstanceId": "opencode",
+      "modelSelection": {
+        "instanceId": "opencode",
+        "model": "openrouter/deepseek/deepseek-v4-flash"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "branch": null,
+      "worktreePath": null,
+      "pullRequests": [],
+      "activeProviderThreadId": null,
+      "lineage": {
+        "parentThreadId": null,
+        "relationshipToParent": null,
+        "rootThreadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>"
+      },
+      "forkedFrom": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "archivedAt": null,
+      "settledOverride": null,
+      "settledAt": null,
+      "snoozedUntil": null,
+      "snoozedAt": null,
+      "lastVisitedAt": null,
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aopencode2_command%3Amessage-1%3A<uuid:3>:<uuid:1>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "thread.metadata-updated",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "projectId": "project:fixture:opencode2_command:<uuid:0>",
+      "title": "Replay fixture: opencode2_command",
+      "providerInstanceId": "opencode",
+      "modelSelection": {
+        "instanceId": "opencode",
+        "model": "openrouter/deepseek/deepseek-v4-flash"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "branch": null,
+      "worktreePath": null,
+      "pullRequests": [],
+      "activeProviderThreadId": null,
+      "lineage": {
+        "parentThreadId": null,
+        "relationshipToParent": null,
+        "rootThreadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>"
+      },
+      "forkedFrom": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "archivedAt": null,
+      "settledOverride": null,
+      "settledAt": null,
+      "snoozedUntil": null,
+      "snoozedAt": null,
+      "lastVisitedAt": "<time>",
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aopencode2_command%3Amessage-1%3A<uuid:3>:<uuid:2>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "driver": "opencode",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "opencode",
+      "providerInstanceId": "opencode",
+      "providerSessionId": "provider-session:provider-instance:opencode:shared",
+      "appThreadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": null,
+      "nativeConversationHeadRef": null,
+      "status": "not_loaded",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": null,
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aopencode2_command%3Amessage-1%3A<uuid:3>:<uuid:3>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "run.created",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "opencode",
+      "modelSelection": {
+        "instanceId": "opencode",
+        "model": "openrouter/deepseek/deepseek-v4-flash"
+      },
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "starting",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": null,
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aopencode2_command%3Amessage-1%3A<uuid:3>:<uuid:4>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "run-attempt.created",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "opencode",
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "pending",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aopencode2_command%3Amessage-1%3A<uuid:3>:<uuid:5>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "pending",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aopencode2_command%3Amessage-1%3A<uuid:3>:<uuid:6>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "checkpoint-scope.created",
+    "payload": {
+      "id": "checkpoint-scope:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:name:root",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentScopeId": null,
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "kind": "root_run",
+      "ordinalWithinParent": 0,
+      "advancesAppRunCount": true,
+      "cwd": "<workspace>",
+      "createdAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aopencode2_command%3Amessage-1%3A<uuid:3>:<uuid:7>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "message:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "role": "user",
+      "text": "/hello WORLD",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aopencode2_command%3Amessage-1%3A<uuid:3>:<uuid:8>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:message:message%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1%3A<uuid:4>",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000001,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "createdBy": "user",
+      "creationSource": "web",
+      "type": "user_message",
+      "messageId": "message:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "inputIntent": "turn_start",
+      "text": "/hello WORLD",
+      "attachments": []
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Aopencode%3Ashared:<uuid:9>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "driver": "opencode",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "provider-session.attached",
+    "payload": {
+      "id": "provider-session:provider-instance:opencode:shared",
+      "driver": "opencode",
+      "providerInstanceId": "opencode",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "openrouter/deepseek/deepseek-v4-flash",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": true,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": true,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "supportsNativeGoals": false,
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "supportsSteeringByInterruptRestart": true,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": false,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": false,
+          "supportsDynamicToolCallbacks": false
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": true,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": true
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": false,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": true,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": true,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": false,
+          "acceptsDeveloperContext": false,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": false,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "native"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Aopencode%3Ashared:<uuid:10>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "driver": "opencode",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:opencode:shared",
+      "driver": "opencode",
+      "providerInstanceId": "opencode",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "openrouter/deepseek/deepseek-v4-flash",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": true,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": true,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "supportsNativeGoals": false,
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "supportsSteeringByInterruptRestart": true,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": false,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": false,
+          "supportsDynamicToolCallbacks": false
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": true,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": true
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": false,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": true,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": true,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": false,
+          "acceptsDeveloperContext": false,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": false,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "native"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:<uuid:11>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "driver": "opencode",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "opencode",
+      "providerInstanceId": "opencode",
+      "providerSessionId": "provider-session:provider-instance:opencode:shared",
+      "appThreadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "opencode",
+        "nativeId": "ses_f0f27cc49ffe6wl0jdiu4kO4FC",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "modelSelection": {
+          "instanceId": "opencode",
+          "model": "openrouter/deepseek/deepseek-v4-flash",
+          "options": [
+            {
+              "id": "variant",
+              "value": "default"
+            }
+          ]
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:<uuid:12>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "opencode",
+      "modelSelection": {
+        "instanceId": "opencode",
+        "model": "openrouter/deepseek/deepseek-v4-flash"
+      },
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "running",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:<uuid:13>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeThreadId": "ses_f0f27cc49ffe6wl0jdiu4kO4FC",
+      "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "opencode",
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:<uuid:14>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "running",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Aopencode%3Ashared:<uuid:15>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "driver": "opencode",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:opencode:shared",
+      "driver": "opencode",
+      "providerInstanceId": "opencode",
+      "status": "running",
+      "cwd": "<workspace>",
+      "model": "openrouter/deepseek/deepseek-v4-flash",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": true,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": true,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "supportsNativeGoals": false,
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "supportsSteeringByInterruptRestart": true,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": false,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": false,
+          "supportsDynamicToolCallbacks": false
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": true,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": true
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": false,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": true,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": true,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": false,
+          "acceptsDeveloperContext": false,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": false,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "native"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Aopencode%3Ashared:<uuid:16>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "opencode",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:opencode:native-turn:ses_f0f27cc49ffe6wl0jdiu4kO4FC%3Aattempt%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aopencode2_command%25253Aproject%25253Aproject%2525253Afixture%2525253Aopencode2_command%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "opencode",
+        "nativeId": "msg_hanzo_turn_ses_f0f27cc49ffe6wl0jdiu4kO4FC:run-attempt:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+        "strength": "weak"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Aopencode%3Ashared:<uuid:17>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "opencode",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "opencode",
+      "providerInstanceId": "opencode",
+      "providerSessionId": "provider-session:provider-instance:opencode:shared",
+      "appThreadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "opencode",
+        "nativeId": "ses_f0f27cc49ffe6wl0jdiu4kO4FC",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "modelSelection": {
+          "instanceId": "opencode",
+          "model": "openrouter/deepseek/deepseek-v4-flash",
+          "options": [
+            {
+              "id": "variant",
+              "value": "default"
+            }
+          ]
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Aopencode%3Ashared:<uuid:18>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:opencode:native-item:msg_0f0d83436001gPzL6SiRXo8F4I%3Areasoning%3A0",
+    "driver": "opencode",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:opencode:native-item:msg_0f0d83436001gPzL6SiRXo8F4I%3Areasoning%3A0",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "reasoning",
+      "status": "running",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:opencode:native-turn:ses_f0f27cc49ffe6wl0jdiu4kO4FC%3Aattempt%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aopencode2_command%25253Aproject%25253Aproject%2525253Afixture%2525253Aopencode2_command%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "opencode",
+        "nativeId": "msg_0f0d83436001gPzL6SiRXo8F4I:reasoning:0",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Aopencode%3Ashared:<uuid:19>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:opencode:native-item:msg_0f0d83436001gPzL6SiRXo8F4I%3Areasoning%3A0",
+    "driver": "opencode",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:opencode:native-item:msg_0f0d83436001gPzL6SiRXo8F4I%3Areasoning%3A0",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "reasoning",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:opencode:native-turn:ses_f0f27cc49ffe6wl0jdiu4kO4FC%3Aattempt%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aopencode2_command%25253Aproject%25253Aproject%2525253Afixture%2525253Aopencode2_command%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "opencode",
+        "nativeId": "msg_0f0d83436001gPzL6SiRXo8F4I:reasoning:0",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Aopencode%3Ashared:<uuid:20>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:opencode:native-item:msg_0f0d83436001gPzL6SiRXo8F4I%3Areasoning%3A0",
+    "driver": "opencode",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:opencode:native-item:msg_0f0d83436001gPzL6SiRXo8F4I%3Areasoning%3A0",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:opencode:native-item:msg_0f0d83436001gPzL6SiRXo8F4I%3Areasoning%3A0",
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:opencode:native-turn:ses_f0f27cc49ffe6wl0jdiu4kO4FC%3Aattempt%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aopencode2_command%25253Aproject%25253Aproject%2525253Afixture%2525253Aopencode2_command%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "opencode",
+        "nativeId": "msg_0f0d83436001gPzL6SiRXo8F4I:reasoning:0",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000002,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "reasoning",
+      "text": "The user wants me to reply with exactly \"HELLO WORLD\".",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Aopencode%3Ashared:<uuid:21>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "driver": "opencode",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:opencode:shared",
+      "driver": "opencode",
+      "providerInstanceId": "opencode",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "openrouter/deepseek/deepseek-v4-flash",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": true,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": true,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "supportsNativeGoals": false,
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "supportsSteeringByInterruptRestart": true,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": false,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": false,
+          "supportsDynamicToolCallbacks": false
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": true,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": true
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": false,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": true,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": true,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": false,
+          "acceptsDeveloperContext": false,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": false,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "native"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Aopencode%3Ashared:<uuid:22>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:opencode:native-item:msg_0f0d83436001gPzL6SiRXo8F4I%3Atext%3A0",
+    "driver": "opencode",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:opencode:native-item:msg_0f0d83436001gPzL6SiRXo8F4I%3Atext%3A0",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "assistant_message",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:opencode:native-turn:ses_f0f27cc49ffe6wl0jdiu4kO4FC%3Aattempt%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aopencode2_command%25253Aproject%25253Aproject%2525253Afixture%2525253Aopencode2_command%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "opencode",
+        "nativeId": "msg_0f0d83436001gPzL6SiRXo8F4I:text:0",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Aopencode%3Ashared:<uuid:23>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:opencode:native-item:msg_0f0d83436001gPzL6SiRXo8F4I%3Atext%3A0",
+    "driver": "opencode",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "agent",
+      "creationSource": "provider",
+      "id": "message:provider:opencode:native-item:msg_0f0d83436001gPzL6SiRXo8F4I%3Atext%3A0",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:opencode:native-item:msg_0f0d83436001gPzL6SiRXo8F4I%3Atext%3A0",
+      "role": "assistant",
+      "text": "HELLO WORLD",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Aopencode%3Ashared:<uuid:24>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:opencode:native-item:msg_0f0d83436001gPzL6SiRXo8F4I%3Atext%3A0",
+    "driver": "opencode",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:opencode:native-item:msg_0f0d83436001gPzL6SiRXo8F4I%3Atext%3A0",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:opencode:native-item:msg_0f0d83436001gPzL6SiRXo8F4I%3Atext%3A0",
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:opencode:native-turn:ses_f0f27cc49ffe6wl0jdiu4kO4FC%3Aattempt%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aopencode2_command%25253Aproject%25253Aproject%2525253Afixture%2525253Aopencode2_command%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "opencode",
+        "nativeId": "msg_0f0d83436001gPzL6SiRXo8F4I:text:0",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000003,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "assistant_message",
+      "messageId": "message:provider:opencode:native-item:msg_0f0d83436001gPzL6SiRXo8F4I%3Atext%3A0",
+      "text": "HELLO WORLD",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Aopencode%3Ashared:<uuid:25>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "opencode",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:opencode:native-turn:ses_f0f27cc49ffe6wl0jdiu4kO4FC%3Aattempt%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aopencode2_command%25253Aproject%25253Aproject%2525253Afixture%2525253Aopencode2_command%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "opencode",
+        "nativeId": "msg_hanzo_turn_ses_f0f27cc49ffe6wl0jdiu4kO4FC:run-attempt:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+        "strength": "weak"
+      },
+      "ordinal": 1,
+      "status": "completed",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "tokenUsage": {
+        "usedTokens": 9427,
+        "maxTokens": 1048576,
+        "inputTokens": 9421,
+        "cachedInputTokens": 0,
+        "outputTokens": 6,
+        "reasoningOutputTokens": 14,
+        "updatedAt": "<time>"
+      },
+      "turnTokenUsage": {
+        "usageScope": "main_agent",
+        "cachedInputTokens": 0,
+        "cacheCreationTokens": 0,
+        "reasoningTokens": 14,
+        "hasSubagents": false,
+        "models": [
+          "openrouter/deepseek/deepseek-v4-flash"
+        ],
+        "usageStatus": "complete",
+        "inputTokens": 9421,
+        "outputTokens": 20
+      }
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Aopencode%3Ashared:<uuid:26>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "opencode",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "opencode",
+      "providerInstanceId": "opencode",
+      "providerSessionId": "provider-session:provider-instance:opencode:shared",
+      "appThreadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "opencode",
+        "nativeId": "ses_f0f27cc49ffe6wl0jdiu4kO4FC",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "idle",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "modelSelection": {
+          "instanceId": "opencode",
+          "model": "openrouter/deepseek/deepseek-v4-flash",
+          "options": [
+            {
+              "id": "variant",
+              "value": "default"
+            }
+          ]
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:<uuid:27>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeThreadId": "ses_f0f27cc49ffe6wl0jdiu4kO4FC",
+      "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "opencode",
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "completed",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:<uuid:28>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "opencode",
+      "modelSelection": {
+        "instanceId": "opencode",
+        "model": "openrouter/deepseek/deepseek-v4-flash"
+      },
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "waiting",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:<uuid:29>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "waiting",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:<uuid:30>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "opencode",
+      "providerInstanceId": "opencode",
+      "providerSessionId": "provider-session:provider-instance:opencode:shared",
+      "appThreadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "opencode",
+        "nativeId": "ses_f0f27cc49ffe6wl0jdiu4kO4FC",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "idle",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "modelSelection": {
+          "instanceId": "opencode",
+          "model": "openrouter/deepseek/deepseek-v4-flash",
+          "options": [
+            {
+              "id": "variant",
+              "value": "default"
+            }
+          ]
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:31>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "opencode",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "checkpoint.captured",
+    "payload": {
+      "id": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:0",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:name:root",
+      "runId": null,
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentCheckpointId": null,
+      "ordinalWithinScope": 0,
+      "appRunOrdinal": null,
+      "ref": "refs/hanzo/orchestration-v2/checkpoints/YWY1NjE1YWQwMzNmZTMzZjdmNDIyYmYyYTA2NzM4ZDg/ordinal/0",
+      "status": "ready",
+      "files": [],
+      "capturedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:32>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "opencode",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "checkpoint.captured",
+    "payload": {
+      "id": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:name:root",
+      "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentCheckpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:0",
+      "ordinalWithinScope": 1,
+      "appRunOrdinal": 1,
+      "ref": "refs/hanzo/orchestration-v2/checkpoints/YWY1NjE1YWQwMzNmZTMzZjdmNDIyYmYyYTA2NzM4ZDg/ordinal/1",
+      "status": "ready",
+      "files": [],
+      "capturedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:33>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "opencode",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:opencode:native-item:checkpoint%3Acheckpoint%3Ascope%3Acheckpoint-scope%253Athread%253Athread%25253Afixture%25253Aopencode2_command%25253Aproject%25253Aproject%2525253Afixture%2525253Aopencode2_command%2525253A<uuid:0>%25253A<uuid:1>%253Aname%253Aroot%3Aname%3A1",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000004,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "checkpoint",
+      "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:name:root",
+      "files": []
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:34>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "opencode",
+      "modelSelection": {
+        "instanceId": "opencode",
+        "model": "openrouter/deepseek/deepseek-v4-flash"
+      },
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "completed",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:35>",
+    "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "opencode",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:opencode2_command:project:project%3Afixture%3Aopencode2_command%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "completed",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:opencode:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aopencode2_command%253Aproject%253Aproject%25253Afixture%25253Aopencode2_command%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Aopencode2_command%3Aproject%3Aproject%253Afixture%253Aopencode2_command%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  }
+]

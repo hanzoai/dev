@@ -28,6 +28,8 @@ export interface LinkedMachine {
   readonly os: string;
   readonly arch: string;
   readonly version: string;
+  /** The machine's ZAP address, empty until its heartbeat reports one. */
+  readonly zap: string;
   readonly state: "online" | "offline" | "revoked";
   readonly lastSeen: string | null;
   readonly linkedAt: string;
@@ -70,7 +72,7 @@ export interface DiscoveryReport {
 export interface EnvironmentDiscovery {
   readonly environments: ReadonlyArray<DiscoveredEnvironment>;
   readonly sources: DiscoveryReport;
-  /** Cloud sessions are offered, never spawned: `ok` means the offer is available. */
+  /** Cloud sessions are offered, never spawned: `ok` means the cloud can run one now. */
   readonly cloud: DiscoveryReport;
   /** True when no linked machine exists: show "Link a Mac from Hanzo Dev on desktop". */
   readonly showLinkPrompt: boolean;
@@ -96,10 +98,21 @@ function parseMachine(value: unknown): LinkedMachine | null {
     os: str(value.os) ?? "",
     arch: str(value.arch) ?? "",
     version: str(value.version) ?? "",
+    zap: str(value.zap) ?? "",
     state,
     lastSeen: str(value.last_seen),
     linkedAt: str(value.linked_at) ?? "",
   };
+}
+
+/** The live machines of a `/v1/sources` response body, or null when the body is not one. */
+export function parseSources(body: unknown): ReadonlyArray<LinkedMachine> | null {
+  const raw =
+    isRecord(body) && Array.isArray(body.sources) ? (body.sources as ReadonlyArray<unknown>) : null;
+  if (raw === null) return null;
+  return raw
+    .map(parseMachine)
+    .filter((machine): machine is LinkedMachine => machine !== null && machine.state !== "revoked");
 }
 
 function parseSession(value: unknown): CloudSession | null {
@@ -162,13 +175,9 @@ async function listLinkedMachines(
   } catch {
     return { machines: [], report: { status: "error", message: "Invalid response" } };
   }
-  const raw =
-    isRecord(body) && Array.isArray(body.sources) ? (body.sources as ReadonlyArray<unknown>) : null;
-  if (raw === null)
+  const machines = parseSources(body);
+  if (machines === null)
     return { machines: [], report: { status: "error", message: "Invalid response" } };
-  const machines = raw
-    .map(parseMachine)
-    .filter((machine): machine is LinkedMachine => machine !== null && machine.state !== "revoked");
   return { machines, report: { status: "ok" } };
 }
 
@@ -228,7 +237,7 @@ export function mergeEnvironments(input: {
     push({ type: "linked", id: machine.id, label: machine.name, machine });
   }
   if (input.cloud === "offer") {
-    push({ type: "cloud", id: "cloud", label: "Run in the cloud", session: null });
+    push({ type: "cloud", id: "cloud", label: "Cloud", session: null });
   } else if (input.cloud !== null) {
     push({ type: "cloud", id: input.cloud.id, label: input.cloud.label, session: input.cloud });
   }
@@ -239,22 +248,51 @@ export function mergeEnvironments(input: {
 }
 
 /**
- * Lists linked machines, offers a cloud environment (only when no machine is linked), and merges
- * saved/relay environments. Makes no POST; a missing token yields `error` for sources and cloud.
+ * Whether `/v1/dev/sessions` is deployed. The route answers any method it does not serve with
+ * 405, so a GET asks without creating a session; only a missing route or no network is
+ * `unavailable`.
+ */
+async function probeCloud(
+  auth: DiscoveryAuth & { readonly accessToken: string },
+  options: DiscoveryOptions,
+): Promise<DiscoveryReport> {
+  const { fetch, baseUrl } = resolve(options);
+  try {
+    const response = await fetch(`${baseUrl}/v1/dev/sessions`, {
+      method: "GET",
+      headers: headers(auth),
+    });
+    if (classify(response.status) === "unavailable") return { status: "unavailable" };
+    if (response.status >= 500) return { status: "error", message: `HTTP ${response.status}` };
+    return { status: "ok" };
+  } catch {
+    return { status: "unavailable" };
+  }
+}
+
+/**
+ * Lists linked machines and always offers a cloud environment while signed in; `cloud.status`
+ * says whether the cloud can run it (`ok`) or not yet (`unavailable`). Makes no POST; a missing
+ * token yields `error` for sources and cloud.
  */
 export async function discoverEnvironments(
   auth: DiscoveryAuth,
   known: ReadonlyArray<KnownEnvironment>,
   options: DiscoveryOptions = {},
 ): Promise<EnvironmentDiscovery> {
-  const { machines, report } = await listLinkedMachines(auth, options);
-  const signedIn = Boolean(auth.accessToken);
-  const cloudReport: DiscoveryReport = !signedIn
-    ? { status: "error", message: "Not signed in" }
-    : { status: report.status === "unavailable" ? "unavailable" : "ok" };
-  const offer = cloudReport.status === "ok" && machines.length === 0;
+  const { accessToken } = auth;
+  const [{ machines, report }, cloudReport] = await Promise.all([
+    listLinkedMachines(auth, options),
+    accessToken
+      ? probeCloud({ ...auth, accessToken }, options)
+      : Promise.resolve<DiscoveryReport>({ status: "error", message: "Not signed in" }),
+  ]);
   return {
-    environments: mergeEnvironments({ machines, cloud: offer ? "offer" : null, known }),
+    environments: mergeEnvironments({
+      machines,
+      cloud: accessToken ? "offer" : null,
+      known,
+    }),
     sources: report,
     cloud: cloudReport,
     showLinkPrompt: machines.length === 0,

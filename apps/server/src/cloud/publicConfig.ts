@@ -8,7 +8,6 @@ import {
   DEFAULT_HANZO_LOGIN_URL,
   DEFAULT_HANZO_IAM_CLIENT_ID,
   DEFAULT_HANZO_IAM_ISSUER,
-  DEFAULT_HANZO_RELAY_URL,
 } from "@hanzodev/shared/hanzoIamAuth";
 import { discoverIamEndpoints } from "./iamDiscovery.ts";
 import { isRelayTracingEnabled } from "@hanzodev/shared/otelEnvironment";
@@ -59,8 +58,8 @@ function normalizeSecureUrl(value: string): string | null {
 
 const buildTimeRelayUrl =
   typeof __HANZO_DEV_BUILD_RELAY_URL__ === "undefined"
-    ? DEFAULT_HANZO_RELAY_URL
-    : (normalizeSecureRelayUrl(__HANZO_DEV_BUILD_RELAY_URL__) ?? DEFAULT_HANZO_RELAY_URL);
+    ? ""
+    : (normalizeSecureRelayUrl(__HANZO_DEV_BUILD_RELAY_URL__) ?? "");
 const buildTimeIamIssuer = readBuildTimeValue(
   typeof __HANZO_DEV_BUILD_IAM_ISSUER__ === "undefined"
     ? undefined

@@ -1,0 +1,24 @@
+{
+  "fixture": "opencode2_simple",
+  "driver": "opencode",
+  "modelSelection": {
+    "instanceId": "opencode",
+    "model": "opencode/space-bunny-free",
+    "options": [
+      {
+        "id": "variant",
+        "value": "high"
+      }
+    ]
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Think carefully step by step about whether 391 is prime, showing your reasoning, then answer in one short sentence."
+    }
+  ]
+}

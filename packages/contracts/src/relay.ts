@@ -719,6 +719,8 @@ export const RelayClientEnvironmentRecord = Schema.Struct({
   label: TrimmedNonEmptyString,
   endpoint: RelayManagedEndpoint,
   linkedAt: TrimmedNonEmptyString,
+  /** Set by the /v1/sources registry: its heartbeat state is the availability. */
+  state: Schema.optional(Schema.Literals(["online", "offline"])),
 });
 export type RelayClientEnvironmentRecord = typeof RelayClientEnvironmentRecord.Type;
 

@@ -1,0 +1,22 @@
+{
+  "fixture": "claude_compact_after_peer_turn_no_echo",
+  "driver": "claudeAgent",
+  "modelSelection": {
+    "instanceId": "claudeAgent",
+    "model": "claude-sonnet-4-6"
+  },
+  "runContinuationWorker": true,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Reply with exactly: compact probe first turn"
+    },
+    {
+      "type": "message",
+      "text": "/compact"
+    }
+  ]
+}

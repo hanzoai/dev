@@ -1,0 +1,23 @@
+{
+  "fixture": "claude_background_task_interrupt",
+  "driver": "claudeAgent",
+  "modelSelection": {
+    "instanceId": "claudeAgent",
+    "model": "claude-sonnet-4-6"
+  },
+  "runContinuationWorker": true,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Live-test interrupting a turn that owns background work. You must make two Bash tool calls, one after the other. Do exactly this, with no extra steps.\n\n1) Call the Bash tool with run_in_background set to true and this exact command:\n   sleep 30 && echo BG_INTERRUPT_DONE\n2) After that call returns, call the Bash tool again in the foreground (run_in_background false) with this exact command and wait for it:\n   node -e \"setTimeout(() => console.log('FG_DONE'), 30000)\"\n3) After it finishes, reply with exactly FINISHED."
+    },
+    {
+      "type": "interrupt",
+      "targetRunIndex": 1,
+      "waitForTurnItemType": "command_execution"
+    }
+  ]
+}

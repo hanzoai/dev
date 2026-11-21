@@ -28,6 +28,7 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
 import * as HostProcess from "@hanzodev/shared/HostProcess";
+import { hanzoSourceZapUrl } from "@hanzodev/shared/hanzoIamAuth";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
@@ -448,7 +449,7 @@ const make = Effect.gen(function* () {
   ) {
     const providers = rows.map(wireProvider);
     const at = iso(yield* Clock.currentTimeMillis);
-    const beat = { id, at, version, zap: "", busy: 0, providers };
+    const beat = { id, at, version, zap: hanzoSourceZapUrl(id), busy: 0, providers };
     const sig = yield* signBeat(key, beatMessage(beat));
     return encodeBody({ ...beat, sig });
   });

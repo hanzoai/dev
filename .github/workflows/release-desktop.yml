@@ -568,7 +568,7 @@ jobs:
             win) bundles="nsis,msi" ;;
           esac
 
-          (cd apps/desktop && npx tauri build --target "${{ inputs.rust_target }}" --bundles "$bundles")
+          (cd apps/desktop && npx tauri build --verbose --target "${{ inputs.rust_target }}" --bundles "$bundles")
 
           shopt -s nullglob
           bundle_root="apps/desktop/src-tauri/target/${{ inputs.rust_target }}/release/bundle"
@@ -621,7 +621,8 @@ jobs:
         shell: bash
         run: |
           dir="${{ steps.stage_pnpm.outputs.dir }}"
-          new=$(find "$dir/cache/v12" "$dir/store/v11/files" -type f -newer "$RUNNER_TEMP/desktop-stage-pnpm.marker" 2>/dev/null | wc -l | tr -d ' ')
+          # find fails on a store directory the staged install never created; that counts as none.
+          new=$({ find "$dir/cache/v12" "$dir/store/v11/files" -type f -newer "$RUNNER_TEMP/desktop-stage-pnpm.marker" 2>/dev/null || true; } | wc -l | tr -d ' ')
           echo "Staged installs added $new cached files."
           echo "changed=$([[ "$new" -gt 0 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 

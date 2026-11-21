@@ -113,6 +113,8 @@ export const nodeEnv = ({ platform, home, env }: HostFacts): UsageEnv => ({
           NodeChildProcess.execFile(
             "security",
             ["find-generic-password", "-s", service, "-w"],
+            // A keychain item that asks for approval would otherwise hold the reader for ever.
+            { timeout: 10_000 },
             (err, stdout) => resolve(err ? undefined : stdout.trim() || undefined),
           ),
         ),

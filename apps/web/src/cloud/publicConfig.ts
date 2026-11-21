@@ -1,7 +1,6 @@
 import {
   DEFAULT_HANZO_IAM_CLIENT_ID,
   DEFAULT_HANZO_IAM_ISSUER,
-  DEFAULT_HANZO_RELAY_URL,
   normalizeHanzoIssuer,
 } from "@hanzodev/shared/hanzoIamAuth";
 import { normalizeSecureRelayUrl } from "@hanzodev/shared/relayUrl";
@@ -36,7 +35,7 @@ export function resolveCloudPublicConfig(): CloudPublicConfig {
   );
   const relayUrl = configuredRelayRaw
     ? normalizeSecureRelayUrl(configuredRelayRaw)
-    : DEFAULT_HANZO_RELAY_URL;
+    : null;
   return {
     iamIssuer: normalizeHanzoIssuer(
       trimNonEmpty(import.meta.env.VITE_HANZO_DEV_IAM_ISSUER as string | undefined) ??

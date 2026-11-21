@@ -512,7 +512,7 @@ export const HANZO_CONNECT_TROUBLESHOOTING_SECTIONS = [
   "the-hosts-tunnel-is-offline",
   "port-7844-is-blocked-on-the-host",
   "the-tunnel-works-but-hanzo-dev-does-not-answer",
-  "the-hanzo-connect-address-does-not-resolve-or-answer",
+  "the-hanzo-link-address-does-not-resolve-or-answer",
   "this-device-cant-reach-hanzo-connect",
   "sign-in-account-or-link-problems",
   "the-clock-is-off",
@@ -537,8 +537,8 @@ const REACHABILITY_SECTION = {
   edge_unreachable: "port-7844-is-blocked-on-the-host",
   origin_unreachable: "the-tunnel-works-but-hanzo-dev-does-not-answer",
   unexpected_response: "the-tunnel-works-but-hanzo-dev-does-not-answer",
-  dns_failed: "the-hanzo-connect-address-does-not-resolve-or-answer",
-  timeout: "the-hanzo-connect-address-does-not-resolve-or-answer",
+  dns_failed: "the-hanzo-link-address-does-not-resolve-or-answer",
+  timeout: "the-hanzo-link-address-does-not-resolve-or-answer",
 } satisfies Record<EnvironmentConnectReachabilityCause, HanzoConnectTroubleshootingSection>;
 
 export function connectReachabilityHelpUrl(cause: EnvironmentConnectReachabilityCause): string {

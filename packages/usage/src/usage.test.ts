@@ -315,6 +315,32 @@ describe("service and report", () => {
     assert.isTrue(isReport(report));
     assert.strictEqual(report.cost.length, 1);
   });
+  it("shows a row for a provider that is slow, without waiting for it", async () => {
+    const token = ".gemini/antigravity-cli/antigravity-oauth-token";
+    const svc = createUsageService(
+      fakeEnv(
+        { [`/h/${token}`]: JSON.stringify({ id_token_email: "a@b.c" }) },
+        {},
+        {},
+        {
+          exec: () => new Promise<string>(() => undefined),
+        },
+      ),
+      () => ({
+        providers: Object.fromEntries(
+          CATALOG.map((p) => [p.id, { enabled: p.id === "antigravity" }]),
+        ),
+        trayMode: "merged",
+        showInMenuBar: false,
+        notifyAtPercent: [],
+        refreshSeconds: 300,
+      }),
+      50,
+    );
+    const { summary } = await svc.refresh({ instances: [], local: [], cost: [] });
+    const row = summary.snapshots.find((x) => x.provider === "antigravity")!;
+    assert.isTrue(typeof row.error === "string" && row.error.length > 0);
+  });
   it("keeps the last good windows when a refresh fails", async () => {
     const env = fakeEnv({}, {});
     const svc = createUsageService(env, () => ({

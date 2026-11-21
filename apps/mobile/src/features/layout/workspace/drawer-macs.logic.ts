@@ -25,6 +25,19 @@ export function drawerMacs(discovery: EnvironmentDiscovery | null): readonly Dra
   return macs.toSorted((a, b) => Number(b.online) - Number(a.online));
 }
 
+export interface DrawerCloud {
+  /** False until the cloud can start a session: the row then reads "Not available yet". */
+  readonly available: boolean;
+}
+
+/** The Cloud environment, listed for every signed-in account; null before discovery answers. */
+export function drawerCloud(discovery: EnvironmentDiscovery | null): DrawerCloud | null {
+  if (discovery === null || !discovery.environments.some(({ type }) => type === "cloud")) {
+    return null;
+  }
+  return { available: discovery.cloud.status === "ok" };
+}
+
 export type MacTap = "open" | "connect" | "settings";
 
 /**

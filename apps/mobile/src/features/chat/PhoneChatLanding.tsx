@@ -15,11 +15,58 @@ export function PhoneChatLanding() {
   const insets = useSafeAreaInsets();
   const cloudChat = useCloudChat();
 
-  /** Plain chat always goes to the cloud chat; where to run work is chosen in the Dev section. */
-  const send = (prompt: string, attachments: ReadonlyArray<CloudChatAttachment> = []): boolean => {
-    if (prompt.trim() === "") return false;
-    void cloudChat.send(prompt, attachments);
-    return true;
+  const run = (target: RunTarget) => {
+    if (target === "mac") {
+      // Linking a Mac is the environment flow; environment discovery plugs in there.
+      openSettings(navigation, "SettingsEnvironmentNew");
+      return;
+    }
+    void cloudChat.runInCloud().then((result) => {
+      const notice = sandboxNotice(result, {
+        ready: gt("Cloud sandbox ready"),
+        readyDetail: gt("Its browser opens from Environments."),
+        unavailable: gt("Not available yet"),
+        unavailableDetail: gt("Keep chatting, or run on your Mac."),
+        failed: gt("Couldn't start a cloud sandbox"),
+      });
+      Alert.alert(
+        notice.title,
+        notice.detail,
+        notice.opens
+          ? [
+              { text: gt("Open"), onPress: () => openSettings(navigation, "SettingsEnvironments") },
+              { text: gt("Close"), style: "cancel" },
+            ]
+          : undefined,
+      );
+    });
+  };
+
+  const chooseTarget = () =>
+    Alert.alert(gt("Where should this run?"), gt("Building needs a machine."), [
+      { text: gt("Run on your Mac"), onPress: () => run("mac") },
+      { text: gt("Cloud"), onPress: () => run("cloud") },
+      { text: gt("Cancel"), style: "cancel" },
+    ]);
+
+  const send = (
+    prompt: string,
+    build: boolean,
+    attachments: ReadonlyArray<CloudChatAttachment> = [],
+  ): boolean => {
+    const outcome = resolveSend({
+      prompt,
+      build,
+      hasReadyEnvironment: state.hasReadyEnvironment,
+      cloudChatAvailable: cloudChat.available,
+    });
+    if (outcome.kind === "machine") startNewTask();
+    else if (outcome.kind === "choose-target") chooseTarget();
+    else if (outcome.kind === "chat") {
+      void cloudChat.send(prompt, attachments);
+      return true;
+    }
+    return false;
   };
 
   const { messages, error, sending, sync } = cloudChat.state;

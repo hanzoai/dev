@@ -1,0 +1,1555 @@
+[
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_restricted_granular%3Athread-create%3A<uuid:2>:<uuid:0>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "thread.created",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "projectId": "project:fixture:tool_call_restricted_granular:<uuid:0>",
+      "title": "Replay fixture: tool_call_restricted_granular",
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "branch": null,
+      "worktreePath": null,
+      "pullRequests": [],
+      "activeProviderThreadId": null,
+      "lineage": {
+        "parentThreadId": null,
+        "relationshipToParent": null,
+        "rootThreadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>"
+      },
+      "forkedFrom": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "archivedAt": null,
+      "settledOverride": null,
+      "settledAt": null,
+      "snoozedUntil": null,
+      "snoozedAt": null,
+      "lastVisitedAt": null,
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_restricted_granular%3Amessage-1%3A<uuid:3>:<uuid:1>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "thread.metadata-updated",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "projectId": "project:fixture:tool_call_restricted_granular:<uuid:0>",
+      "title": "Replay fixture: tool_call_restricted_granular",
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "branch": null,
+      "worktreePath": null,
+      "pullRequests": [],
+      "activeProviderThreadId": null,
+      "lineage": {
+        "parentThreadId": null,
+        "relationshipToParent": null,
+        "rootThreadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>"
+      },
+      "forkedFrom": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "archivedAt": null,
+      "settledOverride": null,
+      "settledAt": null,
+      "snoozedUntil": null,
+      "snoozedAt": null,
+      "lastVisitedAt": "<time>",
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_restricted_granular%3Amessage-1%3A<uuid:3>:<uuid:3>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": null,
+      "nativeConversationHeadRef": null,
+      "status": "not_loaded",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": null,
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_restricted_granular%3Amessage-1%3A<uuid:3>:<uuid:4>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run.created",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "starting",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": null,
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_restricted_granular%3Amessage-1%3A<uuid:3>:<uuid:5>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run-attempt.created",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "claudeAgent",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "pending",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_restricted_granular%3Amessage-1%3A<uuid:3>:<uuid:6>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "pending",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_restricted_granular%3Amessage-1%3A<uuid:3>:<uuid:7>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "checkpoint-scope.created",
+    "payload": {
+      "id": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:name:root",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentScopeId": null,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "kind": "root_run",
+      "ordinalWithinParent": 0,
+      "advancesAppRunCount": true,
+      "cwd": "<workspace>",
+      "createdAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_restricted_granular%3Amessage-1%3A<uuid:3>:<uuid:8>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "message:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "role": "user",
+      "text": "Create or overwrite .codex-probe-write-action.txt with exactly this text: codex app-server approval fixture. Use a local shell command or file edit only, then briefly report what happened. Do not read package metadata, use GitHub, use web, or use MCP.",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_restricted_granular%3Amessage-1%3A<uuid:3>:<uuid:9>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:message:message%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1%3A<uuid:4>",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000001,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "createdBy": "user",
+      "creationSource": "web",
+      "type": "user_message",
+      "messageId": "message:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "inputIntent": "turn_start",
+      "text": "Create or overwrite .codex-probe-write-action.txt with exactly this text: codex app-server approval fixture. Use a local shell command or file edit only, then briefly report what happened. Do not read package metadata, use GitHub, use web, or use MCP.",
+      "attachments": []
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:10>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-session.attached",
+    "payload": {
+      "id": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "claude-sonnet-4-6",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": false,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkWhileSourceRunning": true,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "activeSteeringInterruptsTools": true,
+          "supportsSteeringByInterruptRestart": false,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": false,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": true
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": true,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": true,
+          "acceptsDeveloperContext": true,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": true,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": false
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "native"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:11>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "claude-sonnet-4-6",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": false,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkWhileSourceRunning": true,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "activeSteeringInterruptsTools": true,
+          "supportsSteeringByInterruptRestart": false,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": false,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": true
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": true,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": true,
+          "acceptsDeveloperContext": true,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": true,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": false
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "native"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:<uuid:12>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "ffd3df75-f3cf-433d-bb67-1dd1e9db316b",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "title": "Replay fixture: tool_call_restricted_granular"
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:<uuid:13>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "running",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:<uuid:14>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeThreadId": "ffd3df75-f3cf-433d-bb67-1dd1e9db316b",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "claudeAgent",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:<uuid:15>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "running",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:16>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Atool_call_restricted_granular%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_restricted_granular%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "claudeAgent",
+        "nativeId": "turn:run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+        "strength": "weak"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:17>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "ffd3df75-f3cf-433d-bb67-1dd1e9db316b",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "title": "Replay fixture: tool_call_restricted_granular",
+        "claudeAttachmentBudget": {
+          "bytesUsed": 253,
+          "pagesUsed": 0
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:18>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:claudeAgent:native-item:msg_01DbHDhWivNDrjU961RBEG9p%3Athinking%3A0",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Atool_call_restricted_granular%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_restricted_granular%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "msg_01DbHDhWivNDrjU961RBEG9p:thinking:0",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000002,
+      "status": "completed",
+      "title": "Thinking",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "reasoning",
+      "text": "The user wants me to create or overwrite a file called `.codex-probe-write-action.txt` with exactly the text \"codex app-server approval fixture\". I'll use the Write tool to do this.",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:19>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Atool_call_restricted_granular%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_restricted_granular%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "claudeAgent",
+        "nativeId": "turn:run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+        "strength": "strong"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "tokenUsage": {
+        "usedTokens": 11855,
+        "maxTokens": 200000,
+        "inputTokens": 11847,
+        "cachedInputTokens": 9455,
+        "outputTokens": 8,
+        "reasoningOutputTokens": 0,
+        "promptCacheTtlMs": 3600000,
+        "updatedAt": "<time>"
+      },
+      "model": "claude-sonnet-4-6"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:20>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:toolu_01Ayxc73fyGSj2frmw8XLmJn",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:claudeAgent:native-item:toolu_01Ayxc73fyGSj2frmw8XLmJn",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "running",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Atool_call_restricted_granular%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_restricted_granular%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "toolu_01Ayxc73fyGSj2frmw8XLmJn",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:21>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:toolu_01Ayxc73fyGSj2frmw8XLmJn",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:claudeAgent:native-item:toolu_01Ayxc73fyGSj2frmw8XLmJn",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:claudeAgent:native-item:toolu_01Ayxc73fyGSj2frmw8XLmJn",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Atool_call_restricted_granular%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_restricted_granular%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "toolu_01Ayxc73fyGSj2frmw8XLmJn",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000003,
+      "status": "running",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": null,
+      "updatedAt": "<time>",
+      "type": "command_execution",
+      "input": "printf 'codex app-server approval fixture' > .codex-probe-write-action.txt"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:22>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3AclaudeAgent%3Aprovider-turn%3Aprovider-turn%253Aprovider%253AclaudeAgent%253Anative-turn%253Aturn%25253Arun-attempt%25253Arun%25253Arun%2525253Athread%2525253Athread%252525253Afixture%252525253Atool_call_restricted_granular%252525253Aproject%252525253Aproject%25252525253Afixture%25252525253Atool_call_restricted_granular%25252525253A<uuid:0>%252525253A<uuid:1>%2525253Aordinal%2525253A1%25253Aattempt%25253A1%3Anative-request%3Atoolu_01Ayxc73fyGSj2frmw8XLmJn%3A<uuid:23>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:runtime-request:runtime-request%3Aprovider%3AclaudeAgent%3Aprovider-turn%3Aprovider-turn%253Aprovider%253AclaudeAgent%253Anative-turn%253Aturn%25253Arun-attempt%25253Arun%25253Arun%2525253Athread%2525253Athread%252525253Afixture%252525253Atool_call_restricted_granular%252525253Aproject%252525253Aproject%25252525253Afixture%25252525253Atool_call_restricted_granular%25252525253A<uuid:0>%252525253A<uuid:1>%2525253Aordinal%2525253A1%25253Aattempt%25253A1%3Anative-request%3Atoolu_01Ayxc73fyGSj2frmw8XLmJn%3A<uuid:23>",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:provider:claudeAgent:native-item:toolu_01Ayxc73fyGSj2frmw8XLmJn",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "approval_request",
+      "status": "waiting",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Atool_call_restricted_granular%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_restricted_granular%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "toolu_01Ayxc73fyGSj2frmw8XLmJn",
+        "strength": "strong"
+      },
+      "runtimeRequestId": "runtime-request:provider:claudeAgent:provider-turn:provider-turn%3Aprovider%3AclaudeAgent%3Anative-turn%3Aturn%253Arun-attempt%253Arun%253Arun%25253Athread%25253Athread%2525253Afixture%2525253Atool_call_restricted_granular%2525253Aproject%2525253Aproject%252525253Afixture%252525253Atool_call_restricted_granular%252525253A<uuid:0>%2525253A<uuid:1>%25253Aordinal%25253A1%253Aattempt%253A1:native-request:toolu_01Ayxc73fyGSj2frmw8XLmJn:<uuid:23>",
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:24>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3AclaudeAgent%3Aprovider-turn%3Aprovider-turn%253Aprovider%253AclaudeAgent%253Anative-turn%253Aturn%25253Arun-attempt%25253Arun%25253Arun%2525253Athread%2525253Athread%252525253Afixture%252525253Atool_call_restricted_granular%252525253Aproject%252525253Aproject%25252525253Afixture%25252525253Atool_call_restricted_granular%25252525253A<uuid:0>%252525253A<uuid:1>%2525253Aordinal%2525253A1%25253Aattempt%25253A1%3Anative-request%3Atoolu_01Ayxc73fyGSj2frmw8XLmJn%3A<uuid:23>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "runtime-request.updated",
+    "payload": {
+      "id": "runtime-request:provider:claudeAgent:provider-turn:provider-turn%3Aprovider%3AclaudeAgent%3Anative-turn%3Aturn%253Arun-attempt%253Arun%253Arun%25253Athread%25253Athread%2525253Afixture%2525253Atool_call_restricted_granular%2525253Aproject%2525253Aproject%252525253Afixture%252525253Atool_call_restricted_granular%252525253A<uuid:0>%2525253A<uuid:1>%25253Aordinal%25253A1%253Aattempt%253A1:native-request:toolu_01Ayxc73fyGSj2frmw8XLmJn:<uuid:23>",
+      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3AclaudeAgent%3Aprovider-turn%3Aprovider-turn%253Aprovider%253AclaudeAgent%253Anative-turn%253Aturn%25253Arun-attempt%25253Arun%25253Arun%2525253Athread%2525253Athread%252525253Afixture%252525253Atool_call_restricted_granular%252525253Aproject%252525253Aproject%25252525253Afixture%25252525253Atool_call_restricted_granular%25252525253A<uuid:0>%252525253A<uuid:1>%2525253Aordinal%2525253A1%25253Aattempt%25253A1%3Anative-request%3Atoolu_01Ayxc73fyGSj2frmw8XLmJn%3A<uuid:23>",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Atool_call_restricted_granular%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_restricted_granular%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeRequestRef": {
+        "driver": "claudeAgent",
+        "nativeId": "toolu_01Ayxc73fyGSj2frmw8XLmJn",
+        "strength": "strong"
+      },
+      "kind": "command",
+      "status": "pending",
+      "responseCapability": {
+        "type": "live",
+        "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+        "supportsFeedback": true
+      },
+      "createdAt": "<time>",
+      "resolvedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:25>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3AclaudeAgent%3Aprovider-turn%3Aprovider-turn%253Aprovider%253AclaudeAgent%253Anative-turn%253Aturn%25253Arun-attempt%25253Arun%25253Arun%2525253Athread%2525253Athread%252525253Afixture%252525253Atool_call_restricted_granular%252525253Aproject%252525253Aproject%25252525253Afixture%25252525253Atool_call_restricted_granular%25252525253A<uuid:0>%252525253A<uuid:1>%2525253Aordinal%2525253A1%25253Aattempt%25253A1%3Anative-request%3Atoolu_01Ayxc73fyGSj2frmw8XLmJn%3A<uuid:23>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:runtime-request:runtime-request%3Aprovider%3AclaudeAgent%3Aprovider-turn%3Aprovider-turn%253Aprovider%253AclaudeAgent%253Anative-turn%253Aturn%25253Arun-attempt%25253Arun%25253Arun%2525253Athread%2525253Athread%252525253Afixture%252525253Atool_call_restricted_granular%252525253Aproject%252525253Aproject%25252525253Afixture%25252525253Atool_call_restricted_granular%25252525253A<uuid:0>%252525253A<uuid:1>%2525253Aordinal%2525253A1%25253Aattempt%25253A1%3Anative-request%3Atoolu_01Ayxc73fyGSj2frmw8XLmJn%3A<uuid:23>",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3AclaudeAgent%3Aprovider-turn%3Aprovider-turn%253Aprovider%253AclaudeAgent%253Anative-turn%253Aturn%25253Arun-attempt%25253Arun%25253Arun%2525253Athread%2525253Athread%252525253Afixture%252525253Atool_call_restricted_granular%252525253Aproject%252525253Aproject%25252525253Afixture%25252525253Atool_call_restricted_granular%25252525253A<uuid:0>%252525253A<uuid:1>%2525253Aordinal%2525253A1%25253Aattempt%25253A1%3Anative-request%3Atoolu_01Ayxc73fyGSj2frmw8XLmJn%3A<uuid:23>",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Atool_call_restricted_granular%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_restricted_granular%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "toolu_01Ayxc73fyGSj2frmw8XLmJn",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000004,
+      "status": "waiting",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": null,
+      "updatedAt": "<time>",
+      "type": "approval_request",
+      "requestId": "runtime-request:provider:claudeAgent:provider-turn:provider-turn%3Aprovider%3AclaudeAgent%3Anative-turn%3Aturn%253Arun-attempt%253Arun%253Arun%25253Athread%25253Athread%2525253Afixture%2525253Atool_call_restricted_granular%2525253Aproject%2525253Aproject%252525253Afixture%252525253Atool_call_restricted_granular%252525253A<uuid:0>%2525253A<uuid:1>%25253Aordinal%25253A1%253Aattempt%253A1:native-request:toolu_01Ayxc73fyGSj2frmw8XLmJn:<uuid:23>",
+      "requestKind": "command",
+      "prompt": "printf 'codex app-server approval fixture' > .codex-probe-write-action.txt"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_restricted_granular%3Aapprove-runtime-request-1%3A<uuid:5>:<uuid:26>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3AclaudeAgent%3Aprovider-turn%3Aprovider-turn%253Aprovider%253AclaudeAgent%253Anative-turn%253Aturn%25253Arun-attempt%25253Arun%25253Arun%2525253Athread%2525253Athread%252525253Afixture%252525253Atool_call_restricted_granular%252525253Aproject%252525253Aproject%25252525253Afixture%25252525253Atool_call_restricted_granular%25252525253A<uuid:0>%252525253A<uuid:1>%2525253Aordinal%2525253A1%25253Aattempt%25253A1%3Anative-request%3Atoolu_01Ayxc73fyGSj2frmw8XLmJn%3A<uuid:23>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "runtime-request.updated",
+    "payload": {
+      "id": "runtime-request:provider:claudeAgent:provider-turn:provider-turn%3Aprovider%3AclaudeAgent%3Anative-turn%3Aturn%253Arun-attempt%253Arun%253Arun%25253Athread%25253Athread%2525253Afixture%2525253Atool_call_restricted_granular%2525253Aproject%2525253Aproject%252525253Afixture%252525253Atool_call_restricted_granular%252525253A<uuid:0>%2525253A<uuid:1>%25253Aordinal%25253A1%253Aattempt%253A1:native-request:toolu_01Ayxc73fyGSj2frmw8XLmJn:<uuid:23>",
+      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3AclaudeAgent%3Aprovider-turn%3Aprovider-turn%253Aprovider%253AclaudeAgent%253Anative-turn%253Aturn%25253Arun-attempt%25253Arun%25253Arun%2525253Athread%2525253Athread%252525253Afixture%252525253Atool_call_restricted_granular%252525253Aproject%252525253Aproject%25252525253Afixture%25252525253Atool_call_restricted_granular%25252525253A<uuid:0>%252525253A<uuid:1>%2525253Aordinal%2525253A1%25253Aattempt%25253A1%3Anative-request%3Atoolu_01Ayxc73fyGSj2frmw8XLmJn%3A<uuid:23>",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Atool_call_restricted_granular%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_restricted_granular%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeRequestRef": {
+        "driver": "claudeAgent",
+        "nativeId": "toolu_01Ayxc73fyGSj2frmw8XLmJn",
+        "strength": "strong"
+      },
+      "kind": "command",
+      "status": "resolved",
+      "responseCapability": {
+        "type": "live",
+        "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+        "supportsFeedback": true
+      },
+      "createdAt": "<time>",
+      "resolvedAt": "<time>",
+      "decision": "accept"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_restricted_granular%3Aapprove-runtime-request-1%3A<uuid:5>:<uuid:27>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3AclaudeAgent%3Aprovider-turn%3Aprovider-turn%253Aprovider%253AclaudeAgent%253Anative-turn%253Aturn%25253Arun-attempt%25253Arun%25253Arun%2525253Athread%2525253Athread%252525253Afixture%252525253Atool_call_restricted_granular%252525253Aproject%252525253Aproject%25252525253Afixture%25252525253Atool_call_restricted_granular%25252525253A<uuid:0>%252525253A<uuid:1>%2525253Aordinal%2525253A1%25253Aattempt%25253A1%3Anative-request%3Atoolu_01Ayxc73fyGSj2frmw8XLmJn%3A<uuid:23>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:runtime-request:runtime-request%3Aprovider%3AclaudeAgent%3Aprovider-turn%3Aprovider-turn%253Aprovider%253AclaudeAgent%253Anative-turn%253Aturn%25253Arun-attempt%25253Arun%25253Arun%2525253Athread%2525253Athread%252525253Afixture%252525253Atool_call_restricted_granular%252525253Aproject%252525253Aproject%25252525253Afixture%25252525253Atool_call_restricted_granular%25252525253A<uuid:0>%252525253A<uuid:1>%2525253Aordinal%2525253A1%25253Aattempt%25253A1%3Anative-request%3Atoolu_01Ayxc73fyGSj2frmw8XLmJn%3A<uuid:23>",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:provider:claudeAgent:native-item:toolu_01Ayxc73fyGSj2frmw8XLmJn",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "approval_request",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Atool_call_restricted_granular%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_restricted_granular%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "toolu_01Ayxc73fyGSj2frmw8XLmJn",
+        "strength": "strong"
+      },
+      "runtimeRequestId": "runtime-request:provider:claudeAgent:provider-turn:provider-turn%3Aprovider%3AclaudeAgent%3Anative-turn%3Aturn%253Arun-attempt%253Arun%253Arun%25253Athread%25253Athread%2525253Afixture%2525253Atool_call_restricted_granular%2525253Aproject%2525253Aproject%252525253Afixture%252525253Atool_call_restricted_granular%252525253A<uuid:0>%2525253A<uuid:1>%25253Aordinal%25253A1%253Aattempt%253A1:native-request:toolu_01Ayxc73fyGSj2frmw8XLmJn:<uuid:23>",
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_restricted_granular%3Aapprove-runtime-request-1%3A<uuid:5>:<uuid:28>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3AclaudeAgent%3Aprovider-turn%3Aprovider-turn%253Aprovider%253AclaudeAgent%253Anative-turn%253Aturn%25253Arun-attempt%25253Arun%25253Arun%2525253Athread%2525253Athread%252525253Afixture%252525253Atool_call_restricted_granular%252525253Aproject%252525253Aproject%25252525253Afixture%25252525253Atool_call_restricted_granular%25252525253A<uuid:0>%252525253A<uuid:1>%2525253Aordinal%2525253A1%25253Aattempt%25253A1%3Anative-request%3Atoolu_01Ayxc73fyGSj2frmw8XLmJn%3A<uuid:23>",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:runtime-request:runtime-request%3Aprovider%3AclaudeAgent%3Aprovider-turn%3Aprovider-turn%253Aprovider%253AclaudeAgent%253Anative-turn%253Aturn%25253Arun-attempt%25253Arun%25253Arun%2525253Athread%2525253Athread%252525253Afixture%252525253Atool_call_restricted_granular%252525253Aproject%252525253Aproject%25252525253Afixture%25252525253Atool_call_restricted_granular%25252525253A<uuid:0>%252525253A<uuid:1>%2525253Aordinal%2525253A1%25253Aattempt%25253A1%3Anative-request%3Atoolu_01Ayxc73fyGSj2frmw8XLmJn%3A<uuid:23>",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3AclaudeAgent%3Aprovider-turn%3Aprovider-turn%253Aprovider%253AclaudeAgent%253Anative-turn%253Aturn%25253Arun-attempt%25253Arun%25253Arun%2525253Athread%2525253Athread%252525253Afixture%252525253Atool_call_restricted_granular%252525253Aproject%252525253Aproject%25252525253Afixture%25252525253Atool_call_restricted_granular%25252525253A<uuid:0>%252525253A<uuid:1>%2525253Aordinal%2525253A1%25253Aattempt%25253A1%3Anative-request%3Atoolu_01Ayxc73fyGSj2frmw8XLmJn%3A<uuid:23>",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Atool_call_restricted_granular%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_restricted_granular%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "toolu_01Ayxc73fyGSj2frmw8XLmJn",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000004,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "approval_request",
+      "requestId": "runtime-request:provider:claudeAgent:provider-turn:provider-turn%3Aprovider%3AclaudeAgent%3Anative-turn%3Aturn%253Arun-attempt%253Arun%253Arun%25253Athread%25253Athread%2525253Afixture%2525253Atool_call_restricted_granular%2525253Aproject%2525253Aproject%252525253Afixture%252525253Atool_call_restricted_granular%252525253A<uuid:0>%2525253A<uuid:1>%25253Aordinal%25253A1%253Aattempt%253A1:native-request:toolu_01Ayxc73fyGSj2frmw8XLmJn:<uuid:23>",
+      "requestKind": "command",
+      "prompt": "printf 'codex app-server approval fixture' > .codex-probe-write-action.txt"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:29>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:toolu_01Ayxc73fyGSj2frmw8XLmJn",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:claudeAgent:native-item:toolu_01Ayxc73fyGSj2frmw8XLmJn",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Atool_call_restricted_granular%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_restricted_granular%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "toolu_01Ayxc73fyGSj2frmw8XLmJn",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:30>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:toolu_01Ayxc73fyGSj2frmw8XLmJn",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:claudeAgent:native-item:toolu_01Ayxc73fyGSj2frmw8XLmJn",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:claudeAgent:native-item:toolu_01Ayxc73fyGSj2frmw8XLmJn",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Atool_call_restricted_granular%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_restricted_granular%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "toolu_01Ayxc73fyGSj2frmw8XLmJn",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000003,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "command_execution",
+      "input": "printf 'codex app-server approval fixture' > .codex-probe-write-action.txt",
+      "output": "(Bash completed with no output)"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:31>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Atool_call_restricted_granular%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_restricted_granular%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "claudeAgent",
+        "nativeId": "turn:run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+        "strength": "strong"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "tokenUsage": {
+        "usedTokens": 12033,
+        "maxTokens": 200000,
+        "inputTokens": 12032,
+        "cachedInputTokens": 11844,
+        "outputTokens": 1,
+        "reasoningOutputTokens": 0,
+        "promptCacheTtlMs": 3600000,
+        "updatedAt": "<time>"
+      },
+      "model": "claude-sonnet-4-6"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:32>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:ea75d6df-7f51-4d9b-ae74-c6e0fbf1d3f6",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:claudeAgent:native-item:ea75d6df-7f51-4d9b-ae74-c6e0fbf1d3f6",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "assistant_message",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Atool_call_restricted_granular%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_restricted_granular%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "ea75d6df-7f51-4d9b-ae74-c6e0fbf1d3f6",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:33>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:ea75d6df-7f51-4d9b-ae74-c6e0fbf1d3f6",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "agent",
+      "creationSource": "provider",
+      "id": "message:provider:claudeAgent:native-item:ea75d6df-7f51-4d9b-ae74-c6e0fbf1d3f6",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:claudeAgent:native-item:ea75d6df-7f51-4d9b-ae74-c6e0fbf1d3f6",
+      "role": "assistant",
+      "text": "Done. The file `.codex-probe-write-action.txt` was created (or overwritten) in the current directory with the exact content `codex app-server approval fixture` — no trailing newline, no extra characters.",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:34>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:claudeAgent:native-item:ea75d6df-7f51-4d9b-ae74-c6e0fbf1d3f6",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:claudeAgent:native-item:ea75d6df-7f51-4d9b-ae74-c6e0fbf1d3f6",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:claudeAgent:native-item:ea75d6df-7f51-4d9b-ae74-c6e0fbf1d3f6",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Atool_call_restricted_granular%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_restricted_granular%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "claudeAgent",
+        "nativeId": "ea75d6df-7f51-4d9b-ae74-c6e0fbf1d3f6",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000005,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "assistant_message",
+      "messageId": "message:provider:claudeAgent:native-item:ea75d6df-7f51-4d9b-ae74-c6e0fbf1d3f6",
+      "text": "Done. The file `.codex-probe-write-action.txt` was created (or overwritten) in the current directory with the exact content `codex app-server approval fixture` — no trailing newline, no extra characters.",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:35>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Atool_call_restricted_granular%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_restricted_granular%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "claudeAgent",
+        "nativeId": "turn:run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+        "strength": "strong"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "tokenUsage": {
+        "usedTokens": 12033,
+        "maxTokens": 200000,
+        "inputTokens": 12032,
+        "cachedInputTokens": 11844,
+        "outputTokens": 1,
+        "reasoningOutputTokens": 0,
+        "promptCacheTtlMs": 3600000,
+        "updatedAt": "<time>"
+      },
+      "model": "claude-sonnet-4-6"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:36>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:claudeAgent:native-turn:turn%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Atool_call_restricted_granular%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_restricted_granular%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "claudeAgent",
+        "nativeId": "ea75d6df-7f51-4d9b-ae74-c6e0fbf1d3f6",
+        "strength": "weak"
+      },
+      "ordinal": 1,
+      "status": "completed",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "turnTokenUsage": {
+        "usageScope": "main_agent",
+        "cachedInputTokens": 21299,
+        "cacheCreationTokens": 2576,
+        "hasSubagents": false,
+        "models": [
+          "claude-sonnet-4-6"
+        ],
+        "otherUsage": {
+          "inputTokens": 0,
+          "outputTokens": 0
+        },
+        "usageStatus": "complete",
+        "inputTokens": 23879,
+        "outputTokens": 220
+      },
+      "model": "claude-sonnet-4-6"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AclaudeAgent%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:37>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "ffd3df75-f3cf-433d-bb67-1dd1e9db316b",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "title": "Replay fixture: tool_call_restricted_granular",
+        "claudeAttachmentBudget": {
+          "bytesUsed": 253,
+          "pagesUsed": 0
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:<uuid:38>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeThreadId": "ffd3df75-f3cf-433d-bb67-1dd1e9db316b",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "claudeAgent",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "completed",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:<uuid:39>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "waiting",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:<uuid:40>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "waiting",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:<uuid:41>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "claudeAgent",
+      "providerInstanceId": "claudeAgent",
+      "providerSessionId": "provider-session:provider-instance:claudeAgent:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "claudeAgent",
+        "nativeId": "ffd3df75-f3cf-433d-bb67-1dd1e9db316b",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "idle",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "title": "Replay fixture: tool_call_restricted_granular",
+        "claudeAttachmentBudget": {
+          "bytesUsed": 253,
+          "pagesUsed": 0
+        }
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:42>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "checkpoint.captured",
+    "payload": {
+      "id": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:0",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:name:root",
+      "runId": null,
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentCheckpointId": null,
+      "ordinalWithinScope": 0,
+      "appRunOrdinal": null,
+      "ref": "refs/hanzo/orchestration-v2/checkpoints/NDM4N2I5YTMzOTczMzBiNzUxMzJhZWNmNzM0Y2FmZDg/ordinal/0",
+      "status": "ready",
+      "files": [],
+      "capturedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:43>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "checkpoint.captured",
+    "payload": {
+      "id": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:name:root",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentCheckpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:0",
+      "ordinalWithinScope": 1,
+      "appRunOrdinal": 1,
+      "ref": "refs/hanzo/orchestration-v2/checkpoints/NDM4N2I5YTMzOTczMzBiNzUxMzJhZWNmNzM0Y2FmZDg/ordinal/1",
+      "status": "ready",
+      "files": [],
+      "capturedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:44>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "claudeAgent",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:claudeAgent:native-item:checkpoint%3Acheckpoint%3Ascope%3Acheckpoint-scope%253Athread%253Athread%25253Afixture%25253Atool_call_restricted_granular%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_restricted_granular%2525253A<uuid:0>%25253A<uuid:1>%253Aname%253Aroot%3Aname%3A1",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000006,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "checkpoint",
+      "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:name:root",
+      "files": []
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:45>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "claudeAgent",
+      "modelSelection": {
+        "instanceId": "claudeAgent",
+        "model": "claude-sonnet-4-6"
+      },
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "completed",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:46>",
+    "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "claudeAgent",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:tool_call_restricted_granular:project:project%3Afixture%3Atool_call_restricted_granular%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "completed",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:claudeAgent:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_restricted_granular%253Aproject%253Aproject%25253Afixture%25253Atool_call_restricted_granular%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_restricted_granular%3Aproject%3Aproject%253Afixture%253Atool_call_restricted_granular%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  }
+]

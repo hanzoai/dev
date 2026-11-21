@@ -6,10 +6,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SymbolView } from "../../../components/ui/AppSymbol";
 import { AppText as Text } from "../../../components/ui/AppText";
 import { useControlTheme } from "../../../components/ui/useControlTheme";
+import { useCloudChat } from "../../chat/cloud-chat";
 import { useConnectionController } from "../../connection/useConnectionController";
 import { openSettings } from "../../settings/settings-navigation";
 import { resolveMacTap } from "./drawer-macs.logic";
-import { useDrawerMacs } from "./useDrawerMacs";
+import { useDrawerEnvironments } from "./useDrawerEnvironments";
 import { useSelectWorkspaceTab } from "./useSelectWorkspaceTab";
 import { showDevMacs } from "./workspace-section-store";
 
@@ -20,7 +21,8 @@ export function DevMacsList() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const selectTab = useSelectWorkspaceTab();
-  const macs = useDrawerMacs();
+  const { macs, cloud } = useDrawerEnvironments();
+  const chat = useCloudChat();
   const connection = useConnectionController();
   const connectedIds = new Set(
     connection.connectedEnvironments.map((environment) => String(environment.environmentId)),
@@ -39,6 +41,27 @@ export function DevMacsList() {
       contentContainerClassName="gap-0.5 px-4 pt-3"
       contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
     >
+      {cloud === null ? null : (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={gt("Cloud")}
+          accessibilityState={{ disabled: !cloud.available }}
+          disabled={!cloud.available}
+          onPress={() => {
+            void chat.runInCloud();
+            openThreads();
+          }}
+          className="h-12 flex-row items-center gap-3 rounded-xl px-3"
+        >
+          <SymbolView name="cloud" size={18} tintColor={colors["--color-foreground"]} />
+          <Text className="flex-1 text-base text-foreground" numberOfLines={1}>
+            {gt("Cloud")}
+          </Text>
+          {cloud.available ? null : (
+            <Text className="text-xs text-foreground-muted">{gt("Not available yet")}</Text>
+          )}
+        </Pressable>
+      )}
       {macs.length === 0 ? (
         <Text className="px-3 py-6 text-center text-base text-foreground-muted">
           {gt("No linked Macs. Sign in on a Mac running Hanzo Dev to link it.")}

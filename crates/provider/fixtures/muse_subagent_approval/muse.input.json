@@ -1,0 +1,21 @@
+{
+  "fixture": "muse_subagent_approval",
+  "driver": "muse",
+  "modelSelection": {
+    "instanceId": "muse",
+    "model": "muse-spark-1.3-contributor"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": "approval-required",
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Do not run any commands yourself. Spawn one subagent whose only task is to run this exact shell command: printf 'subagent approval fixture' > subagent-approval.txt and then reply with exactly: Written. Wait for it to finish, then reply with exactly what it said."
+    },
+    {
+      "type": "approve_next_runtime_request"
+    }
+  ]
+}

@@ -479,7 +479,7 @@ const config: ExpoConfig = {
     ),
     iosPersonalTeamBuild: isIosPersonalTeamBuild,
     relay: {
-      url: repoEnv.HANZO_DEV_RELAY_URL ?? "https://relay.dev.hanzo.ai",
+      url: repoEnv.HANZO_DEV_RELAY_URL ?? null,
     },
     iam: {
       issuer: repoEnv.HANZO_DEV_IAM_ISSUER ?? null, // absent: the shared default origin

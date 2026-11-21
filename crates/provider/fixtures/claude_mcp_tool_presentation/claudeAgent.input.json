@@ -1,0 +1,18 @@
+{
+  "fixture": "claude_mcp_tool_presentation",
+  "driver": "claudeAgent",
+  "modelSelection": {
+    "instanceId": "claudeAgent",
+    "model": "claude-sonnet-4-6"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Do exactly this, one tool call at a time, with no other tool calls:\n1) Call the Firecrawl firecrawl_scrape tool on https://example.com with formats [\"markdown\"].\n2) Call the Firecrawl firecrawl_map tool on https://example.com with limit 1.\n3) Reply with exactly: mcp presentation fixture complete"
+    }
+  ]
+}

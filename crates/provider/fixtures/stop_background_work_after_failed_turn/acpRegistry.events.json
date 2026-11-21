@@ -1,0 +1,1034 @@
+[
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Astop_background_work_after_failed_turn%3Athread-create%3A<uuid:2>:<uuid:0>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "thread.created",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "projectId": "project:fixture:stop_background_work_after_failed_turn:<uuid:0>",
+      "title": "Replay fixture: stop_background_work_after_failed_turn",
+      "providerInstanceId": "acpRegistry",
+      "modelSelection": {
+        "instanceId": "acpRegistry",
+        "model": "default"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "branch": null,
+      "worktreePath": null,
+      "pullRequests": [],
+      "activeProviderThreadId": null,
+      "lineage": {
+        "parentThreadId": null,
+        "relationshipToParent": null,
+        "rootThreadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>"
+      },
+      "forkedFrom": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "archivedAt": null,
+      "settledOverride": null,
+      "settledAt": null,
+      "snoozedUntil": null,
+      "snoozedAt": null,
+      "lastVisitedAt": null,
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Astop_background_work_after_failed_turn%3Amessage-1%3A<uuid:3>:<uuid:1>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "thread.metadata-updated",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "projectId": "project:fixture:stop_background_work_after_failed_turn:<uuid:0>",
+      "title": "Replay fixture: stop_background_work_after_failed_turn",
+      "providerInstanceId": "acpRegistry",
+      "modelSelection": {
+        "instanceId": "acpRegistry",
+        "model": "default"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "branch": null,
+      "worktreePath": null,
+      "pullRequests": [],
+      "activeProviderThreadId": null,
+      "lineage": {
+        "parentThreadId": null,
+        "relationshipToParent": null,
+        "rootThreadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>"
+      },
+      "forkedFrom": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "archivedAt": null,
+      "settledOverride": null,
+      "settledAt": null,
+      "snoozedUntil": null,
+      "snoozedAt": null,
+      "lastVisitedAt": "<time>",
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Astop_background_work_after_failed_turn%3Amessage-1%3A<uuid:3>:<uuid:3>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "driver": "acpRegistry",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "acpRegistry",
+      "providerInstanceId": "acpRegistry",
+      "providerSessionId": "provider-session:provider-instance:acpRegistry:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": null,
+      "nativeConversationHeadRef": null,
+      "status": "not_loaded",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": null,
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Astop_background_work_after_failed_turn%3Amessage-1%3A<uuid:3>:<uuid:4>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "run.created",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "acpRegistry",
+      "modelSelection": {
+        "instanceId": "acpRegistry",
+        "model": "default"
+      },
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "starting",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": null,
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Astop_background_work_after_failed_turn%3Amessage-1%3A<uuid:3>:<uuid:5>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "run-attempt.created",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "acpRegistry",
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "pending",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Astop_background_work_after_failed_turn%3Amessage-1%3A<uuid:3>:<uuid:6>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "pending",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Astop_background_work_after_failed_turn%3Amessage-1%3A<uuid:3>:<uuid:7>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "checkpoint-scope.created",
+    "payload": {
+      "id": "checkpoint-scope:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:name:root",
+      "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentScopeId": null,
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "kind": "root_run",
+      "ordinalWithinParent": 0,
+      "advancesAppRunCount": true,
+      "cwd": "<workspace>",
+      "createdAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Astop_background_work_after_failed_turn%3Amessage-1%3A<uuid:3>:<uuid:8>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "message:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "role": "user",
+      "text": "Start the dev server in the background with `bun run dev` and keep it running.",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Astop_background_work_after_failed_turn%3Amessage-1%3A<uuid:3>:<uuid:9>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:message:message%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1%3A<uuid:4>",
+      "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000001,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "createdBy": "user",
+      "creationSource": "web",
+      "type": "user_message",
+      "messageId": "message:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "inputIntent": "turn_start",
+      "text": "Start the dev server in the background with `bun run dev` and keep it running.",
+      "attachments": []
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:10>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "driver": "acpRegistry",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "provider-session.attached",
+    "payload": {
+      "id": "provider-session:provider-instance:acpRegistry:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "acpRegistry",
+      "providerInstanceId": "acpRegistry",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "default",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": false,
+          "canForkFromTurn": false,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": false,
+          "supportsSteeringByInterruptRestart": true,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": true,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": false
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": false,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": false,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": false,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": false,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": false,
+          "acceptsDeveloperContext": false,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": true,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": false,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "weak",
+          "nativeRequestIds": "weak"
+        },
+        "runtimePolicy": {
+          "enforcement": "client-boundary"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:11>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "driver": "acpRegistry",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:acpRegistry:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "acpRegistry",
+      "providerInstanceId": "acpRegistry",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "default",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": false,
+          "canForkFromTurn": false,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": false,
+          "supportsSteeringByInterruptRestart": true,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": true,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": false
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": false,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": false,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": false,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": false,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": false,
+          "acceptsDeveloperContext": false,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": true,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": false,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "weak",
+          "nativeRequestIds": "weak"
+        },
+        "runtimePolicy": {
+          "enforcement": "client-boundary"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:<uuid:12>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "driver": "acpRegistry",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "acpRegistry",
+      "providerInstanceId": "acpRegistry",
+      "providerSessionId": "provider-session:provider-instance:acpRegistry:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "acpRegistry",
+        "nativeId": "grok-replay-session-1",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "itemIdentityVersion": 2
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:<uuid:13>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "acpRegistry",
+      "modelSelection": {
+        "instanceId": "acpRegistry",
+        "model": "default"
+      },
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "running",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:<uuid:14>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeThreadId": "grok-replay-session-1",
+      "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "acpRegistry",
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:<uuid:15>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "running",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:16>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "acpRegistry",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:acpRegistry:native-turn:provider-instance%3AacpRegistry%3Agrok-replay-session-1%3Aturn%3A1",
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "acpRegistry",
+        "nativeId": "grok-replay-session-1:turn:1",
+        "strength": "weak"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:17>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "acpRegistry",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "acpRegistry",
+      "providerInstanceId": "acpRegistry",
+      "providerSessionId": "provider-session:provider-instance:acpRegistry:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "acpRegistry",
+        "nativeId": "grok-replay-session-1",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "itemIdentityVersion": 2
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:18>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:acpRegistry:native-item:provider-instance%3AacpRegistry%3Agrok-replay-session-1%3Atool%3Adev-server",
+    "driver": "acpRegistry",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:acpRegistry:native-item:provider-instance%3AacpRegistry%3Agrok-replay-session-1%3Atool%3Adev-server",
+      "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "running",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:acpRegistry:native-turn:provider-instance%3AacpRegistry%3Agrok-replay-session-1%3Aturn%3A1",
+      "nativeItemRef": {
+        "driver": "acpRegistry",
+        "nativeId": "dev-server",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:19>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:acpRegistry:native-item:provider-instance%3AacpRegistry%3Agrok-replay-session-1%3Atool%3Adev-server",
+    "driver": "acpRegistry",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:acpRegistry:native-item:provider-instance%3AacpRegistry%3Agrok-replay-session-1%3Atool%3Adev-server",
+      "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:acpRegistry:native-item:provider-instance%3AacpRegistry%3Agrok-replay-session-1%3Atool%3Adev-server",
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:acpRegistry:native-turn:provider-instance%3AacpRegistry%3Agrok-replay-session-1%3Aturn%3A1",
+      "nativeItemRef": {
+        "driver": "acpRegistry",
+        "nativeId": "dev-server",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000002,
+      "status": "pending",
+      "title": "Ran command",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "updatedAt": "<time>",
+      "type": "command_execution",
+      "input": "bun run dev"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:20>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:acpRegistry:native-item:provider-instance%3AacpRegistry%3Agrok-replay-session-1%3Atool%3Adev-server",
+    "driver": "acpRegistry",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:acpRegistry:native-item:provider-instance%3AacpRegistry%3Agrok-replay-session-1%3Atool%3Adev-server",
+      "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:acpRegistry:native-item:provider-instance%3AacpRegistry%3Agrok-replay-session-1%3Atool%3Adev-server",
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:acpRegistry:native-turn:provider-instance%3AacpRegistry%3Agrok-replay-session-1%3Aturn%3A1",
+      "nativeItemRef": {
+        "driver": "acpRegistry",
+        "nativeId": "dev-server",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000002,
+      "status": "running",
+      "title": "Ran command",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "updatedAt": "<time>",
+      "type": "command_execution",
+      "input": "bun run dev"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:21>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "acpRegistry",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:acpRegistry:native-turn:provider-instance%3AacpRegistry%3Agrok-replay-session-1%3Aturn%3A1",
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "acpRegistry",
+        "nativeId": "grok-replay-session-1:turn:1",
+        "strength": "weak"
+      },
+      "ordinal": 1,
+      "status": "failed",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "turnTokenUsage": {
+        "usageScope": "main_agent",
+        "hasSubagents": false,
+        "usageStatus": "unavailable"
+      }
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:22>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "acpRegistry",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "acpRegistry",
+      "providerInstanceId": "acpRegistry",
+      "providerSessionId": "provider-session:provider-instance:acpRegistry:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "acpRegistry",
+        "nativeId": "grok-replay-session-1",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "itemIdentityVersion": 2
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:23>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "acpRegistry",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:acpRegistry:native-item:terminal-failure%3Aprovider-turn%3Aprovider%3AacpRegistry%3Anative-turn%3Aprovider-instance%253AacpRegistry%253Agrok-replay-session-1%253Aturn%253A1",
+      "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:acpRegistry:native-turn:provider-instance%3AacpRegistry%3Agrok-replay-session-1%3Aturn%3A1",
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000003,
+      "status": "failed",
+      "title": "Provider error",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "error",
+      "failure": {
+        "class": "provider_error",
+        "message": "Internal error",
+        "code": "-32603",
+        "retryable": null
+      }
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:<uuid:24>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeThreadId": "grok-replay-session-1",
+      "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "acpRegistry",
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "failed",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:<uuid:25>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "acpRegistry",
+      "modelSelection": {
+        "instanceId": "acpRegistry",
+        "model": "default"
+      },
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "failed",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:<uuid:26>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "failed",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:<uuid:27>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "acpRegistry",
+      "providerInstanceId": "acpRegistry",
+      "providerSessionId": "provider-session:provider-instance:acpRegistry:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "acpRegistry",
+        "nativeId": "grok-replay-session-1",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "idle",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "itemIdentityVersion": 2
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Astop_background_work_after_failed_turn%3Astop-background-work-1%3A<uuid:5>:<uuid:28>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:signal:interrupt-request",
+      "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:acpRegistry:native-turn:provider-instance%3AacpRegistry%3Agrok-replay-session-1%3Aturn%3A1",
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000004,
+      "status": "completed",
+      "title": "Interrupt requested",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "run_interrupt_request",
+      "message": "Stopped by user"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:command:effect%3Acommand%3Afixture%3Astop_background_work_after_failed_turn%3Astop-background-work-1%3A<uuid:5>%3Aprovider-turn.interrupt%3Aprovider-turn%3Aprovider%3AacpRegistry%3Anative-turn%3Aprovider-instance%253AacpRegistry%253Agrok-replay-session-1%253Aturn%253A1%3Abackground-work-settled:<uuid:29>",
+    "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:acpRegistry:native-item:provider-instance%3AacpRegistry%3Agrok-replay-session-1%3Atool%3Adev-server",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:acpRegistry:native-item:provider-instance%3AacpRegistry%3Agrok-replay-session-1%3Atool%3Adev-server",
+      "threadId": "thread:fixture:stop_background_work_after_failed_turn:project:project%3Afixture%3Astop_background_work_after_failed_turn%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Astop_background_work_after_failed_turn%3Aproject%3Aproject%253Afixture%253Astop_background_work_after_failed_turn%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:acpRegistry:native-item:provider-instance%3AacpRegistry%3Agrok-replay-session-1%3Atool%3Adev-server",
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Astop_background_work_after_failed_turn%253Aproject%253Aproject%25253Afixture%25253Astop_background_work_after_failed_turn%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:acpRegistry:native-turn:provider-instance%3AacpRegistry%3Agrok-replay-session-1%3Aturn%3A1",
+      "nativeItemRef": {
+        "driver": "acpRegistry",
+        "nativeId": "dev-server",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000002,
+      "status": "interrupted",
+      "title": "Ran command",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "command_execution",
+      "input": "bun run dev"
+    }
+  }
+]
