@@ -1,4 +1,4 @@
-# github.com/hanzo-inc/dev/go
+# github.com/hanzoai/dev/go
 
 The dev loop (HIP-1330), for a Go host.
 
@@ -9,7 +9,7 @@ the host acts. The core asks for work as `Action`s, and the host performs them
 and reports what happened as `Event`s.
 
 ```go
-import dev "github.com/hanzo-inc/dev/go"
+import dev "github.com/hanzoai/dev/go"
 ```
 
 ## The calls

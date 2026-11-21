@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	dev "github.com/hanzo-inc/dev/go"
+	dev "github.com/hanzoai/dev/go"
 )
 
 // A host drives the loop: it steps the session with an event, performs the

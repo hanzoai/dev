@@ -1,4 +1,4 @@
-module github.com/hanzo-inc/dev/go
+module github.com/hanzoai/dev/go
 
 go 1.27.1
 

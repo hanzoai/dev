@@ -64,7 +64,7 @@ wasm-check:
 # 7 MB of source, so it is generated where it is built and never committed.
 wasm2go:
 	@rm -rf go/devwasm && mkdir -p go/devwasm
-	@$(WASM2GO) -i go/dev.wasm -pkg devwasm -import github.com/hanzo-inc/dev/go/devwasm -pure -o go/devwasm/devwasm.go
+	@$(WASM2GO) -i go/dev.wasm -pkg devwasm -import github.com/hanzoai/dev/go/devwasm -pure -o go/devwasm/devwasm.go
 	@cd go && GOWORK=off go build ./devwasm/
 
 ## fmt: format the crates
