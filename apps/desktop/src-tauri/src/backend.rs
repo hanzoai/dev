@@ -357,19 +357,19 @@ mod hanzod {
         matches!(call("GET", "/healthz", vec![]).await, Ok(r) if r.status == 200)
     }
 
-    fn installed() -> PathBuf {
-        let name = if cfg!(windows) { "hanzod.exe" } else { "hanzod" };
+    fn installed(program: &str) -> PathBuf {
+        let name = if cfg!(windows) { format!("{program}.exe") } else { program.to_string() };
         dirs::home_dir().unwrap_or_default().join(".hanzo").join("bin").join(name)
     }
 
-    /// The hanzod the app ships, beside the server in its resources.
-    fn bundled() -> Option<PathBuf> {
-        let name = if cfg!(windows) { "hanzod.exe" } else { "hanzod" };
+    /// A program the app ships, beside the server in its resources.
+    fn bundled(program: &str) -> Option<PathBuf> {
+        let name = if cfg!(windows) { format!("{program}.exe") } else { program.to_string() };
         let exe = env::current_exe().ok()?;
         let dir = exe.parent()?;
         for root in [dir.to_path_buf(), dir.join("Resources"), dir.join("../Resources")] {
             for prefix in [root.join("resources"), root] {
-                let found = prefix.join(name);
+                let found = prefix.join(&name);
                 if found.is_file() {
                     return Some(found);
                 }
@@ -389,8 +389,8 @@ mod hanzod {
     /// Put the bundled hanzod at `~/.hanzo/bin` if it is newer than what is there, or the same
     /// version built differently; never downgrade. The previous binary is kept beside it for rollback.
     fn install() -> Option<PathBuf> {
-        let target = installed();
-        let Some(bundle) = bundled() else {
+        let target = installed("hanzod");
+        let Some(bundle) = bundled("hanzod") else {
             return target.is_file().then_some(target);
         };
         let ours = version_of(&bundle);
@@ -412,8 +412,30 @@ mod hanzod {
         target.is_file().then_some(target)
     }
 
+    /// Put the bundled `hanzo-engine` beside hanzod's other programs. hanzod runs it only if its
+    /// digest is the one pinned, so it is copied byte for byte and replaced when the digest differs.
+    fn install_engine() {
+        let target = installed("hanzo-engine");
+        let Some(bundle) = bundled("hanzo-engine") else { return };
+        if sha256_of(&bundle).ok() == sha256_of(&target).ok() {
+            return;
+        }
+        let Some(dir) = target.parent() else { return };
+        let part = dir.join("hanzo-engine.part");
+        if std::fs::create_dir_all(dir).is_ok()
+            && std::fs::copy(&bundle, &part).is_ok()
+            && std::fs::rename(&part, &target).is_err()
+        {
+            let _ = std::fs::remove_file(&part);
+        }
+    }
+
     /// Make sure a daemon answers on its socket, starting the installed one if not.
     pub async fn ensure() -> Result<(), String> {
+        static ENGINE: std::sync::Once = std::sync::Once::new();
+        if !ENGINE.is_completed() {
+            let _ = tokio::task::spawn_blocking(|| ENGINE.call_once(install_engine)).await;
+        }
         if healthy().await {
             return Ok(());
         }

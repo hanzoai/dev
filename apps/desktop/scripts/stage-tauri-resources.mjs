@@ -267,6 +267,32 @@ function unpack(bytes, name, into) {
   if (NodeFS.existsSync(staged) && !isWindows) NodeFS.chmodSync(staged, 0o755);
 }
 
+// Hanzo Engine runs local models for hanzod, which looks for `hanzo-engine` beside itself and
+// checks it against the digest pinned in hanzoai/node. It is staged byte for byte (never re-signed).
+{
+  const pin = runtimes["hanzo-engine"].targets[runtimeTarget];
+  if (pin !== undefined) {
+    const work = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "hanzo-engine-"));
+    const asset = `hanzo-engine-${runtimeTarget}.tar.gz`;
+    unpack(
+      await fetchPinned(
+        `https://github.com/hanzoai/engine/releases/download/v${runtimes["hanzo-engine"].version}/${asset}`,
+        pin,
+      ),
+      asset,
+      work,
+    );
+    const staged = NodePath.join(resourcesRoot, `hanzo-engine${exeSuffix}`);
+    NodeFS.copyFileSync(NodePath.join(work, `hanzo-engine${exeSuffix}`), staged);
+    if (!isWindows) NodeFS.chmodSync(staged, 0o755);
+    NodeFS.rmSync(work, { recursive: true, force: true });
+  } else {
+    console.warn(
+      `[stage-tauri-resources] no pinned hanzo-engine for ${runtimeTarget}; local models need one in ~/.hanzo/bin`,
+    );
+  }
+}
+
 // Stage dereferenced runtime external node_modules via BFS from apps/server/package.json
 const hostPlatformArch = `${hostPlatform}-${hostArch}`;
 const visited = new Set();

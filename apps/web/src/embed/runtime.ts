@@ -26,3 +26,25 @@ export interface DevRuntimeSource {
   /** Runtimes the person may switch between (linked machines, their cell). */
   list(signal: AbortSignal): Promise<readonly DevRuntime[]>;
 }
+
+/** Where a turn runs. Cloud is plain chat on the person's account; a machine is a linked Mac. */
+export interface DevEnvironment {
+  readonly id: string;
+  readonly kind: "cloud" | "machine";
+  readonly label: string;
+  /** False draws the chip disabled with `note` ("Not available yet"); plain chat still works in Cloud. */
+  readonly available: boolean;
+  readonly note?: string;
+  /** A machine's runtime (ZAP endpoint); absent for Cloud. */
+  readonly runtime?: DevRuntime;
+}
+
+/** The person's cloud account: plain chat needs no environment. */
+export interface DevCloud {
+  /** `https://api.hanzo.ai` */
+  readonly api: string;
+  /** The person's Hanzo IAM access token, fresh per call. */
+  readonly token: () => Promise<string>;
+  /** The person's organization, sent as `X-Org-Id` when set. */
+  readonly org?: string;
+}
