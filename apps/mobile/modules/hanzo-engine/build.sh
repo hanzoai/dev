@@ -7,7 +7,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 TARGETS="${CARGO_TARGET_DIR:-$ENGINE/target}"
 for t in aarch64-apple-ios aarch64-apple-ios-sim; do
   sdk=iphoneos; [ "$t" = aarch64-apple-ios-sim ] && sdk=iphonesimulator
-  (cd "$ENGINE" && SDKROOT="$(xcrun --sdk $sdk --show-sdk-path)" \
+  (cd "$ENGINE" && SDKROOT="$(xcrun --sdk $sdk --show-sdk-path)" IPHONEOS_DEPLOYMENT_TARGET=18.0 \
     cargo build --release -p hanzo-engine-ffi --features metal --target "$t")
 done
 HEADERS="$(mktemp -d)"
