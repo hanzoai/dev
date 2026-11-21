@@ -5,6 +5,8 @@ import {
   ALL_DRAWER_DESTINATIONS,
   DRAWER_FLICK,
   barDestinations,
+  drawerAccountCaption,
+  drawerAccountInitial,
   drawerAxis,
   drawerDestinations,
   drawerPull,
@@ -79,5 +81,20 @@ describe("drawer destinations", () => {
       "pullRequests",
       "settings",
     ]);
+  });
+});
+
+describe("drawer account", () => {
+  it("calls only the reserved admin org SuperAdmin", () => {
+    expect(drawerAccountCaption({ owner: "admin", planName: "Pro" }).kind).toBe("superAdmin");
+    expect(drawerAccountCaption({ owner: "hanzo", planName: "Pro" })).toEqual({
+      kind: "plan",
+      plan: "Pro",
+    });
+  });
+
+  it("takes an initial from the name", () => {
+    expect(drawerAccountInitial("  zed")).toBe("Z");
+    expect(drawerAccountInitial("")).toBe("?");
   });
 });

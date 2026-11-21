@@ -29,11 +29,13 @@ export function drawerReach(windowWidth: number): number {
 
 /** Where the pane stands while a finger holds it: never past home or open. */
 export function drawerPull(from: number, dx: number, reach: number): number {
+  "worklet";
   return Math.min(reach, Math.max(0, from + dx));
 }
 
 /** Whether a drawer let go at `at`, moving `speed` pt/ms, stays open. */
 export function drawerSettles(at: number, reach: number, speed: number): boolean {
+  "worklet";
   if (speed <= -DRAWER_FLICK) return false;
   if (speed >= DRAWER_FLICK) return true;
   return at > reach / 2;
@@ -89,4 +91,20 @@ export type DrawerAction = { readonly type: "open" } | { readonly type: "close" 
 export function drawerReducer(state: DrawerState, action: DrawerAction): DrawerState {
   const open = action.type === "toggle" ? !state.open : action.type === "open";
   return open === state.open ? state : { open };
+}
+
+/** Plan or role under the account name. SuperAdmin is exactly the reserved `admin` org. */
+export function drawerAccountCaption(account: {
+  readonly owner: string;
+  readonly planName: string | null;
+}): { readonly kind: "superAdmin" | "plan"; readonly plan: string | null } {
+  return account.owner === "admin"
+    ? { kind: "superAdmin", plan: null }
+    : { kind: "plan", plan: account.planName };
+}
+
+/** What to show for the avatar when there is no picture. */
+export function drawerAccountInitial(name: string): string {
+  const first = [...name.trim()][0];
+  return first ? first.toUpperCase() : "?";
 }
