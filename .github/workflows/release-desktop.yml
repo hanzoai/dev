@@ -213,6 +213,11 @@ jobs:
           toolchain: stable
           targets: ${{ inputs.rust_target }}
 
+      # rust-toolchain.toml pins the toolchain cargo runs here; give it the target too.
+      - name: Add the Rust target to the pinned toolchain
+        shell: bash
+        run: rustup target add ${{ inputs.rust_target }}
+
       - name: Download relay client tracing config
         if: inputs.relay_client_tracing
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -330,7 +335,9 @@ jobs:
           set -euo pipefail
           name="node-v$VERSION-win-${{ inputs.arch }}"
           dir="$RUNNER_TEMP/node-download"
-          dest="${XDG_CACHE_HOME:-$HOME/.cache}/tsdown/node/v$VERSION/win-${{ inputs.arch }}"
+          # tsdown's cache: %LOCALAPPDATA%\tsdown\Caches on a Windows host, XDG elsewhere.
+          if [[ -n "${LOCALAPPDATA:-}" ]]; then cache="$(cygpath -u "$LOCALAPPDATA")/tsdown/Caches"; else cache="${XDG_CACHE_HOME:-$HOME/.cache}/tsdown"; fi
+          dest="$cache/node/v$VERSION/win-${{ inputs.arch }}"
           mkdir -p "$dest"
           (cd "$dir" && grep " $name.zip\$" SHASUMS256.txt | sha256sum -c -)
           unzip -p "$dir/$name.zip" "$name/node.exe" > "$dest/node.exe"
