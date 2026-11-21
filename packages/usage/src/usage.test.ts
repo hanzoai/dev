@@ -76,7 +76,8 @@ describe("fetchers", () => {
     const env = fakeEnv(
       {
         "/h/.hanzo/identities.json": JSON.stringify({
-          accounts: [{ id: "a", access_token: "tok" }],
+          active: "hanzo/z",
+          identities: { "hanzo/z": { access_token: "tok" } },
         }),
       },
       {
@@ -216,7 +217,10 @@ describe("service and report", () => {
   ];
   it("merges host limits with fetched ones, alerts on crossings, and reports metadata only", async () => {
     const files = {
-      "/h/.hanzo/identities.json": JSON.stringify({ accounts: [{ access_token: "t" }] }),
+      "/h/.hanzo/identities.json": JSON.stringify({
+        active: "a/b",
+        identities: { "a/b": { access_token: "t" } },
+      }),
     };
     const routes = {
       "https://api.hanzo.ai/v1/billing/summary": {

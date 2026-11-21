@@ -152,15 +152,12 @@ export const deepseek: Fetcher = async (env) => {
 const hanzoToken = async (env: UsageEnv): Promise<string | undefined> => {
   const direct = firstEnv(env, ["HANZO_API_KEY"]);
   if (direct) return direct;
-  // The token Hanzo IAM issued to this machine; read from the identity file, used only for api.hanzo.ai.
+  // The token Hanzo IAM issued to this machine, `{ active, identities: { <id>: { access_token } } }`;
+  // used only for api.hanzo.ai.
   const ids = parseJson(await env.readText(`${env.home}/.hanzo/identities.json`));
-  const accounts = Array.isArray(ids.accounts)
-    ? ids.accounts
-    : Object.values(obj(ids.accounts ?? ids));
-  const active = str(ids.active) ?? str(ids.activeAccountId);
-  const entries = accounts.map(obj);
-  const pick = entries.find((e) => str(e.id) === active) ?? entries[0];
-  return str(pick?.access_token);
+  const identities = obj(ids.identities);
+  const pick = obj(identities[str(ids.active) ?? ""] ?? Object.values(identities)[0]);
+  return str(pick.access_token);
 };
 
 export const parseHanzo = (
