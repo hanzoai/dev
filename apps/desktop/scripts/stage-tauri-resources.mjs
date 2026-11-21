@@ -238,3 +238,13 @@ while (queue.length > 0) {
 console.log(
   `[stage-tauri-resources] Staged server + ${visited.size} runtime external packages into ${resourcesRoot}`,
 );
+
+// The macOS menu-bar helper ships inside the app; it is the only menu-bar item.
+if (hostPlatform === "darwin") {
+  const menubarOut = NodePath.join(resourcesRoot, "menubar");
+  NodeFS.rmSync(menubarOut, { recursive: true, force: true });
+  NodeFS.mkdirSync(menubarOut, { recursive: true });
+  NodeChildProcess.execFileSync(NodePath.join(desktopDir, "menubar", "build.sh"), [menubarOut], {
+    stdio: "inherit",
+  });
+}

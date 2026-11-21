@@ -1,0 +1,110 @@
+import {
+  NAVIGATION_TAB_ORDER,
+  resolveHiddenNavigationTabs,
+  resolveNavigationTabOrder,
+  type NavigationTab,
+} from "./navigation-tab-order";
+
+// The numbers of the hanzo.app phone drawer (@hanzo/app slide.ts), ported as is.
+/** Pane left in sight at the trailing edge while the drawer is open, pt. */
+export const DRAWER_STRIP = 64;
+/** The drawer's widest, pt. */
+export const DRAWER_REACH = 360;
+/** pt a finger moves before a drag is a drag. */
+export const DRAWER_SLOP = 8;
+/** A flick, pt per ms: faster than this decides by its direction, whatever the distance. */
+export const DRAWER_FLICK = 0.4;
+/** The slide and the dim run on one clock. */
+export const DRAWER_DURATION = 260;
+/** Where a drag may begin, pt from the leading edge. */
+export const DRAWER_EDGE = 24;
+/** Dim over the content at full open. */
+export const DRAWER_DIM = 0.45;
+
+export type DrawerDestination = NavigationTab | "settings";
+
+export function drawerReach(windowWidth: number): number {
+  return Math.min(Math.max(0, windowWidth - DRAWER_STRIP), DRAWER_REACH);
+}
+
+/** Where the pane stands while a finger holds it: never past home or open. */
+export function drawerPull(from: number, dx: number, reach: number): number {
+  "worklet";
+  return Math.min(reach, Math.max(0, from + dx));
+}
+
+/** Whether a drawer let go at `at`, moving `speed` pt/ms, stays open. */
+export function drawerSettles(at: number, reach: number, speed: number): boolean {
+  "worklet";
+  if (speed <= -DRAWER_FLICK) return false;
+  if (speed >= DRAWER_FLICK) return true;
+  return at > reach / 2;
+}
+
+/** What a finger's first movement is: a pull along the line, a scroll, or nothing yet. */
+export function drawerAxis(dx: number, dy: number): "x" | "y" | null {
+  const x = Math.abs(dx);
+  const y = Math.abs(dy);
+  if (x < DRAWER_SLOP && y < DRAWER_SLOP) return null;
+  return x > y * 1.2 ? "x" : "y";
+}
+
+/**
+ * Every place the bottom bar reached, in its order. The shared pull-request/issue slot is a bar
+ * constraint, not a drawer one; only tabs the user hid leave the list. Settings is always there.
+ */
+export function drawerDestinations(
+  order: readonly unknown[] | undefined,
+  hidden: readonly unknown[] | undefined,
+  customizable: boolean,
+): readonly DrawerDestination[] {
+  const excluded = customizable ? resolveHiddenNavigationTabs(hidden) : [];
+  return [...resolveNavigationTabOrder(order).filter((tab) => !excluded.includes(tab)), "settings"];
+}
+
+/** The destinations the bar offered: its four slots, the overflow, and Settings. */
+export function barDestinations(
+  order: readonly unknown[] | undefined,
+  hidden: readonly unknown[] | undefined,
+): readonly DrawerDestination[] {
+  const hiddenTabs = resolveHiddenNavigationTabs(hidden);
+  return [
+    ...resolveNavigationTabOrder(order).filter((tab) => !hiddenTabs.includes(tab)),
+    "settings",
+  ];
+}
+
+export const ALL_DRAWER_DESTINATIONS: readonly DrawerDestination[] = [
+  ...NAVIGATION_TAB_ORDER,
+  "settings",
+];
+
+export interface DrawerState {
+  readonly open: boolean;
+}
+
+export type DrawerAction =
+  | { readonly type: "open" }
+  | { readonly type: "close" }
+  | { readonly type: "toggle" };
+
+export function drawerReducer(state: DrawerState, action: DrawerAction): DrawerState {
+  const open = action.type === "toggle" ? !state.open : action.type === "open";
+  return open === state.open ? state : { open };
+}
+
+/** Plan or role under the account name. SuperAdmin is exactly the reserved `admin` org. */
+export function drawerAccountCaption(account: {
+  readonly owner: string;
+  readonly planName: string | null;
+}): { readonly kind: "superAdmin" | "plan"; readonly plan: string | null } {
+  return account.owner === "admin"
+    ? { kind: "superAdmin", plan: null }
+    : { kind: "plan", plan: account.planName };
+}
+
+/** What to show for the avatar when there is no picture. */
+export function drawerAccountInitial(name: string): string {
+  const first = [...name.trim()][0];
+  return first ? first.toUpperCase() : "?";
+}

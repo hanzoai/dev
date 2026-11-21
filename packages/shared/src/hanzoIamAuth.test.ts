@@ -80,6 +80,7 @@ describe("hanzoIamAuth", () => {
       expect(url).toBe("https://disco.example/.well-known/openid-configuration");
       return Response.json({
         issuer: "https://iam.example",
+        authorization_endpoint: "https://iam.example/v1/iam/oauth/authorize",
         jwks_uri: "https://iam.example/v1/iam/.well-known/jwks",
         token_endpoint: "https://iam.example/v1/iam/oauth/token",
         userinfo_endpoint: "https://iam.example/v1/iam/oauth/userinfo",
@@ -87,6 +88,7 @@ describe("hanzoIamAuth", () => {
     }) as unknown as typeof fetch;
     expect(await resolveIamEndpoints("https://disco.example", fetchImpl)).toEqual({
       issuer: "https://iam.example",
+      authorize: "https://iam.example/v1/iam/oauth/authorize",
       jwks: "https://iam.example/v1/iam/.well-known/jwks",
       token: "https://iam.example/v1/iam/oauth/token",
       userinfo: "https://iam.example/v1/iam/oauth/userinfo",

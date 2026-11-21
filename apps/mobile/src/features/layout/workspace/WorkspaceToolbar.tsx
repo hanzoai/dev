@@ -19,7 +19,12 @@ import { useHardwareKeyboardCommand } from "../../keyboard/hardwareKeyboardComma
 import { useAdaptiveWorkspaceLayout, useWorkspacePaneState } from "../AdaptiveWorkspaceLayout";
 import { useWorkspaceTabs } from "./WorkspaceTabsContext";
 import { shouldRestoreNativeSearch } from "./workspace-tabs-state";
-import { useFloatingWorkspaceTabs, useSidebarWorkspaceTabs } from "./useSystemWorkspaceTabBar";
+import {
+  useDrawerWorkspace,
+  useFloatingWorkspaceTabs,
+  useSidebarWorkspaceTabs,
+} from "./useSystemWorkspaceTabBar";
+import { usePhoneHeaderButtons } from "./usePhoneHeaderButtons";
 import { WorkspaceTabToolbarButtons } from "./WorkspaceSectionToolbar";
 import { useWorkspaceCompose } from "./useWorkspaceCompose";
 
@@ -44,6 +49,8 @@ export function WorkspaceToolbar(props: {
   const duoSearch = NATIVE_LIQUID_GLASS_SUPPORTED && isDuoDevice(deviceType);
   const bottomSearch = duoSearch && sidebarTabs !== "picker";
   const compose = useWorkspaceCompose();
+  const drawer = useDrawerWorkspace();
+  const phoneButtons = usePhoneHeaderButtons();
   // On the Duo, compose sits in the list's bar when folded and the detail column's when unfolded.
   const nativeToolbarCompose =
     deviceType === "duo-folded" && compose !== null && activeNewTask === null;
@@ -156,7 +163,8 @@ export function WorkspaceToolbar(props: {
             (NATIVE_LIQUID_GLASS_SUPPORTED ||
               tab.searchMode !== "resting" ||
               workspace.settingsOpen) &&
-            searchVisible
+            searchVisible &&
+            !(drawer && selectedTab === "threads")
               ? {
                   ref: searchRef,
                   autoFocus: tab.searchMode === "active",
@@ -190,13 +198,16 @@ export function WorkspaceToolbar(props: {
         }}
       />
       {/* UIKit lays trailing items out from the edge inward. */}
+      {drawer ? <Toolbar placement="left">{phoneButtons.menu}</Toolbar> : null}
       {workspace.settingsOpen ? (
         <Toolbar placement="right">
+          {drawer ? phoneButtons.compose : null}
           {searchButton}
           {createNativeHeaderMenu(settingsMenu)}
         </Toolbar>
       ) : (
         <Toolbar placement="right">
+          {drawer ? phoneButtons.compose : null}
           {searchButton}
           {nativeToolbarCompose && foldedSearch ? <Toolbar.Spacer width={8} /> : null}
           {composeButton}
@@ -211,7 +222,7 @@ export function WorkspaceToolbar(props: {
               onPress={compose.onPress}
             />
           )}
-          {NATIVE_LIQUID_GLASS_SUPPORTED ? null : (
+          {NATIVE_LIQUID_GLASS_SUPPORTED || (drawer && selectedTab === "threads") ? null : (
             <Toolbar.Button
               accessibilityLabel={searchLabel}
               icon="magnifyingglass"

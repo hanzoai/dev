@@ -231,6 +231,7 @@ export const normalizeHanzoIssuer = normalizeIamIssuer;
 interface IamEndpoints {
   /** The `iss` that discovery advertises: the only value a token's `iss` is compared with. */
   readonly issuer: string | null;
+  readonly authorize: string | null;
   readonly token: string;
   readonly userinfo: string;
   readonly jwks: string | null;
@@ -268,6 +269,7 @@ export function resolveIamEndpoints(
   if (running) return running;
   const classic: IamEndpoints = {
     issuer: null,
+    authorize: null,
     token: new URL("/oauth/token", origin).toString(),
     userinfo: new URL("/oauth/userinfo", origin).toString(),
     jwks: null,
@@ -286,6 +288,7 @@ export function resolveIamEndpoints(
       const userinfo = typeof doc.userinfo_endpoint === "string" ? doc.userinfo_endpoint : null;
       const good: IamEndpoints = {
         issuer: typeof doc.issuer === "string" ? doc.issuer : null,
+        authorize: typeof doc.authorization_endpoint === "string" ? doc.authorization_endpoint : null,
         token: token ?? classic.token,
         userinfo: userinfo ?? classic.userinfo,
         jwks: typeof doc.jwks_uri === "string" ? doc.jwks_uri : null,
@@ -462,10 +465,14 @@ export function buildHanzoIamAuthorizeUrl(input: {
   readonly state: string;
   readonly codeChallenge: string;
   readonly scopes?: ReadonlyArray<string>;
+  /** From OIDC discovery; without it Hanzo sign-in starts at the issuer's /login page. */
+  readonly authorizationEndpoint?: string | null;
 }): string {
   const origin = normalizeIamIssuer(input.issuer);
   // Hanzo sign-in starts on hanzo.ai/login with the app's OAuth request; it hands off to IAM.
-  const url = new URL(origin === DEFAULT_HANZO_IAM_ISSUER ? "/login" : "/oauth/authorize", origin);
+  const url = input.authorizationEndpoint
+    ? new URL(input.authorizationEndpoint)
+    : new URL(origin === DEFAULT_HANZO_IAM_ISSUER ? "/login" : "/oauth/authorize", origin);
   url.searchParams.set("client_id", input.clientId);
   url.searchParams.set("redirect_uri", input.redirectUri);
   url.searchParams.set("response_type", "code");

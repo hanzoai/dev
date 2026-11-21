@@ -1,4 +1,3 @@
-import * as Linking from "expo-linking";
 import * as SecureStore from "expo-secure-store";
 import * as WebBrowser from "expo-web-browser";
 import type { CloudAccountSource } from "@hanzodev/client-runtime/relay";
@@ -6,6 +5,7 @@ import {
   buildHanzoApiHeaders,
   buildHanzoIamAccountFromTokens,
   buildHanzoIamAuthorizeUrl,
+  resolveIamEndpoints,
   createOAuthState,
   createPkceChallengeS256,
   createPkceVerifier,
@@ -37,6 +37,7 @@ import { useSyncExternalStore } from "react";
 
 WebBrowser.maybeCompleteAuthSession();
 
+const HANZO_IAM_REDIRECT_URI = "hanzo://oauth/callback";
 const VAULT_STORAGE_KEY = "hanzo.dev.iam.vault.v1";
 
 interface PendingMobilePkce {
@@ -258,7 +259,8 @@ class HanzoMobileAuthController implements CloudAccountSource {
   ): Promise<HanzoIamAccount> => {
     await this.hydrate();
     const brand = getHanzoIamBrand(brandId);
-    const redirectUri = Linking.createURL("oauth/callback");
+    // The hanzo-app IAM client registers `hanzo://oauth/callback`; the auth session intercepts that scheme.
+    const redirectUri = HANZO_IAM_REDIRECT_URI;
     const verifier = createPkceVerifier();
     const challenge = createPkceChallengeS256(verifier);
     const state = createOAuthState();
@@ -271,6 +273,7 @@ class HanzoMobileAuthController implements CloudAccountSource {
       clientId: brand.clientId,
     };
     const authUrl = buildHanzoIamAuthorizeUrl({
+      authorizationEndpoint: (await resolveIamEndpoints(brand.issuer)).authorize,
       issuer: brand.issuer,
       clientId: brand.clientId,
       redirectUri,

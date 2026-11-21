@@ -29,11 +29,7 @@ import {
   WorkspaceSlotOptionsContext,
 } from "../../../native/v5-workspace-context";
 import type { NativeLayoutMetrics } from "../../../lib/reserved-regions";
-import {
-  useCompactWorkspaceTabs,
-  useFloatingWorkspaceTabs,
-  useSystemWorkspaceTabBar,
-} from "./useSystemWorkspaceTabBar";
+import { useFloatingWorkspaceTabs, useSystemWorkspaceTabBar } from "./useSystemWorkspaceTabBar";
 import { useControlTheme } from "../../../components/ui/useControlTheme";
 import { useDeviceType } from "../../../native/native-layout-metrics";
 import { WorkspaceSidebarTabs } from "./WorkspaceSidebarTabs";
@@ -158,7 +154,6 @@ export function WorkspaceNativeTabs(props: {
   const [provenance, setProvenance] = useState(0);
   const systemTabBar = useSystemWorkspaceTabBar();
   const deviceType = useDeviceType();
-  const compactTabs = useCompactWorkspaceTabs();
   const { layout } = useAdaptiveWorkspaceLayout();
   const { panes } = useWorkspacePaneState();
   // The tabs belong to the sidebar; over a page with the sidebar hidden they'd cover the composer.
@@ -272,7 +267,6 @@ export function WorkspaceNativeTabs(props: {
         </Tabs.Host>
       </WorkspaceColumnMetricsContext>
       {(deviceType === "pad" ||
-        compactTabs ||
         (layout.variant === "medium" &&
           !workspaceUsesColumns(selectedTab, workspace.settingsOpen))) &&
       !props.hidden &&

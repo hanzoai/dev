@@ -37,7 +37,7 @@ function deriveEmptyState(
 
   if (!catalogState.hasConnections) {
     return {
-      title: resolve(msg("No environments connected")),
+      title: resolve(msg("Sign in to Hanzo")),
       detail: resolve(msg("Add an environment to load projects and start coding sessions.")),
       loading: false,
     };

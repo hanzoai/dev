@@ -26,7 +26,6 @@ function ConfiguredSettingsAuthRouteScreen() {
     isLoaded,
     activeAccount,
     accounts,
-    brands,
     signInWithBrand,
     signInWithToken,
     switchAccount,
@@ -34,7 +33,6 @@ function ConfiguredSettingsAuthRouteScreen() {
     signOutAll,
   } = useHanzoMobileAccounts();
 
-  const [selectedBrand, setSelectedBrand] = useState<HanzoIamBrandId>("hanzo");
   const [busy, setBusy] = useState(false);
   const [showTokenEntry, setShowTokenEntry] = useState(false);
   const [tokenInput, setTokenInput] = useState("");
@@ -58,7 +56,7 @@ function ConfiguredSettingsAuthRouteScreen() {
   const handleTokenSignIn = () => {
     if (busy || !tokenInput.trim()) return;
     setBusy(true);
-    void signInWithToken({ token: tokenInput, brand: selectedBrand })
+    void signInWithToken({ token: tokenInput, brand: "hanzo" })
       .then(() => {
         setTokenInput("");
         setShowTokenEntry(false);
@@ -91,18 +89,16 @@ function ConfiguredSettingsAuthRouteScreen() {
           }}
         >
           <View className="items-center gap-3 rounded-[24px] bg-grouped-card p-6">
-            <HanzoWordmark height={36} colorClassName="text-foreground" />
+            <HanzoWordmark height={36} colorClassName="accent-foreground" />
             <Text className="text-lg font-hanzo-bold text-foreground">
               {activeAccount
                 ? (activeAccount.displayName ?? activeAccount.id)
-                : gt("Unified Remote Control")}
+                : gt("Sign in to Hanzo")}
             </Text>
             <Text className="text-center text-sm text-foreground-muted">
               {activeAccount
                 ? `${activeAccount.id} · ${activeAccount.issuer.replace(/^https?:\/\//, "")}`
-                : gt(
-                    "Sign in with Hanzo ID to control every Desktop, CLI, and Cloud sandbox across your accounts.",
-                  )}
+                : gt("Sign in to chat, and to control Hanzo Dev on your Mac from your phone.")}
             </Text>
           </View>
 
@@ -162,37 +158,19 @@ function ConfiguredSettingsAuthRouteScreen() {
           ) : null}
 
           <View className="gap-3 rounded-[24px] bg-grouped-card p-5">
-            <Text className="text-xs font-hanzo-bold uppercase text-foreground-muted">
-              {accounts.length > 0 ? gt("Add Another Account") : gt("Choose Identity Network")}
-            </Text>
-            <View className="flex-row flex-wrap gap-2">
-              {brands.map((brand) => {
-                const selected = selectedBrand === brand.id;
-                return (
-                  <Pressable
-                    key={brand.id}
-                    onPress={() => setSelectedBrand(brand.id)}
-                    className={`rounded-full px-3.5 py-2 ${selected ? "bg-foreground" : "bg-subtle"}`}
-                  >
-                    <Text
-                      className={`text-xs font-hanzo-bold ${selected ? "text-background" : "text-foreground"}`}
-                    >
-                      {brand.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            {accounts.length > 0 ? (
+              <Text className="text-xs font-hanzo-bold uppercase text-foreground-muted">
+                {gt("Add Another Account")}
+              </Text>
+            ) : null}
             <Button
               label={
                 busy
                   ? gt("Waiting for browser return...")
-                  : gt("Continue with {brand} ID", {
-                      brand: brands.find((b) => b.id === selectedBrand)?.label ?? "Hanzo",
-                    })
+                  : gt("Continue with Hanzo")
               }
               disabled={busy}
-              onPress={() => handleBrandSignIn(selectedBrand)}
+              onPress={() => handleBrandSignIn("hanzo")}
             />
             {busy ? (
               <View className="flex-row flex-wrap items-center justify-between gap-2 rounded-2xl bg-subtle px-3.5 py-2.5">
@@ -203,7 +181,7 @@ function ConfiguredSettingsAuthRouteScreen() {
               </View>
             ) : null}
             <Button
-              label={showTokenEntry ? gt("Hide API key / token") : gt("Use API key or CLI token")}
+              label={showTokenEntry ? gt("Hide API key") : gt("Use an API key")}
               tone="text"
               onPress={() => setShowTokenEntry((prev) => !prev)}
             />
