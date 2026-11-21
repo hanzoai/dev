@@ -39,7 +39,7 @@ vi.mock(import("~/rpc/requestLatencyState"), async (original) => ({
   trackRpcRequestSent: () => {},
 }));
 
-it("the new-thread project picker follows the manual sidebar project order", async () => {
+it("the composer project menu follows the manual sidebar project order", async () => {
   using _environment = installFakeEnvironment([], {
     extraProjects: [
       { id: ProjectId.make("project-alpha"), title: "alpha" },
@@ -72,7 +72,9 @@ it("the new-thread project picker follows the manual sidebar project order", asy
   });
   // The shell snapshot has arrived once the sidebar lists the project.
   await expect.element(page.getByText("render", { exact: true }).first()).toBeVisible();
-  const trigger = document.querySelector<HTMLElement>("[data-draft-project-trigger]");
+  const trigger = [...document.querySelectorAll<HTMLElement>("[data-draft-project-trigger]")].find(
+    (element) => element.offsetParent !== null,
+  );
   if (!trigger) throw new Error("The draft project picker did not render.");
   await userEvent.click(page.elementLocator(trigger));
   await expect.element(page.getByRole("option", { name: "beta" })).toBeVisible();
@@ -83,7 +85,8 @@ it("the new-thread project picker follows the manual sidebar project order", asy
       page
         .getByRole("option")
         .elements()
-        .map((option) => option.textContent),
+        .map((option) => option.textContent)
+        .slice(0, 4),
     ).toEqual([
       expect.stringMatching(/render$/),
       expect.stringMatching(/beta$/),

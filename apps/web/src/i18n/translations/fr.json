@@ -3269,7 +3269,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "sur l’ordinateur qui a ouvert cette page"]
+      "c": [
+        " ",
+        "sur l’ordinateur qui a ouvert cette page"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3281,7 +3284,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· quiconque l’exécute obtient cet accès"]
+      "c": [
+        " ",
+        "· quiconque l’exécute obtient cet accès"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "N’approuvez qu’une connexion que vous venez de lancer.",
@@ -3671,16 +3677,6 @@
   "198ebc7ab395b090": "Cliquez pour masquer le compte",
   "6df4c22a9ae17336": "Gérer l’utilisation",
   "0469747f4bb9caac": "{additions} ajouts, {deletions} suppressions",
-  "a0e0e2640219f1b0": "Choisir un projet",
-  "074db680e148e829": "Ajouter un projet",
-  "b8e0e89c83a639fa": [
-    {
-      "i": 1,
-      "k": "_gt_value_1",
-      "v": "v"
-    },
-    " pour commencer"
-  ],
   "99c183d2407cd36d": "Ajoutez un projet pour commencer",
   "613f8257a433cec4": "Médias",
   "e3baa1d5c822a835": "Afficher la capture d’écran",
@@ -3991,6 +3987,7 @@
   "d47ad54e98d33190": "Le panneau de droite est indisponible",
   "7e4b0afa9879fd43": "Rétablir la taille du panneau",
   "8381e38420ae57f3": "Agrandir le panneau",
+  "95b53841d3b8e3e2": "Project and workspace: {context}",
   "7d49da3c635828ce": "L’API Presse-papiers n’est pas disponible pour copier le plan.",
   "ef0e4fcee07194f4": "Impossible de copier le plan dans le presse-papiers.",
   "7e2c4488f8ea9b23": "Impossible de copier le plan",

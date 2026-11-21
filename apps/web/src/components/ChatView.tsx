@@ -3621,11 +3621,7 @@ export default function ChatView(props: ChatViewProps) {
                             : undefined
                         }
                       >
-                        <DraftHeroHeadline
-                          draftId={draftId}
-                          activeProjectRef={activeProjectRef}
-                          activeProjectTitle={activeProject?.title ?? null}
-                        />
+                        <DraftHeroHeadline draftId={draftId} activeProjectRef={activeProjectRef} />
                       </div>
                     </div>
                   ) : null}

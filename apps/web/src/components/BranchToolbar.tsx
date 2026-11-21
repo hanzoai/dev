@@ -48,6 +48,7 @@ import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSele
 import { openAddProjectToMachine } from "./AddProjectToMachineDialog";
 import { type AddProjectTarget, useAddProjectTargets } from "../hooks/useAddProjectTargets";
 import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
+import { ProjectWorkspaceMenu } from "./chat/ProjectWorkspaceMenu";
 import { PreviousWorktreeItemContent } from "./PreviousWorktreeItemContent";
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import {
@@ -714,6 +715,22 @@ export const BranchToolbar = memo(function BranchToolbar({
     canPickEnvironment: hasMultipleEnvironments,
   });
   const [attachStrip, labelsOverflow] = useLabelsOverflow();
+  // A new thread picks its project and workspace from one menu.
+  const projectWorkspaceMenu =
+    draftId && !envModeLocked && !forceNewWorktree ? (
+      <ProjectWorkspaceMenu
+        draftId={draftId}
+        activeProjectRef={activeProjectRef}
+        activeProjectTitle={activeProject?.title ?? ""}
+        showWorkspace={showGitControls}
+        effectiveEnvMode={effectiveEnvMode}
+        activeWorktreePath={activeWorktreePath}
+        onEnvModeChange={onEnvModeChange}
+        previousWorktreeLabel={previousWorktreeLabel}
+        previousWorktreeBranch={previousWorktreeSeed?.branch ?? null}
+        onUsePreviousWorktree={onUsePreviousWorktree}
+      />
+    ) : null;
 
   if (!activeProject) return null;
 
@@ -773,29 +790,32 @@ export const BranchToolbar = memo(function BranchToolbar({
     >
       {showGitControls ? (
         <div className="contents @xl/composer-surface:hidden">
-          <RunContextSelector
-            forceNewWorktree={forceNewWorktree}
-            autoEnvironmentLabel={autoEnvironmentLabel}
-            onAutoEnvironment={onAutoEnvironment}
-            envLocked={envLocked}
-            envModeLocked={envModeLocked}
-            environmentId={environmentId}
-            availableEnvironments={availableEnvironments}
-            showEnvironmentPicker={showEnvironmentPicker}
-            showEnvironmentIndicator={showEnvironmentIndicator}
-            onEnvironmentChange={onEnvironmentChange}
-            effectiveEnvMode={effectiveEnvMode}
-            activeWorktreePath={activeWorktreePath}
-            onEnvModeChange={onEnvModeChange}
-            previousWorktreeLabel={previousWorktreeLabel}
-            previousWorktreeBranch={previousWorktreeSeed?.branch ?? null}
-            onUsePreviousWorktree={onUsePreviousWorktree}
-            addTargets={addTargets}
-            onAddToMachine={onAddToMachine}
-          />
+          {projectWorkspaceMenu}
+          {!projectWorkspaceMenu || showEnvironmentIndicator ? (
+            <RunContextSelector
+              forceNewWorktree={forceNewWorktree}
+              autoEnvironmentLabel={autoEnvironmentLabel}
+              onAutoEnvironment={onAutoEnvironment}
+              envLocked={envLocked}
+              envModeLocked={envModeLocked}
+              environmentId={environmentId}
+              availableEnvironments={availableEnvironments}
+              showEnvironmentPicker={showEnvironmentPicker}
+              showEnvironmentIndicator={showEnvironmentIndicator}
+              onEnvironmentChange={onEnvironmentChange}
+              effectiveEnvMode={effectiveEnvMode}
+              activeWorktreePath={activeWorktreePath}
+              onEnvModeChange={onEnvModeChange}
+              previousWorktreeLabel={previousWorktreeLabel}
+              previousWorktreeBranch={previousWorktreeSeed?.branch ?? null}
+              onUsePreviousWorktree={onUsePreviousWorktree}
+              addTargets={addTargets}
+              onAddToMachine={onAddToMachine}
+            />
+          ) : null}
         </div>
       ) : null}
-      {showGitControls || showEnvironmentIndicator ? (
+      {showGitControls || showEnvironmentIndicator || projectWorkspaceMenu ? (
         <div
           className={cn(
             "min-h-7 min-w-10 items-center gap-1 sm:min-h-6",
@@ -803,6 +823,7 @@ export const BranchToolbar = memo(function BranchToolbar({
             "flex-1",
           )}
         >
+          {projectWorkspaceMenu}
           {showEnvironmentIndicator && availableEnvironments && (
             <>
               <BranchToolbarEnvironmentSelector
@@ -814,7 +835,7 @@ export const BranchToolbar = memo(function BranchToolbar({
                 {...(showEnvironmentPicker ? { onEnvironmentChange } : {})}
                 {...(addTargets.length > 0 ? { onAddToMachine: () => onAddToMachine(null) } : {})}
               />
-              {showGitControls ? (
+              {showGitControls && !projectWorkspaceMenu ? (
                 <Separator
                   orientation="vertical"
                   className="mx-0.5 h-3.5!"
@@ -823,7 +844,7 @@ export const BranchToolbar = memo(function BranchToolbar({
               ) : null}
             </>
           )}
-          {showGitControls ? (
+          {showGitControls && !projectWorkspaceMenu ? (
             <BranchToolbarEnvModeSelector
               forceNewWorktree={forceNewWorktree}
               envLocked={envModeLocked}

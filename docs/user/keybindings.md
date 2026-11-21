@@ -34,8 +34,9 @@ Use `mod+shift+m` to choose a model and `mod+shift+h` to choose a host.
 To step a new thread to the next machine instead of opening the menu, bind
 **Composer: Cycle Host** in Keybindings. It has no default shortcut.
 Use `mod+shift+e` for effort, `mod+shift+a` for permissions, `mod+shift+x` for the
-workspace, and `mod+shift+g` for the Git branch. The workspace menu includes the
-current checkout, a new worktree, and the previous worktree when available.
+workspace, and `mod+shift+g` for the Git branch. The workspace menu is the composer's
+project menu: it lists projects, then the current checkout, a new worktree, and the previous
+worktree when available.
 Use `mod+shift+l` to reuse the previous worktree directly.
 
 To change effort one step without opening the picker, bind

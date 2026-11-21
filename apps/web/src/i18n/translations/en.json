@@ -3269,7 +3269,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "on the computer that opened this page"]
+      "c": [
+        " ",
+        "on the computer that opened this page"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3281,7 +3284,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· whoever runs it gets this access"]
+      "c": [
+        " ",
+        "· whoever runs it gets this access"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Only approve a sign-in you just started.",
@@ -3671,16 +3677,6 @@
   "198ebc7ab395b090": "Click to hide account",
   "6df4c22a9ae17336": "Manage usage",
   "0469747f4bb9caac": "{additions} additions, {deletions} deletions",
-  "a0e0e2640219f1b0": "Choose a project",
-  "074db680e148e829": "Add a project",
-  "b8e0e89c83a639fa": [
-    {
-      "i": 1,
-      "k": "_gt_value_1",
-      "v": "v"
-    },
-    " to start"
-  ],
   "99c183d2407cd36d": "Add a project to start",
   "613f8257a433cec4": "Media",
   "e3baa1d5c822a835": "Show screenshot",
@@ -3992,6 +3988,7 @@
   "d47ad54e98d33190": "Right panel is unavailable",
   "7e4b0afa9879fd43": "Restore panel size",
   "8381e38420ae57f3": "Maximize panel",
+  "95b53841d3b8e3e2": "Project and workspace: {context}",
   "7d49da3c635828ce": "Clipboard API is unavailable while copying plan.",
   "ef0e4fcee07194f4": "Failed to copy plan to the clipboard.",
   "7e2c4488f8ea9b23": "Could not copy plan",

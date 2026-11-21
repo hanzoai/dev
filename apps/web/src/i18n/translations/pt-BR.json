@@ -3269,7 +3269,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "no computador que abriu esta página"]
+      "c": [
+        " ",
+        "no computador que abriu esta página"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3281,7 +3284,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· quem executar recebe este acesso"]
+      "c": [
+        " ",
+        "· quem executar recebe este acesso"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Aprove apenas um login que você acabou de iniciar.",
@@ -3671,16 +3677,6 @@
   "198ebc7ab395b090": "Clique para ocultar a conta",
   "6df4c22a9ae17336": "Gerenciar uso",
   "0469747f4bb9caac": "{additions} adições, {deletions} remoções",
-  "a0e0e2640219f1b0": "Escolha um projeto",
-  "074db680e148e829": "Adicione um projeto",
-  "b8e0e89c83a639fa": [
-    {
-      "i": 1,
-      "k": "_gt_value_1",
-      "v": "v"
-    },
-    " para começar"
-  ],
   "99c183d2407cd36d": "Adicione um projeto para começar",
   "613f8257a433cec4": "Mídia",
   "e3baa1d5c822a835": "Mostrar captura de tela",
@@ -3991,6 +3987,7 @@
   "d47ad54e98d33190": "O painel direito não está disponível",
   "7e4b0afa9879fd43": "Restaurar tamanho do painel",
   "8381e38420ae57f3": "Maximizar painel",
+  "95b53841d3b8e3e2": "Project and workspace: {context}",
   "7d49da3c635828ce": "A API da área de transferência não está disponível ao copiar o plano.",
   "ef0e4fcee07194f4": "Falha ao copiar o plano para a área de transferência.",
   "7e2c4488f8ea9b23": "Não foi possível copiar o plano",

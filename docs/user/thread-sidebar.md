@@ -26,11 +26,21 @@ if that project exists there. Otherwise it selects an environment that has it.
 
 A thread does not need a project. To start one without a project, click **or
 start without a project** under a new thread's heading, pick **No project** from
-the project menu in that heading or from **New thread in...** in the command
+**New thread in...** in the command
 palette, or press `mod+alt+n`. On mobile, pick **No project** from the project
 list. It starts on your current machine; before sending, pick another machine
 from the machine menu to move it there. To move a draft into a project, pick the
-project in the heading.
+project from the project chip in the composer.
+
+### Choose the project and workspace
+
+On web and desktop, the chip at the left of the composer's footer row is named for the
+project. Open it, from the keyboard with `mod+shift+x`, to pick both in one menu. The top of
+the menu is the project list: search, pinned projects first, and **Add project**. Below it is
+the workspace for that project, **Current checkout** or **New worktree**, plus the previous
+worktree when one is available. Picking a project on an empty draft opens that project's
+draft, and the workspace choice follows the draft. Projects that are not Git repositories
+list only the projects. On mobile the same menu opens from the same chip.
 
 Each thread without a project works in its own folder under `~/.hanzo-dev/scratch` (the
 `scratch` folder of your Hanzo data directory), named after its date, the first words

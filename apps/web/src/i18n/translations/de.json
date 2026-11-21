@@ -3269,7 +3269,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "auf dem Computer, der diese Seite geöffnet hat"]
+      "c": [
+        " ",
+        "auf dem Computer, der diese Seite geöffnet hat"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3281,7 +3284,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· wer es ausführt, erhält diesen Zugriff"]
+      "c": [
+        " ",
+        "· wer es ausführt, erhält diesen Zugriff"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Genehmige nur eine Anmeldung, die du gerade selbst gestartet hast.",
@@ -3671,16 +3677,6 @@
   "198ebc7ab395b090": "Klicken, um das Konto auszublenden",
   "6df4c22a9ae17336": "Nutzung verwalten",
   "0469747f4bb9caac": "{additions} Hinzufügungen, {deletions} Löschungen",
-  "a0e0e2640219f1b0": "Projekt wählen",
-  "074db680e148e829": "Projekt hinzufügen",
-  "b8e0e89c83a639fa": [
-    {
-      "i": 1,
-      "k": "_gt_value_1",
-      "v": "v"
-    },
-    " zum Starten"
-  ],
   "99c183d2407cd36d": "Füge ein Projekt hinzu, um zu starten",
   "613f8257a433cec4": "Medien",
   "e3baa1d5c822a835": "Screenshot anzeigen",
@@ -3993,6 +3989,7 @@
   "d47ad54e98d33190": "Rechtes Panel ist nicht verfügbar",
   "7e4b0afa9879fd43": "Panelgröße wiederherstellen",
   "8381e38420ae57f3": "Panel maximieren",
+  "95b53841d3b8e3e2": "Project and workspace: {context}",
   "7d49da3c635828ce": "Die Zwischenablage-API ist beim Kopieren des Plans nicht verfügbar.",
   "ef0e4fcee07194f4": "Der Plan konnte nicht in die Zwischenablage kopiert werden.",
   "7e2c4488f8ea9b23": "Plan konnte nicht kopiert werden",

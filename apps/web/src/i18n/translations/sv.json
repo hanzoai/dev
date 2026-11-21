@@ -3269,7 +3269,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "på datorn som öppnade den här sidan"]
+      "c": [
+        " ",
+        "på datorn som öppnade den här sidan"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3281,7 +3284,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· den som kör den får den här åtkomsten"]
+      "c": [
+        " ",
+        "· den som kör den får den här åtkomsten"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Godkänn bara en inloggning som du själv precis har startat.",
@@ -3671,16 +3677,6 @@
   "198ebc7ab395b090": "Klicka för att dölja kontot",
   "6df4c22a9ae17336": "Hantera användning",
   "0469747f4bb9caac": "{additions} tillägg, {deletions} borttagningar",
-  "a0e0e2640219f1b0": "Välj ett projekt",
-  "074db680e148e829": "Lägg till ett projekt",
-  "b8e0e89c83a639fa": [
-    {
-      "i": 1,
-      "k": "_gt_value_1",
-      "v": "v"
-    },
-    " för att starta"
-  ],
   "99c183d2407cd36d": "Lägg till ett projekt för att starta",
   "613f8257a433cec4": "Media",
   "e3baa1d5c822a835": "Visa skärmbild",
@@ -3991,6 +3987,7 @@
   "d47ad54e98d33190": "Högerpanelen är inte tillgänglig",
   "7e4b0afa9879fd43": "Återställ panelens storlek",
   "8381e38420ae57f3": "Maximera panelen",
+  "95b53841d3b8e3e2": "Project and workspace: {context}",
   "7d49da3c635828ce": "Urklipps-API:t är inte tillgängligt vid kopiering av planen.",
   "ef0e4fcee07194f4": "Kunde inte kopiera planen till urklipp.",
   "7e2c4488f8ea9b23": "Kunde inte kopiera planen",
