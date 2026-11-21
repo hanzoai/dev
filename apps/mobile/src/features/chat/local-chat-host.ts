@@ -5,6 +5,7 @@ import * as Option from "effect/Option";
 import { Atom } from "effect/reactivity";
 import { fetch as expoFetch } from "expo/fetch";
 
+import { onDeviceChatHost } from "./on-device-chat-host";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { environmentPresentations } from "../../state/presentation";
 import { environmentSession, sessionHasScope } from "../../state/session";
@@ -46,3 +47,28 @@ export const linkedMacHostAtom = Atom.make((get): LocalChatHost | null => {
 
 /** The linked Mac right now, or null while it is offline. Read at send time, never cached. */
 export const linkedMacHost = (): LocalChatHost | null => appAtomRegistry.get(linkedMacHostAtom);
+
+/**
+ * Every local model the phone can chat with: those on the linked Mac, then those inside this app.
+ * A model id belongs to the host that listed it; the Mac's list is read at send time, so a Mac that
+ * left is an error, never a quiet answer from the phone.
+ */
+export const localChatHost = (): LocalChatHost | null => {
+  const mac = linkedMacHost();
+  if (mac === null) return onDeviceChatHost;
+  if (onDeviceChatHost === null) return mac;
+  const device = onDeviceChatHost;
+  return {
+    models: async (signal) => {
+      const [onMac, onPhone] = await Promise.all([
+        mac.models(signal).catch(() => []),
+        device.models(signal),
+      ]);
+      return [...onPhone, ...onMac];
+    },
+    stream: async (input) =>
+      (await device.models(input.signal)).some((m) => m.id === input.model)
+        ? device.stream(input)
+        : mac.stream(input),
+  };
+};

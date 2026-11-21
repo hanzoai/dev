@@ -6,6 +6,8 @@ import {
 } from "@hanzodev/contracts";
 import {
   BUILT_IN_LOCAL_ENGINES,
+  engineCatalogAction,
+  fetchEngineCatalog,
   localEngineAction,
   localEngineInstanceId,
   localEngineNativeUrl,
@@ -14,6 +16,7 @@ import {
   probeHanzodValidatorStatus,
   probeLocalEngines,
   trimBaseUrl,
+  type EngineCatalog,
   type HanzodValidatorStatus,
   type LocalEngine,
   type LocalEngineStatus,
@@ -207,24 +210,6 @@ async function streamOllamaPull(
   }
 }
 
-async function loadIntoHanzoEngine(
-  engine: LocalEngine,
-  model: string,
-): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }> {
-  try {
-    const response = await fetch(localEngineNativeUrl(engine, "/v1/engine/load"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model_id: model, format: model.endsWith(".gguf") ? "gguf" : "auto" }),
-    });
-    if (!response.ok)
-      return { ok: false, error: (await response.text()) || `HTTP ${response.status}` };
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
-  }
-}
-
 async function deleteOllamaModel(engine: LocalEngine, model: string): Promise<void> {
   await fetch(localEngineNativeUrl(engine, "/api/delete"), {
     method: "DELETE",
@@ -255,9 +240,23 @@ function PickerToggle({
   const persist = usePersistEnvironmentProviderInstanceMutation(environmentId);
   const instanceId = ProviderInstanceId.make(localEngineInstanceId(status.engine));
   const listed = instances[instanceId] !== undefined;
+  // Hanzo Engine's models join the picker (as "Local · Private") unless the user took them out.
+  const dismissKey = `hanzo.dev.localAi.pickerDismissed.${instanceId}`;
+  const dismissed = (() => {
+    try {
+      return window.localStorage.getItem(dismissKey) === "1";
+    } catch {
+      return false;
+    }
+  })();
+  const joins =
+    status.engine.kind === "hanzo-engine" &&
+    status.online &&
+    status.models.length > 0 &&
+    !dismissed;
   // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- keeps the picker's model list equal to what the engine serves after each explicit probe
   useEffect(() => {
-    if (listed && status.online) {
+    if ((listed || joins) && status.online) {
       void persist({
         operation: "upsert",
         instanceId,
@@ -269,19 +268,121 @@ function PickerToggle({
   }, [status]);
   return (
     <Button
-      variant={listed ? "default" : "outline"}
+      variant={listed || joins ? "default" : "outline"}
       size="xs"
       disabled={!status.online && !listed}
-      onClick={() =>
+      onClick={() => {
+        try {
+          if (listed || joins) window.localStorage.setItem(dismissKey, "1");
+          else window.localStorage.removeItem(dismissKey);
+        } catch {
+          // Restricted storage: the choice holds for this session only.
+        }
         void persist(
-          listed
+          listed || joins
             ? { operation: "remove", instanceId }
             : { operation: "upsert", instanceId, instance: pickerInstance(status) },
-        )
-      }
+        );
+      }}
     >
-      {listed ? <T>In model picker</T> : <T>Add to model picker</T>}
+      {listed || joins ? <T>In model picker</T> : <T>Add to model picker</T>}
     </Button>
+  );
+}
+
+const formatGb = (bytes: number): string => `${(bytes / 2 ** 30).toFixed(1)} GB`;
+
+/**
+ * The Zen models Hanzo Engine can run on this machine, with a one-click download of the one this Mac's
+ * memory suits. Weights land in the shared Hugging Face cache and run offline; nothing is sent out.
+ */
+function HanzoEngineCatalog({ onChanged }: { readonly onChanged: () => Promise<void> }) {
+  const gt = useGT();
+  const [catalog, setCatalog] = useState<EngineCatalog | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const pulling = catalog?.models.some((model) => model.pull.state === "pulling") ?? false;
+
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- reads hanzod's catalog on mount, and again every second only while a download runs
+  useEffect(() => {
+    let cancelled = false;
+    const read = () =>
+      void fetchEngineCatalog().then((next) => {
+        if (!cancelled) setCatalog(next);
+      });
+    read();
+    if (!pulling) return () => void (cancelled = true);
+    const timer = setInterval(read, 1_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [pulling]);
+
+  if (catalog === null) return null;
+  const pull = async (id: string) => {
+    setMessage((await engineCatalogAction("pull", id)) ?? null);
+    setCatalog(await fetchEngineCatalog());
+  };
+  const use = async (id: string) => {
+    setMessage((await engineCatalogAction("select", id)) ?? null);
+    setCatalog(await fetchEngineCatalog());
+    await onChanged();
+  };
+  return (
+    <div className="space-y-1.5" data-testid="engine-catalog">
+      <div className="text-xs font-medium">
+        <T>Run on this Mac, privately</T>
+      </div>
+      <ul className="divide-y divide-border rounded-lg border border-border text-xs">
+        {catalog.models.map((model) => {
+          const recommended = model.id === catalog.recommended;
+          const percent =
+            model.pull.total > 0 ? Math.round((model.pull.done / model.pull.total) * 100) : 0;
+          return (
+            <li key={model.id} className="flex items-center justify-between gap-2 px-3 py-1.5">
+              <span className="min-w-0">
+                <span className="font-mono">{model.id}</span>
+                <span className="ml-2 text-muted-foreground">{formatGb(model.bytes)}</span>
+                {recommended ? (
+                  <span className="ml-2 rounded-full bg-success/15 px-2 py-0.5 text-3xs font-semibold text-success-foreground">
+                    <T>Recommended</T>
+                  </span>
+                ) : null}
+              </span>
+              {model.installed ? (
+                <Button
+                  variant={model.selected ? "default" : "outline"}
+                  size="xs"
+                  disabled={model.selected}
+                  onClick={() => void use(model.id)}
+                >
+                  {model.selected ? <T>In use</T> : <T>Use</T>}
+                </Button>
+              ) : (
+                <Button
+                  variant={recommended ? "default" : "outline"}
+                  size="xs"
+                  disabled={pulling}
+                  onClick={() => void pull(model.id)}
+                >
+                  <DownloadIcon className="size-3" />
+                  {model.pull.state === "pulling" ? `${percent}%` : <T>Download</T>}
+                </Button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {message ? <p className="text-xs text-destructive">{message}</p> : null}
+      {catalog.models.some((model) => model.pull.state === "failed") ? (
+        <p className="text-xs text-destructive">
+          {catalog.models.find((model) => model.pull.state === "failed")?.pull.error}
+        </p>
+      ) : null}
+      <p className="text-2xs text-muted-foreground">
+        {gt("Weights stay in your Hugging Face cache and run offline.")}
+      </p>
+    </div>
   );
 }
 
@@ -312,13 +413,10 @@ function EngineCard({
     setBusy(true);
     setPercent(null);
     setMessage(null);
-    const result =
-      action === "pull"
-        ? await streamOllamaPull(engine, model, (update) => {
-            if (update.status) setMessage(update.status);
-            if (update.percent !== undefined) setPercent(update.percent);
-          })
-        : await loadIntoHanzoEngine(engine, model);
+    const result = await streamOllamaPull(engine, model, (update) => {
+      if (update.status) setMessage(update.status);
+      if (update.percent !== undefined) setPercent(update.percent);
+    });
     if (result.ok) {
       setInput("");
       setMessage(gt("Ready: {model}", { model }));
@@ -401,6 +499,8 @@ function EngineCard({
         </p>
       )}
 
+      {engine.kind === "hanzo-engine" ? <HanzoEngineCatalog onChanged={onChanged} /> : null}
+
       {action !== null && status.online ? (
         <div className="space-y-1.5">
           <div className="flex gap-2">
@@ -408,12 +508,8 @@ function EngineCard({
               type="text"
               value={input}
               onChange={(event) => setInput(event.currentTarget.value)}
-              placeholder={
-                action === "pull"
-                  ? gt("Model tag to pull, e.g. llama3.2")
-                  : gt("HuggingFace repo or GGUF path")
-              }
-              aria-label={action === "pull" ? gt("Model to pull") : gt("Model to load")}
+              placeholder={gt("Model tag to pull, e.g. llama3.2")}
+              aria-label={gt("Model to pull")}
               className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 font-mono text-xs focus:outline-hidden"
             />
             <Button
@@ -423,7 +519,7 @@ function EngineCard({
               onClick={() => void run()}
             >
               <DownloadIcon className="size-3.5" />
-              {action === "pull" ? <T>Pull</T> : <T>Load</T>}
+              <T>Pull</T>
             </Button>
           </div>
           {percent !== null ? (

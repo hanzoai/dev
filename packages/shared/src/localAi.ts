@@ -24,9 +24,13 @@ export interface LocalEngineStatus {
   readonly models: ReadonlyArray<LocalModel>;
 }
 
-export type LocalEngineAction = "pull" | "load" | null;
+export type LocalEngineAction = "pull" | null;
 
 export const HANZOD_ENGINE_BASE_URL = "http://127.0.0.1:3690/v1/engine";
+export const HANZOD_ENGINE_CATALOG_URL = `${HANZOD_ENGINE_BASE_URL}/catalog`;
+
+/** The picker group every Hanzo Engine model sits under: weights on this machine, nothing sent out. */
+export const LOCAL_PRIVATE_GROUP = "Local · Private";
 export const LOCAL_HANZOD_RPC_BASE_URL = "http://127.0.0.1:9630";
 const LOCAL_HANZOD_STAKING_PORT = 9631;
 
@@ -111,10 +115,99 @@ export function normalizeLocalModels(body: unknown, kind: LocalEngineKind): Loca
   return models.toSorted((a, b) => Number(b.zen) - Number(a.zen));
 }
 
+export type EnginePullState = "idle" | "pulling" | "done" | "failed";
+
+/** One Zen model hanzod can serve, as `/v1/engine/catalog` lists it. */
+export interface EngineCatalogModel {
+  readonly id: string;
+  readonly name: string;
+  readonly bytes: number;
+  readonly memoryGb: number;
+  readonly installed: boolean;
+  readonly selected: boolean;
+  readonly pull: {
+    readonly state: EnginePullState;
+    readonly done: number;
+    readonly total: number;
+    readonly error: string | null;
+  };
+}
+
+export interface EngineCatalog {
+  readonly memoryBytes: number;
+  /** The model this machine's memory suits best. */
+  readonly recommended: string;
+  readonly models: ReadonlyArray<EngineCatalogModel>;
+}
+
+/** Parses the catalog body; null when it is not one. */
+export function parseEngineCatalog(body: unknown): EngineCatalog | null {
+  const root = body as Record<string, unknown> | null;
+  if (typeof root !== "object" || root === null || !Array.isArray(root.models)) return null;
+  const models: EngineCatalogModel[] = [];
+  for (const row of root.models as ReadonlyArray<Record<string, unknown> | null>) {
+    if (typeof row?.id !== "string" || typeof row.name !== "string") return null;
+    const pull = (row.pull ?? {}) as Record<string, unknown>;
+    const state = ["pulling", "done", "failed"].includes(String(pull.state))
+      ? (pull.state as EnginePullState)
+      : "idle";
+    models.push({
+      id: row.id,
+      name: row.name,
+      bytes: Number(row.bytes) || 0,
+      memoryGb: Number(row.memory_gb) || 0,
+      installed: row.installed === true,
+      selected: row.selected === true,
+      pull: {
+        state,
+        done: Number(pull.done) || 0,
+        total: Number(pull.total) || 0,
+        error: typeof pull.error === "string" ? pull.error : null,
+      },
+    });
+  }
+  return {
+    memoryBytes: Number(root.memory_bytes) || 0,
+    recommended: typeof root.recommended === "string" ? root.recommended : "",
+    models,
+  };
+}
+
+export async function fetchEngineCatalog(
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<EngineCatalog | null> {
+  try {
+    const response = await fetchImpl(HANZOD_ENGINE_CATALOG_URL, {
+      signal: AbortSignal.timeout(3_000),
+    });
+    return response.ok ? parseEngineCatalog(await response.json().catch(() => null)) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** `pull` downloads a model into the shared cache; `select` serves it. Resolves with an error message, or null. */
+export async function engineCatalogAction(
+  action: "pull" | "select",
+  id: string,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<string | null> {
+  try {
+    const response = await fetchImpl(`${HANZOD_ENGINE_CATALOG_URL}/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    if (response.ok) return null;
+    const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
+    return typeof body?.error === "string" ? body.error : `HTTP ${response.status}`;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
 export function localEngineAction(kind: LocalEngineKind): LocalEngineAction {
   switch (kind) {
-    case "hanzo-engine":
-      return "load";
     case "ollama":
       return "pull";
     default:
@@ -132,7 +225,8 @@ export async function probeLocalEngine(
   options?: { readonly timeoutMs?: number; readonly fetchImpl?: typeof globalThis.fetch },
 ): Promise<LocalEngineStatus> {
   const fetchImpl = options?.fetchImpl ?? globalThis.fetch;
-  const timeoutMs = options?.timeoutMs ?? 1_500;
+  // Hanzo Engine starts on its first request and compiles its Metal shaders: give it a cold start.
+  const timeoutMs = options?.timeoutMs ?? (engine.kind === "hanzo-engine" ? 45_000 : 1_500);
   const baseUrl = engine.baseUrl;
   const startedAt = Date.now();
   try {
@@ -184,6 +278,8 @@ export function localEngineProviderInstance(status: LocalEngineStatus): {
 } {
   const id = localEngineInstanceId(status.engine);
   const provider = `model_providers.${id}`;
+  const displayName =
+    status.engine.kind === "hanzo-engine" ? LOCAL_PRIVATE_GROUP : status.engine.name;
   const launchArgs = [
     `-c model_provider="${id}"`,
     `-c ${provider}.name="${status.engine.name.replace(/["\\]/gu, "")}"`,
@@ -191,7 +287,7 @@ export function localEngineProviderInstance(status: LocalEngineStatus): {
     `-c ${provider}.wire_api="chat"`,
   ].join(" ");
   return {
-    displayName: status.engine.name,
+    displayName,
     enabled: true,
     config: {
       enabled: true,

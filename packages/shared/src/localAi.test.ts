@@ -3,6 +3,8 @@ import { tokenizeCliArgs } from "./cliArgs.ts";
 import {
   BUILT_IN_LOCAL_ENGINES,
   HANZOD_ENGINE_BASE_URL,
+  LOCAL_PRIVATE_GROUP,
+  parseEngineCatalog,
   localEngineAction,
   localEngineInstanceId,
   localEngineNativeUrl,
@@ -49,7 +51,7 @@ describe("local engine registry", () => {
 
   it("offers pull for Ollama, load for Hanzo Engine, and nothing for other endpoints", () => {
     expect(localEngineAction("ollama")).toBe("pull");
-    expect(localEngineAction("hanzo-engine")).toBe("load");
+    expect(localEngineAction("hanzo-engine")).toBeNull();
     expect(localEngineAction("lm-studio")).toBeNull();
     expect(localEngineAction("openai")).toBeNull();
     expect(localEngineNativeUrl({ baseUrl: "http://127.0.0.1:11434/v1" }, "/api/pull")).toBe(
@@ -245,5 +247,44 @@ describe("hanzod validator", () => {
     expect(hanzod.chainId).toBe(36963);
     expect(hanzod.networkLabel).toBe("Hanzo Mainnet (36963)");
     expect(hanzod.stakingEndpoint).toBe("127.0.0.1:9631");
+  });
+});
+
+describe("the engine catalog", () => {
+  it("parses hanzod's catalog", () => {
+    const catalog = parseEngineCatalog({
+      memory_bytes: 17179869184,
+      recommended: "zen-eco-3b-agent-q8",
+      selected: null,
+      models: [
+        {
+          id: "zen-eco-3b-agent",
+          name: "Zen Eco 3B Agent",
+          bytes: 1929902464,
+          memory_gb: 8,
+          installed: false,
+          selected: false,
+          pull: { state: "pulling", done: 10, total: 100, error: null },
+        },
+      ],
+    });
+    expect(catalog?.recommended).toBe("zen-eco-3b-agent-q8");
+    expect(catalog?.models[0]).toMatchObject({
+      id: "zen-eco-3b-agent",
+      installed: false,
+      pull: { state: "pulling", done: 10, total: 100 },
+    });
+    expect(parseEngineCatalog({ error: "x" })).toBeNull();
+  });
+
+  it("puts Hanzo Engine models under Local · Private", () => {
+    const status = {
+      engine: BUILT_IN_LOCAL_ENGINES[0]!,
+      online: true,
+      baseUrl: HANZOD_ENGINE_BASE_URL,
+      latencyMs: 1,
+      models: [{ id: "zen-eco-3b-agent", zen: true }],
+    };
+    expect(localEngineProviderInstance(status).displayName).toBe(LOCAL_PRIVATE_GROUP);
   });
 });

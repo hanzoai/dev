@@ -16,7 +16,7 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 
 import { hanzoMobileAuthStore, useAuth } from "../cloud/hanzoMobileAuth";
 import { cloudThreadStore } from "./cloud-thread-store";
-import { linkedMacHost, linkedMacHostAtom } from "./local-chat-host";
+import { linkedMacHostAtom, localChatHost } from "./local-chat-host";
 
 export type { CloudChatModel, CloudChatState };
 
@@ -56,7 +56,7 @@ const shared = (): CloudChatController => {
     controller = createCloudChatController({
       getAuth,
       store: cloudThreadStore,
-      local: linkedMacHost,
+      local: localChatHost,
       options: { fetch: streamingFetch },
     });
     void controller.loadModels();

@@ -1,0 +1,7 @@
+{
+  "platforms": ["apple"],
+  "apple": {
+    "modules": ["HanzoEngineModule"],
+    "podspecPath": "ios/HanzoEngine.podspec"
+  }
+}
