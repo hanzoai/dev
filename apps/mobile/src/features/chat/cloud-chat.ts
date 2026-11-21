@@ -2,11 +2,9 @@ import {
   type CloudChatAttachment,
   cloudChatServerConfig,
   createCloudChatController,
-  runInCloud,
   type CloudChatController,
   type CloudChatModel,
   type CloudChatState,
-  type RunInCloudResult,
 } from "@hanzodev/client-runtime/cloud-chat";
 import type { ServerConfig } from "@hanzodev/contracts";
 import type { DiscoveryFetch } from "@hanzodev/client-runtime/discovery";
@@ -32,7 +30,6 @@ export interface CloudChat {
   readonly renameThread: (key: string, title: string) => Promise<void>;
   readonly pinThread: (key: string, pinned: boolean) => Promise<void>;
   readonly deleteThread: (key: string) => Promise<void>;
-  readonly runInCloud: () => Promise<RunInCloudResult>;
 }
 
 const getAuth = async () => ({
@@ -80,7 +77,6 @@ export function useCloudChat(): CloudChat {
       renameThread: chat.renameThread,
       pinThread: chat.pinThread,
       deleteThread: chat.deleteThread,
-      runInCloud: async () => runInCloud(await getAuth()),
     }),
     [chat, isSignedIn, state],
   );
