@@ -15,7 +15,9 @@ name = "dev-ffi"
 version = "0.7.0-dev.1"
 dependencies = [
  "dev-core",
+ "dev-orchestrator",
  "dev-protocol",
+ "serde_json",
 ]
 
 [[package]]

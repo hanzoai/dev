@@ -1,6 +1,6 @@
 //! The C ABI the Go host drives the loop through.
 //!
-//! Nine symbols, an opaque `u64` per session, and a `Buf` for every byte
+//! Ten symbols, an opaque `u64` per session, and a `Buf` for every byte
 //! string that crosses back. The rules:
 //!
 //! - **Rust copies every input** before the call returns, so the host may free
@@ -39,6 +39,7 @@ use std::sync::Mutex;
 use std::sync::MutexGuard;
 
 use dev_core::Session;
+use dev_orchestrator::apply as decide;
 use dev_protocol::Event;
 use slab::Fault;
 use slab::Slab;
@@ -161,6 +162,48 @@ pub unsafe extern "C" fn dev_step(
             unsafe { out.write(lend(answer)) };
         }
         status
+    })
+}
+
+/// Apply the pure decide function `name` to a JSON `input` and write its JSON output to `out`.
+///
+/// Stateless: no session, no handle. An unknown name or an input the function cannot read
+/// answers [`DEV_MALFORMED`].
+///
+/// # Safety
+/// `name` and `input` must be valid for their lengths unless a length is zero, and `out` must
+/// be writable. On [`DEV_OK`] `out` holds a buffer to release with [`dev_free`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dev_decide(
+    name: *const u8,
+    name_len: usize,
+    input: *const u8,
+    input_len: usize,
+    out: *mut Buf,
+) -> i32 {
+    guard(|| {
+        if out.is_null() {
+            return DEV_NULL;
+        }
+        let (Some(name), Some(input)) =
+            (unsafe { copy(name, name_len) }, unsafe { copy(input, input_len) })
+        else {
+            return DEV_NULL;
+        };
+        let (Ok(name), Ok(input)) = (std::str::from_utf8(&name), std::str::from_utf8(&input))
+        else {
+            return DEV_MALFORMED;
+        };
+        let Ok(raw) = serde_json::from_str::<Box<serde_json::value::RawValue>>(input) else {
+            return DEV_MALFORMED;
+        };
+        match decide(name, &raw) {
+            Some(Ok(json)) => {
+                unsafe { out.write(lend(json.into_bytes())) };
+                DEV_OK
+            }
+            _ => DEV_MALFORMED,
+        }
     })
 }
 

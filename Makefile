@@ -49,7 +49,7 @@ frames-check:
 # go/dev.wasm.sum, the sha256 of every tracked file the build reads and of the
 # copy itself. wasm-check hashes the tree again and fails on any difference.
 WASM_SUM = git ls-files -z -- Makefile Cargo.toml Cargo.lock rust-toolchain.toml \
-    crates/protocol crates/core crates/ffi go/dev.wasm | xargs -0 sha256sum
+    crates/protocol crates/core crates/orchestrator crates/ffi go/dev.wasm | xargs -0 sha256sum
 wasm:
 	@CARGO_ENCODED_RUSTFLAGS='--remap-path-prefix=$(CARGO_HOME)=/cargo' \
 		cargo build --locked --release --target wasm32-wasip1 --target-dir target -p dev-ffi \
