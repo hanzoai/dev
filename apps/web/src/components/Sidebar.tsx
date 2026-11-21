@@ -255,6 +255,7 @@ import {
   ComboboxTrigger,
   useComboboxFilter,
 } from "./ui/combobox";
+import { CloudThreadsSection } from "./cloud/CloudThreads";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
@@ -3752,6 +3753,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             </TooltipProvider>
           ) : null}
         </SidebarGroup>
+        <CloudThreadsSection />
       </SidebarContent>
       <SidebarChromeFooter />
     </SidebarFolderDrop>

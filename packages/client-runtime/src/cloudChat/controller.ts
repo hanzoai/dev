@@ -12,6 +12,7 @@ import {
   type CloudChatModel,
   type CloudChatOptions,
 } from "./api.ts";
+import { loadChatThread } from "./chatThreads.ts";
 import {
   deleteRemoteThread,
   listRemoteThreads,
@@ -51,6 +52,8 @@ export interface CloudChatController {
   /** Reads the device copies, then the remote list, into `state.threads`. */
   loadThreads(): Promise<void>;
   openThread(key: string): Promise<void>;
+  /** Opens a saved hanzo.app thread by its backend id. */
+  open(threadId: string): Promise<void>;
   /** Rename, pin and delete keep a device copy; delete also asks the remote store, best effort. */
   renameThread(key: string, title: string): Promise<void>;
   pinThread(key: string, pinned: boolean): Promise<void>;
@@ -242,6 +245,15 @@ export function createCloudChatController(input: {
         (entry) => entry.remoteId === null || !deleted.has(entry.remoteId),
       );
       set({ threads: mergeThreads(state.threads, remote) });
+    },
+    async open(threadId) {
+      if (state.sending) return;
+      try {
+        const messages = await loadChatThread(await input.getAuth(), threadId, input.options);
+        set({ messages, threadId, sync: "synced", error: null });
+      } catch (cause) {
+        set({ error: kindOf(cause) });
+      }
     },
     async openThread(key) {
       if (state.sending) return;

@@ -40,3 +40,15 @@ describe("hostedLanding", () => {
     expect(hostedLanding({ isLoaded: true, isSignedIn: true })).toBe("chat");
   });
 });
+
+describe("landing labels", () => {
+  it("labels threads and models", async () => {
+    const { threadRowLabel, modelPillLabel, cloudRunNote } = await import("./chatLanding.logic");
+    expect(threadRowLabel({ title: " " }, "New chat")).toBe("New chat");
+    expect(threadRowLabel({ title: "Plan" }, "New chat")).toBe("Plan");
+    expect(modelPillLabel([{ id: "a", label: "Alpha" }], "a")).toBe("Alpha");
+    expect(modelPillLabel([], "b")).toBe("b");
+    expect(cloudRunNote(null)).toBeNull();
+    expect(cloudRunNote({ kind: "unavailable" })).toBe("unavailable");
+  });
+});

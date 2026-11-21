@@ -1,8 +1,9 @@
+import { useCloudChat } from "../cloud/cloudChat";
 import { useAuth } from "../cloud/hanzoWebAuth";
 import type { EnvironmentId } from "@hanzodev/contracts";
 import { Link, useRouter } from "@tanstack/react-router";
 import { T, useGT } from "gt-react";
-import { ArrowUpIcon, HammerIcon } from "lucide-react";
+import { ArrowUpIcon, ChevronDownIcon, HammerIcon } from "lucide-react";
 import { useState } from "react";
 
 import { APP_DISPLAY_NAME } from "~/branding";
@@ -13,9 +14,10 @@ import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { useRelayEnvironmentDiscovery } from "../state/environments";
 import { useHanzoConnectAuthPrompt } from "./account/useHanzoConnectAuthPrompt";
 import { CloudEnvironmentConnectRows } from "./cloud/CloudEnvironmentConnectList";
-import { hostedLanding, resolveSend } from "./chatLanding.logic";
+import { cloudRunNote, hostedLanding, modelPillLabel, resolveSend } from "./chatLanding.logic";
 import { Button } from "./ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
+import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { SidebarInset } from "./ui/sidebar";
 import { WorkspacePageHeader } from "./WorkspacePageHeader";
 
@@ -102,17 +104,27 @@ function ChatLanding() {
   const discovery = useEnvironmentDiscovery();
   const [prompt, setPrompt] = useState("");
   const [choosing, setChoosing] = useState(false);
-  const [cloudNote, setCloudNote] = useState(false);
+  const [cloudResult, setCloudResult] = useState<Awaited<
+    ReturnType<ReturnType<typeof useCloudChat>["runInCloud"]>
+  > | null>(null);
+  const [modelsOpen, setModelsOpen] = useState(false);
+  const chat = useCloudChat();
+  const { messages, models, model, sending, error } = chat.state;
+  const cloudNote = cloudRunNote(cloudResult);
 
   const send = (build: boolean) => {
     const outcome = resolveSend({
       prompt,
       build,
       hasReadyEnvironment: false,
-      cloudChatAvailable: false,
+      cloudChatAvailable: true,
     });
-    setCloudNote(false);
+    setCloudResult(null);
     setChoosing(outcome.kind === "choose-target");
+    if (outcome.kind === "chat") {
+      setPrompt("");
+      void chat.send(prompt);
+    }
   };
 
   const linkedMac = discovery?.environments.find((environment) => environment.type === "linked");
@@ -120,10 +132,42 @@ function ChatLanding() {
   return (
     <>
       <LinkAccountComputers />
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6">
-        <h1 className="text-center text-2xl font-semibold text-foreground">
-          <T>What are we building?</T>
-        </h1>
+      <div
+        className={
+          messages.length > 0
+            ? "flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4"
+            : "flex min-h-0 flex-1 flex-col items-center justify-center px-6"
+        }
+        data-testid="chat-thread"
+      >
+        {messages.length === 0 ? (
+          <h1 className="text-center text-2xl font-semibold text-foreground">
+            <T>What are we building?</T>
+          </h1>
+        ) : (
+          messages.map((message, index) => (
+            <div
+              className={
+                message.role === "user"
+                  ? "ml-auto max-w-[85%] whitespace-pre-wrap rounded-2xl bg-muted px-3 py-2 text-sm"
+                  : "mr-auto max-w-[95%] whitespace-pre-wrap px-1 py-1 text-sm"
+              }
+              data-role={message.role}
+              key={index}
+            >
+              {message.content === "" && sending ? "…" : message.content}
+            </div>
+          ))
+        )}
+        {error !== null ? (
+          <p className="text-center text-xs text-destructive" role="alert">
+            {error === "signed-out" || error === "unauthorized" ? (
+              <T>Sign in again to keep chatting.</T>
+            ) : (
+              <T>Could not reach Hanzo. Try again.</T>
+            )}
+          </p>
+        ) : null}
         {choosing ? (
           <div
             className="mt-6 flex w-full max-w-sm flex-col gap-2 rounded-2xl border border-border p-4"
@@ -142,12 +186,24 @@ function ChatLanding() {
             >
               {linkedMac ? linkedMac.label : <T>Run on your Mac</T>}
             </Button>
-            <Button onClick={() => setCloudNote(true)} size="sm" variant="outline">
+            <Button
+              onClick={() => void chat.runInCloud().then(setCloudResult)}
+              size="sm"
+              variant="outline"
+            >
               <T>Run in the cloud</T>
             </Button>
-            {cloudNote ? (
+            {cloudNote === "unavailable" ? (
               <p className="text-xs text-muted-foreground">
                 <T>Cloud machines are not available yet.</T>
+              </p>
+            ) : cloudNote === "failed" ? (
+              <p className="text-xs text-muted-foreground">
+                <T>Could not start a cloud machine. Try again.</T>
+              </p>
+            ) : cloudNote === "started" ? (
+              <p className="text-xs text-muted-foreground">
+                <T>Cloud machine started.</T>
               </p>
             ) : null}
           </div>
@@ -164,9 +220,33 @@ function ChatLanding() {
             value={prompt}
           />
           <div className="flex items-center gap-2">
-            <Button aria-label={gt("Model")} disabled size="sm" variant="outline">
-              <T>Auto</T>
-            </Button>
+            <Popover onOpenChange={setModelsOpen} open={modelsOpen}>
+              <PopoverTrigger
+                render={<Button aria-label={gt("Model")} size="sm" variant="outline" />}
+              >
+                {modelPillLabel(models, model)}
+                <ChevronDownIcon />
+              </PopoverTrigger>
+              <PopoverPopup align="start" side="top" width="sm">
+                <ul className="flex flex-col gap-1" data-testid="model-list">
+                  {models.map((entry) => (
+                    <li key={entry.id}>
+                      <button
+                        aria-pressed={entry.id === model}
+                        className="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent aria-pressed:font-medium"
+                        onClick={() => {
+                          chat.selectModel(entry.id);
+                          setModelsOpen(false);
+                        }}
+                        type="button"
+                      >
+                        {entry.label}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </PopoverPopup>
+            </Popover>
             <Button
               aria-label={gt("Build on a machine")}
               onClick={() => send(true)}
@@ -179,6 +259,7 @@ function ChatLanding() {
             <span className="flex-1" />
             <Button
               aria-label={gt("Send")}
+              disabled={sending}
               onClick={() => send(false)}
               size="icon"
               variant="default"
