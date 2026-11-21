@@ -1807,6 +1807,7 @@ export default function ChatView(props: ChatViewProps) {
       isDraftHeroState,
       persistInActiveThreads: settings.persistComposerContextStrip,
       hasActiveProject: activeProject !== null && !showProviderSubagentBar,
+      hasWorkspace: !activeProjectIsScratch,
       isGitRepo,
       showEnvironmentIndicator: showComposerEnvironmentIndicator,
     });

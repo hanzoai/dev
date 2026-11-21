@@ -5,6 +5,7 @@ import {
   deriveLocalBranchNameFromRemoteRef,
   isWorktreeChangeBlocked,
   resolveBranchSelectionTarget,
+  shouldShowComposerContextStrip,
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
   resolveBranchToolbarPrBranch,
@@ -430,5 +431,17 @@ describe("resolveConfirmedSelectedRef", () => {
     expect(resolveConfirmedSelectedRef(listed, refs === null ? null : { refs }).worktreePath).toBe(
       expected,
     );
+  });
+
+  it("hides the strip for a conversation with no workspace, and shows it once a project is attached", () => {
+    const base = {
+      isDraftHeroState: true,
+      persistInActiveThreads: true,
+      hasActiveProject: true,
+      isGitRepo: true,
+      showEnvironmentIndicator: false,
+    };
+    expect(shouldShowComposerContextStrip({ ...base, hasWorkspace: false })).toBe(false);
+    expect(shouldShowComposerContextStrip({ ...base, hasWorkspace: true })).toBe(true);
   });
 });

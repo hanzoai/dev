@@ -72,12 +72,16 @@ export function shouldShowComposerContextStrip(input: {
   isDraftHeroState: boolean;
   persistInActiveThreads: boolean;
   hasActiveProject: boolean;
+  /** False for a thread on the scratch project: a conversation, with no repository to act on. */
+  hasWorkspace: boolean;
   isGitRepo: boolean;
   showEnvironmentIndicator: boolean;
 }): boolean {
   // A new thread always shows the strip, since it names the permissions the first send uses.
+  // A conversation without a workspace has no checkout, branch or access to show.
   return (
     input.hasActiveProject &&
+    input.hasWorkspace &&
     (input.isDraftHeroState ||
       (input.persistInActiveThreads && (input.isGitRepo || input.showEnvironmentIndicator)))
   );
