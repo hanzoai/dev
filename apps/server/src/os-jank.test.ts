@@ -151,44 +151,53 @@ effectIt.effect("keeps mise's PATH record with the login shell PATH", () =>
   ),
 );
 
-effectIt.effect("hydrates a missing JAVA_HOME from the login shell and keeps an explicit one", () =>
-  Effect.acquireUseRelease(
-    Effect.sync(() =>
-      vi
-        .spyOn(NodeChildProcess, "execFileSync")
-        .mockReturnValue(
-          [
-            "__HANZO_DEV_ENV_PATH_START__",
-            "/opt/homebrew/bin",
-            "__HANZO_DEV_ENV_PATH_END__",
-            "__HANZO_DEV_ENV_JAVA_HOME_START__",
-            "/opt/homebrew/opt/openjdk@17",
-            "__HANZO_DEV_ENV_JAVA_HOME_END__",
-          ].join("\n"),
-        ),
+effectIt.effect(
+  "hydrates a missing JAVA_HOME and provider key from the login shell and keeps explicit ones",
+  () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() =>
+        vi
+          .spyOn(NodeChildProcess, "execFileSync")
+          .mockReturnValue(
+            [
+              "__HANZO_DEV_ENV_PATH_START__",
+              "/opt/homebrew/bin",
+              "__HANZO_DEV_ENV_PATH_END__",
+              "__HANZO_DEV_ENV_JAVA_HOME_START__",
+              "/opt/homebrew/opt/openjdk@17",
+              "__HANZO_DEV_ENV_JAVA_HOME_END__",
+              "__HANZO_DEV_ENV_Z_AI_API_KEY_START__",
+              "shell-key",
+              "__HANZO_DEV_ENV_Z_AI_API_KEY_END__",
+            ].join("\n"),
+          ),
+      ),
+      () =>
+        Effect.gen(function* () {
+          const missing: NodeJS.ProcessEnv = { SHELL: "/bin/zsh", PATH: "/usr/bin" };
+          const explicit: NodeJS.ProcessEnv = {
+            SHELL: "/bin/zsh",
+            PATH: "/usr/bin",
+            JAVA_HOME: "/custom/jdk",
+            Z_AI_API_KEY: "explicit-key",
+          };
+
+          for (const env of [missing, explicit]) {
+            yield* fixPath().pipe(
+              Effect.provideService(HostProcess.Platform, "darwin"),
+              Effect.provideService(HostProcess.Environment, env),
+              Effect.provide(NodeServices.layer),
+            );
+          }
+
+          assert.equal(missing.JAVA_HOME, "/opt/homebrew/opt/openjdk@17");
+          assert.equal(explicit.JAVA_HOME, "/custom/jdk");
+          // A Dock-launched app has no provider keys; the shell profile's keys fill in only what is absent.
+          assert.equal(missing.Z_AI_API_KEY, "shell-key");
+          assert.equal(explicit.Z_AI_API_KEY, "explicit-key");
+        }),
+      (probe) => Effect.sync(() => probe.mockRestore()),
     ),
-    () =>
-      Effect.gen(function* () {
-        const missing: NodeJS.ProcessEnv = { SHELL: "/bin/zsh", PATH: "/usr/bin" };
-        const explicit: NodeJS.ProcessEnv = {
-          SHELL: "/bin/zsh",
-          PATH: "/usr/bin",
-          JAVA_HOME: "/custom/jdk",
-        };
-
-        for (const env of [missing, explicit]) {
-          yield* fixPath().pipe(
-            Effect.provideService(HostProcess.Platform, "darwin"),
-            Effect.provideService(HostProcess.Environment, env),
-            Effect.provide(NodeServices.layer),
-          );
-        }
-
-        assert.equal(missing.JAVA_HOME, "/opt/homebrew/opt/openjdk@17");
-        assert.equal(explicit.JAVA_HOME, "/custom/jdk");
-      }),
-    (probe) => Effect.sync(() => probe.mockRestore()),
-  ),
 );
 
 effectIt.effect("replaces a Path-spelled Windows PATH instead of adding a second key", () =>

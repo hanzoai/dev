@@ -1,10 +1,12 @@
-import { CATALOG, providerById } from "@hanzodev/usage/catalog";
+import { accountName } from "@hanzodev/usage/account";
+import { CATALOG, DEFAULT_ENABLED, LIVE_PROVIDERS, providerById } from "@hanzodev/usage/catalog";
 import { countdown } from "@hanzodev/usage/notify";
 import type { ProviderSnapshot, StatusIndicator, UsageWindow } from "@hanzodev/usage/schema";
 import { Link } from "@tanstack/react-router";
 import { useGT } from "gt-react";
 import { useSyncExternalStore } from "react";
 
+import { AddAccountButton } from "../usage/AddAccountButton";
 import { Button } from "../ui/button";
 import {
   getUsageState,
@@ -13,8 +15,6 @@ import {
   updateUsageSettings,
 } from "../../usage/usageStore";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
-
-const DEFAULT_ENABLED = ["hanzo", "claude", "codex", "copilot"];
 
 const barColor = (percent: number) =>
   percent >= 95 ? "bg-red-500" : percent >= 80 ? "bg-amber-500" : "bg-emerald-500";
@@ -88,6 +88,7 @@ function ProviderCard({
     <div
       className="space-y-3 px-3 py-3 sm:px-4"
       data-testid={`usage-provider-${snapshot.provider}`}
+      data-instance={snapshot.instance}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
@@ -96,7 +97,7 @@ function ProviderCard({
             style={{ background: descriptor?.color ?? "currentColor" }}
           />
           <span className="truncate text-sm font-semibold text-foreground">
-            {descriptor?.name ?? snapshot.provider}
+            {accountName(snapshot, descriptor?.name ?? snapshot.provider)}
           </span>
           {snapshot.plan ? (
             <span className="rounded bg-muted px-1.5 py-0.5 text-2xs text-muted-foreground">
@@ -104,6 +105,7 @@ function ProviderCard({
             </span>
           ) : null}
         </div>
+        {snapshot.unconfigured ? <AddAccountButton snapshot={snapshot} /> : null}
         {status ? (
           <a
             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
@@ -177,7 +179,7 @@ export function UsageSettingsPanel() {
           </p>
         ) : null}
         {summary?.snapshots.map((s) => (
-          <ProviderCard key={s.provider} snapshot={s} now={now} />
+          <ProviderCard key={`${s.provider}|${s.instance ?? ""}`} snapshot={s} now={now} />
         ))}
       </SettingsSection>
 
@@ -249,9 +251,7 @@ export function UsageSettingsPanel() {
       {settings ? (
         <SettingsSection id="usage-providers" title={gt("Providers")}>
           {CATALOG.map((p) => {
-            const live = ["claude", "codex", "copilot", "openrouter", "deepseek", "hanzo"].includes(
-              p.id,
-            );
+            const live = LIVE_PROVIDERS.includes(p.id);
             return (
               <SettingsRow
                 key={p.id}

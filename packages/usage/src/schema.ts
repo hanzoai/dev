@@ -75,6 +75,12 @@ export const ProviderSnapshot = Schema.Struct({
   source: SnapshotSource,
   plan: Schema.optional(Schema.String),
   account: Schema.optional(Schema.String),
+  /** Which account of the provider this reading belongs to: a provider instance id, or `dir:<path>` for a login found on disk. */
+  instance: Schema.optional(Schema.String),
+  /** The instance name the user gave this account. */
+  label: Schema.optional(Schema.String),
+  /** Set when the login lives in a directory no provider instance uses yet; the panel offers "Add as account". */
+  unconfigured: Schema.optional(Schema.Struct({ path: Schema.String })),
   windows: Schema.Array(UsageWindow),
   credits: Schema.optional(Credits),
   status: Schema.optional(ProviderStatus),

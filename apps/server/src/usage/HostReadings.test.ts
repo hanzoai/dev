@@ -3,10 +3,12 @@ import type { ServerProvider, UsageBucket } from "@hanzodev/contracts";
 
 import { catalogId, costDays, snapshotOf } from "./HostReadings.ts";
 
-const provider = (driver: string, windows: unknown[]) =>
+const provider = (driver: string, windows: unknown[], unavailable?: unknown) =>
   ({
     driver,
-    usageLimits: { checkedAt: "2026-11-20T00:00:00Z", windows },
+    instanceId: `${driver}-work`,
+    displayName: "Work",
+    usageLimits: { checkedAt: "2026-11-20T00:00:00Z", windows, unavailable },
   }) as unknown as ServerProvider;
 
 describe("HostReadings", () => {
@@ -24,6 +26,7 @@ describe("HostReadings", () => {
       ]),
     );
     assert.strictEqual(s?.provider, "claude");
+    assert.deepStrictEqual([s?.instance, s?.label], ["claudeAgent-work", "Work"]);
     assert.deepStrictEqual(s?.windows[0], {
       kind: "session",
       label: "Session",
@@ -33,6 +36,16 @@ describe("HostReadings", () => {
     });
     assert.isUndefined(snapshotOf(provider("codex", [])));
     assert.strictEqual(catalogId("codex"), "codex");
+  });
+  it("carries the driver's own reason when it has no windows", () => {
+    const s = snapshotOf(
+      provider("opencode", [], {
+        reason: "probeFailed",
+        message: "OpenCode Console sign-in expired.",
+      }),
+    );
+    assert.strictEqual(s?.error, "OpenCode Console sign-in expired.");
+    assert.strictEqual(s?.source, "none");
   });
   it("rolls transcript buckets into per-day model cost", () => {
     const b = (day: string, out: number, cost: number) =>

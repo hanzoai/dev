@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { ProviderRegistry } from "../provider/ProviderRegistry.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
 import * as UsageService from "./UsageService.ts";
 
 const COST_DAYS = 30;
@@ -14,9 +15,26 @@ const decodeDay = Schema.decodeSync(UsageDay);
 export const catalogId = (driver: string): string =>
   driver.toLowerCase().startsWith("claude") ? "claude" : driver.toLowerCase();
 
+const who = (p: ServerProvider) => ({
+  instance: p.instanceId,
+  ...(p.displayName ? { label: p.displayName } : {}),
+});
+
 export const snapshotOf = (p: ServerProvider): ProviderSnapshot | undefined => {
   const limits = p.usageLimits;
-  if (!limits || limits.windows.length === 0) return undefined;
+  if (!limits) return undefined;
+  // The driver's own reason ("not signed in", "no usage API") beats a generic one.
+  if (limits.windows.length === 0)
+    return limits.unavailable?.message
+      ? {
+          provider: catalogId(p.driver),
+          ...who(p),
+          fetchedAt: limits.checkedAt,
+          source: "none",
+          windows: [],
+          error: limits.unavailable.message,
+        }
+      : undefined;
   const windows: UsageWindow[] = limits.windows.map((w) => ({
     kind: w.kind,
     label: w.label,
@@ -24,7 +42,13 @@ export const snapshotOf = (p: ServerProvider): ProviderSnapshot | undefined => {
     ...(w.windowDurationMins ? { windowMinutes: w.windowDurationMins } : {}),
     ...(w.resetsAt ? { resetsAt: w.resetsAt } : {}),
   }));
-  return { provider: catalogId(p.driver), fetchedAt: limits.checkedAt, source: "local", windows };
+  return {
+    provider: catalogId(p.driver),
+    ...who(p),
+    fetchedAt: limits.checkedAt,
+    source: "local",
+    windows,
+  };
 };
 
 export const costDays = (buckets: ReadonlyArray<UsageBucket>): CostDay[] => {
@@ -53,6 +77,9 @@ export const readHostReadings = Effect.gen(function* () {
   const registry = yield* ProviderRegistry;
   const usage = yield* UsageService.UsageService;
   const providers = yield* registry.getProviders;
+  const settings = yield* (yield* ServerSettingsService).getSettings.pipe(
+    Effect.orElseSucceed(() => undefined),
+  );
   const now = new Date();
   const summary = yield* usage
     .readSummary({
@@ -65,6 +92,23 @@ export const readHostReadings = Effect.gen(function* () {
     })
     .pipe(Effect.orElseSucceed(() => undefined));
   return {
+    instances: providers.map((p) => {
+      const config = settings?.providerInstances[p.instanceId]?.config;
+      const text = (key: string) => {
+        const v =
+          typeof config === "object" && config !== null ? Reflect.get(config, key) : undefined;
+        return typeof v === "string" && v.trim() ? v.trim() : undefined;
+      };
+      const home = p.runtimePaths?.homePath ?? text("homePath");
+      const binary = text("binaryPath");
+      return {
+        provider: catalogId(p.driver),
+        id: p.instanceId,
+        name: p.displayName ?? p.instanceId,
+        ...(home ? { home } : {}),
+        ...(binary ? { binary } : {}),
+      };
+    }),
     local: providers.flatMap((p) => {
       const s = snapshotOf(p);
       return s ? [s] : [];

@@ -1,7 +1,10 @@
+import { accountSuffix, snapshotKey } from "./account.ts";
 import type { ProviderSnapshot } from "./schema.ts";
 
 export interface LimitAlert {
   readonly provider: string;
+  /** Which account crossed, e.g. "Work (z@example.com)"; absent for a provider with one. */
+  readonly account?: string;
   readonly label: string;
   readonly threshold: number;
   readonly usedPercent: number;
@@ -22,7 +25,7 @@ export const evaluate = (
   const sorted = [...thresholds].sort((a, b) => a - b);
   for (const s of snapshots) {
     for (const w of s.windows) {
-      const key = `${s.provider}/${w.label}`;
+      const key = `${snapshotKey(s)}/${w.label}`;
       const crossed = sorted.filter((t) => w.usedPercent >= t);
       const top = crossed.at(-1);
       const announced = state.get(key) ?? 0;
@@ -31,6 +34,7 @@ export const evaluate = (
         if (top > announced) {
           alerts.push({
             provider: s.provider,
+            ...(accountSuffix(s) ? { account: accountSuffix(s) } : {}),
             label: w.label,
             threshold: top,
             usedPercent: w.usedPercent,
@@ -48,7 +52,7 @@ export const alertText = (
   name: string,
   now: Date,
 ): { title: string; body: string } => ({
-  title: `${name}: ${a.label} at ${Math.round(a.usedPercent)}%`,
+  title: `${a.account ? `${name} · ${a.account}` : name}: ${a.label} at ${Math.round(a.usedPercent)}%`,
   body: a.resetsAt ? `Resets in ${countdown(a.resetsAt, now)}.` : `Crossed ${a.threshold}%.`,
 });
 

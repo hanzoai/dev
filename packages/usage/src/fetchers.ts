@@ -9,36 +9,51 @@
 import type { UsageEnv } from "./env.ts";
 import type { ProviderSnapshot, UsageWindow } from "./schema.ts";
 
-export type Fetcher = (env: UsageEnv) => Promise<ProviderSnapshot>;
+/** A configured provider instance: one account the user signed in to. `home` is its config directory when it has one. */
+export interface Instance {
+  readonly id: string;
+  readonly name: string;
+  readonly home?: string;
+  readonly binary?: string;
+}
+
+/** One reading per account the provider has on this machine. */
+export type Fetcher = (
+  env: UsageEnv,
+  instances: ReadonlyArray<Instance>,
+) => Promise<ReadonlyArray<ProviderSnapshot>>;
+
+/** A reader of one credential. */
+export type SingleFetcher = (env: UsageEnv) => Promise<ProviderSnapshot>;
 
 export class NotConfigured extends Error {}
 
-const obj = (v: unknown): Record<string, unknown> =>
+export const obj = (v: unknown): Record<string, unknown> =>
   v && typeof v === "object" ? (v as Record<string, unknown>) : {};
-const num = (v: unknown): number | undefined => {
+export const num = (v: unknown): number | undefined => {
   const n = typeof v === "string" ? Number(v) : v;
   return typeof n === "number" && Number.isFinite(n) ? n : undefined;
 };
-const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
-const clamp = (n: number) => Math.min(100, Math.max(0, n));
-const iso = (v: unknown, epochSeconds = false): string | undefined => {
+export const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
+export const clamp = (n: number) => Math.min(100, Math.max(0, n));
+export const iso = (v: unknown, epochSeconds = false): string | undefined => {
   if (typeof v === "string")
     return Number.isNaN(Date.parse(v)) ? undefined : new Date(v).toISOString();
   const n = num(v);
   return n === undefined ? undefined : new Date(epochSeconds ? n * 1000 : n).toISOString();
 };
-const json = async (res: Response): Promise<Record<string, unknown>> => {
+export const json = async (res: Response): Promise<Record<string, unknown>> => {
   if (res.status === 401 || res.status === 403) throw new Error("Sign in again.");
   if (res.status === 429) throw new Error("Rate limited by the provider; will retry.");
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return obj(await res.json());
 };
-const base = (env: UsageEnv, provider: string, source: ProviderSnapshot["source"]) => ({
+export const base = (env: UsageEnv, provider: string, source: ProviderSnapshot["source"]) => ({
   provider,
   fetchedAt: env.now().toISOString(),
   source,
 });
-const parseJson = (text: string | undefined): Record<string, unknown> => {
+export const parseJson = (text: string | undefined): Record<string, unknown> => {
   if (!text) return {};
   try {
     return obj(JSON.parse(text));
@@ -46,7 +61,7 @@ const parseJson = (text: string | undefined): Record<string, unknown> => {
     return {};
   }
 };
-const firstEnv = (env: UsageEnv, keys: ReadonlyArray<string>) =>
+export const firstEnv = (env: UsageEnv, keys: ReadonlyArray<string>) =>
   keys.map((k) => env.env[k]?.trim()).find((v): v is string => !!v);
 
 const copilotToken = async (env: UsageEnv): Promise<string | undefined> => {
@@ -59,17 +74,27 @@ const copilotToken = async (env: UsageEnv): Promise<string | undefined> => {
       if (t) return t;
     }
   }
-  return undefined;
+  // The GitHub CLI's own sign-in; Copilot's usage endpoint accepts it.
+  const out = await env.exec("gh", ["auth", "token"], {
+    env: {
+      HOME: env.home,
+      PATH: `${env.home}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`,
+    },
+    cwd: env.home,
+    timeoutMs: 10_000,
+  });
+  return out?.trim() || undefined;
 };
 
 export const parseCopilot = (
   body: Record<string, unknown>,
-): Pick<ProviderSnapshot, "windows" | "plan"> => {
+): Pick<ProviderSnapshot, "windows" | "plan" | "account"> => {
   const snaps = obj(body.quota_snapshots);
   const resetsAt = iso(body.quota_reset_date);
   const win = (label: string, raw: unknown): UsageWindow | undefined => {
     const s = obj(raw);
-    if (s.unlimited === true) return undefined;
+    // A plan with no entitlement for this quota reports 0% remaining; that is absent, not exhausted.
+    if (s.unlimited === true || s.has_quota === false) return undefined;
     const remaining = num(s.percent_remaining);
     if (remaining === undefined) return undefined;
     return {
@@ -81,14 +106,17 @@ export const parseCopilot = (
   };
   const plan = str(body.copilot_plan);
   return {
-    windows: [win("Premium", snaps.premium_interactions), win("Chat", snaps.chat)].filter(
-      (w): w is UsageWindow => !!w,
-    ),
-    ...(plan ? { plan } : {}),
+    windows: [
+      win("Premium", snaps.premium_interactions),
+      win("Chat", snaps.chat),
+      win("Completions", snaps.completions),
+    ].filter((w): w is UsageWindow => !!w),
+    ...(plan ? { plan: plan.charAt(0).toUpperCase() + plan.slice(1) } : {}),
+    ...(str(body.login) ? { account: str(body.login)! } : {}),
   };
 };
 
-export const copilot: Fetcher = async (env) => {
+export const copilot: SingleFetcher = async (env) => {
   const token = await copilotToken(env);
   if (!token) throw new NotConfigured("Sign in to GitHub Copilot in your editor or CLI.");
   const res = await env.fetch("https://api.github.com/copilot_internal/user", {
@@ -102,7 +130,7 @@ export const copilot: Fetcher = async (env) => {
   return { ...base(env, "copilot", "oauth"), ...parseCopilot(await json(res)) };
 };
 
-export const openrouter: Fetcher = async (env) => {
+export const openrouter: SingleFetcher = async (env) => {
   const key = firstEnv(env, ["OPENROUTER_API_KEY"]);
   if (!key) throw new NotConfigured("Set OPENROUTER_API_KEY.");
   const data = obj(
@@ -128,7 +156,7 @@ export const openrouter: Fetcher = async (env) => {
   };
 };
 
-export const deepseek: Fetcher = async (env) => {
+export const deepseek: SingleFetcher = async (env) => {
   const key = firstEnv(env, ["DEEPSEEK_API_KEY"]);
   if (!key) throw new NotConfigured("Set DEEPSEEK_API_KEY.");
   const body = await json(
@@ -148,46 +176,13 @@ export const deepseek: Fetcher = async (env) => {
   };
 };
 
-const hanzoToken = async (env: UsageEnv): Promise<string | undefined> => {
-  const direct = firstEnv(env, ["HANZO_API_KEY"]);
-  if (direct) return direct;
-  // The token Hanzo IAM issued to this machine, `{ active, identities: { <id>: { access_token } } }`;
-  // used only for api.hanzo.ai.
-  const ids = parseJson(await env.readText(`${env.home}/.hanzo/identities.json`));
-  const identities = obj(ids.identities);
-  const pick = obj(identities[str(ids.active) ?? ""] ?? Object.values(identities)[0]);
-  return str(pick.access_token);
-};
+/** Credential-only providers: one reading from one key or session. */
+export const single =
+  (fetcher: SingleFetcher): Fetcher =>
+  async (env) => [await fetcher(env)];
 
-/** commerce `GET /v1/billing/balance`: amounts in cents, available = balance - holds. */
-export const parseHanzo = (
-  body: Record<string, unknown>,
-): Pick<ProviderSnapshot, "windows" | "credits"> => {
-  const available = num(body.available) ?? num(body.balance);
-  const holds = num(body.holds);
-  return {
-    windows: [],
-    credits: {
-      currency: (str(body.currency) ?? "usd").toUpperCase(),
-      ...(available !== undefined ? { balance: available / 100 } : {}),
-      ...(holds ? { spent: holds / 100 } : {}),
-    },
-  };
-};
-
-export const hanzo: Fetcher = async (env) => {
-  const token = await hanzoToken(env);
-  if (!token) throw new NotConfigured("Sign in to Hanzo.");
-  const res = await env.fetch("https://api.hanzo.ai/v1/billing/balance", {
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
-  });
-  return { ...base(env, "hanzo", "oauth"), ...parseHanzo(await json(res)) };
-};
-
-/** Providers whose limits the desktop server already reads (Claude, Codex, ...) are supplied to the service, not fetched here. */
-export const FETCHERS: Readonly<Record<string, Fetcher>> = {
-  copilot,
-  openrouter,
-  deepseek,
-  hanzo,
+export const SINGLE_FETCHERS: Readonly<Record<string, Fetcher>> = {
+  copilot: single(copilot),
+  openrouter: single(openrouter),
+  deepseek: single(deepseek),
 };
