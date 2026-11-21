@@ -28,3 +28,9 @@ export function DevWorkspace(props: {
   dock?: (context: { runtime: DevRuntime; thread: string | null }) => ReactNode;
   className?: string;
 }): ReactNode;
+
+export function DevStart(props: {
+  onCloud: () => void;
+  onLink: () => void;
+  className?: string;
+}): ReactNode;
