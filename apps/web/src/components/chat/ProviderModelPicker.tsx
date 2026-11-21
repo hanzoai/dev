@@ -423,7 +423,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 <EnsoRing
                   gap={props.triggerRing.gap}
                   dot={props.triggerRing.dot}
-                  className={cn("size-4 shrink-0", props.activeProviderIconClassName)}
+                  className={cn("size-[18px] shrink-0", props.activeProviderIconClassName)}
                 />
               ) : (
                 <ProviderInstanceIcon

@@ -112,11 +112,6 @@ export const SidebarAccount = memo(function SidebarAccount({
         >
           <Face account={active} size={20} />
           <span className="min-w-0 flex-1 truncate text-start">{name}</span>
-          {badge ? (
-            <Badge size="sm" variant="outline">
-              {badge}
-            </Badge>
-          ) : null}
         </MenuTrigger>
         <MenuPopup align="start" className="min-w-64" side="top">
           <MenuGroup>
@@ -124,7 +119,14 @@ export const SidebarAccount = memo(function SidebarAccount({
               <span className="flex items-center gap-2">
                 <Face account={active} size={28} />
                 <span className="flex min-w-0 flex-col">
-                  <span className="truncate text-foreground">{name}</span>
+                  <span className="flex items-center gap-1.5 truncate text-foreground">
+                    {name}
+                    {badge ? (
+                      <Badge size="sm" variant="outline">
+                        {badge}
+                      </Badge>
+                    ) : null}
+                  </span>
                   {active.email ? (
                     <span className="truncate font-normal text-muted-foreground">
                       {active.email}
