@@ -43,3 +43,9 @@ export function useDevOpen(): (input: {
   /** The branch to start on, or "" for the default. */
   ref: string;
 }) => Promise<string>;
+
+/** Focuses the composer; false when none is drawn. */
+export function focusComposer(): boolean;
+
+/** Focuses the open thread's row (else the first); false when no list is drawn. */
+export function focusThreadList(): boolean;

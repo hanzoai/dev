@@ -7,6 +7,19 @@ export const MAX_WHEN_EXPRESSION_DEPTH = 64;
 export const MAX_SCRIPT_ID_LENGTH = 24;
 export const MAX_KEYBINDINGS_COUNT = 256;
 
+/** The host's sections, ⌘1 to ⌘9: Chat, Dev, Design and the rest, in the order the rail draws them. */
+export const SECTION_KEYBINDING_COMMANDS = [
+  "section.1",
+  "section.2",
+  "section.3",
+  "section.4",
+  "section.5",
+  "section.6",
+  "section.7",
+  "section.8",
+  "section.9",
+] as const;
+
 export const THREAD_JUMP_KEYBINDING_COMMANDS = [
   "thread.jump.1",
   "thread.jump.2",
@@ -82,6 +95,9 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "preview.resetZoom",
   "preview.find",
   "commandPalette.toggle",
+  "composer.focus",
+  "sidebar.focus",
+  ...SECTION_KEYBINDING_COMMANDS,
   "filePicker.toggle",
   "projectSearch.toggle",
   "settings.open",

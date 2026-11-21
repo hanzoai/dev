@@ -5,9 +5,10 @@
   "license": "MIT",
   "type": "module",
   "sideEffects": ["**/*.css"],
-  "files": ["dist", "index.d.ts"],
+  "files": ["dist", "index.d.ts", "keymap.d.ts"],
   "exports": {
     ".": { "types": "./index.d.ts", "import": "./dist/index.js" },
+    "./keymap": { "types": "./keymap.d.ts", "import": "./dist/keymap.js" },
     "./style.css": "./dist/index.css"
   },
   "peerDependencies": {

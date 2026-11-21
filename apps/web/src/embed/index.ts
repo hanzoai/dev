@@ -6,3 +6,4 @@ export { DevStart } from "./DevStart";
 export { DevWorkspace } from "./DevWorkspace";
 export { useDevOpen } from "./useDevOpen";
 export type { DevRuntime, DevRuntimeSource } from "./runtime";
+export { focusComposer, focusThreadList } from "./focus";

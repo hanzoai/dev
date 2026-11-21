@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from "react";
 
 import { embedTools, useEmbed } from "./context";
+import { moveThroughRows } from "./focus";
 import { useThreadRef } from "./navigation";
 
 /**
@@ -25,5 +26,12 @@ export function DevThreadList({
   const ref = useCallback((el: HTMLDivElement | null) => embed?.slots.threads.set(el), [embed]);
   useThreadRef(embed, active, onOpen);
   useEffect(() => embedTools.set(tools), [tools]);
-  return <div ref={ref} data-dev-threads="" className={className} />;
+  return (
+    <div
+      ref={ref}
+      data-dev-threads=""
+      className={className}
+      onKeyDown={(event) => moveThroughRows(event, event.currentTarget)}
+    />
+  );
 }

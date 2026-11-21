@@ -5,6 +5,7 @@ import {
   MAX_KEYBINDINGS_COUNT,
   MAX_WHEN_EXPRESSION_DEPTH,
   MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
+  SECTION_KEYBINDING_COMMANDS,
   type ResolvedKeybindingRule,
   type ResolvedKeybindingsConfig,
   THREAD_JUMP_KEYBINDING_COMMANDS,
@@ -87,6 +88,21 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+k", command: "commandPalette.toggle", when: "!terminalFocus" },
   { key: "mod+,", command: "settings.open", when: "!terminalFocus" },
   { key: "mod+/", command: "keybindings.open", when: "!terminalFocus" },
+  { key: "shift+/", command: "keybindings.open", when: "!terminalFocus && !editableFocus" },
+  { key: "mod+l", command: "composer.focus", when: "!terminalFocus && !previewFocus" },
+  { key: "mod+0", command: "sidebar.focus", when: "!terminalFocus && !previewFocus" },
+  // ⌘1-9 where the host owns the window (its desktop app); ctrl+alt+1-9 anywhere, since a
+  // browser keeps ⌘1-9 for its tabs.
+  ...SECTION_KEYBINDING_COMMANDS.map((command, index) => ({
+    key: `mod+${index + 1}`,
+    command,
+    when: "!modelPickerOpen && hostDesktop",
+  })),
+  ...SECTION_KEYBINDING_COMMANDS.map((command, index) => ({
+    key: `ctrl+alt+${index + 1}`,
+    command,
+    when: "!modelPickerOpen",
+  })),
   { key: "mod+alt+l", command: "localAi.open", when: "!terminalFocus" },
   { key: "mod+p", command: "filePicker.toggle", when: "!terminalFocus" },
   { key: "mod+shift+f", command: "projectSearch.toggle", when: "!terminalFocus" },

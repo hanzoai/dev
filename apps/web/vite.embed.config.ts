@@ -29,7 +29,11 @@ export default defineConfig({
     emptyOutDir: true,
     cssCodeSplit: false,
     sourcemap: false,
-    lib: { entry: "src/embed/index.ts", formats: ["es"], fileName: "index" },
+    // `keymap` is its own small entry: a host resolves window keys before it has loaded the core.
+    lib: {
+      entry: { index: "src/embed/index.ts", keymap: "src/embed/keymap.ts" },
+      formats: ["es"],
+    },
     rollupOptions: { external: ["react", "react-dom", "react/jsx-runtime", "react-dom/client"] },
   },
 });
