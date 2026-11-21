@@ -13,5 +13,11 @@
   "hanzod": {
     "version": "0.2.7",
     "targets": {}
+  },
+  "hanzo-engine": {
+    "version": "1.7.107",
+    "targets": {
+      "darwin-arm64": "865f094e1927817d938646daaee3cf118accfa20a63f0a8ac64583cd0eab07e0"
+    }
   }
 }
