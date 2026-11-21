@@ -1,4 +1,5 @@
 import * as NodeChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeModule from "node:module";
 import * as NodeOS from "node:os";
@@ -177,6 +178,82 @@ if (NodeFS.existsSync(monitorReleaseBin)) {
   NodeFS.copyFileSync(monitorReleaseBin, destMonitor);
   if (!isWindows) {
     NodeFS.chmodSync(destMonitor, 0o755);
+  }
+}
+
+// 5. Stage the runtimes the app does not ask the machine for.
+//
+// The server runs on a Node the app owns (Dev desktop starts with no Node on PATH), and
+// `hanzod` runs it. Both are fetched from a release by version and checked against a sha256 in
+// scripts/runtimes.json before they are staged; a floating tag or an unpinned target is
+// refused. The Node runtime goes away when the last provider adapter has moved to Rust.
+const runtimes = JSON.parse(
+  NodeFS.readFileSync(NodePath.join(desktopDir, "scripts", "runtimes.json"), "utf8"),
+);
+const runtimeTarget = `${hostPlatform === "win32" ? "win" : hostPlatform}-${hostArch}`;
+// hanzod's release assets name the architecture the way Go and Docker do.
+const hanzodTarget = `${hostPlatform === "win32" ? "windows" : hostPlatform}-${hostArch === "x64" ? "amd64" : hostArch}`;
+
+async function fetchPinned(url, sha256) {
+  const response = await fetch(url, { redirect: "follow" });
+  if (!response.ok) throw new Error(`${url}: ${response.status}`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const got = NodeCrypto.createHash("sha256").update(bytes).digest("hex");
+  if (got !== sha256) throw new Error(`${url}: sha256 ${got} is not the pinned ${sha256}`);
+  return bytes;
+}
+
+function unpack(bytes, name, into) {
+  NodeFS.mkdirSync(into, { recursive: true });
+  const archive = NodePath.join(into, name);
+  NodeFS.writeFileSync(archive, bytes);
+  NodeChildProcess.execFileSync("tar", ["-xf", archive, "-C", into], { stdio: "inherit" });
+  NodeFS.rmSync(archive);
+}
+
+{
+  const pin = runtimes.node.targets[runtimeTarget];
+  if (pin === undefined) throw new Error(`no pinned Node runtime for ${runtimeTarget}`);
+  const ext = isWindows ? "zip" : "tar.gz";
+  const name = `node-v${runtimes.node.version}-${runtimeTarget}`;
+  const work = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "hanzo-node-runtime-"));
+  unpack(
+    await fetchPinned(`https://nodejs.org/dist/v${runtimes.node.version}/${name}.${ext}`, pin),
+    `${name}.${ext}`,
+    work,
+  );
+  const nodeDir = NodePath.join(resourcesRoot, "node");
+  NodeFS.mkdirSync(nodeDir, { recursive: true });
+  const built = isWindows
+    ? NodePath.join(work, name, "node.exe")
+    : NodePath.join(work, name, "bin", "node");
+  const staged = NodePath.join(nodeDir, `node${exeSuffix}`);
+  NodeFS.copyFileSync(built, staged);
+  if (!isWindows) NodeFS.chmodSync(staged, 0o755);
+  NodeFS.rmSync(work, { recursive: true, force: true });
+}
+
+{
+  const pin = runtimes.hanzod.targets[hanzodTarget];
+  if (pin === undefined) {
+    console.warn(
+      `[stage-tauri-resources] no pinned hanzod for ${hanzodTarget}; the app will use the one in ~/.hanzo/bin`,
+    );
+  } else {
+    const work = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "hanzo-hanzod-"));
+    const asset = `hanzod-${hanzodTarget}.tar.gz`;
+    unpack(
+      await fetchPinned(
+        `https://github.com/hanzoai/node/releases/download/v${runtimes.hanzod.version}/${asset}`,
+        pin,
+      ),
+      asset,
+      work,
+    );
+    const staged = NodePath.join(resourcesRoot, `hanzod${exeSuffix}`);
+    NodeFS.copyFileSync(NodePath.join(work, `hanzod${exeSuffix}`), staged);
+    if (!isWindows) NodeFS.chmodSync(staged, 0o755);
+    NodeFS.rmSync(work, { recursive: true, force: true });
   }
 }
 

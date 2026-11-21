@@ -1,0 +1,1702 @@
+[
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aturn_interrupt_mid_tool%3Athread-create%3A<uuid:2>:<uuid:0>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "thread.created",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "projectId": "project:fixture:turn_interrupt_mid_tool:<uuid:0>",
+      "title": "Replay fixture: turn_interrupt_mid_tool",
+      "providerInstanceId": "pi",
+      "modelSelection": {
+        "instanceId": "pi",
+        "model": "openrouter/deepseek/deepseek-v4-flash"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "branch": null,
+      "worktreePath": null,
+      "pullRequests": [],
+      "activeProviderThreadId": null,
+      "lineage": {
+        "parentThreadId": null,
+        "relationshipToParent": null,
+        "rootThreadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>"
+      },
+      "forkedFrom": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "archivedAt": null,
+      "settledOverride": null,
+      "settledAt": null,
+      "snoozedUntil": null,
+      "snoozedAt": null,
+      "lastVisitedAt": null,
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aturn_interrupt_mid_tool%3Amessage-1%3A<uuid:3>:<uuid:1>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "thread.metadata-updated",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "projectId": "project:fixture:turn_interrupt_mid_tool:<uuid:0>",
+      "title": "Replay fixture: turn_interrupt_mid_tool",
+      "providerInstanceId": "pi",
+      "modelSelection": {
+        "instanceId": "pi",
+        "model": "openrouter/deepseek/deepseek-v4-flash"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "branch": null,
+      "worktreePath": null,
+      "pullRequests": [],
+      "activeProviderThreadId": null,
+      "lineage": {
+        "parentThreadId": null,
+        "relationshipToParent": null,
+        "rootThreadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>"
+      },
+      "forkedFrom": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "archivedAt": null,
+      "settledOverride": null,
+      "settledAt": null,
+      "snoozedUntil": null,
+      "snoozedAt": null,
+      "lastVisitedAt": "<time>",
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aturn_interrupt_mid_tool%3Amessage-1%3A<uuid:3>:<uuid:3>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "pi",
+      "providerInstanceId": "pi",
+      "providerSessionId": "provider-session:provider-instance:pi:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": null,
+      "nativeConversationHeadRef": null,
+      "status": "not_loaded",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": null,
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aturn_interrupt_mid_tool%3Amessage-1%3A<uuid:3>:<uuid:4>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "run.created",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "pi",
+      "modelSelection": {
+        "instanceId": "pi",
+        "model": "openrouter/deepseek/deepseek-v4-flash"
+      },
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "starting",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": null,
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aturn_interrupt_mid_tool%3Amessage-1%3A<uuid:3>:<uuid:5>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "run-attempt.created",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "pi",
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "pending",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aturn_interrupt_mid_tool%3Amessage-1%3A<uuid:3>:<uuid:6>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "pending",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aturn_interrupt_mid_tool%3Amessage-1%3A<uuid:3>:<uuid:7>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "checkpoint-scope.created",
+    "payload": {
+      "id": "checkpoint-scope:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:name:root",
+      "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentScopeId": null,
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "kind": "root_run",
+      "ordinalWithinParent": 0,
+      "advancesAppRunCount": true,
+      "cwd": "<workspace>",
+      "createdAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aturn_interrupt_mid_tool%3Amessage-1%3A<uuid:3>:<uuid:8>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "message:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "role": "user",
+      "text": "Run this exact local command: `node -e \"console.log('interrupt fixture tool started'); setTimeout(() => {}, 30000)\"`. Do not answer until it completes, then respond exactly: interrupt fixture should not finish naturally.",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aturn_interrupt_mid_tool%3Amessage-1%3A<uuid:3>:<uuid:9>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:message:message%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1%3A<uuid:4>",
+      "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000001,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "createdBy": "user",
+      "creationSource": "web",
+      "type": "user_message",
+      "messageId": "message:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "inputIntent": "turn_start",
+      "text": "Run this exact local command: `node -e \"console.log('interrupt fixture tool started'); setTimeout(() => {}, 30000)\"`. Do not answer until it completes, then respond exactly: interrupt fixture should not finish naturally.",
+      "attachments": []
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Api%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:10>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "provider-session.attached",
+    "payload": {
+      "id": "provider-session:provider-instance:pi:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "pi",
+      "providerInstanceId": "pi",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "openrouter/deepseek/deepseek-v4-flash",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "supportsSteeringByInterruptRestart": false,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": true,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": false
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": false,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": false,
+          "emitsTodoList": false,
+          "emitsProposedPlan": false,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": false,
+          "acceptsDeveloperContext": false,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": false,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": false,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "client-boundary"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Api%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:11>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:pi:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "pi",
+      "providerInstanceId": "pi",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "openrouter/deepseek/deepseek-v4-flash",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "supportsSteeringByInterruptRestart": false,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": true,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": false
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": false,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": false,
+          "emitsTodoList": false,
+          "emitsProposedPlan": false,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": false,
+          "acceptsDeveloperContext": false,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": false,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": false,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "client-boundary"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:12>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "pi",
+      "providerInstanceId": "pi",
+      "providerSessionId": "provider-session:provider-instance:pi:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "pi",
+        "nativeId": "/pi-sessions/session-1.jsonl",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": null,
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:13>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "pi",
+      "modelSelection": {
+        "instanceId": "pi",
+        "model": "openrouter/deepseek/deepseek-v4-flash"
+      },
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "running",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:14>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeThreadId": "/pi-sessions/session-1.jsonl",
+      "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "pi",
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:15>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "running",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Api%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:16>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:pi:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "pi",
+      "providerInstanceId": "pi",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "openrouter/deepseek/deepseek-v4-flash",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "supportsSteeringByInterruptRestart": false,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": true,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": false
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": false,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": false,
+          "emitsTodoList": false,
+          "emitsProposedPlan": false,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": false,
+          "acceptsDeveloperContext": false,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": false,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": false,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "client-boundary"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Api%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:17>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:pi:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "pi",
+      "providerInstanceId": "pi",
+      "status": "running",
+      "cwd": "<workspace>",
+      "model": "openrouter/deepseek/deepseek-v4-flash",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "supportsSteeringByInterruptRestart": false,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": true,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": false
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": false,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": false,
+          "emitsTodoList": false,
+          "emitsProposedPlan": false,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": false,
+          "acceptsDeveloperContext": false,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": false,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": false,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "client-boundary"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Api%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:18>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:pi:native-turn:provider-thread%3Aprovider%3Api%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "pi",
+        "nativeId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:run-attempt:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+        "strength": "weak"
+      },
+      "nativeThreadRef": {
+        "driver": "pi",
+        "nativeId": "/pi-sessions/session-1.jsonl",
+        "strength": "strong"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Api%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:19>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "pi",
+      "providerInstanceId": "pi",
+      "providerSessionId": "provider-session:provider-instance:pi:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "pi",
+        "nativeId": "/pi-sessions/session-1.jsonl",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": null,
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Api%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:20>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:pi:native-turn:provider-thread%3Aprovider%3Api%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "pi",
+        "nativeId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:run-attempt:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+        "strength": "weak"
+      },
+      "nativeThreadRef": {
+        "driver": "pi",
+        "nativeId": "/pi-sessions/session-1.jsonl",
+        "strength": "strong"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "tokenUsage": {
+        "usedTokens": 1932,
+        "maxTokens": 1048576,
+        "inputTokens": 1830,
+        "cachedInputTokens": 0,
+        "outputTokens": 102,
+        "updatedAt": "<time>"
+      }
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Api%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:21>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:pi:native-item:provider-turn%3Aprovider%3Api%3Anative-turn%3Aprovider-thread%253Aprovider%253Api%253Anative-thread%253Apending%25253Arun%25253Athread%25253Athread%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253Aproject%2525253Aproject%252525253Afixture%252525253Aturn_interrupt_mid_tool%252525253A<uuid:0>%2525253A<uuid:1>%25253Aordinal%25253A1%253Aattempt%253Arun-attempt%253Arun%253Arun%25253Athread%25253Athread%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253Aproject%2525253Aproject%252525253Afixture%252525253Aturn_interrupt_mid_tool%252525253A<uuid:0>%2525253A<uuid:1>%25253Aordinal%25253A1%253Aattempt%253A1%3Am1%3Ac0",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:pi:native-item:provider-turn%3Aprovider%3Api%3Anative-turn%3Aprovider-thread%253Aprovider%253Api%253Anative-thread%253Apending%25253Arun%25253Athread%25253Athread%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253Aproject%2525253Aproject%252525253Afixture%252525253Aturn_interrupt_mid_tool%252525253A<uuid:0>%2525253A<uuid:1>%25253Aordinal%25253A1%253Aattempt%253Arun-attempt%253Arun%253Arun%25253Athread%25253Athread%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253Aproject%2525253Aproject%252525253Afixture%252525253Aturn_interrupt_mid_tool%252525253A<uuid:0>%2525253A<uuid:1>%25253Aordinal%25253A1%253Aattempt%253A1%3Am1%3Ac0",
+      "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "reasoning",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:pi:native-turn:provider-thread%3Aprovider%3Api%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "pi",
+        "nativeId": "provider-turn:provider:pi:native-turn:provider-thread%3Aprovider%3Api%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1:m1:c0",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Api%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:22>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:pi:native-item:provider-turn%3Aprovider%3Api%3Anative-turn%3Aprovider-thread%253Aprovider%253Api%253Anative-thread%253Apending%25253Arun%25253Athread%25253Athread%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253Aproject%2525253Aproject%252525253Afixture%252525253Aturn_interrupt_mid_tool%252525253A<uuid:0>%2525253A<uuid:1>%25253Aordinal%25253A1%253Aattempt%253Arun-attempt%253Arun%253Arun%25253Athread%25253Athread%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253Aproject%2525253Aproject%252525253Afixture%252525253Aturn_interrupt_mid_tool%252525253A<uuid:0>%2525253A<uuid:1>%25253Aordinal%25253A1%253Aattempt%253A1%3Am1%3Ac0",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:pi:native-item:provider-turn%3Aprovider%3Api%3Anative-turn%3Aprovider-thread%253Aprovider%253Api%253Anative-thread%253Apending%25253Arun%25253Athread%25253Athread%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253Aproject%2525253Aproject%252525253Afixture%252525253Aturn_interrupt_mid_tool%252525253A<uuid:0>%2525253A<uuid:1>%25253Aordinal%25253A1%253Aattempt%253Arun-attempt%253Arun%253Arun%25253Athread%25253Athread%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253Aproject%2525253Aproject%252525253Afixture%252525253Aturn_interrupt_mid_tool%252525253A<uuid:0>%2525253A<uuid:1>%25253Aordinal%25253A1%253Aattempt%253A1%3Am1%3Ac0",
+      "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:pi:native-item:provider-turn%3Aprovider%3Api%3Anative-turn%3Aprovider-thread%253Aprovider%253Api%253Anative-thread%253Apending%25253Arun%25253Athread%25253Athread%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253Aproject%2525253Aproject%252525253Afixture%252525253Aturn_interrupt_mid_tool%252525253A<uuid:0>%2525253A<uuid:1>%25253Aordinal%25253A1%253Aattempt%253Arun-attempt%253Arun%253Arun%25253Athread%25253Athread%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253Aproject%2525253Aproject%252525253Afixture%252525253Aturn_interrupt_mid_tool%252525253A<uuid:0>%2525253A<uuid:1>%25253Aordinal%25253A1%253Aattempt%253A1%3Am1%3Ac0",
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:pi:native-turn:provider-thread%3Aprovider%3Api%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "pi",
+        "nativeId": "provider-turn:provider:pi:native-turn:provider-thread%3Aprovider%3Api%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1:m1:c0",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000002,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "reasoning",
+      "text": "The user wants me to run a specific command and wait for it to complete. Let me execute it.",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Api%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:23>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:pi:native-item:call_9726ad99cc114832996228eb",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:pi:native-item:call_9726ad99cc114832996228eb",
+      "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "running",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:pi:native-turn:provider-thread%3Aprovider%3Api%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "pi",
+        "nativeId": "call_9726ad99cc114832996228eb",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Api%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:24>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:pi:native-item:call_9726ad99cc114832996228eb",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:pi:native-item:call_9726ad99cc114832996228eb",
+      "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:pi:native-item:call_9726ad99cc114832996228eb",
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:pi:native-turn:provider-thread%3Aprovider%3Api%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "pi",
+        "nativeId": "call_9726ad99cc114832996228eb",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000003,
+      "status": "running",
+      "title": "bash",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "updatedAt": "<time>",
+      "type": "command_execution",
+      "input": "node -e \"console.log('interrupt fixture tool started'); setTimeout(() => {}, 30000)\""
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aturn_interrupt_mid_tool%3Ainterrupt-1%3A<uuid:5>:<uuid:25>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:signal:interrupt-request",
+      "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:pi:native-turn:provider-thread%3Aprovider%3Api%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000004,
+      "status": "completed",
+      "title": "Interrupt requested",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "run_interrupt_request",
+      "message": "Stopped by user"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Api%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:26>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:pi:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "pi",
+      "providerInstanceId": "pi",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "openrouter/deepseek/deepseek-v4-flash",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "supportsSteeringByInterruptRestart": false,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": true,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": false
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": false,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": false,
+          "emitsTodoList": false,
+          "emitsProposedPlan": false,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": false,
+          "acceptsDeveloperContext": false,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": false,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": false,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "client-boundary"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Api%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:27>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:pi:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "pi",
+      "providerInstanceId": "pi",
+      "status": "stopped",
+      "cwd": "<workspace>",
+      "model": "openrouter/deepseek/deepseek-v4-flash",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "supportsSteeringByInterruptRestart": false,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": true,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": false
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": false,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": false,
+          "emitsTodoList": false,
+          "emitsProposedPlan": false,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": false,
+          "acceptsDeveloperContext": false,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": false,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": false,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "client-boundary"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Api%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:28>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:pi:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "pi",
+      "providerInstanceId": "pi",
+      "status": "stopped",
+      "cwd": "<workspace>",
+      "model": "openrouter/deepseek/deepseek-v4-flash",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": false,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "supportsSteeringByInterruptRestart": false,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": true,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": false
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": false,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": false
+        },
+        "planning": {
+          "emitsPlanUpdated": false,
+          "emitsTodoList": false,
+          "emitsProposedPlan": false,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": false,
+          "acceptsDeveloperContext": false,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": false,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": false,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "weak",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "client-boundary"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Api%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:29>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:pi:native-item:call_9726ad99cc114832996228eb",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:pi:native-item:call_9726ad99cc114832996228eb",
+      "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "interrupted",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:pi:native-turn:provider-thread%3Aprovider%3Api%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "pi",
+        "nativeId": "call_9726ad99cc114832996228eb",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Api%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:30>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:pi:native-item:call_9726ad99cc114832996228eb",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:pi:native-item:call_9726ad99cc114832996228eb",
+      "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:pi:native-item:call_9726ad99cc114832996228eb",
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:pi:native-turn:provider-thread%3Aprovider%3Api%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "nativeItemRef": {
+        "driver": "pi",
+        "nativeId": "call_9726ad99cc114832996228eb",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000003,
+      "status": "interrupted",
+      "title": "bash",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "command_execution",
+      "input": "node -e \"console.log('interrupt fixture tool started'); setTimeout(() => {}, 30000)\"",
+      "output": "Command aborted"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Api%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:31>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:pi:native-turn:provider-thread%3Aprovider%3Api%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3Arun-attempt%3Arun%3Arun%253Athread%253Athread%25253Afixture%25253Aturn_interrupt_mid_tool%25253Aproject%25253Aproject%2525253Afixture%2525253Aturn_interrupt_mid_tool%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3Aattempt%3A1",
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "pi",
+        "nativeId": "b36f8c4a",
+        "strength": "strong"
+      },
+      "nativeThreadRef": {
+        "driver": "pi",
+        "nativeId": "/pi-sessions/session-1.jsonl",
+        "strength": "strong"
+      },
+      "ordinal": 1,
+      "status": "interrupted",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "model": "openrouter/deepseek/deepseek-v4-flash"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Api%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:32>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "pi",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "pi",
+      "providerInstanceId": "pi",
+      "providerSessionId": "provider-session:provider-instance:pi:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "pi",
+        "nativeId": "/pi-sessions/session-1.jsonl",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": {
+        "driver": "pi",
+        "nativeId": "206b2637",
+        "strength": "strong"
+      },
+      "status": "idle",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": null,
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:33>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeThreadId": "/pi-sessions/session-1.jsonl",
+      "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "pi",
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "interrupted",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:34>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:signal:interrupt-result",
+      "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "parentItemId": "turn-item:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:signal:interrupt-request",
+      "ordinal": 1000005,
+      "status": "interrupted",
+      "title": "Interrupted",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "run_interrupt_result",
+      "message": "Stopped by user"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:35>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "pi",
+      "modelSelection": {
+        "instanceId": "pi",
+        "model": "openrouter/deepseek/deepseek-v4-flash"
+      },
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "interrupted",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:36>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "interrupted",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:37>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "pi",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:pi:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "pi",
+      "providerInstanceId": "pi",
+      "providerSessionId": "provider-session:provider-instance:pi:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "pi",
+        "nativeId": "/pi-sessions/session-1.jsonl",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": {
+        "driver": "pi",
+        "nativeId": "206b2637",
+        "strength": "strong"
+      },
+      "status": "idle",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": null,
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  }
+]

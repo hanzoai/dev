@@ -1,0 +1,22 @@
+{
+  "fixture": "subagent_v2_approval",
+  "driver": "codex",
+  "modelSelection": {
+    "instanceId": "codex",
+    "model": "gpt-6-luna"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Do not run any commands yourself. Spawn one subagent whose only task is to run this exact shell command: printf 'subagent approval fixture' > subagent-approval.txt and then reply with exactly: Written. Wait for it to finish, then reply with exactly what it said."
+    },
+    {
+      "type": "approve_next_runtime_request",
+      "shellSnapshotKeyWhilePending": "subagent-approval-pending"
+    }
+  ]
+}

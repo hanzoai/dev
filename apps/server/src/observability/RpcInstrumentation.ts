@@ -108,6 +108,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.secretsAnswerRequest]: "secrets",
   [WS_METHODS.guestShareCreate]: "guest-share",
   [WS_METHODS.cloudGetRelayClientStatus]: "cloud",
+  [WS_METHODS.browserSourcesList]: "cloud",
   [WS_METHODS.desktopsStatus]: "cloud",
   [WS_METHODS.desktopsLink]: "cloud",
   [WS_METHODS.desktopsUnlink]: "cloud",

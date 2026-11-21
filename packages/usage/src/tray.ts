@@ -1,3 +1,4 @@
+import { accountName } from "./account.ts";
 import { countdown } from "./notify.ts";
 import type { ProviderSnapshot, TrayMode } from "./schema.ts";
 
@@ -21,7 +22,7 @@ export const trayModel = (
     .map((s) => ({ s, w: primary(s) }))
     .filter((r): r is { s: ProviderSnapshot; w: NonNullable<ReturnType<typeof primary>> } => !!r.w);
   const lines = snapshots.map((s) => {
-    const name = names[s.provider] ?? s.provider;
+    const name = accountName(s, names[s.provider] ?? s.provider);
     const w = primary(s);
     if (s.error && !w) return `${name}: ${s.error}`;
     if (w)

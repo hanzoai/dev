@@ -29,7 +29,10 @@ interface Recorded {
 }
 
 const SECRET_EMAIL = "someone@example.test";
-const SECRET_TOKEN = "access-token-secret";
+// A JWT-shaped bearer: the desktop's principal is its `owner` and `sub` claims.
+const SECRET_TOKEN = `${Base64Url.encode(new TextEncoder().encode('{"alg":"none"}'))}.${Base64Url.encode(
+  new TextEncoder().encode('{"owner":"hanzo","sub":"z-user"}'),
+)}.secret`;
 
 const decodeProvider = Schema.decodeUnknownSync(ServerProvider);
 
@@ -226,14 +229,14 @@ it.effect("a heartbeat reports provider state only and is signed by the device k
           kind: "login",
           state: "ready",
           plan: "max",
-          shared: false,
+          shared: true,
         },
         {
           provider: "codex",
           instance: "codex",
           kind: "login",
           state: "needs_login",
-          shared: false,
+          shared: true,
         },
       ]);
       assert.notInclude(heartbeat.body, SECRET_EMAIL);
@@ -264,8 +267,8 @@ it.effect("a heartbeat reports provider state only and is signed by the device k
         `${JSON.parse(heartbeat.body).version}\n` +
         "\n" +
         "0\n" +
-        "claude,claude,login,ready,max,false\n" +
-        "codex,codex,login,needs_login,,false\n";
+        "claude,claude,login,ready,max,true\n" +
+        "codex,codex,login,needs_login,,true\n";
       const verified = yield* Effect.promise(() =>
         globalThis.crypto.subtle.verify(
           "Ed25519",
@@ -491,17 +494,18 @@ it.effect(
         yield* desktopLink.link({});
         yield* Queue.take(requests);
         const first = yield* Queue.take(requests);
-        assert.equal(JSON.parse(first.body).providers[0].shared, false);
+        // Nothing stored yet: a claude login is shared with the owner's own surfaces by default.
+        assert.equal(JSON.parse(first.body).providers[0].shared, true);
 
-        const on = yield* desktopLink.setShared("claude", true);
-        assert.equal(on.providers.find((row) => row.instance === "claude")?.shared, true);
-        const beat = yield* Queue.take(requests);
-        assert.equal(JSON.parse(beat.body).providers[0].shared, true);
-        assert.equal(JSON.parse(beat.body).providers[0].shareable, undefined);
+        const off = yield* desktopLink.setShared("claude", false);
+        assert.equal(off.providers.find((row) => row.instance === "claude")?.shared, false);
+        const beatOff = yield* Queue.take(requests);
+        assert.equal(JSON.parse(beatOff.body).providers[0].shared, false);
+        assert.equal(JSON.parse(beatOff.body).providers[0].shareable, undefined);
 
-        yield* desktopLink.setShared("claude", false);
-        const off = yield* Queue.take(requests);
-        assert.equal(JSON.parse(off.body).providers[0].shared, false);
+        yield* desktopLink.setShared("claude", true);
+        const beatOn = yield* Queue.take(requests);
+        assert.equal(JSON.parse(beatOn.body).providers[0].shared, true);
 
         const refused = yield* desktopLink.setShared("not-an-instance", true).pipe(Effect.flip);
         assert.equal(refused.reason, "rejected");
@@ -510,35 +514,50 @@ it.effect(
 );
 
 it.effect(
-  "a routed run is refused on an unshared login and no credential appears in any answer",
+  "a routed run needs the same account and Share on, which is the default; no credential appears in any answer",
   () =>
     Effect.gen(function* () {
-      const { requests, layer } = yield* harness;
+      const { requests, secrets, layer } = yield* harness;
       yield* Effect.gen(function* () {
         const desktopLink = yield* DesktopLink.DesktopLink;
+        const linkedUser = (id: string) =>
+          void secrets.set("cloud-linked-user-id", new TextEncoder().encode(id));
         yield* Effect.yieldNow;
+
+        // An unlinked desktop refuses.
+        linkedUser("z-user");
+        const unlinked = yield* desktopLink.assertRoutedRun("claude").pipe(Effect.flip);
+        assert.equal(unlinked.reason, "not_shared");
+
         yield* desktopLink.link({});
         yield* Queue.take(requests);
         yield* Queue.take(requests);
 
-        const refused = yield* desktopLink.assertRoutedRun("claude").pipe(Effect.flip);
-        assert.equal(refused.reason, "not_shared");
-        // Not routable (a login this policy does not offer) stays refused even with the switch asked for.
+        // A fresh install, no stored setting, the same account: claude and codex are allowed.
+        yield* desktopLink.assertRoutedRun("claude");
+        yield* desktopLink.assertRoutedRun("codex");
+
+        // A different account is refused, with the same default.
+        linkedUser("someone-else");
+        const stranger = yield* desktopLink.assertRoutedRun("claude").pipe(Effect.flip);
+        assert.equal(stranger.reason, "not_shared");
+        linkedUser("hanzo/z-user");
+        yield* desktopLink.assertRoutedRun("claude");
+
+        // An instance the policy does not offer stays refused.
         const unknown = yield* desktopLink.assertRoutedRun("nope").pipe(Effect.flip);
         assert.equal(unknown.reason, "not_shared");
 
-        yield* desktopLink.setShared("claude", true);
-        yield* Queue.take(requests);
-        yield* desktopLink.assertRoutedRun("claude");
-
+        // An explicit off wins over the default.
         yield* desktopLink.setShared("claude", false);
         yield* Queue.take(requests);
-        const again = yield* desktopLink.assertRoutedRun("claude").pipe(Effect.flip);
-        assert.equal(again.reason, "not_shared");
+        const off = yield* desktopLink.assertRoutedRun("claude").pipe(Effect.flip);
+        assert.equal(off.reason, "not_shared");
+        yield* desktopLink.assertRoutedRun("codex");
 
         const everything = JSON.stringify([
-          refused.message,
-          again.message,
+          off.message,
+          stranger.message,
           yield* desktopLink.status,
           yield* desktopLink.outbox,
         ]);

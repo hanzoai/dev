@@ -7,8 +7,6 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
 
 #[derive(Clone)]
 pub struct BackendRuntimeConfig {
@@ -116,7 +114,34 @@ pub fn augmented_path() -> String {
     entries.join(&sep.to_string())
 }
 
+/// The Node runtime the app ships (`resources/node/node`), so Dev desktop starts on a machine
+/// with no Node of its own.
+fn bundled_node() -> Option<PathBuf> {
+    let name = if cfg!(windows) { "node.exe" } else { "node" };
+    let exe = env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    let roots = [
+        dir.to_path_buf(),
+        dir.join("Resources"),
+        dir.join("../Resources"),
+        dir.join("../lib/Hanzo Dev"),
+        dir.join("../lib/hanzo-dev-desktop"),
+    ];
+    for root in roots {
+        for prefix in [root.join("resources"), root] {
+            let found = prefix.join("node").join(name);
+            if found.is_file() {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
 pub fn resolve_node_executable() -> PathBuf {
+    if let Some(bundled) = bundled_node() {
+        return bundled;
+    }
     if let Ok(explicit) = env::var("HANZO_NODE_BINARY") {
         let p = PathBuf::from(explicit.trim());
         if p.is_file() {
@@ -279,6 +304,151 @@ pub fn resolve_backend_target() -> Option<ResolvedBackendTarget> {
     None
 }
 
+/// The one daemon per machine (HIP-1330). The Dev backend runs as its child worker: this app
+/// registers how to start it and hanzod starts it, restarts it if it dies and stops it when idle.
+mod hanzod {
+    use super::*;
+    use sha2::{Digest, Sha256};
+
+    pub fn socket() -> PathBuf {
+        dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("hanzo")
+            .join("hanzod.zap.sock")
+    }
+
+    #[cfg(not(unix))]
+    pub async fn call(
+        _method: &str,
+        _target: &str,
+        _body: Vec<u8>,
+    ) -> std::io::Result<zaphttp::Response> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "hanzod's socket is unix; the loopback view for Windows is not wired yet",
+        ))
+    }
+
+    #[cfg(unix)]
+    pub async fn call(
+        method: &str,
+        target: &str,
+        body: Vec<u8>,
+    ) -> std::io::Result<zaphttp::Response> {
+        let mut conn = tokio::net::UnixStream::connect(socket()).await?;
+        let request = zaphttp::Request {
+            method: method.into(),
+            target: target.into(),
+            headers: vec![("Content-Type".into(), "application/json".into())],
+            body,
+        };
+        zaphttp::write_frame(&mut conn, &zaphttp::encode_request(&request)).await?;
+        let frame = zaphttp::read_frame(&mut conn)
+            .await?
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::UnexpectedEof))?;
+        zaphttp::decode_response(&frame)
+    }
+
+    pub async fn healthy() -> bool {
+        matches!(call("GET", "/healthz", vec![]).await, Ok(r) if r.status == 200)
+    }
+
+    fn installed() -> PathBuf {
+        let name = if cfg!(windows) { "hanzod.exe" } else { "hanzod" };
+        dirs::home_dir().unwrap_or_default().join(".hanzo").join("bin").join(name)
+    }
+
+    /// The hanzod the app ships, beside the server in its resources.
+    fn bundled() -> Option<PathBuf> {
+        let name = if cfg!(windows) { "hanzod.exe" } else { "hanzod" };
+        let exe = env::current_exe().ok()?;
+        let dir = exe.parent()?;
+        for root in [dir.to_path_buf(), dir.join("Resources"), dir.join("../Resources")] {
+            for prefix in [root.join("resources"), root] {
+                let found = prefix.join(name);
+                if found.is_file() {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+
+    fn version_of(bin: &Path) -> Option<(u64, u64, u64)> {
+        let out = std::process::Command::new(bin).arg("--version").output().ok()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        let v = text.split_whitespace().nth(1)?;
+        let mut it = v.split('.').map(|p| p.parse::<u64>().ok());
+        Some((it.next()??, it.next()??, it.next()??))
+    }
+
+    /// Put the bundled hanzod at `~/.hanzo/bin` if it is newer than what is there; never
+    /// downgrade. The previous binary is kept beside it for rollback.
+    fn install() -> Option<PathBuf> {
+        let target = installed();
+        let Some(bundle) = bundled() else {
+            return target.is_file().then_some(target);
+        };
+        let ours = version_of(&bundle);
+        let theirs = target.is_file().then(|| version_of(&target)).flatten();
+        if ours.is_some() && (theirs.is_none() || ours > theirs) {
+            let dir = target.parent()?;
+            std::fs::create_dir_all(dir).ok()?;
+            let part = dir.join("hanzod.part");
+            std::fs::copy(&bundle, &part).ok()?;
+            if target.is_file() {
+                let _ = std::fs::rename(&target, dir.join("hanzod.prev"));
+            }
+            std::fs::rename(&part, &target).ok()?;
+        }
+        target.is_file().then_some(target)
+    }
+
+    /// Make sure a daemon answers on its socket, starting the installed one if not.
+    pub async fn ensure() -> Result<(), String> {
+        if healthy().await {
+            return Ok(());
+        }
+        let bin = tokio::task::spawn_blocking(install)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "hanzod is not installed".to_string())?;
+        let mut cmd = std::process::Command::new(&bin);
+        cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
+        }
+        cmd.spawn().map_err(|e| format!("starting {}: {e}", bin.display()))?;
+        for _ in 0..100 {
+            if healthy().await {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        Err("hanzod did not answer".into())
+    }
+
+    pub fn sha256_of(path: &Path) -> std::io::Result<String> {
+        let mut file = std::fs::File::open(path)?;
+        let mut hasher = Sha256::new();
+        std::io::copy(&mut file, &mut hasher)?;
+        Ok(hex::encode(hasher.finalize()))
+    }
+
+    /// Register the worker and have hanzod start it; returns its pid.
+    pub async fn register(spec: serde_json::Value) -> Result<u32, String> {
+        let body = serde_json::to_vec(&spec).map_err(|e| e.to_string())?;
+        let reply = call("POST", "/v1/dev/session", body).await.map_err(|e| e.to_string())?;
+        let value: serde_json::Value = serde_json::from_slice(&reply.body).unwrap_or_default();
+        if reply.status != 200 {
+            return Err(value["error"].as_str().unwrap_or("hanzod refused the Dev worker").to_string());
+        }
+        Ok(value["pid"].as_u64().unwrap_or(0) as u32)
+    }
+}
+
 impl BackendSupervisor {
     pub fn start(config: BackendRuntimeConfig, local_enabled: bool) -> Self {
         let shutting_down = Arc::new(AtomicBool::new(false));
@@ -330,56 +500,56 @@ impl BackendSupervisor {
                         resource_monitor_path: monitor_path
                             .map(|p| p.to_string_lossy().into_owned()),
                     };
-
-                    let Ok(bootstrap_json) = serde_json::to_vec(&payload) else {
+                    let Ok(bootstrap) = serde_json::to_value(&payload) else {
                         break;
                     };
 
-                    let mut cmd = Command::new(&program);
+                    let mut args: Vec<String> = Vec::new();
                     if let Some(ref script) = entry_arg {
-                        cmd.arg(script);
+                        args.push(script.to_string_lossy().into_owned());
                     }
-                    cmd.arg("--bootstrap-fd")
-                        .arg("0")
-                        .current_dir(&backend_cwd)
-                        .env("PATH", augmented_path())
-                        .env("HANZO_DEV_DESKTOP_HOST_SCOPE", &cfg.host_scope)
-                        .env_remove("HANZO_DEV_PORT")
-                        .env_remove("HANZO_DEV_MODE")
-                        .env_remove("HANZO_DEV_NO_BROWSER")
-                        .env_remove("HANZO_DEV_HOST")
-                        .stdin(Stdio::piped())
-                        .stdout(Stdio::inherit())
-                        .stderr(Stdio::inherit());
+                    args.push("--bootstrap-fd".into());
+                    args.push("0".into());
+                    // The worker's whole environment: hanzod clears the rest.
+                    let env = serde_json::json!([
+                        ["PATH", augmented_path()],
+                        ["HOME", dirs::home_dir().unwrap_or_default().to_string_lossy()],
+                        ["HANZO_DEV_DESKTOP_HOST_SCOPE", cfg.host_scope],
+                    ]);
 
-                    match cmd.spawn() {
-                        Ok(mut child) => {
-                            if let Some(pid) = child.id() {
-                                pid_slot.store(pid, Ordering::SeqCst);
-                            }
-                            if let Some(mut stdin) = child.stdin.take() {
-                                let _ = stdin.write_all(&bootstrap_json).await;
-                                let _ = stdin.shutdown().await;
-                            }
+                    let started = std::time::Instant::now();
+                    let outcome = async {
+                        let digest = hanzod::sha256_of(&program).map_err(|e| e.to_string())?;
+                        hanzod::ensure().await?;
+                        hanzod::register(serde_json::json!({
+                            "program": program,
+                            "sha256": digest,
+                            "args": args,
+                            "cwd": backend_cwd,
+                            "env": env,
+                            "bootstrap": bootstrap,
+                        }))
+                        .await
+                    }
+                    .await;
 
-                            let started_at = std::time::Instant::now();
-                            let _ = child.wait().await;
-                            pid_slot.store(0, Ordering::SeqCst);
-
-                            if stop_flag.load(Ordering::SeqCst) {
-                                break;
-                            }
-                            if started_at.elapsed() > Duration::from_secs(15) {
-                                backoff_ms = 500;
-                            }
+                    match outcome {
+                        Ok(pid) => {
+                            pid_slot.store(pid, Ordering::SeqCst);
+                            backoff_ms = 500;
+                            // hanzod restarts the worker on the next session if it dies and
+                            // stops it when idle; registering again keeps it current and live.
+                            tokio::time::sleep(Duration::from_secs(30)).await;
                         }
                         Err(err) => {
-                            eprintln!("[hanzo-tauri] Failed to spawn {}: {err}", program.display());
+                            eprintln!("[hanzo-tauri] hanzod: {err}");
+                            if started.elapsed() > Duration::from_secs(15) {
+                                backoff_ms = 500;
+                            }
+                            tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                            backoff_ms = (backoff_ms * 2).min(10_000);
                         }
                     }
-
-                    tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-                    backoff_ms = (backoff_ms * 2).min(10_000);
                 }
             });
         }
@@ -391,21 +561,19 @@ impl BackendSupervisor {
         }
     }
 
+    /// Tell hanzod this app no longer needs its Dev worker. The daemon itself keeps running: it
+    /// is the machine's, not this app's.
     pub fn shutdown(&self) {
         self.shutting_down.store(true, Ordering::SeqCst);
-        let pid = self.child_pid.swap(0, Ordering::SeqCst);
-        if pid == 0 {
+        if self.child_pid.swap(0, Ordering::SeqCst) == 0 {
             return;
         }
-        #[cfg(unix)]
-        unsafe {
-            libc::kill(pid as i32, libc::SIGTERM);
-        }
-        #[cfg(windows)]
-        {
-            let _ = std::process::Command::new("taskkill")
-                .args(["/PID", &pid.to_string(), "/T", "/F"])
-                .status();
-        }
+        let _ = tauri::async_runtime::block_on(async {
+            tokio::time::timeout(
+                Duration::from_secs(3),
+                hanzod::call("DELETE", "/v1/dev/session", vec![]),
+            )
+            .await
+        });
     }
 }

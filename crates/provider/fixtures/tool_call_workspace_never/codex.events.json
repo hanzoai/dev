@@ -1,0 +1,1408 @@
+[
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_workspace_never%3Athread-create%3A<uuid:2>:<uuid:0>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "thread.created",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "projectId": "project:fixture:tool_call_workspace_never:<uuid:0>",
+      "title": "Replay fixture: tool_call_workspace_never",
+      "providerInstanceId": "codex",
+      "modelSelection": {
+        "instanceId": "codex",
+        "model": "gpt-6-luna"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "branch": null,
+      "worktreePath": null,
+      "pullRequests": [],
+      "activeProviderThreadId": null,
+      "lineage": {
+        "parentThreadId": null,
+        "relationshipToParent": null,
+        "rootThreadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>"
+      },
+      "forkedFrom": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "archivedAt": null,
+      "settledOverride": null,
+      "settledAt": null,
+      "snoozedUntil": null,
+      "snoozedAt": null,
+      "lastVisitedAt": null,
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_workspace_never%3Amessage-1%3A<uuid:3>:<uuid:1>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "thread.metadata-updated",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "projectId": "project:fixture:tool_call_workspace_never:<uuid:0>",
+      "title": "Replay fixture: tool_call_workspace_never",
+      "providerInstanceId": "codex",
+      "modelSelection": {
+        "instanceId": "codex",
+        "model": "gpt-6-luna"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "branch": null,
+      "worktreePath": null,
+      "pullRequests": [],
+      "activeProviderThreadId": null,
+      "lineage": {
+        "parentThreadId": null,
+        "relationshipToParent": null,
+        "rootThreadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>"
+      },
+      "forkedFrom": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "archivedAt": null,
+      "settledOverride": null,
+      "settledAt": null,
+      "snoozedUntil": null,
+      "snoozedAt": null,
+      "lastVisitedAt": "<time>",
+      "deletedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_workspace_never%3Amessage-1%3A<uuid:3>:<uuid:2>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "codex",
+      "providerInstanceId": "codex",
+      "providerSessionId": "provider-session:provider-instance:codex:shared",
+      "appThreadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": null,
+      "nativeConversationHeadRef": null,
+      "status": "not_loaded",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": null,
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_workspace_never%3Amessage-1%3A<uuid:3>:<uuid:3>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "run.created",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "codex",
+      "modelSelection": {
+        "instanceId": "codex",
+        "model": "gpt-6-luna"
+      },
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "starting",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": null,
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_workspace_never%3Amessage-1%3A<uuid:3>:<uuid:4>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "run-attempt.created",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "codex",
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "pending",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_workspace_never%3Amessage-1%3A<uuid:3>:<uuid:5>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "pending",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": null,
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_workspace_never%3Amessage-1%3A<uuid:3>:<uuid:6>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "checkpoint-scope.created",
+    "payload": {
+      "id": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:name:root",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentScopeId": null,
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "kind": "root_run",
+      "ordinalWithinParent": 0,
+      "advancesAppRunCount": true,
+      "cwd": "<workspace>",
+      "createdAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_workspace_never%3Amessage-1%3A<uuid:3>:<uuid:7>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "user",
+      "creationSource": "web",
+      "id": "message:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "role": "user",
+      "text": "Create or overwrite .codex-probe-write-action.txt with exactly this text: codex app-server approval fixture. Use a local shell command or file edit only, then briefly report what happened. Do not read package metadata, use GitHub, use web, or use MCP.",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Atool_call_workspace_never%3Amessage-1%3A<uuid:3>:<uuid:8>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:message:message%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1%3A<uuid:4>",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000001,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "createdBy": "user",
+      "creationSource": "web",
+      "type": "user_message",
+      "messageId": "message:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "inputIntent": "turn_start",
+      "text": "Create or overwrite .codex-probe-write-action.txt with exactly this text: codex app-server approval fixture. Use a local shell command or file edit only, then briefly report what happened. Do not read package metadata, use GitHub, use web, or use MCP.",
+      "attachments": []
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acodex%3Ashared:<uuid:9>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "provider-session.attached",
+    "payload": {
+      "id": "provider-session:provider-instance:codex:shared",
+      "driver": "codex",
+      "providerInstanceId": "codex",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "gpt-6-luna",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": true,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": true,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkWhileSourceRunning": true,
+          "canForkFromSubagentThread": true,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": true,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "activeSteeringDuringCompaction": true,
+          "supportsSteeringByInterruptRestart": true,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": true,
+          "streamsPlanText": true,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": true
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": true,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": true
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": true,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": true
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": true,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": true,
+          "canCloseSubagents": true,
+          "canForkSubagentThread": true
+        },
+        "context": {
+          "acceptsSystemContext": true,
+          "acceptsDeveloperContext": true,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": true,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "strong",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "native"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acodex%3Ashared:<uuid:10>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:codex:shared",
+      "driver": "codex",
+      "providerInstanceId": "codex",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "gpt-6-luna",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": true,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": true,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkWhileSourceRunning": true,
+          "canForkFromSubagentThread": true,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": true,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "activeSteeringDuringCompaction": true,
+          "supportsSteeringByInterruptRestart": true,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": true,
+          "streamsPlanText": true,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": true
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": true,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": true
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": true,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": true
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": true,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": true,
+          "canCloseSubagents": true,
+          "canForkSubagentThread": true
+        },
+        "context": {
+          "acceptsSystemContext": true,
+          "acceptsDeveloperContext": true,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": true,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "strong",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "native"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:<uuid:11>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "codex",
+      "providerInstanceId": "codex",
+      "providerSessionId": "provider-session:provider-instance:codex:shared",
+      "appThreadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "codex",
+        "nativeId": "01a0d5ed-896f-73b3-8c42-3ffa820eb343",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": null,
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:<uuid:12>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "codex",
+      "modelSelection": {
+        "instanceId": "codex",
+        "model": "gpt-6-luna"
+      },
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "running",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:<uuid:13>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeThreadId": "01a0d5ed-896f-73b3-8c42-3ffa820eb343",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "codex",
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:<uuid:14>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "running",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acodex%3Ashared:<uuid:15>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:codex:shared",
+      "driver": "codex",
+      "providerInstanceId": "codex",
+      "status": "error",
+      "cwd": "<workspace>",
+      "model": "gpt-6-luna",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": true,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": true,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": true,
+          "canForkThread": true,
+          "canForkFromTurn": true,
+          "canForkWhileSourceRunning": true,
+          "canForkFromSubagentThread": true,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": true,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "activeSteeringDuringCompaction": true,
+          "supportsSteeringByInterruptRestart": true,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": true,
+          "streamsPlanText": true,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": true
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": true,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": true
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": true,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": true
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": true,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": true,
+          "canCloseSubagents": true,
+          "canForkSubagentThread": true
+        },
+        "context": {
+          "acceptsSystemContext": true,
+          "acceptsDeveloperContext": true,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": true,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": true,
+          "providerCanRollbackConversation": true,
+          "providerRollbackReturnsSnapshot": true,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "strong",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "native"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": "The provider event stream closed unexpectedly. Retry the turn; if it keeps failing, check the provider and server logs."
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acodex%3Ashared:<uuid:16>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:codex:native-turn:01a0d5ed-8a2a-7002-b65d-fe5885c9f4e0",
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "codex",
+        "nativeId": "01a0d5ed-8a2a-7002-b65d-fe5885c9f4e0",
+        "strength": "strong"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acodex%3Ashared:<uuid:17>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:codex:native-item:msg_0158c37667c5446c016ab5bdd9725087d0b7565268186ee142",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:codex:native-item:msg_0158c37667c5446c016ab5bdd9725087d0b7565268186ee142",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "assistant_message",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:codex:native-turn:01a0d5ed-8a2a-7002-b65d-fe5885c9f4e0",
+      "nativeItemRef": {
+        "driver": "codex",
+        "nativeId": "msg_0158c37667c5446c016ab5bdd9725087d0b7565268186ee142",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acodex%3Ashared:<uuid:18>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:codex:native-item:msg_0158c37667c5446c016ab5bdd9725087d0b7565268186ee142",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "agent",
+      "creationSource": "provider",
+      "id": "message:provider:codex:native-item:msg_0158c37667c5446c016ab5bdd9725087d0b7565268186ee142",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:codex:native-item:msg_0158c37667c5446c016ab5bdd9725087d0b7565268186ee142",
+      "role": "assistant",
+      "text": "I’ll write the exact text to the requested file with a local shell command.",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acodex%3Ashared:<uuid:19>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:codex:native-item:msg_0158c37667c5446c016ab5bdd9725087d0b7565268186ee142",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:codex:native-item:msg_0158c37667c5446c016ab5bdd9725087d0b7565268186ee142",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:codex:native-item:msg_0158c37667c5446c016ab5bdd9725087d0b7565268186ee142",
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:codex:native-turn:01a0d5ed-8a2a-7002-b65d-fe5885c9f4e0",
+      "nativeItemRef": {
+        "driver": "codex",
+        "nativeId": "msg_0158c37667c5446c016ab5bdd9725087d0b7565268186ee142",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000002,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "assistant_message",
+      "phase": "commentary",
+      "messageId": "message:provider:codex:native-item:msg_0158c37667c5446c016ab5bdd9725087d0b7565268186ee142",
+      "text": "I’ll write the exact text to the requested file with a local shell command.",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acodex%3Ashared:<uuid:20>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:codex:native-item:exec-0aedac8d-7d1e-4a69-8d3e-14fa41449e6e",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:codex:native-item:exec-0aedac8d-7d1e-4a69-8d3e-14fa41449e6e",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "running",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:codex:native-turn:01a0d5ed-8a2a-7002-b65d-fe5885c9f4e0",
+      "nativeItemRef": {
+        "driver": "codex",
+        "nativeId": "exec-0aedac8d-7d1e-4a69-8d3e-14fa41449e6e",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acodex%3Ashared:<uuid:21>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:codex:native-item:exec-0aedac8d-7d1e-4a69-8d3e-14fa41449e6e",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:codex:native-item:exec-0aedac8d-7d1e-4a69-8d3e-14fa41449e6e",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:codex:native-item:exec-0aedac8d-7d1e-4a69-8d3e-14fa41449e6e",
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:codex:native-turn:01a0d5ed-8a2a-7002-b65d-fe5885c9f4e0",
+      "nativeItemRef": {
+        "driver": "codex",
+        "nativeId": "exec-0aedac8d-7d1e-4a69-8d3e-14fa41449e6e",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000003,
+      "status": "running",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": null,
+      "updatedAt": "<time>",
+      "type": "command_execution",
+      "input": "/bin/bash -lc \"printf '%s' 'codex app-server approval fixture.' > .codex-probe-write-action.txt\"",
+      "completionWake": "always"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acodex%3Ashared:<uuid:22>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:codex:native-item:exec-0aedac8d-7d1e-4a69-8d3e-14fa41449e6e",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:codex:native-item:exec-0aedac8d-7d1e-4a69-8d3e-14fa41449e6e",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "tool_call",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:codex:native-turn:01a0d5ed-8a2a-7002-b65d-fe5885c9f4e0",
+      "nativeItemRef": {
+        "driver": "codex",
+        "nativeId": "exec-0aedac8d-7d1e-4a69-8d3e-14fa41449e6e",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acodex%3Ashared:<uuid:23>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:codex:native-item:exec-0aedac8d-7d1e-4a69-8d3e-14fa41449e6e",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:codex:native-item:exec-0aedac8d-7d1e-4a69-8d3e-14fa41449e6e",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:codex:native-item:exec-0aedac8d-7d1e-4a69-8d3e-14fa41449e6e",
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:codex:native-turn:01a0d5ed-8a2a-7002-b65d-fe5885c9f4e0",
+      "nativeItemRef": {
+        "driver": "codex",
+        "nativeId": "exec-0aedac8d-7d1e-4a69-8d3e-14fa41449e6e",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000003,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "command_execution",
+      "input": "/bin/bash -lc \"printf '%s' 'codex app-server approval fixture.' > .codex-probe-write-action.txt\"",
+      "exitCode": 0,
+      "completionWake": "always"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acodex%3Ashared:<uuid:24>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:codex:native-turn:01a0d5ed-8a2a-7002-b65d-fe5885c9f4e0",
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "codex",
+        "nativeId": "01a0d5ed-8a2a-7002-b65d-fe5885c9f4e0",
+        "strength": "strong"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "tokenUsage": {
+        "usedTokens": 21865,
+        "maxTokens": 258400,
+        "inputTokens": 21736,
+        "cachedInputTokens": 6912,
+        "outputTokens": 129,
+        "reasoningOutputTokens": 0,
+        "updatedAt": "<time>"
+      }
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acodex%3Ashared:<uuid:25>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:codex:native-item:msg_0158c37667c5446c016ab5bddd677887d083f28a9559bf7626",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:provider:codex:native-item:msg_0158c37667c5446c016ab5bddd677887d083f28a9559bf7626",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "assistant_message",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:codex:native-turn:01a0d5ed-8a2a-7002-b65d-fe5885c9f4e0",
+      "nativeItemRef": {
+        "driver": "codex",
+        "nativeId": "msg_0158c37667c5446c016ab5bddd677887d083f28a9559bf7626",
+        "strength": "strong"
+      },
+      "runtimeRequestId": null,
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acodex%3Ashared:<uuid:26>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:codex:native-item:msg_0158c37667c5446c016ab5bddd677887d083f28a9559bf7626",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "message.updated",
+    "payload": {
+      "createdBy": "agent",
+      "creationSource": "provider",
+      "id": "message:provider:codex:native-item:msg_0158c37667c5446c016ab5bddd677887d083f28a9559bf7626",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:codex:native-item:msg_0158c37667c5446c016ab5bddd677887d083f28a9559bf7626",
+      "role": "assistant",
+      "text": "Created `.codex-probe-write-action.txt` with exactly `codex app-server approval fixture.`",
+      "attachments": [],
+      "streaming": false,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acodex%3Ashared:<uuid:27>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:codex:native-item:msg_0158c37667c5446c016ab5bddd677887d083f28a9559bf7626",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:codex:native-item:msg_0158c37667c5446c016ab5bddd677887d083f28a9559bf7626",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:codex:native-item:msg_0158c37667c5446c016ab5bddd677887d083f28a9559bf7626",
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:codex:native-turn:01a0d5ed-8a2a-7002-b65d-fe5885c9f4e0",
+      "nativeItemRef": {
+        "driver": "codex",
+        "nativeId": "msg_0158c37667c5446c016ab5bddd677887d083f28a9559bf7626",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000004,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "assistant_message",
+      "phase": "final_answer",
+      "messageId": "message:provider:codex:native-item:msg_0158c37667c5446c016ab5bddd677887d083f28a9559bf7626",
+      "text": "Created `.codex-probe-write-action.txt` with exactly `codex app-server approval fixture.`",
+      "streaming": false
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acodex%3Ashared:<uuid:28>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:codex:native-turn:01a0d5ed-8a2a-7002-b65d-fe5885c9f4e0",
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "codex",
+        "nativeId": "01a0d5ed-8a2a-7002-b65d-fe5885c9f4e0",
+        "strength": "strong"
+      },
+      "ordinal": 1,
+      "status": "running",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "tokenUsage": {
+        "usedTokens": 21915,
+        "maxTokens": 258400,
+        "inputTokens": 21891,
+        "cachedInputTokens": 21248,
+        "outputTokens": 24,
+        "reasoningOutputTokens": 0,
+        "updatedAt": "<time>"
+      }
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Acodex%3Ashared:<uuid:29>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "provider-turn.updated",
+    "payload": {
+      "id": "provider-turn:provider:codex:native-turn:01a0d5ed-8a2a-7002-b65d-fe5885c9f4e0",
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "runAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeTurnRef": {
+        "driver": "codex",
+        "nativeId": "01a0d5ed-8a2a-7002-b65d-fe5885c9f4e0",
+        "strength": "strong"
+      },
+      "ordinal": 1,
+      "status": "completed",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "turnTokenUsage": {
+        "usageScope": "main_agent",
+        "cachedInputTokens": 28160,
+        "cacheCreationTokens": 0,
+        "reasoningTokens": 0,
+        "hasSubagents": false,
+        "models": [
+          "gpt-6-luna"
+        ],
+        "usageStatus": "complete",
+        "inputTokens": 43627,
+        "outputTokens": 153
+      },
+      "model": "gpt-6-luna"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:<uuid:30>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "run-attempt.updated",
+    "payload": {
+      "id": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "nativeThreadId": "01a0d5ed-896f-73b3-8c42-3ffa820eb343",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "attemptOrdinal": 1,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerInstanceId": "codex",
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "reason": "initial",
+      "status": "completed",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:<uuid:31>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "codex",
+      "modelSelection": {
+        "instanceId": "codex",
+        "model": "gpt-6-luna"
+      },
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "waiting",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": null,
+      "checkpointId": null,
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:<uuid:32>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "waiting",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:<uuid:33>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "codex",
+      "providerInstanceId": "codex",
+      "providerSessionId": "provider-session:provider-instance:codex:shared",
+      "appThreadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "codex",
+        "nativeId": "01a0d5ed-896f-73b3-8c42-3ffa820eb343",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "idle",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": null,
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:34>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "checkpoint.captured",
+    "payload": {
+      "id": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:0",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:name:root",
+      "runId": null,
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentCheckpointId": null,
+      "ordinalWithinScope": 0,
+      "appRunOrdinal": null,
+      "ref": "refs/hanzo/orchestration-v2/checkpoints/YWM2MmNjMjA4YWM4OGYyMWYyMjJhMjRmMjE5MGNiZDQ/ordinal/0",
+      "status": "ready",
+      "files": [],
+      "capturedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:35>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "checkpoint.captured",
+    "payload": {
+      "id": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:name:root",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "parentCheckpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:0",
+      "ordinalWithinScope": 1,
+      "appRunOrdinal": 1,
+      "ref": "refs/hanzo/orchestration-v2/checkpoints/YWM2MmNjMjA4YWM4OGYyMWYyMjJhMjRmMjE5MGNiZDQ/ordinal/1",
+      "status": "ready",
+      "files": [],
+      "capturedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:36>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "codex",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:codex:native-item:checkpoint%3Acheckpoint%3Ascope%3Acheckpoint-scope%253Athread%253Athread%25253Afixture%25253Atool_call_workspace_never%25253Aproject%25253Aproject%2525253Afixture%2525253Atool_call_workspace_never%2525253A<uuid:0>%25253A<uuid:1>%253Aname%253Aroot%3Aname%3A1",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000005,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "checkpoint",
+      "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "scopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:name:root",
+      "files": []
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:37>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "run.updated",
+    "payload": {
+      "id": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "ordinal": 1,
+      "providerInstanceId": "codex",
+      "modelSelection": {
+        "instanceId": "codex",
+        "model": "gpt-6-luna"
+      },
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "userMessageId": "message:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1:<uuid:4>",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "activeAttemptId": "run-attempt:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:attempt:1",
+      "status": "completed",
+      "queuePosition": null,
+      "requestedAt": "<time>",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "checkpointId": "checkpoint:scope:checkpoint-scope%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aname%3Aroot:name:1",
+      "contextHandoffId": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:38>",
+    "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "codex",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "threadId": "thread:fixture:tool_call_workspace_never:project:project%3Afixture%3Atool_call_workspace_never%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": null,
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "root_turn",
+      "status": "completed",
+      "countsForRun": true,
+      "providerThreadId": "provider-thread:provider:codex:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Atool_call_workspace_never%253Aproject%253Aproject%25253Afixture%25253Atool_call_workspace_never%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": null,
+      "nativeItemRef": null,
+      "runtimeRequestId": null,
+      "checkpointScopeId": "checkpoint-scope:thread:thread%3Afixture%3Atool_call_workspace_never%3Aproject%3Aproject%253Afixture%253Atool_call_workspace_never%253A<uuid:0>%3A<uuid:1>:name:root",
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  }
+]

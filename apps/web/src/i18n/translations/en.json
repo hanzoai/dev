@@ -3280,10 +3280,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "on the computer that opened this page"
-      ]
+      "c": [" ", "on the computer that opened this page"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3295,10 +3292,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· whoever runs it gets this access"
-      ]
+      "c": [" ", "· whoever runs it gets this access"]
     }
   ],
   "c54cc9c75db9dc58": "Only approve a sign-in you just started.",
@@ -7747,6 +7741,16 @@
       "v": "v"
     }
   ],
+  "c363b6d564a2feaa": "Browsers on this computer",
+  "078d1b5bed67258d": "Could not load your browsers",
+  "16b8614b7ba98d82": "No browser extension connected",
+  "3916007360d4cf63": "Install the Hanzo extension in a browser and sign in. It joins this computer by itself.",
+  "6948433092727396": "on {browser}",
+  "7ce808b7103eeec9": "No signed-in AI products reported.",
+  "a553be36e93303cd": "Ready",
+  "159e05bacc582a55": "Needs login",
+  "d3b0a2fdb2fb90d8": "View only. Logins stay in the browser and are never routed to.",
+  "570567bbea004eac": "View only",
   "a2fc467e1a6e2e29": "Couldn't prepare the changes. Check Advanced for help.",
   "9c09c0fc3f65c734": "Shortcut saved",
   "b1d65f0c09819ac5": "Use {shortcut} from another app.",
@@ -8802,13 +8806,11 @@
   "27a52341e07b18fe": "Could not revoke the desktop",
   "f7aab05f0491947b": "This desktop",
   "10da6ac7e656ae95": "Last seen {when}",
-  "a553be36e93303cd": "Ready",
-  "159e05bacc582a55": "Needs login",
   "4d9f05fa09cf6ec2": "Limit reached",
   "c0862b3882f10de2": "Could not change sharing",
   "96bf175f6b13f0fb": "Providers on this desktop",
   "a1c47d1a32f0e947": "No providers to report",
-  "fe8bfd46976572e0": "hanzo.app and your other signed-in devices can start runs here. Your login never leaves this computer.",
+  "00192721a94b1448": "On by default for your own devices: hanzo.app and your other signed-in devices can start runs here, and no one else can. Your login never leaves this computer.",
   "946131518c676dc3": "Hanzo does not offer this provider to other surfaces.",
   "9215ffa976187973": "Share with my other surfaces",
   "0e36affc3afeb95e": "This desktop only",
@@ -8891,9 +8893,11 @@
   "bdedd5c7764a77a0": "Move {name} down",
   "acae74b37388b9ba": "Forget {name}",
   "e78e2b3c49707388": "Not connected",
+  "e547d1f37d018edf": "Microphone access is unavailable. Restart Hanzo Dev and try again.",
   "5d06c2a13becb19a": "Microphone testing is unavailable in this browser. Use HTTPS or the desktop app.",
   "9b581819633e98f1": "No audio was recorded. Try again.",
   "df00ec1712b48dd3": "Could not record microphone audio. Try again.",
+  "0ee4cf7796f9c0bc": "Microphone access is denied. Enable Hanzo Dev in System Settings, Privacy & Security, Microphone.",
   "f9646114dcf59695": "No microphone found.",
   "22d83d5c866695af": "Could not access the microphone.",
   "e284b82cf690f402": "Record",

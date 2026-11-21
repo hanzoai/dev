@@ -39,6 +39,8 @@ tokio = { version = "1.36.0", features = [
 ] }
 reqwest = { version = "0.11", features = ["json"] }
 sha2 = "0.10"
+# ZAP-HTTP frames: how this app talks to hanzod, the one daemon per machine.
+zaphttp = { git = "https://github.com/hanzoai/node", rev = "2d93704e9" }
 hex = "0.4.3"
 base64 = "0.22.1"
 rand = "0.8"

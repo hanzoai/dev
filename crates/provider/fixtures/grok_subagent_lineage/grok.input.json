@@ -1,0 +1,18 @@
+{
+  "fixture": "grok_subagent_lineage",
+  "driver": "grok",
+  "modelSelection": {
+    "instanceId": "grok",
+    "model": "grok-composer-2.5-fast"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "audit this codebase"
+    }
+  ]
+}

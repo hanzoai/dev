@@ -287,6 +287,10 @@
       "types": "./src/state/previewTunnel.ts",
       "default": "./src/state/previewTunnel.ts"
     },
+    "./state/browserSources": {
+      "types": "./src/state/browserSources.ts",
+      "default": "./src/state/browserSources.ts"
+    },
     "./state/desktops": {
       "types": "./src/state/desktops.ts",
       "default": "./src/state/desktops.ts"

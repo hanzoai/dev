@@ -1,7 +1,8 @@
-// @effect-diagnostics nodeBuiltinImport:off globalDate:off extendsNativeError:off
-import { CATALOG, providerById } from "./catalog.ts";
+import { snapshotKey } from "./account.ts";
+import { CATALOG, DEFAULT_ENABLED, providerById } from "./catalog.ts";
 import type { UsageEnv } from "./env.ts";
-import { FETCHERS, NotConfigured } from "./fetchers.ts";
+import { NotConfigured, type Instance } from "./fetchers.ts";
+import { FETCHERS } from "./readers.ts";
 import { evaluate, type LimitAlert, type NotifyState } from "./notify.ts";
 import type {
   CostDay,
@@ -12,49 +13,68 @@ import type {
 } from "./schema.ts";
 import { fetchStatus } from "./status.ts";
 
-/** Providers shown before the user chooses: the ones Dev users link. */
-export const DEFAULT_ENABLED: ReadonlyArray<string> = ["hanzo", "claude", "codex", "copilot"];
-
-export const isEnabled = (settings: UsageSettings, id: string): boolean =>
-  settings.providers[id]?.enabled ?? DEFAULT_ENABLED.includes(id);
+/** Shown before the user chooses: the defaults, and any provider the user configured an instance of. */
+export const isEnabled = (settings: UsageSettings, id: string, configured = false): boolean =>
+  settings.providers[id]?.enabled ?? (configured || DEFAULT_ENABLED.includes(id));
 
 /**
- * What the host already knows without a network call here: limit windows from the provider sessions it runs,
- * and per-day cost from the transcripts it already scans.
+ * What the host already knows without a network call here: the provider instances the user configured,
+ * limit windows from the provider sessions it runs, and per-day cost from the transcripts it already scans.
  */
 export interface HostReadings {
+  readonly instances: ReadonlyArray<Instance & { readonly provider: string }>;
   readonly local: ReadonlyArray<ProviderSnapshot>;
   readonly cost: ReadonlyArray<CostDay>;
 }
 
+const failure = (env: UsageEnv, provider: string, error: string): ProviderSnapshot => ({
+  provider,
+  fetchedAt: env.now().toISOString(),
+  source: "none",
+  windows: [],
+  error,
+});
+
+/** Directly read accounts win; a session's own numbers stand in where the direct read failed. */
+const merge = (
+  read: ReadonlyArray<ProviderSnapshot>,
+  local: ReadonlyArray<ProviderSnapshot>,
+): ProviderSnapshot[] => {
+  const byKey = new Map(local.map((s) => [snapshotKey(s), s]));
+  const out = read.map((s) => {
+    const l = byKey.get(snapshotKey(s));
+    byKey.delete(snapshotKey(s));
+    return s.error && l && !l.error ? l : s;
+  });
+  return [...out, ...byKey.values()];
+};
+
 const refreshOne = async (
   env: UsageEnv,
   id: string,
-  local: ProviderSnapshot | undefined,
-): Promise<ProviderSnapshot> => {
-  const fetcher = FETCHERS[id];
+  local: ReadonlyArray<ProviderSnapshot>,
+  instances: ReadonlyArray<Instance>,
+): Promise<ProviderSnapshot[]> => {
   const p = providerById(id);
-  const fetchedAt = env.now().toISOString();
-  const usage: Promise<ProviderSnapshot> = local
-    ? Promise.resolve(local)
-    : fetcher
-      ? fetcher(env).catch((e: unknown): ProviderSnapshot => ({
-          provider: id,
-          fetchedAt,
-          source: "none",
-          windows: [],
-          error:
-            e instanceof NotConfigured ? e.message : e instanceof Error ? e.message : String(e),
-        }))
-      : Promise.resolve({
-          provider: id,
-          fetchedAt,
-          source: "none",
-          windows: [],
-          error: "No live reading yet; open the dashboard.",
-        });
-  const [snapshot, status] = await Promise.all([usage, p ? fetchStatus(env, p) : undefined]);
-  return status ? { ...snapshot, status } : snapshot;
+  const fetcher = FETCHERS[id];
+  const read = fetcher
+    ? await fetcher(env, instances).catch((e: unknown) => [
+        failure(env, id, e instanceof NotConfigured || e instanceof Error ? e.message : String(e)),
+      ])
+    : [];
+  const snapshots = merge(read, local);
+  if (snapshots.length === 0)
+    snapshots.push(
+      failure(
+        env,
+        id,
+        p?.dashboard
+          ? "No usage API for this provider; open its dashboard."
+          : "No usage API for this provider.",
+      ),
+    );
+  const status = p ? await fetchStatus(env, p) : undefined;
+  return status ? snapshots.map((s) => ({ ...s, status })) : snapshots;
 };
 
 /** Holds the last good snapshot per provider so a failed refresh never blanks the panel. */
@@ -67,27 +87,39 @@ export const createUsageService = (env: UsageEnv, getSettings: () => UsageSettin
     host: HostReadings,
   ): Promise<{ summary: UsageSummary; alerts: LimitAlert[] }> => {
     const settings = getSettings();
-    const ids = CATALOG.map((p) => p.id).filter((id) => isEnabled(settings, id));
+    const ids = CATALOG.map((p) => p.id).filter((id) =>
+      isEnabled(
+        settings,
+        id,
+        host.instances.some((i) => i.provider === id),
+      ),
+    );
     const fresh = await Promise.all(
       ids.map((id) =>
         refreshOne(
           env,
           id,
-          host.local.find((s) => s.provider === id),
+          host.local.filter((s) => s.provider === id),
+          host.instances.filter((i) => i.provider === id),
         ),
       ),
     );
-    for (const s of fresh) {
-      const prev = last.get(s.provider);
+    const seen = new Set<string>();
+    for (const s of fresh.flat()) {
+      const key = snapshotKey(s);
+      seen.add(key);
+      const prev = last.get(key);
       last.set(
-        s.provider,
+        key,
         s.error && prev && prev.windows.length
           ? { ...prev, error: s.error, ...(s.status ? { status: s.status } : {}) }
           : s,
       );
     }
+    // An account that is gone (instance removed, directory deleted) must not linger.
+    for (const key of last.keys()) if (!seen.has(key)) last.delete(key);
     cost = host.cost;
-    const snapshots = ids.flatMap((id) => (last.has(id) ? [last.get(id)!] : []));
+    const snapshots = fresh.flat().map((s) => last.get(snapshotKey(s))!);
     const ev = evaluate(notified, snapshots, settings.notifyAtPercent);
     notified = ev.state;
     return {
@@ -103,7 +135,11 @@ export const createUsageService = (env: UsageEnv, getSettings: () => UsageSettin
     from: since.toISOString(),
     to: env.now().toISOString(),
     cost: cost.filter((c) => c.day >= since.toISOString().slice(0, 10)),
-    snapshots: [...last.values()].map(({ error: _e, ...rest }) => rest),
+    // Local paths and error text stay on this machine.
+    snapshots: [...last.values()].map(({ error: _e, unconfigured: _u, instance, ...rest }) => ({
+      ...rest,
+      ...(instance && !instance.startsWith("dir:") ? { instance } : {}),
+    })),
   });
 
   return { refresh, report };

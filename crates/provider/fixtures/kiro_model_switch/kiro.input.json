@@ -1,0 +1,26 @@
+{
+  "fixture": "kiro_model_switch",
+  "driver": "kiro",
+  "modelSelection": {
+    "instanceId": "kiro",
+    "model": "claude-haiku-4.5"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Respond with exactly: kiro model switch first"
+    },
+    {
+      "type": "set_model",
+      "model": "claude-sonnet-4.5"
+    },
+    {
+      "type": "message",
+      "text": "Respond with exactly: kiro model switch second"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "fixture": "subagent_continue",
+  "driver": "codex",
+  "modelSelection": {
+    "instanceId": "codex",
+    "model": "gpt-5.6-luna"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Spawn one subagent and have it reply exactly: initial subagent response"
+    },
+    {
+      "type": "message",
+      "text": "Have the same subagent you spawned earlier reply exactly: continued subagent response"
+    }
+  ]
+}

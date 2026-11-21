@@ -11,6 +11,7 @@ import {
   setWindowsPath,
   WindowsShellEnvironment,
 } from "@hanzodev/shared/shell";
+import { USAGE_ENV_KEYS } from "@hanzodev/usage/catalog";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -29,10 +30,9 @@ function logPathHydrationWarning(message: string, error?: unknown): void {
   );
 }
 
-// __MISE_DIFF is mise's record of the PATH entries it added. It must travel
-// with the shell's PATH, or `mise x` can rebuild PATH behind a same-named
-// wrapper (`exec mise x claude -- claude`) that then re-runs itself forever.
-const LOGIN_SHELL_ENV_NAMES = ["PATH", "__MISE_DIFF", "JAVA_HOME"] as const;
+// __MISE_DIFF must travel with the shell's PATH, or `mise x` rebuilds PATH behind a same-named wrapper
+// and re-runs itself forever. The provider keys are ones a Dock-launched app lacks but the profile sets.
+const LOGIN_SHELL_ENV_NAMES = ["PATH", "__MISE_DIFF", "JAVA_HOME", ...USAGE_ENV_KEYS];
 const LOGIN_SHELL_TIMEOUT = Duration.seconds(5);
 const SLOW_LOGIN_SHELL_TIMEOUT_MS = 20_000;
 
@@ -63,6 +63,10 @@ function applyLoginShellEnvironment(
   // is only reachable through the JAVA_HOME the shell profile sets.
   if (!env.JAVA_HOME && shellEnvironment.JAVA_HOME) {
     env.JAVA_HOME = shellEnvironment.JAVA_HOME;
+  }
+  for (const name of USAGE_ENV_KEYS) {
+    const value = shellEnvironment[name];
+    if (!env[name] && value) env[name] = value;
   }
 }
 

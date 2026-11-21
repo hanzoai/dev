@@ -1,7 +1,7 @@
 // @effect-diagnostics globalDate:off
 import { AuthOrchestrationOperateScope, AuthOrchestrationReadScope } from "@hanzodev/contracts";
 import * as HostProcess from "@hanzodev/shared/HostProcess";
-import { UsageSettings, type HostReadings } from "@hanzodev/usage";
+import { UsageSettings, type HostReadings, type ProviderSnapshot } from "@hanzodev/usage";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -12,6 +12,7 @@ import {
   HttpServerResponse,
 } from "effect/http";
 
+import * as BrowserSources from "../browser/BrowserSources.ts";
 import * as ServerConfig from "../config.ts";
 import { authenticateRawRouteWithScope } from "../http.ts";
 import { readHostReadings } from "./HostReadings.ts";
@@ -33,6 +34,7 @@ const route = (
     runtime: UsageRuntime,
     request: { url: string; body: unknown },
     host: () => Promise<HostReadings>,
+    browser: () => Promise<ReadonlyArray<ProviderSnapshot>>,
   ) => Promise<unknown>,
 ) =>
   HttpRouter.add(
@@ -51,8 +53,10 @@ const route = (
       });
       const services = yield* Effect.context<Effect.Services<typeof readHostReadings>>();
       const host = () => Effect.runPromiseWith(services)(readHostReadings);
+      const browsers = yield* BrowserSources.BrowserSources;
+      const browser = () => Effect.runPromiseWith(services)(browsers.usage);
       const out = yield* Effect.tryPromise({
-        try: () => handle(runtime, { url: request.url, body }, host),
+        try: () => handle(runtime, { url: request.url, body }, host, browser),
         catch: (cause) => new UsageRouteError({ message: String(cause) }),
       });
       // @effect-diagnostics-next-line globalJsonInEffect:off
@@ -73,7 +77,9 @@ const route = (
 
 /** Provider usage for the panel, the tray and linked-desktop reports. Metadata only; see @hanzodev/usage. */
 export const layer = Layer.mergeAll(
-  route("GET", "/v1/usage", AuthOrchestrationReadScope, (r, _q, host) => r.summary(host)),
+  route("GET", "/v1/usage", AuthOrchestrationReadScope, async (r, _q, host, browser) =>
+    BrowserSources.withBrowserSnapshots(await r.summary(host), await browser()),
+  ),
   route("POST", "/v1/usage/refresh", AuthOrchestrationOperateScope, (r, _q, host) =>
     r.refresh(host),
   ),
@@ -91,4 +97,4 @@ export const layer = Layer.mergeAll(
     const since = new Date(q.get("since") ?? Date.now() - 86_400_000);
     return r.report(host, q.get("deviceId") ?? "local", since);
   }),
-);
+).pipe(Layer.provide(BrowserSources.layer));

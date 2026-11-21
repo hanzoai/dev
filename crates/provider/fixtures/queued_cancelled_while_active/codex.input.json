@@ -1,0 +1,41 @@
+{
+  "fixture": "queued_cancelled_while_active",
+  "driver": "codex",
+  "modelSelection": {
+    "instanceId": "codex",
+    "model": "gpt-6-luna"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Respond with exactly: first fixture turn complete"
+    },
+    {
+      "type": "queue_message",
+      "text": "Respond with exactly: second fixture turn complete",
+      "createdBy": "agent",
+      "creationSource": "server"
+    },
+    {
+      "type": "cancel_queued_run",
+      "targetRunIndex": 2
+    },
+    {
+      "type": "await_run_status",
+      "targetRunIndex": 1,
+      "status": "running"
+    },
+    {
+      "type": "capture_shell_snapshot",
+      "key": "active-run-over-cancelled-latest"
+    },
+    {
+      "type": "release_replay_gate",
+      "label": "turn/completed"
+    }
+  ]
+}

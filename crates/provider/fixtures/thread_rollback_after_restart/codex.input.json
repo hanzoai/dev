@@ -1,0 +1,35 @@
+{
+  "fixture": "thread_rollback_after_restart",
+  "driver": "codex",
+  "modelSelection": {
+    "instanceId": "codex",
+    "model": "gpt-6-luna"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Respond with exactly: rollback fixture first turn complete"
+    },
+    {
+      "type": "message",
+      "text": "Respond with exactly: rollback fixture second turn complete"
+    },
+    {
+      "type": "advance_clock",
+      "duration": "31 minutes"
+    },
+    {
+      "type": "rollback",
+      "checkpointScopeSuffix": "root",
+      "checkpointSuffix": "1"
+    },
+    {
+      "type": "message",
+      "text": "Repeat the conversation verbatim."
+    }
+  ]
+}

@@ -274,6 +274,7 @@ import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http
 import * as SourceControlRateLimit from "@hanzodev/source-control-core/server/SourceControlRateLimit";
 import { isNetworkPath } from "@hanzodev/shared/path";
 import * as RelayClient from "@hanzodev/shared/relayClient";
+import * as BrowserSources from "./browser/BrowserSources.ts";
 import * as DesktopLink from "./cloud/DesktopLink.ts";
 import { commandProviderTarget, isRoutedSession } from "./cloud/routedRun.ts";
 import * as ProviderAccounts from "./cloud/ProviderAccounts.ts";
@@ -1447,7 +1448,7 @@ export const layerWsRpc = (
       // Another surface's run on a login runs only where the user shared that login.
       const assertRoutedCommand = Effect.fn("ws.assertRoutedCommand")(
         function* (command: OrchestrationV2Command) {
-          if (!isRoutedSession(currentSession.method)) return;
+          if (!isRoutedSession(currentSession)) return;
           const target = commandProviderTarget(command);
           if (target === null) return;
           const instanceId =
@@ -1628,6 +1629,7 @@ export const layerWsRpc = (
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const relayClient = yield* RelayClient.RelayClient;
       const desktopLink = yield* DesktopLink.DesktopLink;
+      const browserSources = yield* BrowserSources.BrowserSources;
       const providerAccounts = yield* ProviderAccounts.ProviderAccounts;
       // Webhook URLs start agents; expose them only to operate-scoped sessions while keeping tasks readable.
       const withVisibleWebhookUrls = (result: ScheduledTaskListResult): ScheduledTaskListResult =>
@@ -2788,6 +2790,8 @@ export const layerWsRpc = (
               ),
             ),
           ),
+        [WS_METHODS.browserSourcesList]: (_input) =>
+          Effect.map(browserSources.list, (sources) => ({ sources })),
         [WS_METHODS.desktopsStatus]: (_input) => desktopLink.status,
         [WS_METHODS.desktopsLink]: (input) => desktopLink.link(input),
         [WS_METHODS.desktopsUnlink]: (_input) => desktopLink.unlink,

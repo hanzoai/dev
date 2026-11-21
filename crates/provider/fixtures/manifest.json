@@ -1,0 +1,12 @@
+{
+  "layout": "<fixture>/<driver>.{transcript.ndjson,input.json,events.json}",
+  "transcript.ndjson": "Recorded provider wire. First record is transcript_start; the rest are expect_outbound and emit_inbound entries. A replay answers each outbound request from the next recorded inbound frame.",
+  "input.json": "The user steps that drive the replay, with the model selection and runtime modes.",
+  "events.json": "The domain events a replay must produce, in order, as JSON.",
+  "unpinned_events": ["grok_auto_blocked_command/grok", "kiro_tool_call_read_only_on_request/kiro", "queued_cancelled_while_active/codex", "subagent/kiro"],
+  "normalization": {
+    "workspace": "The replay's temp workspace path is written as <workspace>.",
+    "timestamps": "Every ISO timestamp is written as <time>. Wall-clock values differ per run and a race shifts the test clock by a millisecond, so no value is pinned.",
+    "uuids": "UUIDs minted by the adapter are written as <uuid:N>, numbered by first appearance in events.json. UUIDs that occur in the transcript stay as recorded."
+  }
+}

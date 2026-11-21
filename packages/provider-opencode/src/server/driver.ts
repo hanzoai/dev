@@ -34,6 +34,7 @@ import type { ProviderTextGeneration } from "@hanzodev/provider-core/server/text
 import { ProviderDriverError } from "@hanzodev/provider-core/server/errors";
 import { openCodeUsageReader, type OpenCodeUsageReaderEnv } from "./usage.ts";
 import { readOpenCodeGoUsageLimits } from "./usageLimits.ts";
+import { usageFailureMessage } from "./v2/usageLimits.ts";
 import { loadOpenCode2Catalog, loadOpenCode2DirectoryCatalog } from "./openCode2Catalog.ts";
 import {
   checkOpenCodeProviderStatus,
@@ -491,14 +492,14 @@ export const OpenCodeDriver: ProviderDriver<
       const legacy = yield* legacyUsageLimits;
       return limits !== undefined && legacy.unavailable?.reason === "unsupported" ? limits : legacy;
     }).pipe(
-      Effect.timeout("10 seconds"),
-      Effect.catch(() =>
+      Effect.timeout("20 seconds"),
+      Effect.catch((error) =>
         Effect.map(DateTime.now, (now) => ({
           checkedAt: DateTime.formatIso(now),
           windows: [],
           unavailable: {
             reason: "probeFailed" as const,
-            message: "OpenCode could not read workspace usage.",
+            message: usageFailureMessage(error),
           },
         })),
       ),

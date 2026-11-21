@@ -39,6 +39,7 @@ import {
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { UsageAccounts } from "./UsageAccounts";
 import { UsageLimitsPooled } from "./UsageLimitsPooled";
 import { formatResetsIn, resetCreditChoices } from "@hanzodev/shared/usageLimitsCopy";
 import { PROVIDER_PRESENTATION } from "./usageProviders";
@@ -428,5 +429,13 @@ export function UsageLimitsSection({
       ];
     }),
   );
-  return <UsageLimitsPooled presentations={selected} now={now} />;
+  return (
+    <div className="space-y-6">
+      <UsageLimitsPooled presentations={selected} now={now} />
+      <UsageAccounts
+        providers={[...selected.values()].flatMap((p) => p.serverConfig?.providers ?? [])}
+        now={now}
+      />
+    </div>
+  );
 }

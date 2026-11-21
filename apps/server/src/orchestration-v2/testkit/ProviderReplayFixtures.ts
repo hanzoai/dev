@@ -20,6 +20,7 @@ import {
   runOrchestratorV2ProviderReplayScenario,
   type OrchestratorV2ProviderReplayHarness,
 } from "./ProviderReplayHarness.ts";
+import { matchProviderFixture } from "./ProviderFixtureSnapshot.ts";
 import { materializeReplayTranscriptRuntimeInstructions } from "./ReplayRuntimeInstructions.ts";
 
 // Each driver's fixtures run from its own <Provider>ReplayFixtures.integration.test.ts,
@@ -93,6 +94,8 @@ export interface ReplayFixtureCase {
   readonly fixtureName: string;
   readonly buildInput: () => OrchestratorFixtureInput;
   readonly driver: ProviderOrchestratorReplayVariant;
+  /** Pins the replay against `crates/provider/fixtures`. Set only for the unmodified recorded variants. */
+  readonly pinSharedFixture?: boolean;
   readonly transformTranscript?: (transcript: ProviderReplayTranscript) => ProviderReplayTranscript;
 }
 
@@ -151,6 +154,14 @@ const runFixtureProvider = Effect.fn("runOrchestratorReplayFixture")(function* <
     input.driver.runContinuationWorker === true ? { runContinuationWorker: true } : {},
   ).pipe(provideDeterministicTestRuntime);
   input.driver.assertOutput(result, transcript);
+  if (input.pinSharedFixture === true)
+    yield* matchProviderFixture({
+      fixtureName: input.fixtureName,
+      driver: input.driver,
+      fixtureInput,
+      result,
+      workspace,
+    });
   assertProviderNativeSubagentRootTurns(result);
   const expectedAbsentWorkspacePaths = input.driver.expectedAbsentWorkspacePaths;
   if (expectedAbsentWorkspacePaths !== undefined) {
@@ -223,6 +234,11 @@ export function itRunsReplayFixtures<E>(
         .map((provider) => [fixture.name, provider.driver, fixture, provider] as const),
     ),
   )("runs %s/%s through OrchestratorV2 using deterministic replay", ([, , fixture, provider]) =>
-    run({ fixtureName: fixture.name, buildInput: fixture.buildInput, driver: provider }),
+    run({
+      fixtureName: fixture.name,
+      buildInput: fixture.buildInput,
+      driver: provider,
+      pinSharedFixture: true,
+    }),
   );
 }

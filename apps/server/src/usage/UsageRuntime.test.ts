@@ -32,7 +32,7 @@ describe("UsageRuntime", () => {
     assert.strictEqual((await again.settings()).providers.hanzo?.enabled, true);
 
     const { tray, alerts } = await again.tray(
-      async () => ({ local: [], cost: [] }),
+      async () => ({ instances: [], local: [], cost: [] }),
       new Date("2026-11-20T12:00:00Z"),
     );
     assert.deepStrictEqual(alerts, []);

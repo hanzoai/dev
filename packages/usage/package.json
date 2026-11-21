@@ -11,6 +11,10 @@
       "types": "./src/schema.ts",
       "import": "./src/schema.ts"
     },
+    "./account": {
+      "types": "./src/account.ts",
+      "import": "./src/account.ts"
+    },
     "./catalog": {
       "types": "./src/catalog.ts",
       "import": "./src/catalog.ts"

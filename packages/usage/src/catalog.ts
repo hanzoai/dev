@@ -929,3 +929,47 @@ export const CATALOG: ReadonlyArray<ProviderDescriptor> = [
 
 export const providerById = (id: string): ProviderDescriptor | undefined =>
   CATALOG.find((p) => p.id === id);
+
+/** Providers with a live reader that most Dev users have signed in to. */
+export const DEFAULT_ENABLED: ReadonlyArray<string> = [
+  "hanzo",
+  "claude",
+  "codex",
+  "copilot",
+  "cursor",
+  "antigravity",
+  "opencode",
+  "muse",
+  "zai",
+];
+
+/** Providers with a live reader (`FETCHERS`), or whose limits the host reads from the sessions it runs. */
+export const LIVE_PROVIDERS: ReadonlyArray<string> = [
+  "claude",
+  "codex",
+  "copilot",
+  "openrouter",
+  "deepseek",
+  "hanzo",
+  "cursor",
+  "antigravity",
+  "zai",
+  "opencode",
+  "muse",
+];
+
+/** Environment variables the live readers take a provider key from. */
+export const USAGE_ENV_KEYS: ReadonlyArray<string> = [
+  "Z_AI_API_KEY",
+  "ZAI_API_KEY",
+  "ZAI_OPENAI_API_KEY",
+  "BIGMODEL_API_KEY",
+  "ZHIPU_API_KEY",
+  "ZHIPUAI_API_KEY",
+  "GLM_API_KEY",
+  "OPENROUTER_API_KEY",
+  "DEEPSEEK_API_KEY",
+  "HANZO_API_KEY",
+  "COPILOT_API_TOKEN",
+  "MUSE_DEVICE_TOKEN",
+];

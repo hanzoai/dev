@@ -1,0 +1,24 @@
+{
+  "fixture": "kiro_turn_interrupt_mid_tool",
+  "driver": "kiro",
+  "modelSelection": {
+    "instanceId": "kiro",
+    "model": "claude-haiku-4.5"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Run this exact local command: `node -e \"console.log('interrupt fixture tool started'); setTimeout(() => {}, 30000)\"`. Do not answer until it completes, then respond exactly: interrupt fixture should not finish naturally."
+    },
+    {
+      "type": "interrupt",
+      "targetRunIndex": 1,
+      "waitForTurnItemType": "command_execution",
+      "waitForTurnItemStatus": "running"
+    }
+  ]
+}

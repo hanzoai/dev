@@ -35,6 +35,7 @@ import { Radio, RadioGroup } from "../ui/radio-group";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
+import { BrowserSourcesSection } from "./BrowserSourcesSection";
 import { ITEM_ROW_CLASSNAME, ITEM_ROW_INNER_CLASSNAME } from "./itemRows";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
@@ -78,6 +79,7 @@ export function LinkedDesktopSettings() {
           <StatusRow environmentId={environmentId} status={data} onRefresh={status.refresh} />
         )}
       </SettingsSection>
+      {environmentId !== null ? <BrowserSourcesSection environmentId={environmentId} /> : null}
       {environmentId !== null && data !== null && data.desktop !== null ? (
         <>
           <DesktopsSection environmentId={environmentId} thisDesktopId={data.desktop.id} />
@@ -471,7 +473,7 @@ function ProvidersSection({
                 {provider.shareable ? (
                   <span className="block">
                     {gt(
-                      "hanzo.app and your other signed-in devices can start runs here. Your login never leaves this computer.",
+                      "On by default for your own devices: hanzo.app and your other signed-in devices can start runs here, and no one else can. Your login never leaves this computer.",
                     )}
                   </span>
                 ) : provider.kind === "login" ? (

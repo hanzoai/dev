@@ -67,6 +67,10 @@ Yes. Add another provider instance in Settings and give it its own keys and endp
 
 No. Hanzo Dev is a serious developer tool. Locally runnable models are not capable of meaningful engineering work.
 
+## Can agents use my browser?
+
+Yes, through the Hanzo browser extension. With the extension installed and signed in, it appears under Settings > Linked to Hanzo > Browsers on this computer, view only. Agents can list your tabs, read a page, take a snapshot, and click, and each call asks for approval like any other tool. They never act on ChatGPT, Claude.ai, Gemini, Grok, Perplexity, Copilot, or Cursor pages: those products' terms bar automated access. To run work on those providers, use an API key or the provider's own signed-in app.
+
 ## Does my code go to Hanzo servers?
 
 No. Your code and prompts go from your machine to your provider (Anthropic, OpenAI, etc.), not to us. With Hanzo Link, traffic rides a Cloudflare tunnel (`cloudflared` on your machine). Our relay sets up the link. It does not proxy your HTTP or WebSocket sessions. Hanzo Dev does send basic product usage events (provider, model, token totals, that kind of thing). No prompts, no file contents. That is the same on Tailscale, LAN, or Hanzo Link. Set `HANZO_DEV_TELEMETRY_ENABLED=false` if you want it off. [Product usage data](./telemetry.md)

@@ -1,0 +1,22 @@
+{
+  "fixture": "kiro_cloud_config",
+  "driver": "kiro",
+  "modelSelection": {
+    "instanceId": "kiro",
+    "model": "claude-haiku-4.5"
+  },
+  "runContinuationWorker": false,
+  "interactionMode": null,
+  "runtimeMode": null,
+  "workspaceFiles": {},
+  "steps": [
+    {
+      "type": "message",
+      "text": "Do not answer immediately. First run the local shell command `sleep 30`, then respond with exactly: interrupt fixture should not finish naturally."
+    },
+    {
+      "type": "interrupt",
+      "targetRunIndex": 1
+    }
+  ]
+}

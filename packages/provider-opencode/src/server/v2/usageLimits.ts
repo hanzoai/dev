@@ -61,6 +61,18 @@ const Providers = Schema.Struct({
   ),
 });
 
+/** A reason the user can act on, instead of one message for every failure. */
+export const usageFailureMessage = (error: unknown): string => {
+  if (typeof error === "object" && error !== null) {
+    if (Reflect.get(error, "_tag") === "TimeoutError")
+      return "OpenCode Console did not answer in time; it will retry.";
+    const status = Reflect.get(Reflect.get(error, "response") ?? {}, "status");
+    if (status === 401 || status === 403)
+      return "OpenCode Console sign-in expired. Sign in to OpenCode again.";
+  }
+  return "OpenCode could not read workspace usage.";
+};
+
 const resetTime = (ms: number) => DateTime.formatIso(DateTime.makeUnsafe(ms));
 const budgetPercent = (spent: number, limit: number) =>
   limit <= 0 ? 100 : clampPercent((spent / limit) * 100);
@@ -181,13 +193,16 @@ export const readServerUsageLimits = Effect.fn("OpenCode2Client.usageLimits")(fu
     }
     return { ...makeUsageLimits({ checkedAt, windows }), ...externalUsage };
   }).pipe(
-    Effect.timeout("5 seconds"),
-    Effect.orElseSucceed(() =>
-      makeUnavailableUsageLimits({
-        checkedAt,
-        reason: "probeFailed",
-        message: "OpenCode could not read workspace usage.",
-      }),
+    // The Console lookup is a network call behind a locally started server; a cold server takes several seconds.
+    Effect.timeout("15 seconds"),
+    Effect.catch((error: unknown) =>
+      Effect.succeed(
+        makeUnavailableUsageLimits({
+          checkedAt,
+          reason: "probeFailed",
+          message: usageFailureMessage(error),
+        }),
+      ),
     ),
   );
 });
