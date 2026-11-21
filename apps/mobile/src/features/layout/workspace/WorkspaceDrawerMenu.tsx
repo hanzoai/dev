@@ -7,6 +7,8 @@ import { AppText as Text } from "../../../components/ui/AppText";
 import { useControlTheme } from "../../../components/ui/useControlTheme";
 import { useHanzoMobileAccounts } from "../../cloud/hanzoMobileAuth";
 import { HomeRouteScreen } from "../../home/HomeRouteScreen";
+import { useWorkspaceState } from "../../../state/workspace";
+import { WorkspaceDrawerThreads } from "./WorkspaceDrawerThreads";
 import {
   NAVIGATION_TAB_ICONS,
   WORKSPACE_TAB_LABELS,
@@ -138,6 +140,7 @@ export function WorkspaceDrawerMenu() {
   const workspace = useWorkspaceTabs()!;
   const destinations = useDrawerDestinations();
   const select = useDrawerSelect();
+  const { state: catalog } = useWorkspaceState();
   const sections = destinations.filter(
     (destination) => destination !== "usage" && destination !== "settings",
   );
@@ -179,7 +182,7 @@ export function WorkspaceDrawerMenu() {
         ))}
       </View>
       <View className="flex-1">
-        <HomeRouteScreen />
+        {catalog.hasReadyEnvironment ? <HomeRouteScreen /> : <WorkspaceDrawerThreads />}
       </View>
       <AccountFooter destinations={account} />
     </View>

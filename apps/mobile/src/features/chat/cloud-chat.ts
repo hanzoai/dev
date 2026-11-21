@@ -73,3 +73,6 @@ export function useCloudChat(): CloudChat {
     [chat, isSignedIn, state],
   );
 }
+
+/** Starts a fresh conversation; the next message opens a new thread. */
+export const startNewCloudChat = (): void => shared().reset();

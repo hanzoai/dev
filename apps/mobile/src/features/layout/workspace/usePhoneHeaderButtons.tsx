@@ -2,6 +2,7 @@ import { useGT } from "gt-react-native";
 
 import { Toolbar } from "../../../components/ui/Toolbar";
 import { useWorkspaceState } from "../../../state/workspace";
+import { startNewCloudChat } from "../../chat/cloud-chat";
 import { useAdaptiveWorkspaceLayout } from "../adaptive-workspace-context";
 import { openWorkspaceDrawer } from "./workspace-drawer-store";
 import { useSelectWorkspaceTab } from "./useSelectWorkspaceTab";
@@ -16,7 +17,13 @@ export function usePhoneHeaderButtons() {
   const { startNewTask } = useAdaptiveWorkspaceLayout();
   const { state } = useWorkspaceState();
   const selectTab = useSelectWorkspaceTab();
-  const newChat = () => (state.hasReadyEnvironment ? startNewTask() : selectTab("threads"));
+  const newChat = () => {
+    if (state.hasReadyEnvironment) startNewTask();
+    else {
+      startNewCloudChat();
+      selectTab("threads");
+    }
+  };
   return {
     menu: (
       <Toolbar.Custom>
