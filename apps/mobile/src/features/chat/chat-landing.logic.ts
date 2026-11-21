@@ -65,3 +65,6 @@ export function sandboxNotice(
     return { title: text.unavailable, detail: text.unavailableDetail, opens: false };
   return { title: text.failed, detail: result.message, opens: false };
 }
+
+/** The composer draft the landing keeps, so its text and attachments survive a reload. */
+export const CHAT_LANDING_DRAFT_KEY = "chat-landing";

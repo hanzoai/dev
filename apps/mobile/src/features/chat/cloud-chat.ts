@@ -1,4 +1,5 @@
 import {
+  cloudChatServerConfig,
   createCloudChatController,
   runInCloud,
   type CloudChatController,
@@ -6,6 +7,7 @@ import {
   type CloudChatState,
   type RunInCloudResult,
 } from "@hanzodev/client-runtime/cloud-chat";
+import type { ServerConfig } from "@hanzodev/contracts";
 import type { DiscoveryFetch } from "@hanzodev/client-runtime/discovery";
 import { fetch as expoFetch } from "expo/fetch";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
@@ -19,9 +21,11 @@ export interface CloudChat {
   /** Whether a prompt can be answered without an environment: true while signed in. */
   readonly available: boolean;
   readonly models: readonly CloudChatModel[];
+  /** The catalog as the server config the thread composer and its model picker read. */
+  readonly serverConfig: ServerConfig;
   readonly state: CloudChatState;
   readonly send: (prompt: string) => Promise<void>;
-  readonly selectModel: (id: string) => void;
+  readonly selectModel: (id: string, effort?: string | null) => void;
   readonly openThread: (key: string) => Promise<void>;
   readonly newChat: () => void;
   readonly renameThread: (key: string, title: string) => Promise<void>;
@@ -66,6 +70,7 @@ export function useCloudChat(): CloudChat {
     () => ({
       available: isSignedIn,
       models: state.models,
+      serverConfig: cloudChatServerConfig(state.models),
       state,
       send: chat.send,
       selectModel: chat.selectModel,

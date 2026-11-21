@@ -25,7 +25,8 @@ const sse = (chunks: ReadonlyArray<string>, status = 200) => {
     { status },
   );
 };
-const frame = (text: string) => `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`;
+const frame = (text: string) =>
+  `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`;
 const auth = { accessToken: "tok", orgId: "acme" };
 
 describe("sse parser", () => {
@@ -43,7 +44,9 @@ describe("sse parser", () => {
   });
   it("flushes an unterminated last line and skips junk", () => {
     const parser = createSseParser();
-    expect(parser.push(": ping\r\ndata: {bad\n" + 'data: {"choices":[{"delta":{"content":"x"}}]}')).toEqual([]);
+    expect(
+      parser.push(": ping\r\ndata: {bad\n" + 'data: {"choices":[{"delta":{"content":"x"}}]}'),
+    ).toEqual([]);
     expect(parser.flush()).toEqual([{ kind: "delta", text: "x" }]);
   });
 });
@@ -82,7 +85,15 @@ describe("streamChatReply", () => {
       model: "enso-flash",
       messages: [{ role: "user", content: "hi" }],
       onDelta: (t) => got.push(t),
-      options: { fetch: async () => sse([frame("Hi").slice(0, 10), frame("Hi").slice(10), frame(" there"), "data: [DONE]\n\n"]) },
+      options: {
+        fetch: async () =>
+          sse([
+            frame("Hi").slice(0, 10),
+            frame("Hi").slice(10),
+            frame(" there"),
+            "data: [DONE]\n\n",
+          ]),
+      },
     });
     expect(reply).toBe("Hi there");
     expect(got).toEqual(["Hi", " there"]);
@@ -135,7 +146,12 @@ describe("controller", () => {
     await chat.send("Again");
     expect(chat.getState().sync).toBe("synced");
     expect(chat.getState().threadId).toBe("c1");
-    expect(bodies[0]).toEqual({ messages: [{ role: "user", content: "Ping" }, { role: "assistant", content: "Pong" }] });
+    expect(bodies[0]).toEqual({
+      messages: [
+        { role: "user", content: "Ping" },
+        { role: "assistant", content: "Pong" },
+      ],
+    });
     expect(bodies[1]).toMatchObject({ conversationId: "c1" });
   });
 
@@ -179,7 +195,9 @@ describe("controller", () => {
 
 describe("runInCloud", () => {
   it.each([404, 501])("says unavailable on %i", async (status: number) => {
-    expect(await runInCloud(auth, { fetch: async () => json(status, {}) })).toEqual({ kind: "unavailable" });
+    expect(await runInCloud(auth, { fetch: async () => json(status, {}) })).toEqual({
+      kind: "unavailable",
+    });
   });
   it("starts a session", async () => {
     const result = await runInCloud(auth, {
@@ -194,7 +212,8 @@ const memoryStore = () => {
   return {
     rows,
     load: async (_owner: string) => [...rows.values()],
-    save: async (_owner: string, thread: import("./index.ts").StoredThread) => void rows.set(thread.key, thread),
+    save: async (_owner: string, thread: import("./index.ts").StoredThread) =>
+      void rows.set(thread.key, thread),
   };
 };
 
@@ -206,7 +225,14 @@ describe("stream assembly", () => {
       options: {
         fetch: async (url) =>
           url.endsWith("/v1/chat/completions")
-            ? sse([frame("Hel").slice(0, 12), frame("Hel").slice(12), frame("lo"), frame(", wor"), frame("ld"), "data: [DONE]\n\n"])
+            ? sse([
+                frame("Hel").slice(0, 12),
+                frame("Hel").slice(12),
+                frame("lo"),
+                frame(", wor"),
+                frame("ld"),
+                "data: [DONE]\n\n",
+              ])
             : json(404, {}),
       },
     });
@@ -282,19 +308,34 @@ describe("thread persistence", () => {
 
   it("merges remote threads with device copies and reads a remote-only one", async () => {
     const store = memoryStore();
-    await store.save("u", { key: "k1", remoteId: "c1", title: "Mine", updatedAt: 1000, synced: 2, messages: [{ role: "user", content: "a" }] });
+    await store.save("u", {
+      key: "k1",
+      remoteId: "c1",
+      title: "Mine",
+      updatedAt: 1000,
+      synced: 2,
+      messages: [{ role: "user", content: "a" }],
+    });
     const chat = createCloudChatController({
       getAuth: async () => auth,
       store,
       options: {
         fetch: async (url) =>
           url.endsWith("/conversations")
-            ? json(200, { conversations: [
-                { id: "c1", title: "Mine renamed", updatedAt: new Date(5000).toISOString() },
-                { id: "c2", title: "Other device", updatedAt: new Date(3000).toISOString() },
-              ] })
+            ? json(200, {
+                conversations: [
+                  { id: "c1", title: "Mine renamed", updatedAt: new Date(5000).toISOString() },
+                  { id: "c2", title: "Other device", updatedAt: new Date(3000).toISOString() },
+                ],
+              })
             : url.endsWith("/conversations/c2")
-              ? json(200, { id: "c2", messages: [{ id: "1", role: "user", content: "hey" }, { id: "2", role: "assistant", content: "yo" }] })
+              ? json(200, {
+                  id: "c2",
+                  messages: [
+                    { id: "1", role: "user", content: "hey" },
+                    { id: "2", role: "assistant", content: "yo" },
+                  ],
+                })
               : json(404, {}),
       },
     });
@@ -322,7 +363,14 @@ describe("thread persistence", () => {
 describe("thread actions", () => {
   const seeded = async () => {
     const store = memoryStore();
-    await store.save("u", { key: "k1", remoteId: "c1", title: "Mine", updatedAt: 1000, synced: 2, messages: [{ role: "user", content: "a" }] });
+    await store.save("u", {
+      key: "k1",
+      remoteId: "c1",
+      title: "Mine",
+      updatedAt: 1000,
+      synced: 2,
+      messages: [{ role: "user", content: "a" }],
+    });
     const calls: string[] = [];
     const chat = createCloudChatController({
       getAuth: async () => auth,
@@ -331,10 +379,12 @@ describe("thread actions", () => {
         fetch: async (url, init) => {
           calls.push(`${init?.method ?? "GET"} ${url.replace("https://api.hanzo.ai", "")}`);
           return url.endsWith("/conversations")
-            ? json(200, { conversations: [
-                { id: "c1", title: "Server title", updatedAt: new Date(5000).toISOString() },
-                { id: "c2", title: "Other", updatedAt: new Date(3000).toISOString() },
-              ] })
+            ? json(200, {
+                conversations: [
+                  { id: "c1", title: "Server title", updatedAt: new Date(5000).toISOString() },
+                  { id: "c2", title: "Other", updatedAt: new Date(3000).toISOString() },
+                ],
+              })
             : json(200, {});
         },
       },

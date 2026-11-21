@@ -100,7 +100,9 @@ export function parseChatModels(body: unknown): ReadonlyArray<CloudChatModel> {
 }
 
 export function pickDefaultModel(models: ReadonlyArray<CloudChatModel>): string {
-  return models.find((model) => model.id === DEFAULT_MODEL_ID)?.id ?? models[0]?.id ?? DEFAULT_MODEL_ID;
+  return (
+    models.find((model) => model.id === DEFAULT_MODEL_ID)?.id ?? models[0]?.id ?? DEFAULT_MODEL_ID
+  );
 }
 
 export async function listChatModels(

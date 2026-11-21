@@ -77,7 +77,8 @@ export function createCloudChatController(input: {
   readonly now?: () => number;
 }): CloudChatController {
   const createKey =
-    input.createKey ?? (() => `t-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`);
+    input.createKey ??
+    (() => `t-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`);
   const now = input.now ?? Date.now;
   const initial: CloudChatState = {
     messages: [],
@@ -110,7 +111,9 @@ export function createCloudChatController(input: {
     if (key === null || state.messages.length === 0) return;
     const last = state.messages.at(-1);
     const settled =
-      last?.role === "assistant" && last.content === "" ? state.messages.slice(0, -1) : state.messages;
+      last?.role === "assistant" && last.content === ""
+        ? state.messages.slice(0, -1)
+        : state.messages;
     const current = state.threads.find((entry) => entry.key === key);
     const thread: StoredThread = {
       key,
@@ -147,7 +150,9 @@ export function createCloudChatController(input: {
       messages: [],
       synced: 0,
     };
-    writes = writes.then(() => store.save(ownerOf(auth), { ...base, ...flags })).catch(() => undefined);
+    writes = writes
+      .then(() => store.save(ownerOf(auth), { ...base, ...flags }))
+      .catch(() => undefined);
     await writes;
   };
   const patch = async (
@@ -244,7 +249,12 @@ export function createCloudChatController(input: {
       for (const thread of stored)
         if (thread.deleted === true && thread.remoteId !== null) deleted.add(thread.remoteId);
       const local = stored.filter((thread) => thread.deleted !== true).map(summaryOf);
-      set({ threads: mergeThreads(local, state.threads.filter((entry) => entry.local)) });
+      set({
+        threads: mergeThreads(
+          local,
+          state.threads.filter((entry) => entry.local),
+        ),
+      });
       const remote = (await listRemoteThreads(auth, input.options)).filter(
         (entry) => entry.remoteId === null || !deleted.has(entry.remoteId),
       );
@@ -265,7 +275,8 @@ export function createCloudChatController(input: {
       const entry = state.threads.find((thread) => thread.key === key);
       if (entry === undefined) return;
       const stored = entry.local
-        ? ((await input.store?.load(ownerOf(auth)).catch(() => []))?.find((t) => t.key === key) ?? null)
+        ? ((await input.store?.load(ownerOf(auth)).catch(() => []))?.find((t) => t.key === key) ??
+          null)
         : null;
       let messages = stored !== null && stored.messages.length > 0 ? stored.messages : null;
       if (messages === null && entry.remoteId !== null)
@@ -275,7 +286,13 @@ export function createCloudChatController(input: {
         return;
       }
       synced = stored?.synced ?? messages.length;
-      set({ messages, threadKey: key, threadId: entry.remoteId, sync: entry.remoteId ? "synced" : "local", error: null });
+      set({
+        messages,
+        threadKey: key,
+        threadId: entry.remoteId,
+        sync: entry.remoteId ? "synced" : "local",
+        error: null,
+      });
     },
     async renameThread(key, title) {
       const text = title.trim();

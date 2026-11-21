@@ -14,11 +14,12 @@ describe("cloud chat catalog", () => {
       { id: "enso-flash", label: "Enso Flash" },
       { id: "claude-sonnet", label: "Claude Sonnet" },
       { id: "gpt-5", label: "GPT 5" },
-      { id: "kai-1", label: "Kai", outputs: ["decision"] } as never,
     ]);
     expect(providers.map((p) => p.driver)).toEqual(["hanzo", "claudeAgent", "codex"]);
     expect(providers[0]?.models.map((m) => m.slug)).toEqual(["enso-flash"]);
-    expect(providers[0]?.models[0]?.capabilities?.optionDescriptors?.[0]?.id).toBe("reasoningEffort");
+    expect(providers[0]?.models[0]?.capabilities?.optionDescriptors?.[0]?.id).toBe(
+      "reasoningEffort",
+    );
     expect(providers[1]?.models[0]?.capabilities).toBeNull();
   });
 

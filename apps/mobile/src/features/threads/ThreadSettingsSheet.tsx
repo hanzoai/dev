@@ -306,6 +306,8 @@ type ThreadSettingsSessionProps = {
   readonly onUpdateOptionSelections: (selections: ReadonlyArray<ProviderOptionSelection>) => void;
   readonly runtimeMode: RuntimeMode;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
+  /** False where nothing runs on a machine, so there is no permission mode to pick. */
+  readonly offersRuntime?: boolean;
 };
 
 /** The composer draft the sheet edits: the thread's own, or a queued message being edited. */
@@ -326,6 +328,7 @@ type ThreadSettingsSessionValue = {
   readonly pendingHiddenKeys: ReadonlySet<string>;
   readonly manageHidden: boolean;
   readonly setManageHidden: (value: boolean) => void;
+  readonly offersRuntime: boolean;
   readonly runtimeMode: RuntimeMode;
   readonly runtimeModeChoices: ReadonlyArray<RuntimeModeChoice>;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
@@ -647,6 +650,7 @@ function ThreadSettingsSessionProvider(
     setManageHidden,
     toggleHidden,
     pendingHiddenKeys,
+    offersRuntime: props.offersRuntime ?? true,
     runtimeMode: compatibleRuntimeMode,
     runtimeModeChoices,
     onUpdateRuntimeMode: props.onUpdateRuntimeMode,
@@ -1044,19 +1048,21 @@ function ThreadSettingsOptionsItem(props: {
             </Animated.View>
           );
         })}
-        <Animated.View layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}>
-          <DisclosureRow
-            isLast
-            label={gt("Runtime", { $context: "agent permission mode setting" })}
-            value={(() => {
-              const label = session.runtimeModeChoices.find(
-                (choice) => choice.mode === session.runtimeMode,
-              )?.label;
-              return label === undefined ? undefined : m(label);
-            })()}
-            onPress={() => props.onOpenSubmenu({ kind: "runtime" })}
-          />
-        </Animated.View>
+        {session.offersRuntime ? (
+          <Animated.View layout={THREAD_SETTINGS_OPTIONS_LAYOUT_TRANSITION}>
+            <DisclosureRow
+              isLast
+              label={gt("Runtime", { $context: "agent permission mode setting" })}
+              value={(() => {
+                const label = session.runtimeModeChoices.find(
+                  (choice) => choice.mode === session.runtimeMode,
+                )?.label;
+                return label === undefined ? undefined : m(label);
+              })()}
+              onPress={() => props.onOpenSubmenu({ kind: "runtime" })}
+            />
+          </Animated.View>
+        ) : null}
       </Animated.View>
 
       <Text className="px-5 pb-2 pt-7 text-sm font-hanzo-medium text-foreground-muted">

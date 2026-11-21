@@ -197,7 +197,10 @@ export async function deleteRemoteThread(
   try {
     const response = await fetch(
       `${baseUrl}/v1/agents/chat/conversations/${encodeURIComponent(remoteId)}`,
-      { method: "DELETE", headers: buildHanzoApiHeaders({ accessToken: token, orgId: auth.orgId }) },
+      {
+        method: "DELETE",
+        headers: buildHanzoApiHeaders({ accessToken: token, orgId: auth.orgId }),
+      },
     );
     return response.ok;
   } catch {

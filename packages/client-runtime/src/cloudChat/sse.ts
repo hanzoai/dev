@@ -3,7 +3,9 @@
  * anywhere, including mid-line and mid-UTF-16 pair boundaries of the transport; `push` buffers the
  * tail until its line ends. `[DONE]` ends the stream.
  */
-export type SseEvent = { readonly kind: "delta"; readonly text: string } | { readonly kind: "done" };
+export type SseEvent =
+  | { readonly kind: "delta"; readonly text: string }
+  | { readonly kind: "done" };
 
 export interface SseParser {
   push(chunk: string): ReadonlyArray<SseEvent>;

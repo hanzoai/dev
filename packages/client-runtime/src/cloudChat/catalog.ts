@@ -4,15 +4,16 @@
  * groups (Enso, Hanzo, Claude, Codex, ...) and effort panel as a thread's picker.
  */
 import {
+  DEFAULT_SERVER_SETTINGS,
   ProviderDriverKind,
   ProviderInstanceId,
   type ModelSelection,
+  type ServerConfig,
   type ServerProvider,
   type ServerProviderModel,
 } from "@hanzodev/contracts";
 import { HANZO_REASONING_CAPABILITIES } from "@hanzodev/shared/model";
 
-import { writesReplies } from "../replyModels.ts";
 import type { CloudChatModel } from "./api.ts";
 
 export const REASONING_EFFORT_ID = "reasoningEffort";
@@ -35,7 +36,6 @@ export function cloudChatProviders(
 ): ReadonlyArray<ServerProvider> {
   const byDriver = new Map<string, ServerProviderModel[]>();
   for (const [index, model] of models.entries()) {
-    if (!writesReplies(model)) continue;
     const driver = cloudChatDriver(model.id);
     const list = byDriver.get(driver) ?? [];
     list.push({
@@ -61,6 +61,18 @@ export function cloudChatProviders(
     slashCommands: [],
     skills: [],
   }));
+}
+
+/**
+ * The catalog as the server config the thread composer reads. Only providers and the defaults
+ * the composer consults exist; nothing here describes a machine, so it advertises no capabilities.
+ */
+export function cloudChatServerConfig(models: ReadonlyArray<CloudChatModel>): ServerConfig {
+  return {
+    environment: { capabilities: {} },
+    settings: DEFAULT_SERVER_SETTINGS,
+    providers: cloudChatProviders(models),
+  } as unknown as ServerConfig;
 }
 
 /** The picker's selection for a chat model, carrying its effort when one is set. */

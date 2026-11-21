@@ -92,6 +92,7 @@ import {
   ExistingThreadSettingsRouteScreen,
   NewTaskThreadSettingsRouteScreen,
 } from "./features/threads/ThreadSettingsSheet";
+import { ChatLandingModelSettingsRouteScreen } from "./features/chat/ChatLandingModelSettings";
 import { NewTaskFlowProvider } from "./features/threads/new-task-flow-provider";
 import { newTaskFlowKey } from "./features/threads/new-task-flow-state";
 import { NewTaskRouteScreen } from "./features/threads/NewTaskRouteScreen";
@@ -708,6 +709,11 @@ const RootStackConfig = createWorkspaceStackNavigator({
       screen: AttachmentFileScreen,
       linking: "new/draft/attachments/:attachmentId",
       options: pageRoute({ header: "solid" }),
+    }),
+    ChatLandingModelSettings: createNativeStackScreen({
+      screen: ChatLandingModelSettingsRouteScreen,
+      linking: "chat/settings",
+      options: THREAD_SETTINGS_ROUTE,
     }),
     NewTaskThreadSettings: createNativeStackScreen({
       screen: NewTaskThreadSettingsRouteScreen,

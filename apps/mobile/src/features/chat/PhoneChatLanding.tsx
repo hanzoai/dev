@@ -1,30 +1,32 @@
 import { useGT } from "gt-react-native";
 import { useNavigation } from "@react-navigation/native";
 import { useState } from "react";
-import { Alert, Pressable, ScrollView, TextInput, View } from "react-native";
+import { Alert, ScrollView, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { GlassSurface } from "../../components/ui/GlassSurface";
-import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
-import { useControlTheme } from "../../components/ui/useControlTheme";
+import { getComposerDraftSnapshot } from "../../state/use-composer-drafts";
 import { useWorkspaceState } from "../../state/workspace";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import { openSettings } from "../settings/settings-navigation";
-import { resolveSend, sandboxNotice, type RunTarget } from "./chat-landing.logic";
+import {
+  CHAT_LANDING_DRAFT_KEY,
+  resolveSend,
+  sandboxNotice,
+  type RunTarget,
+} from "./chat-landing.logic";
+import { ChatLandingComposer } from "./ChatLandingComposer";
 import { useCloudChat } from "./cloud-chat";
 
 /** What a signed-in phone opens on: a new chat. An environment is asked for only to build. */
 export function PhoneChatLanding() {
   const gt = useGT();
-  const { colors } = useControlTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { startNewTask } = useAdaptiveWorkspaceLayout();
   const { state } = useWorkspaceState();
   const cloudChat = useCloudChat();
-  const [prompt, setPrompt] = useState("");
 
   const run = (target: RunTarget) => {
     if (target === "mac") {
@@ -60,7 +62,7 @@ export function PhoneChatLanding() {
       { text: gt("Cancel"), style: "cancel" },
     ]);
 
-  const send = (build: boolean) => {
+  const send = (prompt: string, build: boolean): boolean => {
     const outcome = resolveSend({
       prompt,
       build,
@@ -71,8 +73,9 @@ export function PhoneChatLanding() {
     else if (outcome.kind === "choose-target") chooseTarget();
     else if (outcome.kind === "chat") {
       void cloudChat.send(prompt);
-      setPrompt("");
+      return true;
     }
+    return false;
   };
 
   const { messages, error, sending, sync } = cloudChat.state;
@@ -84,15 +87,8 @@ export function PhoneChatLanding() {
         : error === "failed"
           ? gt("That reply failed. Try again.")
           : null;
-  const model =
-    cloudChat.models.find((m) => m.id === cloudChat.state.model)?.label ?? cloudChat.state.model;
-  const nextModel = () => {
-    const list = cloudChat.models;
-    const at = list.findIndex((m) => m.id === cloudChat.state.model);
-    const next = list[(at + 1) % list.length];
-    if (next) cloudChat.selectModel(next.id);
-  };
-  const composerClearance = Math.max(insets.bottom, 12) + 120;
+  const [composerHeight, setComposerHeight] = useState(0);
+  const composerClearance = composerHeight + 12;
   return (
     <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
       <View style={{ flex: 1 }}>
@@ -105,7 +101,11 @@ export function PhoneChatLanding() {
         ) : (
           <ScrollView
             className="flex-1 px-4"
-            contentContainerStyle={{ gap: 12, paddingVertical: 12, paddingBottom: composerClearance }}
+            contentContainerStyle={{
+              gap: 12,
+              paddingVertical: 12,
+              paddingBottom: composerClearance,
+            }}
           >
             {messages.map((message, index) => (
               <Text
@@ -124,63 +124,14 @@ export function PhoneChatLanding() {
             ) : null}
           </ScrollView>
         )}
-        <View
-          className="absolute inset-x-0 bottom-0 px-3"
-          style={{ paddingBottom: Math.max(insets.bottom, 12) }}
-        >
-          <GlassSurface chrome="none" style={{ borderRadius: 28 }}>
-            <View className="gap-2 p-3">
-              <TextInput
-                value={prompt}
-                onChangeText={setPrompt}
-                placeholder={gt("Ask anything")}
-                accessibilityLabel={gt("Message")}
-                placeholderTextColor={colors["--color-foreground-muted"]}
-                multiline
-                style={{
-                  maxHeight: 160,
-                  minHeight: 36,
-                  fontSize: 17,
-                  color: colors["--color-foreground"],
-                }}
-              />
-              <View className="flex-row items-center gap-2">
-                <GlassSurface chrome="none" style={{ borderRadius: 16 }}>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={gt("Model")}
-                    disabled={cloudChat.models.length < 2}
-                    onPress={nextModel}
-                    className="h-8 flex-row items-center px-3"
-                  >
-                    <Text className="text-sm text-foreground">{model}</Text>
-                  </Pressable>
-                </GlassSurface>
-                <GlassSurface chrome="none" style={{ borderRadius: 16 }}>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={gt("Build on a machine")}
-                    onPress={() => send(true)}
-                    className="h-8 flex-row items-center gap-1 px-3"
-                  >
-                    <SymbolView name="hammer" size={13} tintColor={colors["--color-foreground"]} />
-                    <Text className="text-sm text-foreground">{gt("Build")}</Text>
-                  </Pressable>
-                </GlassSurface>
-                <View className="flex-1" />
-                <GlassSurface chrome="none" style={{ borderRadius: 18 }}>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={gt("Send")}
-                    onPress={() => send(false)}
-                    className="h-9 w-9 items-center justify-center"
-                  >
-                    <SymbolView name="arrow.up" size={16} tintColor={colors["--color-foreground"]} />
-                  </Pressable>
-                </GlassSurface>
-              </View>
-            </View>
-          </GlassSurface>
+        <View className="absolute inset-x-0 bottom-0" pointerEvents="box-none">
+          <ChatLandingComposer
+            chat={cloudChat}
+            bottomInset={insets.bottom}
+            onSend={(prompt) => send(prompt, false)}
+            onBuild={() => send(getComposerDraftSnapshot(CHAT_LANDING_DRAFT_KEY).text, true)}
+            onHeightChange={setComposerHeight}
+          />
         </View>
       </View>
     </KeyboardAvoidingView>

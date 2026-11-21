@@ -38,12 +38,26 @@ describe("sending from the chat landing", () => {
 });
 
 describe("cloud sandbox notice", () => {
-  const text = { ready: "R", readyDetail: "RD", unavailable: "U", unavailableDetail: "UD", failed: "F" };
+  const text = {
+    ready: "R",
+    readyDetail: "RD",
+    unavailable: "U",
+    unavailableDetail: "UD",
+    failed: "F",
+  };
   it("offers the sandbox when the endpoint is live", () => {
-    expect(sandboxNotice({ kind: "started", sessionId: "s" }, text)).toEqual({ title: "R", detail: "RD", opens: true });
+    expect(sandboxNotice({ kind: "started", sessionId: "s" }, text)).toEqual({
+      title: "R",
+      detail: "RD",
+      opens: true,
+    });
   });
   it("says plainly when it is not available", () => {
-    expect(sandboxNotice({ kind: "unavailable" }, text)).toEqual({ title: "U", detail: "UD", opens: false });
+    expect(sandboxNotice({ kind: "unavailable" }, text)).toEqual({
+      title: "U",
+      detail: "UD",
+      opens: false,
+    });
   });
   it("reports a failure with its message", () => {
     expect(sandboxNotice({ kind: "failed", message: "HTTP 500" }, text).detail).toBe("HTTP 500");

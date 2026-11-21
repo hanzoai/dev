@@ -67,7 +67,8 @@ async function getJson(
 ): Promise<unknown> {
   const token = auth.accessToken?.trim();
   if (!token) throw new CloudChatError("signed-out", "Not signed in");
-  const fetch = options.fetch ?? ((input: string, init?: RequestInit) => globalThis.fetch(input, init));
+  const fetch =
+    options.fetch ?? ((input: string, init?: RequestInit) => globalThis.fetch(input, init));
   const baseUrl = (options.baseUrl ?? CLOUD_CHAT_BASE_URL).replace(/\/+$/, "");
   let response: Response;
   try {

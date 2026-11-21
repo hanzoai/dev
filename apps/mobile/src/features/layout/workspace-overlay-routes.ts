@@ -17,6 +17,7 @@ const LISTED_OVERLAY_ROUTES: ReadonlySet<string> = new Set([
   "NewTaskFile",
   "NewTaskAttachment",
   "NewTaskThreadSettings",
+  "ChatLandingModelSettings",
   "AddProject",
   "AddProjectRepository",
   "AddProjectDestination",

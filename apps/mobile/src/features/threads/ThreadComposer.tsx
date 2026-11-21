@@ -134,6 +134,8 @@ const NO_MACHINES: ReadonlyArray<ComposerEnvironmentCandidate> = [];
 
 export interface ThreadComposerProps {
   readonly isDraft?: boolean;
+  /** The sheet route that picks the model, where the thread's own settings route does not apply. */
+  readonly modelPickerRoute?: "ChatLandingModelSettings";
   readonly canOperateThread: boolean;
   readonly placeholder: string;
   readonly contentMaxWidth?: number;
@@ -278,13 +280,15 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
       settingsRoutePresentedRef.current = true;
       // The draft composer edits the new-task flow, which owns its own settings route.
       navigation.dispatch(
-        props.isDraft
-          ? StackActions.push("NewTaskThreadSettings")
-          : StackActions.push("ThreadSettingsSheet", {
-              environmentId: props.environmentId,
-              threadId: props.selectedThread.id,
-              draftKey: composerDraftKey,
-            } satisfies ExistingThreadSettingsRouteParams),
+        props.modelPickerRoute
+          ? StackActions.push(props.modelPickerRoute)
+          : props.isDraft
+            ? StackActions.push("NewTaskThreadSettings")
+            : StackActions.push("ThreadSettingsSheet", {
+                environmentId: props.environmentId,
+                threadId: props.selectedThread.id,
+                draftKey: composerDraftKey,
+              } satisfies ExistingThreadSettingsRouteParams),
       );
     },
   });

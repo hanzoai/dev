@@ -25,7 +25,8 @@ const sse = (chunks: ReadonlyArray<string>, status = 200) => {
     { status },
   );
 };
-const frame = (text: string) => `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`;
+const frame = (text: string) =>
+  `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`;
 const auth = { accessToken: "tok", orgId: "acme" };
 
 describe("sse parser", () => {
@@ -43,7 +44,9 @@ describe("sse parser", () => {
   });
   it("flushes an unterminated last line and skips junk", () => {
     const parser = createSseParser();
-    expect(parser.push(": ping\r\ndata: {bad\n" + 'data: {"choices":[{"delta":{"content":"x"}}]}')).toEqual([]);
+    expect(
+      parser.push(": ping\r\ndata: {bad\n" + 'data: {"choices":[{"delta":{"content":"x"}}]}'),
+    ).toEqual([]);
     expect(parser.flush()).toEqual([{ kind: "delta", text: "x" }]);
   });
 });
@@ -82,7 +85,15 @@ describe("streamChatReply", () => {
       model: "enso-flash",
       messages: [{ role: "user", content: "hi" }],
       onDelta: (t) => got.push(t),
-      options: { fetch: async () => sse([frame("Hi").slice(0, 10), frame("Hi").slice(10), frame(" there"), "data: [DONE]\n\n"]) },
+      options: {
+        fetch: async () =>
+          sse([
+            frame("Hi").slice(0, 10),
+            frame("Hi").slice(10),
+            frame(" there"),
+            "data: [DONE]\n\n",
+          ]),
+      },
     });
     expect(reply).toBe("Hi there");
     expect(got).toEqual(["Hi", " there"]);
@@ -135,7 +146,12 @@ describe("controller", () => {
     await chat.send("Again");
     expect(chat.getState().sync).toBe("synced");
     expect(chat.getState().threadId).toBe("c1");
-    expect(bodies[0]).toEqual({ messages: [{ role: "user", content: "Ping" }, { role: "assistant", content: "Pong" }] });
+    expect(bodies[0]).toEqual({
+      messages: [
+        { role: "user", content: "Ping" },
+        { role: "assistant", content: "Pong" },
+      ],
+    });
     expect(bodies[1]).toMatchObject({ conversationId: "c1" });
   });
 
@@ -179,7 +195,9 @@ describe("controller", () => {
 
 describe("runInCloud", () => {
   it.each([404, 501])("says unavailable on %i", async (status: number) => {
-    expect(await runInCloud(auth, { fetch: async () => json(status, {}) })).toEqual({ kind: "unavailable" });
+    expect(await runInCloud(auth, { fetch: async () => json(status, {}) })).toEqual({
+      kind: "unavailable",
+    });
   });
   it("starts a session", async () => {
     const result = await runInCloud(auth, {
@@ -196,7 +214,9 @@ describe("threads", () => {
     const fetch = async (url: string) => {
       seen.push(url);
       return url.endsWith("/conversations")
-        ? json(200, { conversations: [{ id: "t1", title: "Hi", updatedAt: "2026-01-01" }, { title: "no id" }] })
+        ? json(200, {
+            conversations: [{ id: "t1", title: "Hi", updatedAt: "2026-01-01" }, { title: "no id" }],
+          })
         : json(200, {
             messages: [
               { role: "user", content: "a" },
