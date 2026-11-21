@@ -51,6 +51,7 @@ import { useProjectScriptEditing } from "./chat/useProjectScriptEditing";
 import { RightPanelSurfaceContent } from "./chat/RightPanelSurfaceContent";
 import { usePendingThreadRequests } from "./chat/usePendingThreadRequests";
 import { isScratchProject } from "@hanzodev/client-runtime/state/projects";
+import { AttachProjectControl } from "./chat/AttachProjectControl";
 import { visibleThreadPullRequests } from "@hanzodev/shared/threadPullRequests";
 import type { UsageLimitSourceSnapshots } from "@hanzodev/contracts";
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
@@ -3844,6 +3845,19 @@ export default function ChatView(props: ChatViewProps) {
                             data-terminal-open={terminalUiState.terminalOpen ? "true" : undefined}
                             className="relative z-0"
                           >
+                            {activeProjectIsScratch && isServerThread && activeThread ? (
+                              <div className="pointer-events-auto flex px-3 pb-1">
+                                <AttachProjectControl
+                                  environmentId={activeThread.environmentId}
+                                  threadId={activeThread.id}
+                                  currentProjectId={activeThread.projectId}
+                                  scratchWorkspaceRoot={
+                                    environmentById.get(activeThread.environmentId)?.serverConfig
+                                      ?.scratchWorkspaceRoot ?? null
+                                  }
+                                />
+                              </div>
+                            ) : null}
                             {showComposerContextStrip && (
                               <div className="pointer-events-auto">
                                 <BranchToolbar

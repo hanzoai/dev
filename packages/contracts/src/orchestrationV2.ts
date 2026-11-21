@@ -3275,6 +3275,17 @@ export const OrchestrationV2Command = Schema.Union([
     /** Link (object) or unlink (null) a pull request; absent leaves it unchanged. */
     linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   }),
+  /**
+   * Attaches a project to a thread in place: a chat becomes a dev thread, keeping its history. The
+   * thread leaves any worktree and branch and works in the project root from its next turn.
+   * Rejected while the thread has work in progress.
+   */
+  Schema.Struct({
+    type: Schema.Literal("thread.project.set"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    projectId: ProjectId,
+  }),
   Schema.Struct({
     type: Schema.Literal("thread.pull-request.link"),
     commandId: CommandId,

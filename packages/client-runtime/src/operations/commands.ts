@@ -140,6 +140,11 @@ export interface VisitThreadInput extends ThreadCommandInput {
 
 export type MarkThreadUnreadInput = ThreadCommandInput;
 
+/** Attaches a project to a thread in place: a chat becomes a dev thread and keeps its history. */
+export interface SetThreadProjectInput extends ThreadCommandInput {
+  readonly projectId: ProjectId;
+}
+
 export interface UpdateThreadMetadataInput extends ThreadCommandInput {
   readonly limitRecovery?: import("@hanzodev/contracts").OrchestrationV2LimitRecoveryUpdate | null;
   readonly title?: string;
@@ -684,6 +689,17 @@ export const markThreadUnread = Effect.fn("EnvironmentCommands.markThreadUnread"
     type: "thread.mark-unread",
     commandId: yield* allocateCommandId(input),
     threadId: input.threadId,
+  });
+});
+
+export const setThreadProject = Effect.fn("EnvironmentCommands.setThreadProject")(function* (
+  input: SetThreadProjectInput,
+) {
+  return yield* dispatch({
+    type: "thread.project.set",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    projectId: input.projectId,
   });
 });
 

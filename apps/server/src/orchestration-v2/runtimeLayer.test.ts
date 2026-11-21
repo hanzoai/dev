@@ -11884,6 +11884,45 @@ it.layer(layerScratchPromotionTest)("turning a No project thread into a project"
     }),
   );
 
+  it.effect("attaches a project to a conversation in place and leaves its worktree", () =>
+    Effect.gen(function* () {
+      const projects = yield* ProjectService.ProjectService;
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const { folder, createThread } = yield* setup("attach");
+      const threadId = yield* createThread("chat", folder);
+      const projectId = ProjectId.make("attach-target-project");
+      yield* projects.create({
+        commandId: CommandId.make("attach-target-project-create"),
+        projectId,
+        title: "Target",
+        workspaceRoot: "/tmp/runtime-layer-attach-target",
+      });
+
+      yield* orchestrator.dispatch({
+        type: "thread.project.set",
+        commandId: CommandId.make("attach-set-project"),
+        threadId,
+        projectId,
+      });
+
+      const shell = yield* shellOf(threadId);
+      assert.equal(shell?.projectId, projectId);
+      assert.equal(shell?.worktreePath, null);
+      assert.equal(shell?.branch, null);
+      assert.equal(shell?.title, "attach chat");
+
+      const missing = yield* orchestrator
+        .dispatch({
+          type: "thread.project.set",
+          commandId: CommandId.make("attach-set-missing"),
+          threadId,
+          projectId: ProjectId.make("attach-no-such-project"),
+        })
+        .pipe(Effect.flip);
+      assert.include(missing.message, "cannot move to missing project");
+    }),
+  );
+
   it.effect("refuses a thread outside No project", () =>
     Effect.gen(function* () {
       const promotion = yield* ScratchThreadPromotion.ScratchThreadPromotion;
