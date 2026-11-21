@@ -5,7 +5,7 @@ import { commandProviderTarget, isRoutedSession } from "./routedRun.ts";
 
 const command = (fields: Record<string, unknown>) => fields as unknown as OrchestrationV2Command;
 
-it("only a DPoP session through Hanzo Connect is a routed session", () => {
+it("only a DPoP session through Hanzo Link is a routed session", () => {
   assert.equal(isRoutedSession("dpop-access-token"), true);
   assert.equal(isRoutedSession("browser-session-cookie"), false);
   assert.equal(isRoutedSession("bearer-access-token"), false);

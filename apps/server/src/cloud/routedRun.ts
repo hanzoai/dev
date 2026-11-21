@@ -1,7 +1,7 @@
 import type { OrchestrationV2Command, ThreadId } from "@hanzodev/contracts";
 
 /**
- * A routed run is one started by another of the user's surfaces through Hanzo Connect, whose
+ * A routed run is one started by another of the user's surfaces through Hanzo Link, whose
  * sessions prove a DPoP key. This desktop's own client uses a cookie or a desktop bearer.
  */
 export const isRoutedSession = (method: string): boolean => method === "dpop-access-token";
