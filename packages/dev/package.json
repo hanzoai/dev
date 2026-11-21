@@ -1,6 +1,6 @@
 {
   "name": "@hanzo/dev-core",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "The Hanzo Dev core (threads, composer, model picker) as a library for a host's own shell.",
   "license": "MIT",
   "repository": {
