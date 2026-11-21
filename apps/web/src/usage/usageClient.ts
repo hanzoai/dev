@@ -27,3 +27,5 @@ export const refreshUsage = () => call<UsageSummary>("POST", "/v1/usage/refresh"
 export const fetchUsageSettings = () => call<UsageSettings>("GET", "/v1/usage/settings");
 export const saveUsageSettings = (settings: UsageSettings) =>
   call<UsageSettings>("PUT", "/v1/usage/settings", settings);
+export const connectUsage = (provider: string) =>
+  call<UsageSummary>("POST", "/v1/usage/connect", { provider });

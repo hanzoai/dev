@@ -12,6 +12,7 @@ import {
   type HostFacts,
   type HostReadings,
   type LimitAlert,
+  type ProviderSnapshot,
   type TrayModel,
   type UsageReport,
   type UsageSettings,
@@ -36,6 +37,9 @@ export const createUsageRuntime = (stateDir: string, host: HostFacts) => {
   let summary: UsageSummary | undefined;
   let pending: LimitAlert[] = [];
   let inflight: Promise<UsageSummary> | undefined;
+  /** What the user's "Connect" read once, by provider: a reading, never the login it came from. */
+  const connectedPath = NodePath.join(stateDir, "usage-connected.json");
+  let connected: Record<string, ReadonlyArray<ProviderSnapshot>> | undefined;
 
   const service = createUsageService(nodeEnv(host), () => settings);
 
@@ -52,10 +56,24 @@ export const createUsageRuntime = (stateDir: string, host: HostFacts) => {
     }
   };
 
+  const loadConnected = async () => {
+    if (connected) return connected;
+    const text = await NodeFSP.readFile(connectedPath, "utf8").catch(() => undefined);
+    try {
+      connected = text ? (JSON.parse(text) as typeof connected) : {};
+    } catch {
+      connected = {};
+    }
+    return connected ?? {};
+  };
+
   const refresh = (host: () => Promise<HostReadings>): Promise<UsageSummary> => {
     inflight ??= (async () => {
       await load();
-      const r = await service.refresh(await host());
+      const readings = await host();
+      // A connected provider's last reading stands in until a reader of its own succeeds.
+      const kept = Object.values(await loadConnected()).flat();
+      const r = await service.refresh({ ...readings, local: [...readings.local, ...kept] });
       summary = r.summary;
       pending.push(...r.alerts);
       return r.summary;
@@ -82,6 +100,27 @@ export const createUsageRuntime = (stateDir: string, host: HostFacts) => {
     },
     summary: current,
     refresh,
+    connect: async (provider: string, host: () => Promise<HostReadings>): Promise<UsageSummary> => {
+      const instances = (await host()).instances.filter((i) => i.provider === provider);
+      const readings = await service.connect(provider, instances);
+      const good = readings.filter((s) => s.windows.length > 0);
+      const store = await loadConnected();
+      if (good.length > 0) {
+        connected = { ...store, [provider]: good };
+        await NodeFSP.mkdir(stateDir, { recursive: true });
+        await NodeFSP.writeFile(connectedPath, JSON.stringify(connected), { mode: 0o600 });
+      }
+      summary = undefined;
+      const next = await refresh(host);
+      // Why a connect failed is told once, in the row the user is looking at.
+      const failure = good.length === 0 ? readings.find((s) => s.error) : undefined;
+      return failure
+        ? {
+            ...next,
+            snapshots: [...next.snapshots.filter((s) => s.provider !== provider), failure],
+          }
+        : next;
+    },
     report: async (
       host: () => Promise<HostReadings>,
       deviceId: string,

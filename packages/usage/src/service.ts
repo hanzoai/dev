@@ -2,7 +2,7 @@ import { snapshotKey } from "./account.ts";
 import { CATALOG, DEFAULT_ENABLED, providerById } from "./catalog.ts";
 import type { UsageEnv } from "./env.ts";
 import { NotConfigured, type Instance } from "./fetchers.ts";
-import { FETCHERS } from "./readers.ts";
+import { CONNECTORS, FETCHERS } from "./readers.ts";
 import { evaluate, type LimitAlert, type NotifyState } from "./notify.ts";
 import type {
   CostDay,
@@ -163,6 +163,20 @@ export const createUsageService = (
     };
   };
 
+  /** The user's "Connect" for a provider whose login is in another app's keychain. */
+  const connect = async (
+    id: string,
+    instances: ReadonlyArray<Instance>,
+  ): Promise<ProviderSnapshot[]> => {
+    const connector = CONNECTORS[id];
+    if (!connector) return [failure(env, id, "This provider has no connect step.")];
+    return [
+      ...(await connector(env, instances).catch((e: unknown) => [
+        failure(env, id, e instanceof Error ? e.message : String(e)),
+      ])),
+    ];
+  };
+
   /** What a linked desktop reports to the cloud registry: metadata only. */
   const report = (deviceId: string, since: Date): UsageReport => ({
     version: 1,
@@ -177,5 +191,5 @@ export const createUsageService = (
     })),
   });
 
-  return { refresh, report };
+  return { refresh, report, connect };
 };

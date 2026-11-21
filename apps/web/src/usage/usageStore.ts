@@ -1,6 +1,12 @@
 import type { UsageSettings, UsageSummary } from "@hanzodev/usage/schema";
 
-import { fetchUsage, fetchUsageSettings, refreshUsage, saveUsageSettings } from "./usageClient";
+import {
+  connectUsage,
+  fetchUsage,
+  fetchUsageSettings,
+  refreshUsage,
+  saveUsageSettings,
+} from "./usageClient";
 
 export interface UsageState {
   readonly summary: UsageSummary | null;
@@ -62,4 +68,16 @@ export async function updateUsageSettings(next: UsageSettings) {
   set({ settings: next });
   await saveUsageSettings(next).catch(() => undefined);
   await poll();
+}
+
+/** The user's "Connect": reads a provider's login once (the system may ask), then keeps only its reading. */
+export async function connectUsageProvider(provider: string) {
+  set({ refreshing: true });
+  try {
+    set({ summary: await connectUsage(provider), error: null });
+  } catch (cause) {
+    set({ error: cause instanceof Error ? cause.message : String(cause) });
+  } finally {
+    set({ refreshing: false });
+  }
 }

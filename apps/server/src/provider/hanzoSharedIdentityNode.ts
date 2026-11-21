@@ -88,6 +88,9 @@ export async function hanzoAccessToken(host: SharedIdentityHost): Promise<string
   return refreshed || undefined;
 }
 
+/** The longest a client waits for the CLI to refresh the active identity before it is shown as is. */
+const IDENTITY_REFRESH_WAIT_MS = 3_000;
+
 /** Refresh tokens are single-use and the CLI's; a client gets access tokens only. */
 const withoutRefreshTokens = (snapshot: SharedIdentitySnapshot): SharedIdentitySnapshot => ({
   ...snapshot,
@@ -101,6 +104,14 @@ export async function readFreshSharedIdentity(
   const snapshot = await readSharedIdentity(host);
   const active = snapshot.accounts.find((account) => account.id === snapshot.activeAccountId);
   if (!active || isSharedTokenUsable(active, Date.now())) return withoutRefreshTokens(snapshot);
-  await runHanzoAuth(host, ["token", "--as", active.id], 20_000).catch(() => undefined);
+  // The CLI may stop on a keychain approval; the account must still show from the vault file.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    runHanzoAuth(host, ["token", "--as", active.id], 20_000).catch(() => undefined),
+    new Promise((resolve) => {
+      timer = setTimeout(resolve, IDENTITY_REFRESH_WAIT_MS);
+    }),
+  ]);
+  clearTimeout(timer);
   return withoutRefreshTokens(await readSharedIdentity(host));
 }

@@ -5,7 +5,8 @@ import type { ProviderSnapshot } from "@hanzodev/usage/schema";
 import { useGT } from "gt-react";
 import { useSyncExternalStore } from "react";
 
-import { getUsageState, subscribeUsage } from "../../usage/usageStore";
+import { connectUsageProvider, getUsageState, subscribeUsage } from "../../usage/usageStore";
+import { Button } from "../ui/button";
 import { AddAccountButton } from "./AddAccountButton";
 import { LimitWindows } from "./UsageLimits";
 
@@ -67,6 +68,15 @@ export function UsageAccounts({
                 ) : null}
               </div>
               {s.unconfigured ? <AddAccountButton snapshot={s} /> : null}
+              {s.provider === "muse" ? (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => void connectUsageProvider("muse")}
+                >
+                  {gt("Connect Muse")}
+                </Button>
+              ) : null}
             </div>
             {s.windows.length > 0 ? (
               <LimitWindows

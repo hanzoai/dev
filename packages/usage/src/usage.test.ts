@@ -15,7 +15,7 @@ import {
   parseZai,
 } from "./accounts.ts";
 import { parseCopilot } from "./fetchers.ts";
-import { FETCHERS } from "./readers.ts";
+import { CONNECTORS, FETCHERS } from "./readers.ts";
 import { countdown, evaluate } from "./notify.ts";
 import { ProviderSnapshot, UsageReport } from "./schema.ts";
 import { createUsageService } from "./service.ts";
@@ -545,14 +545,18 @@ describe("account readers", () => {
     );
     assert.deepStrictEqual([r.plan, r.account], ["Individual", "octo"]);
   });
-  it("reads muse login from the keychain and posts only to api.meta.ai", async () => {
+  it("never reads muse's keychain item on a refresh, only when the user connects", async () => {
     const calls: string[] = [];
+    let keychainReads = 0;
     const env = fakeEnv(
       {},
       {},
       {},
       {
-        keychain: async () => JSON.stringify({ access_token: "dca:abc" }),
+        keychain: async () => {
+          keychainReads++;
+          return JSON.stringify({ access_token: "dca:abc" });
+        },
         fetch: (async (url: string | URL | Request) => {
           calls.push(String(url));
           return new Response(
@@ -562,7 +566,15 @@ describe("account readers", () => {
         }) as typeof fetch,
       },
     );
-    const [r] = await FETCHERS.muse!(env, []);
+    let refused = "";
+    await FETCHERS.muse!(env, []).catch((e: Error) => {
+      refused = e.message;
+    });
+    assert.strictEqual(keychainReads, 0);
+    assert.deepStrictEqual(calls, []);
+    assert.include(refused, "Connect Muse");
+    const [r] = await CONNECTORS.muse!(env, []);
+    assert.strictEqual(keychainReads, 1);
     assert.deepStrictEqual(calls, ["https://api.meta.ai/muse-code/key"]);
     assert.strictEqual(r!.windows[0]!.usedPercent, 5);
   });

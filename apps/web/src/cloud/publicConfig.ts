@@ -33,9 +33,7 @@ export function resolveCloudPublicConfig(): CloudPublicConfig {
   const configuredRelayRaw = trimNonEmpty(
     import.meta.env.VITE_HANZO_DEV_RELAY_URL as string | undefined,
   );
-  const relayUrl = configuredRelayRaw
-    ? normalizeSecureRelayUrl(configuredRelayRaw)
-    : null;
+  const relayUrl = configuredRelayRaw ? normalizeSecureRelayUrl(configuredRelayRaw) : null;
   return {
     iamIssuer: normalizeHanzoIssuer(
       trimNonEmpty(import.meta.env.VITE_HANZO_DEV_IAM_ISSUER as string | undefined) ??
@@ -83,5 +81,6 @@ export function resolveRelayTracingConfig() {
 
 export function hasCloudPublicConfig(): boolean {
   const config = resolveCloudPublicConfig();
-  return Boolean(config.relayUrl && config.iamIssuer && config.iamClientId);
+  // The account and sign-in need the identity provider only; a linked Mac is reached over ZAP, not a relay.
+  return Boolean(config.iamIssuer && config.iamClientId);
 }

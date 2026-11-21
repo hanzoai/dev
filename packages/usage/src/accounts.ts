@@ -635,13 +635,12 @@ export const zai: Fetcher = async (env, instances) => {
   );
 };
 
+/** Muse's login without the keychain: what is set in the environment or in Muse's own config file. */
 const museToken = async (env: UsageEnv): Promise<string | undefined> => {
   const direct = firstEnv(env, ["MUSE_DEVICE_TOKEN"]);
   if (direct) return direct;
   const file = parseJson(await env.readText(`${env.home}/.config/muse/auth.json`));
-  const inline = str(file.access_token) ?? str(obj(obj(file.providers).muse).access_token);
-  if (inline) return inline;
-  return str(parseJson(await env.keychain("ai.meta.dev.credentials")).access_token);
+  return str(file.access_token) ?? str(obj(obj(file.providers).muse).access_token);
 };
 
 export const parseMuse = (
@@ -671,11 +670,12 @@ export const parseMuse = (
   return { windows, ...(plan ? { plan } : {}), ...(account ? { account } : {}) };
 };
 
-export const muse: Fetcher = async (env, instances) => {
+const readMuse = async (
+  env: UsageEnv,
+  instances: ReadonlyArray<Instance>,
+  token: string,
+): Promise<ReadonlyArray<ProviderSnapshot>> => {
   const instance = instances[0];
-  const token = await museToken(env);
-  if (!token?.startsWith("dca:"))
-    throw new NotConfigured("Sign in to Muse Code (run `muse login`).");
   const who: Identity = {
     instance: instance?.id ?? "muse",
     ...(instance ? { label: instance.name } : {}),
@@ -697,4 +697,24 @@ export const muse: Fetcher = async (env, instances) => {
     return [failed(env, "muse", who, "No Muse Code subscription is active on this login.")];
   const parsed = parseMuse(body);
   return [{ ...base(env, "muse", "oauth"), ...who, ...parsed }];
+};
+
+/** The timer's reader: never the keychain, which asks the user for a password every time. */
+export const muse: Fetcher = async (env, instances) => {
+  const token = await museToken(env);
+  if (!token?.startsWith("dca:")) throw new NotConfigured("Connect Muse Code to read its usage.");
+  return readMuse(env, instances, token);
+};
+
+/**
+ * The user's "Connect Muse Code": the one read of Muse's keychain item. Only the reading it yields
+ * is kept (never the login), so no later refresh asks again.
+ */
+export const connectMuse: Fetcher = async (env, instances) => {
+  const token =
+    (await museToken(env)) ??
+    str(parseJson(await env.keychain("ai.meta.dev.credentials")).access_token);
+  if (!token?.startsWith("dca:"))
+    throw new NotConfigured("Sign in to Muse Code (run `muse login`).");
+  return readMuse(env, instances, token);
 };

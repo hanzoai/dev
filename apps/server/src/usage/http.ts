@@ -45,7 +45,7 @@ const route = (
       const config = yield* ServerConfig.ServerConfig;
       const request = yield* HttpServerRequest.HttpServerRequest;
       const body =
-        method === "PUT" ? yield* request.json.pipe(Effect.orElseSucceed(() => null)) : null;
+        method !== "GET" ? yield* request.json.pipe(Effect.orElseSucceed(() => null)) : null;
       const runtime = usageRuntimeFor(config.stateDir, {
         platform: yield* HostProcess.Platform,
         home: yield* HostProcess.HomeDirectory,
@@ -83,6 +83,11 @@ export const layer = Layer.mergeAll(
   route("POST", "/v1/usage/refresh", AuthOrchestrationOperateScope, (r, _q, host) =>
     r.refresh(host),
   ),
+  route("POST", "/v1/usage/connect", AuthOrchestrationOperateScope, async (r, req, host) => {
+    const body = req.body as { provider?: unknown } | null;
+    if (typeof body?.provider !== "string") throw new Error("Expected a provider.");
+    return r.connect(body.provider, host);
+  }),
   route("GET", "/v1/usage/tray", AuthOrchestrationReadScope, (r, _q, host) =>
     r.tray(host, new Date()),
   ),
