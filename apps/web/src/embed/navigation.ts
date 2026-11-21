@@ -3,7 +3,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import type { EmbedState } from "./context";
 
 const THREAD = /^\/([^/]+)\/([^/]+)$/;
-const RESERVED = new Set(["settings", "draft", "threads", "projects"]);
+const RESERVED = new Set(["settings", "threads", "projects"]);
 
 /** `<environmentId>/<threadId>` for a thread's address, null for anything else. */
 export function refOf(pathname: string): string | null {

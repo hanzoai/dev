@@ -1,6 +1,7 @@
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
+import type { EnvironmentId } from "@hanzodev/contracts";
 import { startAppServices } from "../appInit";
 import { connectPairing } from "../connection/onboarding";
 import { I18nProvider } from "../i18n/I18nProvider";
@@ -21,7 +22,15 @@ function start() {
   return started.router;
 }
 
-const paired = new Set<string>();
+const paired = new Map<string, EnvironmentId>();
+const waiting = new Map<string, Array<(id: EnvironmentId) => void>>();
+
+/** The environment a runtime became once its pairing finished; resolves at once if it already has. */
+export function whenPaired(runtimeId: string): Promise<EnvironmentId> {
+  const done = paired.get(runtimeId);
+  if (done) return Promise.resolve(done);
+  return new Promise((resolve) => waiting.set(runtimeId, [...(waiting.get(runtimeId) ?? []), resolve]));
+}
 
 /** Redeems the runtime's pairing credential once per session, then draws the core. */
 function Pair({ runtime, children }: { runtime: DevRuntime; children: ReactNode }) {
@@ -35,7 +44,9 @@ function Pair({ runtime, children }: { runtime: DevRuntime; children: ReactNode 
       const result = await pair({ host: runtime.zap.replace(/^https:/, "zaps:"), pairingCode: await runtime.token() });
       if (!live) return;
       if (result._tag === "Success") {
-        paired.add(runtime.id);
+        paired.set(runtime.id, result.value);
+        for (const resolve of waiting.get(runtime.id) ?? []) resolve(result.value);
+        waiting.delete(runtime.id);
         setReady(true);
       } else {
         setFailure(`Could not connect to ${runtime.label}.`);

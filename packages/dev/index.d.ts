@@ -36,3 +36,10 @@ export function DevStart(props: {
   onLink: () => void;
   className?: string;
 }): ReactNode;
+
+export function useDevOpen(): (input: {
+  /** `github.com/<owner>/<name>` or any clone address. */
+  repo: string;
+  /** The branch to start on, or "" for the default. */
+  ref: string;
+}) => Promise<string>;

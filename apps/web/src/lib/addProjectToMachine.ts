@@ -56,7 +56,7 @@ function failureMessage(result: Parameters<typeof squashAtomCommandFailure>[0]):
  * Resolves when the clone finishes, or null once it is removed. A failed or
  * cancelled clone keeps waiting, since the composer offers a retry.
  */
-function waitForClone(environmentId: EnvironmentId, projectId: ProjectId) {
+export function waitForClone(environmentId: EnvironmentId, projectId: ProjectId) {
   return new Promise<ProjectCloneSnapshot | null>((resolve) => {
     const atom = environmentProjectClonesAtom(environmentId);
     let seen = false;
