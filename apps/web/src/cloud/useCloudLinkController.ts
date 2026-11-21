@@ -31,7 +31,6 @@ import {
   updateEnvironmentPreferences as updateEnvironmentPreferencesAtom,
 } from "./linkEnvironmentAtoms";
 import { readCachedCloudLinkState, useCloudLinkState } from "./cloudLinkState";
-import { resolveRelayClerkTokenOptions } from "./publicConfig";
 import { cloudChangeReplacesLink, isManagedTunnelActive } from "./hanzoConnectState";
 
 export interface CloudLinkDesiredState {
@@ -151,7 +150,7 @@ export function useCloudLinkController(environmentId: EnvironmentId | null) {
     if (!canManageLink()) return false;
     const wantsLink = desired.managedTunnel || desired.publish;
     if (wantsLink && readLinkState() === null) return false;
-    const tokenResult = await settlePromise(() => getToken(resolveRelayClerkTokenOptions()));
+    const tokenResult = await settlePromise(() => getToken());
     if (!canManageLink()) return false;
 
     // A failed mutation may have partially applied, so refresh server state on every exit.
@@ -159,7 +158,7 @@ export function useCloudLinkController(environmentId: EnvironmentId | null) {
       // Unlink needs no relay token; failed token reads must still allow it.
       const unlinkResult = await unlinkEnvironment({
         target,
-        clerkToken: tokenResult._tag === "Success" ? (tokenResult.value ?? null) : null,
+        iamToken: tokenResult._tag === "Success" ? (tokenResult.value ?? null) : null,
       });
       refreshManagedTunnelUsage();
       if (unlinkResult._tag === "Failure") {
@@ -186,8 +185,8 @@ export function useCloudLinkController(environmentId: EnvironmentId | null) {
         reportUpdateFailure(squashAtomCommandFailure(tokenResult));
         return false;
       }
-      const clerkToken = tokenResult.value;
-      if (!clerkToken) {
+      const iamToken = tokenResult.value;
+      if (!iamToken) {
         reportUpdateFailure(new Error(m(msg("Sign in to Hanzo Connect before enabling this."))));
         return false;
       }
@@ -206,7 +205,7 @@ export function useCloudLinkController(environmentId: EnvironmentId | null) {
         }
         const linkResult = await linkEnvironment({
           target,
-          clerkToken,
+          iamToken,
           mode: desired.managedTunnel ? "managed" : "publish_only",
         });
         // Any link attempt can change the account's tunnel count.

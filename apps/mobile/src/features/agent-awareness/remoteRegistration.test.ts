@@ -343,7 +343,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       return Response.json({ ok: true });
     });
     Constants.expoConfig!.extra = { relay: { url: "https://relay.example.test/" } };
-    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"));
+    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam-token-user-a"));
     let tokenListener: ((event: { readonly pushToken: string }) => void) | undefined;
     const activity = {
       getId: () => "activity-1",
@@ -402,7 +402,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       return Response.json({ ok: true });
     });
     Constants.expoConfig!.extra = { relay: { url: "https://relay.example.test/" } };
-    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"));
+    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam-token-user-a"));
     let tokenListener: ((event: { readonly pushToken: string }) => void) | undefined;
     const activity = {
       getId: () => "activity-1",
@@ -469,7 +469,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       return Response.json({ ok: true });
     });
     Constants.expoConfig!.extra = { relay: { url: "https://relay.example.test/" } };
-    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"));
+    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam-token-user-a"));
     const activity = {
       getId: () => "activity-1",
       getPushToken: vi.fn(() => Promise.resolve("activity-token")),
@@ -509,7 +509,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       end,
     };
     widgetMocks.getInstances.mockReturnValue([activity] as never);
-    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"));
+    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam-token-user-a"));
     expect(appStateMock.listeners).toHaveLength(1);
 
     setAgentAwarenessRelayTokenProvider(null);
@@ -543,7 +543,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       },
     };
 
-    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"));
+    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam-token-user-a"));
 
     return Effect.gen(function* () {
       yield* runBackgroundOperations();
@@ -585,7 +585,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         url: "https://relay.example.test/",
       },
     };
-    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"));
+    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam-token-user-a"));
 
     return Effect.gen(function* () {
       yield* runBackgroundOperations();
@@ -605,7 +605,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         url: "https://relay.example.test/",
       },
     };
-    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"));
+    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam-token-user-a"));
 
     return Effect.gen(function* () {
       yield* refreshAgentAwarenessRegistration();
@@ -633,7 +633,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       .fn<() => Promise<string | null>>()
       .mockRejectedValueOnce(new Error("auth unavailable"))
       .mockRejectedValueOnce(new Error("auth unavailable"))
-      .mockResolvedValue("clerk-token-user-a");
+      .mockResolvedValue("iam-token-user-a");
     setAgentAwarenessRelayTokenProvider(tokenProvider);
     const tokenListener = vi.mocked(Notifications.addPushTokenListener).mock.calls.at(-1)?.[0];
     expect(tokenListener).toBeDefined();
@@ -673,7 +673,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         return Response.json({ ok: true });
       });
       Constants.expoConfig!.extra = { relay: { url: "https://permission-relay.example.test" } };
-      setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk"), "user-a");
+      setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam"), "user-a");
       return Effect.gen(function* () {
         yield* runBackgroundOperations();
         expect(registrations.at(-1)).toMatchObject({
@@ -743,7 +743,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
     vi.mocked(Notifications.getDevicePushTokenAsync).mockRejectedValue(
       new Error("Default FirebaseApp is not initialized"),
     );
-    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"), "user-a");
+    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam-token-user-a"), "user-a");
 
     return Effect.gen(function* () {
       yield* runBackgroundOperations();
@@ -774,7 +774,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       type: "android",
       data: "fcm-token",
     });
-    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"), "user-a");
+    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam-token-user-a"), "user-a");
 
     return Effect.gen(function* () {
       yield* runBackgroundOperations();
@@ -856,7 +856,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         return Response.json({ ok: true });
       });
       Constants.expoConfig!.extra = { relay: { url: "https://relay.example.test" } };
-      setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk"), "user-a");
+      setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam"), "user-a");
       return Effect.gen(function* () {
         yield* runBackgroundOperations();
         expect(registrations.at(-1)).toMatchObject({
@@ -908,7 +908,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       return Promise.resolve(response);
     });
     Constants.expoConfig!.extra = { relay: { url: "https://relay.example.test" } };
-    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-user-a"), "user-a");
+    setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam-token-user-a"), "user-a");
 
     return Effect.gen(function* () {
       // Hermes' compiled error hashing reads the response's cookie getter.
@@ -938,7 +938,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
       vi.spyOn(Platform, "OS", "get").mockReturnValue("android");
       vi.spyOn(Platform, "Version", "get").mockReturnValue(36);
       Constants.expoConfig!.extra = { relay: { url: "https://relay.example.test" } };
-      setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token"), "user-a");
+      setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam-token"), "user-a");
       releaseAgentAwarenessRelayTokenProvider();
       vi.mocked(configureAndroidAgentNotifications).mockClear();
       return Effect.gen(function* () {
@@ -1025,7 +1025,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
           return { aggregate };
         }),
       );
-      setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token"), "user-a");
+      setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam-token"), "user-a");
 
       return Effect.gen(function* () {
         yield* refreshActiveLiveActivityRemoteRegistration();
@@ -1052,7 +1052,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
               )
             : Effect.succeed({ aggregate: newer });
         });
-        setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token"), "user-a");
+        setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam-token"), "user-a");
 
         const older = yield* Effect.forkChild(
           refreshActiveLiveActivityRemoteRegistration().pipe(Effect.provide(relay)),
@@ -1093,13 +1093,13 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         const relay = fakeRelay(() =>
           Deferred.succeed(requested, undefined).pipe(Effect.andThen(Deferred.await(response))),
         );
-        setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-a"), "user-a");
+        setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam-token-a"), "user-a");
 
         const refreshA = yield* Effect.forkChild(
           refreshActiveLiveActivityRemoteRegistration().pipe(Effect.provide(relay)),
         );
         yield* Effect.promise(() => tokenRequested);
-        setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-b"), "user-b");
+        setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam-token-b"), "user-b");
         const refreshB = yield* Effect.forkChild(
           refreshActiveLiveActivityRemoteRegistration().pipe(Effect.provide(relay)),
         );
@@ -1134,7 +1134,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         const relay = fakeRelay(() =>
           Effect.succeed({ aggregate: ++reads === 1 ? aggregate : idle }),
         );
-        setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token"), "user-a");
+        setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam-token"), "user-a");
 
         const older = yield* Effect.forkChild(
           refreshActiveLiveActivityRemoteRegistration().pipe(Effect.provide(relay)),
@@ -1155,14 +1155,14 @@ describe("makeRelayDeviceRegistrationRequest", () => {
         const relay = fakeRelay(() =>
           Deferred.succeed(requested, undefined).pipe(Effect.andThen(Deferred.await(response))),
         );
-        setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-a"), "user-a");
+        setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam-token-a"), "user-a");
 
         const refresh = yield* Effect.forkChild(
           refreshActiveLiveActivityRemoteRegistration().pipe(Effect.provide(relay)),
         );
         yield* Deferred.await(requested);
         setAgentAwarenessRelayTokenProvider(null);
-        setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token-a"), "user-a");
+        setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam-token-a"), "user-a");
         publishWidgetMock.mockClear();
         yield* Deferred.succeed(response, { aggregate });
         yield* Fiber.join(refresh);
@@ -1185,7 +1185,7 @@ describe("makeRelayDeviceRegistrationRequest", () => {
           });
         });
         const relay = fakeRelay(() => Effect.succeed({ aggregate }));
-        setAgentAwarenessRelayTokenProvider(() => Promise.resolve("clerk-token"), "user-a");
+        setAgentAwarenessRelayTokenProvider(() => Promise.resolve("iam-token"), "user-a");
 
         const refresh = yield* Effect.forkChild(
           refreshActiveLiveActivityRemoteRegistration().pipe(Effect.provide(relay)),

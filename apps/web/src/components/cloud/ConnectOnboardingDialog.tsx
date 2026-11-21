@@ -39,7 +39,7 @@ import {
 import {
   type HanzoConnectAccountPageUrl,
   useHanzoConnectAccountPage,
-} from "../clerk/HanzoConnectAccountPages";
+} from "../account/HanzoConnectAccountPages";
 import { CloudEnvironmentConnectRows } from "./CloudEnvironmentConnectList";
 import { TunnelLimitAlert } from "./TunnelUsage";
 import { Button } from "../ui/button";
@@ -69,7 +69,7 @@ function canPublishOnEnvironment(id: EnvironmentId | null): boolean {
 }
 
 function ConfiguredConnectOnboardingDialog() {
-  // Pending Clerk sessions must not look signed out or activation would look like a new sign-in.
+  // Pending sessions must not look signed out or activation would look like a new sign-in.
   const { isLoaded, isSignedIn, userId } = useAuth({ treatPendingAsSignedOut: false });
   const gt = useGT();
   const m = useMessages();
@@ -234,7 +234,7 @@ function ConfiguredConnectOnboardingDialog() {
   };
 
   const openAccountPage = accountPage.open;
-  // The account page is a Clerk modal, so close this dialog before it opens.
+  // The account page is a modal, so close this dialog before it opens.
   const leaveForAccountPage = openAccountPage
     ? (page: HanzoConnectAccountPageUrl) => {
         complete();

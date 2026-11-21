@@ -11,8 +11,7 @@ import { isElectron } from "../env";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { useRelayEnvironmentDiscovery } from "../state/environments";
 import { InstallHanzoCommands } from "./InstallHanzoCommands";
-import { retryClerkLoad, useClerkLoadFailed } from "./clerk/clerkLoadFailure";
-import { useHanzoConnectAuthPrompt } from "./clerk/useHanzoConnectAuthPrompt";
+import { useHanzoConnectAuthPrompt } from "./account/useHanzoConnectAuthPrompt";
 import { CloudEnvironmentConnectRows } from "./cloud/CloudEnvironmentConnectList";
 import { Button } from "./ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
@@ -69,7 +68,6 @@ export function HostedEmptyState() {
 
 function HanzoConnectSteps() {
   const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
-  const loadFailed = useClerkLoadFailed();
   const { openAuthPrompt } = useHanzoConnectAuthPrompt();
   // Adding the first computer unmounts this screen. Wait for all health checks
   // so every compatible registration is queued before that happens.
@@ -81,11 +79,7 @@ function HanzoConnectSteps() {
   return (
     <>
       <SetupStep number={1}>
-        {loadFailed ? (
-          <Button size="sm" onClick={retryClerkLoad}>
-            <T>Retry sign-in</T>
-          </Button>
-        ) : isSignedIn ? (
+        {isSignedIn ? (
           <p className="flex items-center gap-1.5 text-muted-foreground">
             <CheckIcon className="size-4" />
             <T>Signed in</T>

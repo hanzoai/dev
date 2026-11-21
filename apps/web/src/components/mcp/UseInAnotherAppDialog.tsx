@@ -52,7 +52,7 @@ import { useEnvironmentQuery } from "~/state/query";
 import { relayEnvironmentDiscovery } from "~/state/relay";
 import { useEnvironmentScope, useEnvironmentSessionState } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
-import { useHanzoConnectAuthPrompt } from "../clerk/useHanzoConnectAuthPrompt";
+import { useHanzoConnectAuthPrompt } from "../account/useHanzoConnectAuthPrompt";
 import { CommandBlock } from "../CommandBlock";
 import { AccessOption, accessConfig } from "../auth/ConnectAgentSurface";
 import { useAccessEnvironment } from "../settings/useAccessEnvironment";
@@ -429,7 +429,7 @@ function GateScreen({
             ),
           ]}
         >
-          {/* Clerk's sign-in is its own modal, so this dialog closes first. */}
+          {/* The sign-in is its own modal, so this dialog closes first. */}
           <Button
             onClick={() => {
               close();

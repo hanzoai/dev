@@ -221,7 +221,7 @@ const CLOUD_LINK_REQUEST_TIMEOUT_MS = 60_000;
 /** Links the supervised environment, signing its requests with this device's own credential. */
 export const linkEnvironmentToCloudWithPreference = Effect.fn(
   "linkEnvironment.linkEnvironmentToCloudWithPreference",
-)(function* (input: { readonly clerkToken: string; readonly liveActivitiesEnabled: boolean }) {
+)(function* (input: { readonly iamToken: string; readonly liveActivitiesEnabled: boolean }) {
   const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
   const prepared = yield* SubscriptionRef.get(supervisor.prepared);
   if (Option.isNone(prepared)) {
@@ -262,7 +262,7 @@ export const linkEnvironmentToCloudWithPreference = Effect.fn(
   const liveActivitiesEnabled = input.liveActivitiesEnabled;
   const challenge = yield* relayClient
     .createEnvironmentLinkChallenge({
-      clerkToken: input.clerkToken,
+      iamToken: input.iamToken,
       payload: {
         notificationsEnabled: true,
         liveActivitiesEnabled,
@@ -298,7 +298,7 @@ export const linkEnvironmentToCloudWithPreference = Effect.fn(
   );
   const link = yield* relayClient
     .linkEnvironment({
-      clerkToken: input.clerkToken,
+      iamToken: input.iamToken,
       payload: {
         deviceId,
         proof,

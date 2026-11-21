@@ -44,7 +44,7 @@ const updateEnvironment = vi.fn<
 const linkEnvironment = vi.fn<
   (
     id: EnvironmentId,
-    input: { readonly clerkToken: string; readonly liveActivitiesEnabled: boolean },
+    input: { readonly iamToken: string; readonly liveActivitiesEnabled: boolean },
   ) => Effect.Effect<void, CloudEnvironmentLinkError>
 >(() => Effect.void);
 
@@ -78,7 +78,7 @@ describe("liveActivityPreferences", () => {
           linkEnvironment,
           enabled: false,
           previousEnabled: true,
-          clerkToken: "clerk-token",
+          iamToken: "iam-token",
           connections: [connection, otherConnection],
           canConfigureEnvironment: () => false,
           canUpdateEnvironment: () => true,
@@ -118,7 +118,7 @@ describe("liveActivityPreferences", () => {
           linkEnvironment,
           enabled: true,
           previousEnabled: false,
-          clerkToken: "clerk-token",
+          iamToken: "iam-token",
           connections: [connection],
           canConfigureEnvironment: () => true,
           canUpdateEnvironment: () => true,
@@ -158,7 +158,7 @@ describe("liveActivityPreferences", () => {
         linkEnvironment,
         enabled: true,
         previousEnabled: false,
-        clerkToken: "clerk-token",
+        iamToken: "iam-token",
         connections: [readOnlyConnection, dpopConnection],
         canUpdateEnvironment: (environmentId) => environmentId === connection.environmentId,
         canConfigureEnvironment: (environmentId) => environmentId === connection.environmentId,
@@ -168,7 +168,7 @@ describe("liveActivityPreferences", () => {
         liveActivitiesEnabled: true,
       });
       expect(linkEnvironment).toHaveBeenCalledExactlyOnceWith(connection.environmentId, {
-        clerkToken: "clerk-token",
+        iamToken: "iam-token",
         liveActivitiesEnabled: true,
       });
     }).pipe(withRelayClient);
@@ -187,7 +187,7 @@ describe("liveActivityPreferences", () => {
         linkEnvironment,
         enabled: false,
         previousEnabled: true,
-        clerkToken: "clerk-token",
+        iamToken: "iam-token",
         connections: [dpopConnection],
         canConfigureEnvironment: () => false,
         canUpdateEnvironment: () => true,
@@ -211,7 +211,7 @@ describe("liveActivityPreferences", () => {
         linkEnvironment,
         enabled: false,
         previousEnabled: true,
-        clerkToken: "clerk-token",
+        iamToken: "iam-token",
         connections: [connection],
         canConfigureEnvironment: () => canConfigureEnvironment,
         canUpdateEnvironment: () => canConfigureEnvironment,

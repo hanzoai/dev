@@ -7,10 +7,10 @@ import { useManagedTunnelUsage } from "../../cloud/managedRelayState";
 import { HANZOCHAT_SUBSCRIPTION_URL, TunnelUsageMeter } from "../cloud/TunnelUsage";
 import { Button } from "../ui/button";
 import {
-  ClerkUserProfilePage,
-  ClerkUserProfileRefreshButton,
-  ClerkUserProfileRow,
-} from "./ClerkUserProfilePage";
+  AccountPage,
+  AccountPageRefreshButton,
+  AccountPageRow,
+} from "./AccountPage";
 import { useHanzoChatLink } from "./useHanzoChatLink";
 
 function planLabel(link: RelayHanzoChatLink): ReactNode {
@@ -69,14 +69,14 @@ export function HanzoChatUserProfilePage() {
   const link = data?.link ?? null;
 
   return (
-    <ClerkUserProfilePage
+    <AccountPage
       title="Hanzo Chat"
       description={gt(
         "Link a paid Hanzo Chat account for more Hanzo Connect tunnels: up to {pro} with Pro, {premier} with Premier.",
         { pro: HANZOCHAT_PLAN_TUNNEL_LIMITS.pro, premier: HANZOCHAT_PLAN_TUNNEL_LIMITS.premier },
       )}
       action={
-        <ClerkUserProfileRefreshButton
+        <AccountPageRefreshButton
           disabled={pending !== null}
           isPending={linkState.isPending}
           onClick={usage.refresh}
@@ -96,7 +96,7 @@ export function HanzoChatUserProfilePage() {
         </p>
       ) : (
         <ul className="border-t">
-          <ClerkUserProfileRow icon={<MessageSquareIcon className="size-4" />}>
+          <AccountPageRow icon={<MessageSquareIcon className="size-4" />}>
             <div className="flex items-start gap-4">
               <div className="min-w-0 flex-1">
                 <h3 className="truncate text-sm leading-4.5 font-medium text-foreground">
@@ -138,7 +138,7 @@ export function HanzoChatUserProfilePage() {
                 </Button>
               )}
             </div>
-          </ClerkUserProfileRow>
+          </AccountPageRow>
           {usage.used !== null && usage.limit !== null ? (
             <li className="border-t py-4">
               <TunnelUsageMeter used={usage.used} limit={usage.limit} />
@@ -146,6 +146,6 @@ export function HanzoChatUserProfilePage() {
           ) : null}
         </ul>
       )}
-    </ClerkUserProfilePage>
+    </AccountPage>
   );
 }

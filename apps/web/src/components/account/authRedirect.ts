@@ -1,11 +1,11 @@
-export interface ClerkSignInProps {
+export interface SignInProps {
   forceRedirectUrl?: string;
   signUpForceRedirectUrl?: string;
 }
 
-export function resolveClerkSignInProps(href: string, isElectron: boolean): ClerkSignInProps {
+export function resolveSignInProps(href: string, isElectron: boolean): SignInProps {
   if (isElectron) {
-    // Electron routes through the hash, so reset any Clerk virtual pathname without losing the Hanzo page.
+    // Electron routes through the hash, so reset any sign-in virtual pathname without losing the Hanzo page.
     const redirectUrl = new URL(href);
     redirectUrl.pathname = "/";
     redirectUrl.search = "";

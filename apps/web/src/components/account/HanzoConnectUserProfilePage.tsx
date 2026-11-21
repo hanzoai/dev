@@ -28,10 +28,10 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "..
 import { toastManager } from "../ui/toast";
 import { stackedThreadToast } from "../ui/toastHelpers";
 import {
-  ClerkUserProfilePage,
-  ClerkUserProfileRefreshButton,
-  ClerkUserProfileRow,
-} from "./ClerkUserProfilePage";
+  AccountPage,
+  AccountPageRefreshButton,
+  AccountPageRow,
+} from "./AccountPage";
 import { m, type MessageResolver } from "../../i18n/messages";
 import { useHanzoChatLink } from "./useHanzoChatLink";
 
@@ -64,7 +64,7 @@ function HanzoConnectEnvironmentRow(props: {
   const gt = useGT();
   const m = useMessages();
   return (
-    <ClerkUserProfileRow icon={<ServerIcon className="size-4" />}>
+    <AccountPageRow icon={<ServerIcon className="size-4" />}>
       <Collapsible open={props.confirmationOpen} onOpenChange={props.onConfirmationChange}>
         <div className="flex items-start gap-4">
           <div className="min-w-0 flex-1">
@@ -130,7 +130,7 @@ function HanzoConnectEnvironmentRow(props: {
           </div>
         </CollapsiblePanel>
       </Collapsible>
-    </ClerkUserProfileRow>
+    </AccountPageRow>
   );
 }
 
@@ -281,13 +281,13 @@ export function HanzoConnectUserProfilePage() {
     !environmentsState.accountId || (environmentsState.data === null && !environmentsState.error);
 
   return (
-    <ClerkUserProfilePage
+    <AccountPage
       title="Hanzo Connect"
       description={gt(
         "Environments registered to your account. Connections on this device are managed in Settings.",
       )}
       action={
-        <ClerkUserProfileRefreshButton
+        <AccountPageRefreshButton
           disabled={deregisteringEnvironmentId !== null}
           isPending={environmentsState.isPending}
           onClick={refreshAll}
@@ -345,6 +345,6 @@ export function HanzoConnectUserProfilePage() {
           </div>
         )}
       </div>
-    </ClerkUserProfilePage>
+    </AccountPage>
   );
 }

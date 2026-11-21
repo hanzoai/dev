@@ -1,4 +1,4 @@
-import { useAuth, useClerk } from "../../cloud/hanzoWebAuth";
+import { useAuth, useHanzoSession } from "../../cloud/hanzoWebAuth";
 import { useAtomValue } from "@effect/atom-react";
 import { managedRelaySessionAtom } from "@hanzodev/client-runtime/relay";
 import {
@@ -15,8 +15,7 @@ import { m } from "../../i18n/messages";
 
 import { isElectron } from "../../env";
 import { runConnectMcpApproval } from "../../state/connectMcpApproval";
-import { resolveClerkSignInProps } from "../clerk/authRedirect";
-import { retryClerkLoad, useClerkLoadFailed } from "../clerk/clerkLoadFailure";
+import { resolveSignInProps } from "../account/authRedirect";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { StandalonePage, StandalonePageHeader } from "../ui/standalone-page";
@@ -89,17 +88,16 @@ export function ApproveAgentSurface() {
   const [transport] = useState(() =>
     environmentId === null ? null : connectTransport(environmentId, setEnvironment),
   );
-  const clerk = useClerk();
+  const auth = useHanzoSession();
   const { isLoaded, isSignedIn } = useAuth();
-  const loadFailed = useClerkLoadFailed();
   const session = useAtomValue(managedRelaySessionAtom);
   const signInOpened = useRef(false);
 
   const openSignIn = () =>
-    clerk.openSignIn(resolveClerkSignInProps(window.location.href, isElectron));
+    auth.openSignIn(resolveSignInProps(window.location.href, isElectron));
   const openSignInOnLoad = useEffectEvent(openSignIn);
 
-  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- opens Clerk sign-in once Clerk has loaded and nobody is signed in
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- opens sign-in once the session has loaded and nobody is signed in
   useEffect(() => {
     if (!isLoaded || isSignedIn || signInOpened.current || framed) return;
     signInOpened.current = true;
@@ -121,23 +119,6 @@ export function ApproveAgentSurface() {
         title={gt("Open this page in its own window")}
         description={gt("For your safety, agent sign-ins cannot be approved inside another site.")}
       />
-    );
-  }
-
-  if (loadFailed) {
-    return (
-      <Message
-        title={gt("Could not load sign-in")}
-        description={gt(
-          "Hanzo Connect sign-in did not load. Check your connection, then try again.",
-        )}
-      >
-        <div className="mt-6">
-          <Button type="button" onClick={retryClerkLoad}>
-            <T>Retry sign-in</T>
-          </Button>
-        </div>
-      </Message>
     );
   }
 
@@ -193,7 +174,7 @@ export function ApproveAgentSurface() {
           <Button
             size="sm"
             variant="link"
-            onClick={() => void clerk.signOut({ redirectUrl: window.location.href })}
+            onClick={() => void auth.signOut({ redirectUrl: window.location.href })}
             type="button"
           >
             <T>Use another account</T>

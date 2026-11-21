@@ -89,7 +89,7 @@ import {
   supportsDesktopAppUpdate,
 } from "~/versionSkew";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
-import { RemoveHanzoConnectEnvironmentDialog } from "../clerk/RemoveHanzoConnectEnvironmentDialog";
+import { RemoveHanzoConnectEnvironmentDialog } from "../account/RemoveHanzoConnectEnvironmentDialog";
 import { authEnvironment } from "~/state/auth";
 import { environmentCatalog } from "~/connection/catalog";
 import {

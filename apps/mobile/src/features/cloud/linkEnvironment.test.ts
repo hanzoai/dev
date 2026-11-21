@@ -147,7 +147,7 @@ const linkPreparedEnvironment = (liveActivitiesEnabled: boolean) =>
   Effect.flatMap(linkedSupervisor, (supervisor) =>
     withCloudServices(
       linkEnvironmentToCloudWithPreference({
-        clerkToken: "clerk-token",
+        iamToken: "iam-token",
         liveActivitiesEnabled,
       }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor)),
     ),

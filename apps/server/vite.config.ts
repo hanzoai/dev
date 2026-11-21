@@ -148,12 +148,6 @@ export default mergeConfig(
         __HANZO_DEV_BUILD_CHANNEL__: JSON.stringify(cliBuildChannel),
         __HANZO_DEV_TELEMETRY_CHANNEL__: JSON.stringify(telemetryChannel),
         __HANZO_DEV_BUILD_RELAY_URL__: JSON.stringify(repoEnv.HANZO_DEV_RELAY_URL?.trim() ?? ""),
-        __HANZO_DEV_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(
-          repoEnv.HANZO_DEV_CLERK_PUBLISHABLE_KEY?.trim() ?? "",
-        ),
-        __HANZO_DEV_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__: JSON.stringify(
-          repoEnv.HANZO_DEV_CLERK_CLI_OAUTH_CLIENT_ID?.trim() ?? "",
-        ),
         __HANZO_DEV_BUILD_RELAY_CLIENT_OTLP_TRACES_URL__: JSON.stringify(
           repoEnv.HANZO_DEV_RELAY_CLIENT_OTLP_TRACES_URL?.trim() ?? "",
         ),

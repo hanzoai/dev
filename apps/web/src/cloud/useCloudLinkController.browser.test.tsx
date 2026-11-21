@@ -91,10 +91,6 @@ vi.mock(import("./cloudLinkState"), async (original) => ({
     refresh: testState.refreshLink,
   })) as never,
 }));
-vi.mock(import("./publicConfig"), async (original) => ({
-  ...(await original()),
-  resolveRelayClerkTokenOptions: () => ({}) as never,
-}));
 
 import { CloudEnvironmentLinkError } from "./linkEnvironment";
 import { useCloudLinkController, type CloudLinkDesiredState } from "./useCloudLinkController";
@@ -153,7 +149,7 @@ function setup() {
   testState.snapshot = linkedState;
   testState.renderedSnapshot = linkedState;
   testState.relayProviderKind = null;
-  testState.getToken.mockReset().mockResolvedValue("clerk-token");
+  testState.getToken.mockReset().mockResolvedValue("iam-token");
   for (const command of [
     testState.link,
     testState.unlink,
@@ -198,7 +194,7 @@ describe("useCloudLinkController", () => {
       await using screen = await mountController();
       testState.getToken.mockImplementationOnce(async () => {
         testState.scopes.delete(scope);
-        return "clerk-token";
+        return "iam-token";
       });
 
       expect(await screen.reconcile({ managedTunnel: false, publish: false })).toBe(false);
@@ -211,7 +207,7 @@ describe("useCloudLinkController", () => {
     await using screen = await mountController();
     testState.getToken.mockImplementationOnce(async () => {
       testState.snapshot = null;
-      return "clerk-token";
+      return "iam-token";
     });
 
     expect(await screen.reconcile({ managedTunnel: true, publish: true })).toBe(false);
@@ -224,7 +220,7 @@ describe("useCloudLinkController", () => {
     testState.getToken.mockRejectedValueOnce(new Error("Cloud sign-in unavailable"));
 
     expect(await screen.reconcile({ managedTunnel: false, publish: false })).toBe(true);
-    expect(testState.unlink).toHaveBeenCalledExactlyOnceWith({ target, clerkToken: null });
+    expect(testState.unlink).toHaveBeenCalledExactlyOnceWith({ target, iamToken: null });
     expect(testState.link).not.toHaveBeenCalled();
     expect(testState.preferences).not.toHaveBeenCalled();
   });

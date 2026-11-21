@@ -76,12 +76,12 @@ const SnapShotIcon = createLucideIcon("snap-shot", [
 ]);
 
 const HanzoConnectSidebarSignIn = lazy(() =>
-  import("../clerk/HanzoConnectSidebarSignIn").then((module) => ({
+  import("../account/HanzoConnectSidebarSignIn").then((module) => ({
     default: module.HanzoConnectSidebarSignIn,
   })),
 );
 const HanzoConnectSidebarAvatar = lazy(() =>
-  import("../clerk/HanzoConnectSidebarSignIn").then((module) => ({
+  import("../account/HanzoConnectSidebarSignIn").then((module) => ({
     default: module.HanzoConnectSidebarAvatar,
   })),
 );

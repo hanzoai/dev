@@ -1540,8 +1540,8 @@ function HanzoAccountModal({ controller }: { readonly controller: HanzoWebAuthCo
 }
 
 function HanzoManagedRelayBridge({ children }: { readonly children: ReactNode }) {
-  const clerk = useClerk();
-  return <ManagedRelayAuthProvider clerk={clerk}>{children}</ManagedRelayAuthProvider>;
+  const session = useHanzoSession();
+  return <ManagedRelayAuthProvider session={session}>{children}</ManagedRelayAuthProvider>;
 }
 
 export function HanzoManagedAuthShell({ children }: { readonly children: ReactNode }) {
@@ -1619,7 +1619,7 @@ export function useUser() {
   };
 }
 
-export function useClerk() {
+export function useHanzoSession() {
   const controller = useController();
   const isLoaded = useSyncExternalStore(
     controller.subscribe,
@@ -1634,7 +1634,6 @@ export function useClerk() {
   const activeAccountId = activeAccount?.id ?? null;
 
   return {
-    status: "ready" as "ready" | "error" | "loading",
     loaded: isLoaded,
     user: activeAccountId ? { id: activeAccountId } : null,
     session: activeAccountId

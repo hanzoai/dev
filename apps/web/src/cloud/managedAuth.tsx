@@ -15,7 +15,6 @@ import { useEffect, type ReactNode } from "react";
 import { environmentCatalog } from "../connection/catalog";
 import { runtime } from "../lib/runtime";
 import { appAtomRegistry } from "../rpc/atomRegistry";
-import { resolveRelayClerkTokenOptions } from "./publicConfig";
 
 export function deactivateManagedRelayAuthentication(): void {
   setManagedRelaySession(appAtomRegistry, null);
@@ -23,27 +22,27 @@ export function deactivateManagedRelayAuthentication(): void {
 
 export function activateManagedRelayAuthentication(
   accountId: string,
-  readClerkToken: () => Promise<string | null>,
+  readIamToken: () => Promise<string | null>,
 ): void {
   setManagedRelaySession(appAtomRegistry, {
     accountId,
-    readClerkToken,
+    readIamToken,
   });
 }
 
-interface ManagedRelayClerkInstance extends CloudAccountSource {
+interface ManagedRelayIamSession extends CloudAccountSource {
   readonly session: {
     readonly id: string;
-    readonly getToken: (options?: { readonly template?: string }) => Promise<string | null>;
+    readonly getToken: () => Promise<string | null>;
   } | null;
 }
 
-function clerkTokenReader(clerk: ManagedRelayClerkInstance): () => Promise<string | null> {
+function iamTokenReader(session: ManagedRelayIamSession): () => Promise<string | null> {
   return async () =>
-    clerk.session ? await clerk.session.getToken(resolveRelayClerkTokenOptions()) : null;
+    session.session ? await session.session.getToken() : null;
 }
 
-const managedRelayAccountService = createCloudAccountService<ManagedRelayClerkInstance>({
+const managedRelayAccountService = createCloudAccountService<ManagedRelayIamSession>({
   deactivate: deactivateManagedRelayAuthentication,
   detach: deactivateManagedRelayAuthentication,
   cleanUp: async () => {
@@ -63,17 +62,17 @@ const managedRelayAccountService = createCloudAccountService<ManagedRelayClerkIn
     }
   },
   activate: ({ source, accountId }) =>
-    activateManagedRelayAuthentication(accountId, clerkTokenReader(source)),
+    activateManagedRelayAuthentication(accountId, iamTokenReader(source)),
 });
 
 export function ManagedRelayAuthProvider({
-  clerk,
+  session,
   children,
 }: {
-  readonly clerk: ManagedRelayClerkInstance;
+  readonly session: ManagedRelayIamSession;
   readonly children: ReactNode;
 }) {
   // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- attaches the auth source to the managed relay account service for the provider's lifetime
-  useEffect(() => managedRelayAccountService.attach(clerk), [clerk]);
+  useEffect(() => managedRelayAccountService.attach(session), [session]);
   return children;
 }

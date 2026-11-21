@@ -72,11 +72,7 @@ vi.mock(import("../../cloud/hanzoWebAuth"), async (original) => ({
   ...(await original()),
   useAuth: (() => state.auth) as never,
 }));
-vi.mock(import("../clerk/clerkLoadFailure"), async (original) => ({
-  ...(await original()),
-  useClerkLoadFailed: () => false,
-}));
-vi.mock(import("../clerk/useHanzoConnectAuthPrompt"), async (original) => ({
+vi.mock(import("../account/useHanzoConnectAuthPrompt"), async (original) => ({
   ...(await original()),
   useHanzoConnectAuthPrompt: (() => ({ openAuthPrompt: () => {} })) as never,
 }));

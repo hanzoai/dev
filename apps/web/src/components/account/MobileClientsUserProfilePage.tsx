@@ -13,10 +13,10 @@ import {
   mobileClientUpdatedAtLabel,
 } from "./MobileClientsUserProfilePage.logic";
 import {
-  ClerkUserProfilePage,
-  ClerkUserProfileRefreshButton,
-  ClerkUserProfileRow,
-} from "./ClerkUserProfilePage";
+  AccountPage,
+  AccountPageRefreshButton,
+  AccountPageRow,
+} from "./AccountPage";
 
 const MOBILE_CLIENT_SKELETON_ROWS = ["primary", "secondary"] as const;
 
@@ -41,7 +41,7 @@ function MobileClientRow({ device }: { readonly device: RelayClientDeviceRecord 
   const gt = useGT();
   const m = useMessages();
   return (
-    <ClerkUserProfileRow icon={<SmartphoneIcon className="size-4" />}>
+    <AccountPageRow icon={<SmartphoneIcon className="size-4" />}>
       <div className="flex flex-col gap-0.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
         <div className="min-w-0">
           <h3 className="truncate text-sm leading-4.5 font-medium text-foreground">
@@ -68,7 +68,7 @@ function MobileClientRow({ device }: { readonly device: RelayClientDeviceRecord 
       <p className="mt-1.5 text-xs leading-4.5 text-muted-foreground/80">
         {mobileClientNotificationDetail(device, m)}
       </p>
-    </ClerkUserProfileRow>
+    </AccountPageRow>
   );
 }
 
@@ -125,11 +125,11 @@ export function MobileClientsUserProfilePage() {
   const hasErrorWithoutData = devicesState.error !== null && devicesState.data === null;
 
   return (
-    <ClerkUserProfilePage
+    <AccountPage
       title={gt("Mobile clients")}
       description={gt("Mobile devices that get notifications from your environments.")}
       action={
-        <ClerkUserProfileRefreshButton
+        <AccountPageRefreshButton
           isPending={devicesState.isPending}
           onClick={devicesState.refresh}
         />
@@ -167,6 +167,6 @@ export function MobileClientsUserProfilePage() {
           </div>
         )}
       </div>
-    </ClerkUserProfilePage>
+    </AccountPage>
   );
 }

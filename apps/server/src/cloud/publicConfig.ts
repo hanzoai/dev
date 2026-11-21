@@ -9,19 +9,15 @@ import {
   DEFAULT_HANZO_RELAY_URL,
   normalizeHanzoIssuer,
 } from "@hanzodev/shared/hanzoIamAuth";
-import { clerkFrontendApiUrlFromPublishableKey } from "@hanzodev/shared/relayAuth";
 import { isRelayTracingEnabled } from "@hanzodev/shared/otelEnvironment";
 import { normalizeSecureRelayUrl } from "@hanzodev/shared/relayUrl";
 import * as Config from "effect/Config";
-import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 
 declare const __HANZO_DEV_BUILD_RELAY_URL__: string | undefined;
 declare const __HANZO_DEV_BUILD_CHANNEL__: "nightly" | "latest" | undefined;
-declare const __HANZO_DEV_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
-declare const __HANZO_DEV_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__: string | undefined;
 declare const __HANZO_DEV_BUILD_IAM_ISSUER__: string | undefined;
 declare const __HANZO_DEV_BUILD_IAM_CLIENT_ID__: string | undefined;
 declare const __HANZO_DEV_BUILD_RELAY_CLIENT_OTLP_TRACES_URL__: string | undefined;
@@ -63,16 +59,6 @@ const buildTimeRelayUrl =
   typeof __HANZO_DEV_BUILD_RELAY_URL__ === "undefined"
     ? DEFAULT_HANZO_RELAY_URL
     : (normalizeSecureRelayUrl(__HANZO_DEV_BUILD_RELAY_URL__) ?? DEFAULT_HANZO_RELAY_URL);
-const buildTimeClerkPublishableKey = readBuildTimeValue(
-  typeof __HANZO_DEV_BUILD_CLERK_PUBLISHABLE_KEY__ === "undefined"
-    ? undefined
-    : __HANZO_DEV_BUILD_CLERK_PUBLISHABLE_KEY__,
-);
-const buildTimeClerkCliOAuthClientId = readBuildTimeValue(
-  typeof __HANZO_DEV_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__ === "undefined"
-    ? undefined
-    : __HANZO_DEV_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__,
-);
 const buildTimeIamIssuer = readBuildTimeValue(
   typeof __HANZO_DEV_BUILD_IAM_ISSUER__ === "undefined"
     ? undefined
@@ -191,63 +177,26 @@ export interface CloudCliOAuthConfig {
 }
 
 export function makeCloudCliOAuthConfig({
-  clerkPublishableKeyFallback = buildTimeClerkPublishableKey,
-  clerkCliOAuthClientIdFallback = buildTimeClerkCliOAuthClientId,
   iamIssuerFallback = buildTimeIamIssuer || DEFAULT_HANZO_IAM_ISSUER,
   iamClientIdFallback = buildTimeIamClientId || DEFAULT_HANZO_IAM_CLIENT_ID,
 }: {
-  readonly clerkPublishableKeyFallback?: string;
-  readonly clerkCliOAuthClientIdFallback?: string;
   readonly iamIssuerFallback?: string;
   readonly iamClientIdFallback?: string;
 } = {}) {
   return Config.all({
-    clerkPublishableKey: Config.String("HANZO_DEV_CLERK_PUBLISHABLE_KEY").pipe(
-      Config.withDefault(clerkPublishableKeyFallback),
-      Config.map((value) => value.trim()),
-    ),
-    clerkClientId: Config.String("HANZO_DEV_CLERK_CLI_OAUTH_CLIENT_ID").pipe(
-      Config.withDefault(clerkCliOAuthClientIdFallback),
-      Config.map((value) => value.trim()),
-    ),
     iamIssuer: makePublicValueConfig("HANZO_DEV_IAM_ISSUER", iamIssuerFallback),
     iamClientId: makePublicValueConfig("HANZO_DEV_IAM_CLIENT_ID", iamClientIdFallback),
   }).pipe(
-    Config.mapEffect(({ clerkPublishableKey, clerkClientId, iamIssuer, iamClientId }) => {
-      if (clerkPublishableKey && clerkClientId) {
-        return Effect.try({
-          try: () => clerkFrontendApiUrlFromPublishableKey(clerkPublishableKey),
-          catch: (cause) =>
-            new Config.ConfigError(
-              new ConfigProvider.SourceError({
-                message: "Failed to derive Clerk Frontend API URL from the publishable key.",
-                cause,
-              }),
-            ),
-        }).pipe(
-          Effect.map(
-            (clerkFrontendApiUrl) =>
-              ({
-                tokenEndpoint: `${clerkFrontendApiUrl}/oauth/token`,
-                deviceAuthorizationEndpoint: `${clerkFrontendApiUrl}/oauth/device_authorization`,
-                clientId: clerkClientId,
-                loopbackPort: CLOUD_CLI_OAUTH_LOOPBACK_PORT,
-                redirectUri: connectLoopbackRedirectUri(CLOUD_CLI_OAUTH_LOOPBACK_PORT),
-                scopes: CLOUD_CLI_OAUTH_SCOPES,
-              }) satisfies CloudCliOAuthConfig,
-          ),
-        );
-      }
-
+    Config.map(({ iamIssuer, iamClientId }) => {
       const issuer = normalizeHanzoIssuer(iamIssuer);
-      return Effect.succeed({
+      return {
         tokenEndpoint: `${issuer}/oauth/token`,
         deviceAuthorizationEndpoint: `${issuer}/oauth/device`,
         clientId: iamClientId,
         loopbackPort: CLOUD_CLI_OAUTH_LOOPBACK_PORT,
         redirectUri: connectLoopbackRedirectUri(CLOUD_CLI_OAUTH_LOOPBACK_PORT),
         scopes: CLOUD_CLI_OAUTH_SCOPES,
-      } satisfies CloudCliOAuthConfig);
+      } satisfies CloudCliOAuthConfig;
     }),
   );
 }

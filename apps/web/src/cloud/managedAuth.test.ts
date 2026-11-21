@@ -29,7 +29,7 @@ describe("managed relay authentication", () => {
     activateManagedRelayAuthentication("account-1", async () => "account-1-token");
     expect(appAtomRegistry.get(managedRelaySessionAtom)?.accountId).toBe("account-1");
     const token = await Effect.fromNullishOr(appAtomRegistry.get(managedRelaySessionAtom)).pipe(
-      Effect.flatMap((session) => session.readClerkToken()),
+      Effect.flatMap((session) => session.readIamToken()),
       Effect.runPromise,
     );
     expect(token).toBe("account-1-token");

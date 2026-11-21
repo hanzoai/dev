@@ -1,16 +1,15 @@
-import { useAuth, useClerk } from "../../cloud/hanzoWebAuth";
+import { useAuth, useHanzoSession } from "../../cloud/hanzoWebAuth";
 import { readConnectAuthorizeRequest } from "@hanzodev/shared/connectAuth";
 import { msg, T, useGT, useMessages } from "gt-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import {
-  buildConnectCliClerkAuthorizeUrl,
+  buildConnectCliAuthorizeUrl,
   connectCliSignInRedirectUrl,
 } from "../../cloud/connectCliAuth";
 import { isElectron } from "../../env";
 import { StandalonePage, StandalonePageHeader } from "../ui/standalone-page";
-import { resolveClerkSignInProps } from "../clerk/authRedirect";
-import { retryClerkLoad, useClerkLoadFailed } from "../clerk/clerkLoadFailure";
+import { resolveSignInProps } from "../account/authRedirect";
 import { Button } from "../ui/button";
 
 const invalidLinkMessage = {
@@ -25,9 +24,8 @@ export function ConnectCliAuthorizeSurface() {
   const [request] = useState(() => readConnectAuthorizeRequest(new URL(window.location.href)));
   const gt = useGT();
   const m = useMessages();
-  const clerk = useClerk();
+  const auth = useHanzoSession();
   const { isLoaded, isSignedIn } = useAuth();
-  const loadFailed = useClerkLoadFailed();
   const signInOpened = useRef(false);
   const redirecting = useRef(false);
 
@@ -35,8 +33,8 @@ export function ConnectCliAuthorizeSurface() {
     if (!request) {
       return;
     }
-    clerk.openSignIn(
-      resolveClerkSignInProps(
+    auth.openSignIn(
+      resolveSignInProps(
         connectCliSignInRedirectUrl(request, window.location.href),
         isElectron,
       ),
@@ -44,7 +42,7 @@ export function ConnectCliAuthorizeSurface() {
   };
   const openSignInOnLoad = useEffectEvent(openSignIn);
 
-  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- opens Clerk sign-in or navigates the window to the authorize URL once Clerk has loaded
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- opens sign-in or navigates the window to the authorize URL once the session has loaded
   useEffect(() => {
     if (!request || !isLoaded || redirecting.current) {
       return;
@@ -56,7 +54,7 @@ export function ConnectCliAuthorizeSurface() {
       }
       return;
     }
-    const authorizeUrl = buildConnectCliClerkAuthorizeUrl(request);
+    const authorizeUrl = buildConnectCliAuthorizeUrl(request);
     if (!authorizeUrl) {
       return;
     }
@@ -87,13 +85,7 @@ export function ConnectCliAuthorizeSurface() {
             : gt("Sign in to continue authorizing Hanzo Connect for your CLI.")
         }
       />
-      {loadFailed ? (
-        <div className="mt-6">
-          <Button type="button" onClick={retryClerkLoad}>
-            <T>Retry sign-in</T>
-          </Button>
-        </div>
-      ) : isLoaded && !isSignedIn ? (
+      {isLoaded && !isSignedIn ? (
         <div className="mt-6">
           <Button type="button" onClick={openSignIn}>
             <T>Sign in</T>

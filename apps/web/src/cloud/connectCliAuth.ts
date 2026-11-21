@@ -1,50 +1,23 @@
 import {
-  buildConnectClerkAuthorizeUrl,
+  buildConnectAuthorizeUrl,
   connectLoopbackRedirectUri,
   CONNECT_OAUTH_SCOPES,
   type ConnectAuthorizeRequest,
 } from "@hanzodev/shared/connectAuth";
-import { clerkFrontendApiUrlFromPublishableKey } from "@hanzodev/shared/relayAuth";
 
 import { isHostedStaticApp } from "../hostedPairing";
-import { hasCloudPublicConfig, resolveCloudPublicConfig, trimNonEmpty } from "./publicConfig";
-
-function resolveConnectCliOAuthClientId(): string | null {
-  return (
-    trimNonEmpty(import.meta.env.VITE_CLERK_CLI_OAUTH_CLIENT_ID as string | undefined) ??
-    resolveCloudPublicConfig().iamClientId
-  );
-}
-
-function hasConnectCliAuthConfig(): boolean {
-  const config = resolveCloudPublicConfig();
-  return Boolean(
-    (config.clerkPublishableKey && resolveConnectCliOAuthClientId()) ||
-    (config.iamIssuer && config.iamClientId),
-  );
-}
+import { hasCloudPublicConfig, resolveCloudPublicConfig } from "./publicConfig";
 
 export function connectCliAuthRoutesEnabled(): boolean {
-  return isHostedStaticApp() && hasCloudPublicConfig() && hasConnectCliAuthConfig();
+  return isHostedStaticApp() && hasCloudPublicConfig();
 }
 
-export function buildConnectCliClerkAuthorizeUrl(request: ConnectAuthorizeRequest): string | null {
-  const { clerkPublishableKey, iamIssuer, iamClientId } = resolveCloudPublicConfig();
-  const clientId = resolveConnectCliOAuthClientId();
-  if (clerkPublishableKey && clientId) {
-    return buildConnectClerkAuthorizeUrl({
-      authorizationEndpoint: `${clerkFrontendApiUrlFromPublishableKey(clerkPublishableKey)}/oauth/authorize`,
-      clientId,
-      redirectUri: connectLoopbackRedirectUri(request.loopbackPort),
-      scopes: CONNECT_OAUTH_SCOPES,
-      state: request.state,
-      challenge: request.challenge,
-    });
-  }
+export function buildConnectCliAuthorizeUrl(request: ConnectAuthorizeRequest): string | null {
+  const { iamIssuer, iamClientId } = resolveCloudPublicConfig();
   if (!iamIssuer || !iamClientId) {
     return null;
   }
-  return buildConnectClerkAuthorizeUrl({
+  return buildConnectAuthorizeUrl({
     authorizationEndpoint: `${iamIssuer}/oauth/authorize`,
     clientId: iamClientId,
     redirectUri: connectLoopbackRedirectUri(request.loopbackPort),
@@ -54,10 +27,10 @@ export function buildConnectCliClerkAuthorizeUrl(request: ConnectAuthorizeReques
   });
 }
 
-/** Force a new document: fragment revisits do not reload, and Clerk suppresses post-sign-in session updates. */
+/** Force a new document: fragment revisits do not reload, and the IAM session may not update in place. */
 export function connectCliSignInRedirectUrl(
   request: ConnectAuthorizeRequest,
   currentHref: string,
 ): string {
-  return buildConnectCliClerkAuthorizeUrl(request) ?? currentHref;
+  return buildConnectCliAuthorizeUrl(request) ?? currentHref;
 }

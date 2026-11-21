@@ -7,9 +7,6 @@ import * as NodeUtil from "node:util";
 export interface HanzoDevPublicConfig {
   readonly iamIssuer: string | undefined;
   readonly iamClientId: string | undefined;
-  readonly clerkPublishableKey: string | undefined;
-  readonly clerkJwtTemplate: string | undefined;
-  readonly clerkCliOAuthClientId: string | undefined;
   readonly relayUrl: string | undefined;
   readonly mobileOtlpTracesUrl: string | undefined;
   readonly mobileOtlpTracesDataset: string | undefined;
@@ -50,26 +47,6 @@ export function loadRepoEnv({
           HANZO_DEV_IAM_CLIENT_ID: config.iamClientId,
           VITE_HANZO_DEV_IAM_CLIENT_ID: config.iamClientId,
           EXPO_PUBLIC_HANZO_IAM_CLIENT_ID: config.iamClientId,
-        }
-      : {}),
-    ...(config.clerkPublishableKey
-      ? {
-          HANZO_DEV_CLERK_PUBLISHABLE_KEY: config.clerkPublishableKey,
-          VITE_CLERK_PUBLISHABLE_KEY: config.clerkPublishableKey,
-          EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: config.clerkPublishableKey,
-        }
-      : {}),
-    ...(config.clerkJwtTemplate
-      ? {
-          HANZO_DEV_CLERK_JWT_TEMPLATE: config.clerkJwtTemplate,
-          VITE_CLERK_JWT_TEMPLATE: config.clerkJwtTemplate,
-          EXPO_PUBLIC_CLERK_JWT_TEMPLATE: config.clerkJwtTemplate,
-        }
-      : {}),
-    ...(config.clerkCliOAuthClientId
-      ? {
-          HANZO_DEV_CLERK_CLI_OAUTH_CLIENT_ID: config.clerkCliOAuthClientId,
-          VITE_CLERK_CLI_OAUTH_CLIENT_ID: config.clerkCliOAuthClientId,
         }
       : {}),
     ...(config.relayUrl
@@ -130,23 +107,6 @@ function resolvePublicConfig(...sources: readonly Environment[]): HanzoDevPublic
       "HANZO_DEV_IAM_CLIENT_ID",
       "VITE_HANZO_DEV_IAM_CLIENT_ID",
       "EXPO_PUBLIC_HANZO_IAM_CLIENT_ID",
-    ),
-    clerkPublishableKey: firstNonEmpty(
-      sources,
-      "HANZO_DEV_CLERK_PUBLISHABLE_KEY",
-      "VITE_CLERK_PUBLISHABLE_KEY",
-      "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY",
-    ),
-    clerkJwtTemplate: firstNonEmpty(
-      sources,
-      "HANZO_DEV_CLERK_JWT_TEMPLATE",
-      "VITE_CLERK_JWT_TEMPLATE",
-      "EXPO_PUBLIC_CLERK_JWT_TEMPLATE",
-    ),
-    clerkCliOAuthClientId: firstNonEmpty(
-      sources,
-      "HANZO_DEV_CLERK_CLI_OAUTH_CLIENT_ID",
-      "VITE_CLERK_CLI_OAUTH_CLIENT_ID",
     ),
     relayUrl: firstNonEmpty(sources, "HANZO_DEV_RELAY_URL", "VITE_HANZO_DEV_RELAY_URL"),
     mobileOtlpTracesUrl: firstNonEmpty(

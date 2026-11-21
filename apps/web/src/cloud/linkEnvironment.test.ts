@@ -268,7 +268,7 @@ describe("web cloud link environment client", () => {
       const error = yield* withServices(
         unlinkEnvironmentFromCloud({
           target: { environmentId: EnvironmentId.make(TARGET.environmentId) },
-          clerkToken: "clerk-token",
+          iamToken: "iam-token",
         }),
       ).pipe(Effect.flip);
 

@@ -54,7 +54,7 @@ import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { useHanzoConnectTurnOn } from "~/cloud/useHanzoConnectTurnOn";
 import { useCloudLinkController } from "~/cloud/useCloudLinkController";
 import { useManagedTunnelUsage } from "~/cloud/managedRelayState";
-import { useHanzoConnectAccountPage } from "../clerk/HanzoConnectAccountPages";
+import { useHanzoConnectAccountPage } from "../account/HanzoConnectAccountPages";
 import { TunnelLimitAlert, TunnelUsageMeter } from "../cloud/TunnelUsage";
 import { environmentCatalog } from "~/connection/catalog";
 import { readEnvironmentScope } from "~/state/session";
@@ -70,7 +70,7 @@ import {
   ServerUpdateProgress,
 } from "../ServerUpdateAction";
 import { CloudEnvironmentConnectRows } from "../cloud/CloudEnvironmentConnectList";
-import { useHanzoConnectAuthPrompt } from "../clerk/useHanzoConnectAuthPrompt";
+import { useHanzoConnectAuthPrompt } from "../account/useHanzoConnectAuthPrompt";
 
 type SavedBackendListRowProps = {
   environment: EnvironmentPresentation;
@@ -619,7 +619,7 @@ function ConfiguredCloudLinkRow({
     managedTunnel: managedTunnelActive,
     publish: !publishAgentActivity,
   });
-  // `isSignedIn` is undefined until Clerk loads. Signed out, one row shows a
+  // `isSignedIn` is undefined until the session loads. Signed out, one row shows a
   // sign-in button instead of its switch; the onboarding dialog that opens after
   // a fresh sign-in offers both linking and publishing.
   const signedOut = isSignedIn === false;

@@ -17,10 +17,6 @@ describe("resolveCloudPublicConfig", () => {
         issuer: "https://hanzo.id",
         clientId: "hanzo-app",
       },
-      clerk: {
-        publishableKey: null,
-        jwtTemplate: null,
-      },
       relay: {
         url: "https://relay.dev.hanzo.ai",
       },
@@ -43,10 +39,6 @@ describe("resolveCloudPublicConfig", () => {
       iam: {
         issuer: "https://lux.id",
         clientId: "lux-app",
-      },
-      clerk: {
-        publishableKey: null,
-        jwtTemplate: null,
       },
       relay: {
         url: null,

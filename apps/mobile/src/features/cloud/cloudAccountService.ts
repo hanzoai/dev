@@ -38,7 +38,7 @@ export function activateCloudRelayAccount(
   setAgentAwarenessRelayTokenProvider(tokenProvider, accountId);
   setManagedRelaySession(appAtomRegistry, {
     accountId,
-    readClerkToken: tokenProvider,
+    readIamToken: tokenProvider,
   });
 }
 

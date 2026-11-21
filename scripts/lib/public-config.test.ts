@@ -19,11 +19,11 @@ describe("loadRepoEnv", () => {
     const repoRoot = makeTemporaryDirectory();
     NodeFS.writeFileSync(
       NodePath.join(repoRoot, ".env"),
-      "HANZO_DEV_CLERK_PUBLISHABLE_KEY=pk_root\nHANZO_DEV_CLERK_JWT_TEMPLATE=template_root\nHANZO_DEV_CLERK_CLI_OAUTH_CLIENT_ID=oauth_root\nHANZO_DEV_RELAY_URL=https://root.example.test\n",
+      "HANZO_DEV_IAM_CLIENT_ID=iam_root\nHANZO_DEV_RELAY_URL=https://root.example.test\n",
     );
     NodeFS.writeFileSync(
       NodePath.join(repoRoot, ".env.local"),
-      "HANZO_DEV_CLERK_PUBLISHABLE_KEY=pk_local\nHANZO_DEV_CLERK_JWT_TEMPLATE=template_local\nHANZO_DEV_CLERK_CLI_OAUTH_CLIENT_ID=oauth_local\nHANZO_DEV_RELAY_URL=https://local.example.test\n",
+      "HANZO_DEV_IAM_CLIENT_ID=iam_local\nHANZO_DEV_RELAY_URL=https://local.example.test\n",
     );
 
     expect(loadRepoEnv({ baseEnv: {}, repoRoot }).HANZO_DEV_RELAY_URL).toBe(
@@ -32,21 +32,15 @@ describe("loadRepoEnv", () => {
     expect(
       loadRepoEnv({
         baseEnv: {
-          HANZO_DEV_CLERK_PUBLISHABLE_KEY: "pk_ci",
-          HANZO_DEV_CLERK_JWT_TEMPLATE: "template_ci",
-          HANZO_DEV_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_ci",
+          HANZO_DEV_IAM_CLIENT_ID: "iam_ci",
           HANZO_DEV_RELAY_URL: "https://ci.example.test",
         },
         repoRoot,
       }),
     ).toMatchObject({
-      HANZO_DEV_CLERK_PUBLISHABLE_KEY: "pk_ci",
-      HANZO_DEV_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_ci",
-      VITE_CLERK_PUBLISHABLE_KEY: "pk_ci",
-      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_ci",
-      HANZO_DEV_CLERK_JWT_TEMPLATE: "template_ci",
-      VITE_CLERK_JWT_TEMPLATE: "template_ci",
-      EXPO_PUBLIC_CLERK_JWT_TEMPLATE: "template_ci",
+      HANZO_DEV_IAM_CLIENT_ID: "iam_ci",
+      VITE_HANZO_DEV_IAM_CLIENT_ID: "iam_ci",
+      EXPO_PUBLIC_HANZO_IAM_CLIENT_ID: "iam_ci",
       HANZO_DEV_RELAY_URL: "https://ci.example.test",
       VITE_HANZO_DEV_RELAY_URL: "https://ci.example.test",
     });

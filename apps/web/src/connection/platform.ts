@@ -375,7 +375,7 @@ const layerCapabilities = Layer.effectContext(
       identity: Effect.sync(() =>
         Option.fromNullishOr(appAtomRegistry.get(managedRelaySessionAtom)),
       ),
-      clerkToken: Effect.gen(function* () {
+      iamToken: Effect.gen(function* () {
         const session = appAtomRegistry.get(managedRelaySessionAtom);
         if (session === null) {
           return yield* new ConnectionBlockedError({
@@ -383,7 +383,7 @@ const layerCapabilities = Layer.effectContext(
             detail: m(msg("Sign in to Hanzo Connect to connect this environment.")),
           });
         }
-        const token = yield* session.readClerkToken().pipe(
+        const token = yield* session.readIamToken().pipe(
           Effect.mapError(
             (error) =>
               new ConnectionTransientError({

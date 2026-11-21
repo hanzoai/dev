@@ -55,7 +55,7 @@ import {
   updateLinkedEnvironmentLiveActivityPreference,
 } from "../cloud/linkEnvironment";
 import { refreshManagedRelayEnvironments } from "../cloud/managedRelayState";
-import { hasCloudPublicConfig, resolveRelayClerkTokenOptions } from "../cloud/publicConfig";
+import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { makePermissionStatusAtom } from "../../lib/permissionStatusAtom";
 import { runtime } from "../../lib/runtime";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
@@ -101,7 +101,7 @@ const updateEnvironmentPreference = Effect.fn("updateEnvironmentPreference")(fun
 
 const linkEnvironmentWithPreference = Effect.fn("linkEnvironmentWithPreference")(function* (
   environmentId: EnvironmentId,
-  input: { readonly clerkToken: string; readonly liveActivitiesEnabled: boolean },
+  input: { readonly iamToken: string; readonly liveActivitiesEnabled: boolean },
 ) {
   const result = yield* Effect.promise(() =>
     linkLiveActivityEnvironment.run(appAtomRegistry, { environmentId, input }),
@@ -358,7 +358,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
       }
       setNotificationStatus("enabled");
     }
-    const tokenResult = await settlePromise(() => getToken(resolveRelayClerkTokenOptions()));
+    const tokenResult = await settlePromise(() => getToken());
     if (tokenResult._tag === "Failure") {
       setLiveActivityStatus("disabled");
       const error = squashAtomCommandFailure(tokenResult);
@@ -389,7 +389,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
           canUpdateEnvironment: (id) => canManageConnect(id, AuthRelayWriteScope),
           enabled: true,
           previousEnabled: liveActivitiesPreferenceEnabled,
-          clerkToken: tokenResult.value,
+          iamToken: tokenResult.value,
           connections,
         }),
       ),
@@ -465,7 +465,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
   async function disableLiveActivities() {
     let token: string | null = null;
     if (isSignedIn) {
-      const tokenResult = await settlePromise(() => getToken(resolveRelayClerkTokenOptions()));
+      const tokenResult = await settlePromise(() => getToken());
       if (tokenResult._tag === "Failure") {
         setLiveActivityStatus("enabled");
         reportAtomCommandResult(tokenResult, {
@@ -487,7 +487,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
           canUpdateEnvironment: (id) => canManageConnect(id, AuthRelayWriteScope),
           enabled: false,
           previousEnabled: liveActivitiesPreferenceEnabled,
-          clerkToken: token,
+          iamToken: token,
           connections,
         }),
       ),

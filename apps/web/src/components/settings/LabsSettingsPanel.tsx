@@ -4,7 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { T, useGT, useMessages } from "gt-react";
 
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
-import { useHanzoConnectAuthPrompt } from "../clerk/useHanzoConnectAuthPrompt";
+import { useHanzoConnectAuthPrompt } from "../account/useHanzoConnectAuthPrompt";
 import { Button } from "../ui/button";
 import { Switch } from "../ui/switch";
 import { ScopedSwitch } from "./ScopedSwitch";
@@ -21,7 +21,7 @@ export function LabsSettingsPanel() {
     <SettingsPageContainer>
       <SettingsSection id="beta" title={gt("Beta")}>
         <BoringSidebarRow />
-        {/* Clerk is only mounted when this build has Hanzo Connect. */}
+        {/* The session is only mounted when this build has Hanzo Connect. */}
         {hasCloudPublicConfig() ? <GuestLinksRowWithSignIn /> : <GuestLinksRow />}
         <LinkedEnvironmentsRow />
         <PromptSuggestionsRow />
@@ -91,7 +91,7 @@ function GuestLinksRowWithSignIn() {
   const gt = useGT();
   const { isSignedIn } = useAuth();
   const { openAuthPrompt } = useHanzoConnectAuthPrompt();
-  // `isSignedIn` is undefined until Clerk loads.
+  // `isSignedIn` is undefined until the session loads.
   if (isSignedIn !== false) return <GuestLinksRow />;
   return (
     <SettingsRow

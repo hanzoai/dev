@@ -49,8 +49,7 @@ import { useCloudLinkState } from "../../cloud/cloudLinkState";
 import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { PRIVACY_POLICY_URL } from "../../legalLinks";
 import { workspaceAreaProps } from "../../lib/workspaceFocus";
-import { retryClerkLoad, useClerkLoadFailed } from "../clerk/clerkLoadFailure";
-import { useHanzoConnectAuthPrompt } from "../clerk/useHanzoConnectAuthPrompt";
+import { useHanzoConnectAuthPrompt } from "../account/useHanzoConnectAuthPrompt";
 import { completeOnboarding } from "../../onboarding/firstRun";
 import {
   groupOnboardingProjects,
@@ -1049,7 +1048,6 @@ function PhoneStep({ step, children }: { readonly step: number; readonly childre
 function PhoneConnectLink({ environmentId }: { readonly environmentId: EnvironmentId }) {
   const { isLoaded, isSignedIn, userId } = useAuth({ treatPendingAsSignedOut: false });
   const gt = useGT();
-  const loadFailed = useClerkLoadFailed();
   const { openAuthPrompt } = useHanzoConnectAuthPrompt();
   const linkState = useCloudLinkState(environmentId);
   const refreshLinkState = useEffectEvent(linkState.refresh);
@@ -1124,15 +1122,9 @@ function PhoneConnectLink({ environmentId }: { readonly environmentId: Environme
       <p className="text-sm text-foreground">
         <T>Sign in to Hanzo Connect here, then in the app with the same account.</T>
       </p>
-      {loadFailed ? (
-        <Button variant="outline" size="xs" onClick={retryClerkLoad}>
-          <T>Retry sign-in</T>
-        </Button>
-      ) : (
-        <Button variant="outline" size="xs" disabled={!isLoaded} onClick={openAuthPrompt}>
-          <T>Sign in to Hanzo Connect</T>
-        </Button>
-      )}
+      <Button variant="outline" size="xs" disabled={!isLoaded} onClick={openAuthPrompt}>
+        <T>Sign in to Hanzo Connect</T>
+      </Button>
     </>
   );
 }

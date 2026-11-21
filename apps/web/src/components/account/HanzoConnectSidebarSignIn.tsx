@@ -1,10 +1,9 @@
 import { T, useGT } from "gt-react";
-import { LogInIcon, RotateCwIcon } from "lucide-react";
+import { LogInIcon } from "lucide-react";
 
 import { useAuth, useHanzoWebAccounts } from "../../cloud/hanzoWebAuth";
 import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
-import { retryClerkLoad, useClerkLoadFailed } from "./clerkLoadFailure";
 import { useResolvedHanzoConnectAccountPages } from "./HanzoConnectAccountPages";
 import { useHanzoConnectAuthPrompt } from "./useHanzoConnectAuthPrompt";
 
@@ -66,23 +65,8 @@ function ConfiguredHanzoConnectSidebarAvatar() {
 
 function ConfiguredHanzoConnectSidebarSignIn() {
   const { isLoaded, isSignedIn } = useAuth();
-  const loadFailed = useClerkLoadFailed();
   const { openAuthPrompt } = useHanzoConnectAuthPrompt();
 
-  if (loadFailed) {
-    return (
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton onClick={retryClerkLoad}>
-            <RotateCwIcon />
-            <span>
-              <T>Retry Hanzo Connect</T>
-            </span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      </SidebarMenu>
-    );
-  }
   if (!isLoaded || isSignedIn) return null;
 
   return (
