@@ -264,9 +264,7 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Check
-        run: vp check
-
+      # Format and lint gate main in ci.yml; they change no artifact, so the release does not re-run them.
       - name: Typecheck
         run: vp run typecheck
 

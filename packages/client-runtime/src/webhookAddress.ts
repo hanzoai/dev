@@ -29,9 +29,7 @@ export function webhookAddress(
     address: url.href,
     copyable: true,
     note: isLocalLoopbackHost(url.hostname)
-      ? resolve(
-          msg("Only this computer can call this address. Link Hanzo Link for a public URL."),
-        )
+      ? resolve(msg("Only this computer can call this address. Link Hanzo Link for a public URL."))
       : resolve(
           msg(
             "Works wherever this environment's address is reachable, for example over Tailscale or your own proxy. Link Hanzo Link for a public URL.",

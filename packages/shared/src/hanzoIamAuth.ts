@@ -288,7 +288,8 @@ export function resolveIamEndpoints(
       const userinfo = typeof doc.userinfo_endpoint === "string" ? doc.userinfo_endpoint : null;
       const good: IamEndpoints = {
         issuer: typeof doc.issuer === "string" ? doc.issuer : null,
-        authorize: typeof doc.authorization_endpoint === "string" ? doc.authorization_endpoint : null,
+        authorize:
+          typeof doc.authorization_endpoint === "string" ? doc.authorization_endpoint : null,
         token: token ?? classic.token,
         userinfo: userinfo ?? classic.userinfo,
         jwks: typeof doc.jwks_uri === "string" ? doc.jwks_uri : null,

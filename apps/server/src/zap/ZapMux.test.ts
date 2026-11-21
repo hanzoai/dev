@@ -25,14 +25,15 @@ const worker = `
 
 describe("ZapMux", () => {
   it("opens a session per OPEN record and carries bytes both ways over an inherited descriptor", async () => {
-    const child = NodeChildProcess.spawn(
-      process.execPath,
-      ["--input-type=module", "-e", worker],
-      { stdio: ["ignore", "inherit", "inherit", "pipe"] },
-    );
+    const child = NodeChildProcess.spawn(process.execPath, ["--input-type=module", "-e", worker], {
+      stdio: ["ignore", "inherit", "inherit", "pipe"],
+    });
     const pair = child.stdio[3];
-    if (pair === null || pair === undefined || !("write" in pair)) throw new Error("no descriptor 3");
-    const reply = new Promise<Uint8Array>((resolve) => pair.once("data", (d) => resolve(new Uint8Array(d))));
+    if (pair === null || pair === undefined || !("write" in pair))
+      throw new Error("no descriptor 3");
+    const reply = new Promise<Uint8Array>((resolve) =>
+      pair.once("data", (d) => resolve(new Uint8Array(d))),
+    );
     pair.write(record(1, 1, new Uint8Array(0)));
     pair.write(record(1, 0, new TextEncoder().encode("ping")));
     const got = await reply;

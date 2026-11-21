@@ -112,7 +112,12 @@ export function drawerAccountInitial(name: string): string {
  * round to --radius-composer (28), a 1px --border-strong edge, shadow `0 24px 60px -16px`.
  */
 export const DRAWER_CARD_RADIUS = 28;
-export const DRAWER_CARD_SHADOW = { offsetY: 24, radius: 30, opacityDark: 0.75, opacityLight: 0.18 } as const;
+export const DRAWER_CARD_SHADOW = {
+  offsetY: 24,
+  radius: 30,
+  opacityDark: 0.75,
+  opacityLight: 0.18,
+} as const;
 export const FLOATING_HEADER_HEIGHT = 52;
 
 export type PhoneHeaderMode = "floating" | "native";

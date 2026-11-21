@@ -164,11 +164,7 @@ function ConfiguredSettingsAuthRouteScreen() {
               </Text>
             ) : null}
             <Button
-              label={
-                busy
-                  ? gt("Waiting for browser return...")
-                  : gt("Continue with Hanzo")
-              }
+              label={busy ? gt("Waiting for browser return...") : gt("Continue with Hanzo")}
               disabled={busy}
               onPress={() => handleBrandSignIn("hanzo")}
             />

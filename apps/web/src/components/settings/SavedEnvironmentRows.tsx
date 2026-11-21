@@ -730,9 +730,7 @@ function ConfiguredCloudLinkRow({
                     "Sign in to make this environment available to your other devices through Hanzo Link.",
                   )
                 : linkRevoked
-                  ? gt(
-                      "This environment was removed from Hanzo Link. Turn it on to link it again.",
-                    )
+                  ? gt("This environment was removed from Hanzo Link. Turn it on to link it again.")
                   : managedTunnelActive
                     ? reachability?.status === "unreachable"
                       ? gt("Hanzo Link is on, but other devices cannot reach this environment.")
@@ -787,9 +785,7 @@ function ConfiguredCloudLinkRow({
           description={
             signedOut
               ? gt("Sign in to send activity to mobile notifications and Live Activities.")
-              : gt(
-                  "Send activity to mobile notifications and Live Activities without Hanzo Link.",
-                )
+              : gt("Send activity to mobile notifications and Live Activities without Hanzo Link.")
           }
           managed={connectDenial}
           control={

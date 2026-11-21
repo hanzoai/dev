@@ -959,9 +959,7 @@ export const make = Effect.gen(function* () {
           );
           break;
         case "disabled":
-          yield* Effect.logInfo(
-            "agent activity publishing disabled by Hanzo Link configuration",
-          );
+          yield* Effect.logInfo("agent activity publishing disabled by Hanzo Link configuration");
           break;
         case "enabled":
           yield* Effect.logInfo("agent activity publishing enabled", {

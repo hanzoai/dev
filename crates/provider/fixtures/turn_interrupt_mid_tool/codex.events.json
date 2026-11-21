@@ -963,9 +963,7 @@
         "cacheCreationTokens": 0,
         "reasoningTokens": 25,
         "hasSubagents": false,
-        "models": [
-          "gpt-6-luna"
-        ],
+        "models": ["gpt-6-luna"],
         "usageStatus": "partial",
         "inputTokens": 17855,
         "outputTokens": 98

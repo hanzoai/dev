@@ -1343,9 +1343,7 @@
         "cacheCreationTokens": 0,
         "reasoningTokens": 49,
         "hasSubagents": false,
-        "models": [
-          "gpt-5.6-terra"
-        ],
+        "models": ["gpt-5.6-terra"],
         "usageStatus": "complete",
         "inputTokens": 42807,
         "outputTokens": 152

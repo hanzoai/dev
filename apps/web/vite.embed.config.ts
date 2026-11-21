@@ -8,7 +8,8 @@ import { tailwindPlugins } from "./vite/tailwind";
 import pkg from "./package.json" with { type: "json" };
 
 // The packages the host bundles itself: React and the CommonJS that requires it.
-const HOST_MODULES = /^(?:react(?:-dom)?|use-sync-external-store|@tanstack\/react-(?:router|store))(?:\/|$)/;
+const HOST_MODULES =
+  /^(?:react(?:-dom)?|use-sync-external-store|@tanstack\/react-(?:router|store))(?:\/|$)/;
 
 // The Office engines are 75 to 108 MB of worker each; a host's static export cannot carry them.
 // The embed draws one notice in their place (src/embed/OfficeUnavailable.tsx); the desktop
@@ -37,7 +38,9 @@ function embedSizeGuard(): Plugin {
       for (const [name, file] of Object.entries(bundle)) {
         const size = file.type === "chunk" ? Buffer.byteLength(file.code) : file.source.length;
         if (size > MAX_FILE_BYTES) {
-          this.error(`${name} is ${(size / 1048576).toFixed(1)} MB; an embedded file may not pass 32 MB.`);
+          this.error(
+            `${name} is ${(size / 1048576).toFixed(1)} MB; an embedded file may not pass 32 MB.`,
+          );
         }
       }
     },

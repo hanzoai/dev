@@ -2422,9 +2422,7 @@
       "type": "dynamic_tool",
       "toolName": "get_command_or_subagent_output",
       "input": {
-        "task_ids": [
-          "00000000-0000-4000-8000-000000000002"
-        ]
+        "task_ids": ["00000000-0000-4000-8000-000000000002"]
       }
     }
   },
@@ -2460,9 +2458,7 @@
       "toolName": "Get task output: 00000000-0000-4000-8000-000000000002",
       "input": {
         "variant": "TaskOutput",
-        "task_ids": [
-          "00000000-0000-4000-8000-000000000002"
-        ],
+        "task_ids": ["00000000-0000-4000-8000-000000000002"],
         "timeout_ms": null
       }
     }
@@ -2530,9 +2526,7 @@
       "toolName": "for i in 1 2 3; do sleep 8; echo tock $i; done (01a0dc77)",
       "input": {
         "variant": "TaskOutput",
-        "task_ids": [
-          "00000000-0000-4000-8000-000000000002"
-        ],
+        "task_ids": ["00000000-0000-4000-8000-000000000002"],
         "timeout_ms": null
       },
       "output": {

@@ -1815,9 +1815,7 @@
       "type": "dynamic_tool",
       "toolName": "get_command_or_subagent_output",
       "input": {
-        "task_ids": [
-          "call-d5448d70-380d-4a88-a7a0-2968806350ea-0"
-        ],
+        "task_ids": ["call-d5448d70-380d-4a88-a7a0-2968806350ea-0"],
         "timeout_ms": 15000
       },
       "output": null
@@ -1855,9 +1853,7 @@
       "toolName": "Get task output: call-d5448d70-380d-4a88-a7a0-2968806350ea-0",
       "input": {
         "variant": "TaskOutput",
-        "task_ids": [
-          "call-d5448d70-380d-4a88-a7a0-2968806350ea-0"
-        ],
+        "task_ids": ["call-d5448d70-380d-4a88-a7a0-2968806350ea-0"],
         "timeout_ms": 15000
       },
       "output": null
@@ -1895,9 +1891,7 @@
       "toolName": "sleep 20 (call-d54)",
       "input": {
         "variant": "TaskOutput",
-        "task_ids": [
-          "call-d5448d70-380d-4a88-a7a0-2968806350ea-0"
-        ],
+        "task_ids": ["call-d5448d70-380d-4a88-a7a0-2968806350ea-0"],
         "timeout_ms": 15000
       },
       "output": {

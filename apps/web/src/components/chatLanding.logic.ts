@@ -41,10 +41,7 @@ export function hostedLanding(input: {
 }
 
 /** A saved thread's row label: its title, else the fallback. */
-export function threadRowLabel(
-  thread: { readonly title: string },
-  fallback: string,
-): string {
+export function threadRowLabel(thread: { readonly title: string }, fallback: string): string {
   const title = thread.title.trim();
   return title === "" ? fallback : title;
 }

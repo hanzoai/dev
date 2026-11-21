@@ -69,12 +69,18 @@ export function WorkspaceDrawerThreads() {
               }}
               className="h-11 flex-row items-center gap-3 rounded-xl px-3"
             >
-              <SymbolView name="laptopcomputer" size={18} tintColor={colors["--color-foreground"]} />
+              <SymbolView
+                name="laptopcomputer"
+                size={18}
+                tintColor={colors["--color-foreground"]}
+              />
               <Text className="flex-1 text-base text-foreground" numberOfLines={1}>
                 {mac.name}
               </Text>
               <View
-                className={mac.online ? "h-2 w-2 rounded-full bg-primary" : "h-2 w-2 rounded-full bg-border"}
+                className={
+                  mac.online ? "h-2 w-2 rounded-full bg-primary" : "h-2 w-2 rounded-full bg-border"
+                }
               />
             </Pressable>
           ))}
@@ -116,15 +122,24 @@ export function WorkspaceDrawerThreads() {
                     {
                       text: gt("Rename"),
                       onPress: () =>
-                        Alert.prompt(gt("Rename"), undefined, (title) => {
-                          void chat.renameThread(row.key, title);
-                        }, "plain-text", row.title),
+                        Alert.prompt(
+                          gt("Rename"),
+                          undefined,
+                          (title) => {
+                            void chat.renameThread(row.key, title);
+                          },
+                          "plain-text",
+                          row.title,
+                        ),
                     },
                     {
                       text: row.pinned ? gt("Unpin") : gt("Pin"),
                       onPress: () => void chat.pinThread(row.key, !row.pinned),
                     },
-                    { text: gt("Copy title"), onPress: () => void Clipboard.setStringAsync(row.title) },
+                    {
+                      text: gt("Copy title"),
+                      onPress: () => void Clipboard.setStringAsync(row.title),
+                    },
                     {
                       text: gt("Delete"),
                       style: "destructive",
@@ -143,7 +158,11 @@ export function WorkspaceDrawerThreads() {
                 }
                 className="h-11 w-11 items-center justify-center"
               >
-                <SymbolView name="ellipsis" size={16} tintColor={colors["--color-foreground-muted"]} />
+                <SymbolView
+                  name="ellipsis"
+                  size={16}
+                  tintColor={colors["--color-foreground-muted"]}
+                />
               </Pressable>
             </View>
           ))}

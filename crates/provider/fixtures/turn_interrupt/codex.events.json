@@ -798,9 +798,7 @@
       "turnTokenUsage": {
         "usageScope": "main_agent",
         "hasSubagents": false,
-        "models": [
-          "gpt-6-luna"
-        ],
+        "models": ["gpt-6-luna"],
         "usageStatus": "unavailable"
       },
       "model": "gpt-6-luna"

@@ -48,32 +48,32 @@ function createDrawerGesture(input: {
 }) {
   const { enabled, open, reach, at, target, from } = input;
   return (
-      Gesture.Pan()
-        .enabled(enabled)
-        // Closed, only the leading edge begins a pull; open, anywhere on the dimmed pane closes.
-        .hitSlop(open ? undefined : { left: 0, width: DRAWER_EDGE })
-        .activeOffsetX([-8, 8])
-        .failOffsetY([-16, 16])
-        .onBegin(() => {
-          from.value = at.value;
-          // A finger catches a moving drawer where it is.
-          at.value = at.value;
-        })
-        .onUpdate((event) => {
-          at.value = drawerPull(from.value, event.translationX, reach);
-        })
-        .onEnd((event) => {
-          const stays = drawerSettles(at.value, reach, event.velocityX / 1000);
-          const next = stays ? reach : 0;
-          target.value = next;
-          at.value = withTiming(next, {
-            duration: DRAWER_DURATION,
-            easing: DRAWER_EASING,
-            reduceMotion: ReduceMotion.System,
-          });
-          runOnJS(dispatchWorkspaceDrawer)({ type: stays ? "open" : "close" });
-        })
-    );
+    Gesture.Pan()
+      .enabled(enabled)
+      // Closed, only the leading edge begins a pull; open, anywhere on the dimmed pane closes.
+      .hitSlop(open ? undefined : { left: 0, width: DRAWER_EDGE })
+      .activeOffsetX([-8, 8])
+      .failOffsetY([-16, 16])
+      .onBegin(() => {
+        from.value = at.value;
+        // A finger catches a moving drawer where it is.
+        at.value = at.value;
+      })
+      .onUpdate((event) => {
+        at.value = drawerPull(from.value, event.translationX, reach);
+      })
+      .onEnd((event) => {
+        const stays = drawerSettles(at.value, reach, event.velocityX / 1000);
+        const next = stays ? reach : 0;
+        target.value = next;
+        at.value = withTiming(next, {
+          duration: DRAWER_DURATION,
+          easing: DRAWER_EASING,
+          reduceMotion: ReduceMotion.System,
+        });
+        runOnJS(dispatchWorkspaceDrawer)({ type: stays ? "open" : "close" });
+      })
+  );
 }
 
 export function WorkspaceDrawer(props: {
@@ -119,7 +119,8 @@ export function WorkspaceDrawer(props: {
     const progress = reach === 0 ? 0 : at.value / reach;
     return {
       transform: [{ translateX: at.value }],
-      shadowOpacity: progress * (isDark ? DRAWER_CARD_SHADOW.opacityDark : DRAWER_CARD_SHADOW.opacityLight),
+      shadowOpacity:
+        progress * (isDark ? DRAWER_CARD_SHADOW.opacityDark : DRAWER_CARD_SHADOW.opacityLight),
     };
   });
   // The floating header's circles leave as the drawer opens, on the same value.
@@ -149,21 +150,21 @@ export function WorkspaceDrawer(props: {
           importantForAccessibility={open ? "no-hide-descendants" : "auto"}
         >
           <Reanimated.View className="flex-1 bg-screen" style={[styles.clip, clipStyle]}>
-          {props.children}
-          <Reanimated.View
-            pointerEvents={interactive ? "none" : "box-none"}
-            style={[StyleSheet.absoluteFill, floatingStyle]}
-          >
-            {props.floating}
-          </Reanimated.View>
-          {interactive ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={gt("Close menu")}
-              style={StyleSheet.absoluteFill}
-              onPress={closeWorkspaceDrawer}
-            />
-          ) : null}
+            {props.children}
+            <Reanimated.View
+              pointerEvents={interactive ? "none" : "box-none"}
+              style={[StyleSheet.absoluteFill, floatingStyle]}
+            >
+              {props.floating}
+            </Reanimated.View>
+            {interactive ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={gt("Close menu")}
+                style={StyleSheet.absoluteFill}
+                onPress={closeWorkspaceDrawer}
+              />
+            ) : null}
           </Reanimated.View>
         </Reanimated.View>
       </GestureDetector>
@@ -173,7 +174,12 @@ export function WorkspaceDrawer(props: {
 
 const styles = StyleSheet.create({
   menu: { position: "absolute", top: 0, bottom: 0, left: 0 },
-  clip: { overflow: "hidden", borderCurve: "continuous", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(128,128,128,0.32)" },
+  clip: {
+    overflow: "hidden",
+    borderCurve: "continuous",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(128,128,128,0.32)",
+  },
   card: {
     shadowColor: "#000",
     shadowOffset: { width: 0, height: DRAWER_CARD_SHADOW.offsetY },

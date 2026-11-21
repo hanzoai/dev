@@ -421,12 +421,9 @@ function GateScreen({
               "Apps like Poke and Claude run in the cloud. They need a public address to reach {environment}.",
               { environment: name },
             ),
-            gt(
-              "Hanzo Link gives {environment} that address. Each app still needs your approval.",
-              {
-                environment: name,
-              },
-            ),
+            gt("Hanzo Link gives {environment} that address. Each app still needs your approval.", {
+              environment: name,
+            }),
           ]}
         >
           {/* The sign-in is its own modal, so this dialog closes first. */}

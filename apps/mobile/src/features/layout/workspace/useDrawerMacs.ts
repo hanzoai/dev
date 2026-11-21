@@ -1,4 +1,7 @@
-import { discoverEnvironments, type EnvironmentDiscovery } from "@hanzodev/client-runtime/discovery";
+import {
+  discoverEnvironments,
+  type EnvironmentDiscovery,
+} from "@hanzodev/client-runtime/discovery";
 import { useEffect, useState } from "react";
 
 import { hanzoMobileAuthStore, useAuth } from "../../cloud/hanzoMobileAuth";

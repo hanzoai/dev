@@ -137,14 +137,18 @@ describe("drawer threads", () => {
     ]);
   });
   it("filters by the search field, ignoring case and padding", () => {
-    expect(drawerThreadRows(threads, "  LOGIN ", "New chat")).toEqual([{ key: "c", title: "Fix login", pinned: false }]);
+    expect(drawerThreadRows(threads, "  LOGIN ", "New chat")).toEqual([
+      { key: "c", title: "Fix login", pinned: false },
+    ]);
   });
 });
 
 describe("drawer account name", () => {
   const base = { displayName: null, email: null, subject: "z" };
   it("prefers the display name, then email, then subject", () => {
-    expect(drawerAccountName({ ...base, displayName: " Z A ", email: "z@x.io" }, "Hanzo")).toBe("Z A");
+    expect(drawerAccountName({ ...base, displayName: " Z A ", email: "z@x.io" }, "Hanzo")).toBe(
+      "Z A",
+    );
     expect(drawerAccountName({ ...base, email: "z@x.io" }, "Hanzo")).toBe("z@x.io");
     expect(drawerAccountName(base, "Hanzo")).toBe("z");
   });

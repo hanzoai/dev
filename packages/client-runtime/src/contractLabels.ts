@@ -144,9 +144,7 @@ function managedCapabilityDeniedMessage(
         }),
       );
     case "connect":
-      return resolve(
-        msg("{organization}'s policy does not allow Hanzo Link.", { organization }),
-      );
+      return resolve(msg("{organization}'s policy does not allow Hanzo Link.", { organization }));
     case "webhookTasks":
       return resolve(
         msg("{organization}'s policy does not allow webhook tasks.", { organization }),

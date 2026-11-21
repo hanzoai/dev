@@ -52,11 +52,13 @@ export function WorkspaceToolbar(props: {
   const compose = useWorkspaceCompose();
   const drawer = useDrawerWorkspace();
   const phoneButtons = usePhoneHeaderButtons();
-  const nativePhoneButtons = drawer && phoneHeaderMode({
-    drawer,
-    settingsOpen: workspace.settingsOpen,
-    selectedTab: workspace.state.selectedTab,
-  }) === "native";
+  const nativePhoneButtons =
+    drawer &&
+    phoneHeaderMode({
+      drawer,
+      settingsOpen: workspace.settingsOpen,
+      selectedTab: workspace.state.selectedTab,
+    }) === "native";
   // On the Duo, compose sits in the list's bar when folded and the detail column's when unfolded.
   const nativeToolbarCompose =
     deviceType === "duo-folded" && compose !== null && activeNewTask === null;
