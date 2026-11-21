@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import { KEYMAP_ROWS, resolveCommand, setKeymapOverrides, shortcutFor } from "./keymap";
 
@@ -19,6 +19,10 @@ const press = (init: {
 });
 
 describe("the one keymap", () => {
+  // The cases press Cmd: resolve them as a Mac does on every CI host.
+  beforeAll(() => vi.stubGlobal("navigator", { platform: "MacIntel" }));
+  afterAll(() => vi.unstubAllGlobals());
+
   it("resolves the window commands a host needs", () => {
     expect(resolveCommand(press({ key: "k", metaKey: true }))).toBe("commandPalette.toggle");
     expect(resolveCommand(press({ key: "n", metaKey: true }))).toBe("chat.new");

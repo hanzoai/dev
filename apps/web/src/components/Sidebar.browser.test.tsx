@@ -183,7 +183,7 @@ describe("sidebar render isolation", () => {
         <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
       </SidebarProvider>,
     );
-    await expect.element(screen.getByText("Thread 4").first()).toBeInTheDocument();
+    await expect.element(screen.getByText(`Thread 4 ${tag(4)}`).first()).toBeInTheDocument();
     const rowRenders = () => vi.mocked(SortableThreadRow).mock.calls.length;
 
     using _timers = fakeTimers();
@@ -296,7 +296,7 @@ describe("sidebar thread menu", () => {
         <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
       </SidebarProvider>,
     );
-    const row = screen.getByText("Thread 0").first();
+    const row = screen.getByText(`Thread 0 ${tag(0)}`).first();
     await expect.element(row).toBeInTheDocument();
     row.element().closest<HTMLElement>("[data-sidebar-row]")!.focus();
     await userEvent.keyboard("{Shift>}{F10}{/Shift}");
