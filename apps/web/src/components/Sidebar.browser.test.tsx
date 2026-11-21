@@ -129,12 +129,17 @@ describe("sidebar header new thread", () => {
   });
 });
 
+// A distinct word per index keeps fixture titles out of the sidebar's near-duplicate fold.
+function tag(index: number): string {
+  return String.fromCharCode(97 + (Math.floor(index / 26) % 26), 97 + (index % 26));
+}
+
 function threadShell(projectId: ProjectId, index: number): EnvironmentThreadShell {
   return makeThreadFixture({
     environmentId: EnvironmentId.make("local"),
     id: ThreadId.make(`thread-${index}`),
     projectId,
-    title: `Thread ${index}`,
+    title: `Thread ${index} ${tag(index)}`,
   });
 }
 
@@ -327,7 +332,7 @@ describe("sidebar settled pagination", () => {
         environmentId: activeProject.environmentId,
         projectId: activeProject.id,
         id: ThreadId.make(`settled-${index}`),
-        title: `Settled thread ${index}`,
+        title: `Settled thread ${index} ${tag(index)}`,
         settledOverride: "settled",
         settledAt: "2026-01-01T00:00:00.000Z",
       }),
