@@ -2,11 +2,15 @@ import {
   createCloudChatController,
   createLocalChatHost,
   isLocalChatSlug,
+  listPersonas,
+  readPersona,
   type CloudChatController,
   type CloudChatState,
   type LocalChatHost,
+  type Persona,
+  type PersonaRecord,
 } from "@hanzodev/client-runtime/cloud-chat";
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import type { DevCloud, DevEnvironment } from "./runtime";
 
@@ -65,8 +69,39 @@ export function useHomeChat(cloud: DevCloud, machine: DevEnvironment | null) {
     void controller.loadModels();
     void controller.loadThreads();
   }, [controller]);
+  // Personas: the org's agents, chosen per conversation. Their records are read when first used.
+  const [personas, setPersonas] = useState<ReadonlyArray<Persona>>([]);
+  const [persona, setPersona] = useState<string | null>(null);
+  const records = useRef(new Map<string, PersonaRecord | null>());
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const auth = { accessToken: await cloud.token(), orgId: cloud.org ?? null };
+      const roster = await listPersonas(auth, { baseUrl: cloud.api });
+      if (live) setPersonas(roster);
+    })().catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [cloud]);
+  const personaRecord = useCallback(async (): Promise<PersonaRecord | null> => {
+    if (persona === null) return null;
+    if (!records.current.has(persona)) {
+      const auth = { accessToken: await cloud.token(), orgId: cloud.org ?? null };
+      records.current.set(persona, await readPersona(auth, persona, { baseUrl: cloud.api }));
+    }
+    return records.current.get(persona) ?? null;
+  }, [cloud, persona]);
   return useMemo(
-    () => ({ state, controller, localSelected: isLocalChatSlug(state.model) }),
-    [state, controller],
+    () => ({
+      state,
+      controller,
+      localSelected: isLocalChatSlug(state.model),
+      personas,
+      persona,
+      selectPersona: setPersona,
+      personaRecord,
+    }),
+    [state, controller, personas, persona, personaRecord],
   );
 }
