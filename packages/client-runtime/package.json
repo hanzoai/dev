@@ -123,6 +123,10 @@
       "types": "./src/authorization/index.ts",
       "default": "./src/authorization/index.ts"
     },
+    "./discovery": {
+      "types": "./src/discovery/environments.ts",
+      "default": "./src/discovery/environments.ts"
+    },
     "./environment": {
       "types": "./src/environment/index.ts",
       "default": "./src/environment/index.ts"
