@@ -8,6 +8,7 @@ import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { isHostedStaticApp } from "../../hostedPairing";
 import { useEnvironments } from "../../state/environments";
 import { threadRowLabel } from "../chatLanding.logic";
+import { useSidebar } from "../ui/sidebar";
 
 /**
  * Saved plain-chat threads for the hosted app while it has no environment. Reopening one
@@ -25,10 +26,14 @@ export function CloudThreadsSection() {
 function CloudThreadList() {
   const gt = useGT();
   const router = useRouter();
+  const { setOpenMobile } = useSidebar();
   const chat = useCloudChat();
   const threads = useCloudThreads();
   const go = (action: () => void | Promise<void>) => {
-    void Promise.resolve(action()).then(() => router.navigate({ to: "/" }));
+    void Promise.resolve(action()).then(() => {
+      setOpenMobile(false);
+      return router.navigate({ to: "/" });
+    });
   };
   return (
     <div className="flex flex-col gap-0.5 px-2 pb-2" data-testid="cloud-threads">
