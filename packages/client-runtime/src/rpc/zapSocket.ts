@@ -1,41 +1,14 @@
+import { lengthPrefixed, splitMessages, ZAP_FRAME_METHOD } from "@hanzodev/shared/zapFrames";
 import { buildRequest, parseResponse } from "@zap-proto/zap";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Socket from "effect/socket/Socket";
 
-// The Dev session service's one method: a frame of the environment protocol.
-// The ordinal is the contract with the runtime's ZAP endpoint (apps/web/src/embed/runtime.ts).
-export const ZAP_FRAME_METHOD = 0;
-
 const NO_TARGET = 0;
 const NO_CAP = new Uint8Array(0);
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-
-/** A ZAP message on a stream: u32 little-endian length, then the router envelope. */
-export function lengthPrefixed(envelope: Uint8Array): Uint8Array {
-  const out = new Uint8Array(4 + envelope.byteLength);
-  new DataView(out.buffer).setUint32(0, envelope.byteLength, true);
-  out.set(envelope, 4);
-  return out;
-}
-
-/** Splits `buffered` into whole messages; returns them with what is left over. */
-export function splitMessages(buffered: Uint8Array): {
-  readonly messages: ReadonlyArray<Uint8Array>;
-  readonly rest: Uint8Array;
-} {
-  const messages: Array<Uint8Array> = [];
-  let at = 0;
-  while (buffered.byteLength - at >= 4) {
-    const size = new DataView(buffered.buffer, buffered.byteOffset + at, 4).getUint32(0, true);
-    if (buffered.byteLength - at - 4 < size) break;
-    messages.push(buffered.subarray(at + 4, at + 4 + size));
-    at += 4 + size;
-  }
-  return { messages, rest: buffered.subarray(at) };
-}
 
 const readError = (cause: unknown) =>
   new Socket.SocketError({ reason: new Socket.SocketReadError({ cause }) });

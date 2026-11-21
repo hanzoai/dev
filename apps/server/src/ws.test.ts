@@ -20,6 +20,7 @@ import {
   VcsProcessSpawnError,
   MessageId,
   ProjectId,
+  ORCHESTRATION_V2_WS_METHODS,
   ThreadId,
   TurnItemId,
   ProviderDriverKind,
@@ -50,6 +51,20 @@ import * as Exit from "effect/Exit";
 import * as Cause from "effect/Cause";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
+import * as Clock from "effect/Clock";
+import * as Redacted from "effect/Redacted";
+import * as Jwk from "effect/jose/Jwk";
+import * as Jwks from "effect/jose/Jwks";
+import * as Jwt from "effect/jose/Jwt";
+import * as Schema from "effect/Schema";
+import { Http3Server, WebTransport } from "@fails-components/webtransport";
+import { buildRequest, parseResponse } from "@zap-proto/zap";
+import { lengthPrefixed, splitMessages, ZAP_FRAME_METHOD } from "@hanzodev/shared/zapFrames";
+import * as ZapAuth from "./zap/ZapAuth.ts";
+import * as ZapServer from "./zap/ZapServer.ts";
+import { selfSignedCertificate } from "./testUtils/selfSignedCertificate.ts";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Finds a free UDP port for the QUIC listener.
+import * as Dgram from "node:dgram";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
@@ -913,6 +928,47 @@ const layerConfigSources = Layer.mergeAll(
   Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
 );
 
+// The services a `Ws.layer` route needs to build, with the capabilities a session does not reach left unused.
+const layerWsRouteServices = (...extra: ReadonlyArray<Layer.Layer<never>>) =>
+  Layer.mergeAll(
+    layerUnusedConfigRpcServices,
+    Layer.mock(ServerBrowser.ServerBrowser)({
+      profileReporter: Effect.succeed(() => Effect.void),
+    }),
+    Layer.mock(SessionStore.SessionStore)({
+      cookieName: "compression-test",
+      legacyCookieName: undefined,
+      markConnected: () => Effect.void,
+      markDisconnected: () => Effect.void,
+      awaitInvalidation: () => Effect.never,
+    }),
+    Layer.mock(AnalyticsService.AnalyticsService)({ recordOwners: () => Effect.void }),
+    Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+      namedProjectsRoot: process.cwd(),
+    }),
+    Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
+    Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+    Layer.mock(UsageLimitSources.UsageLimitSources)({}),
+    Layer.mock(ExternalLauncher.ExternalLauncher)({}),
+    Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
+    Layer.mock(DirectEndpoints.DirectEndpoints)({}),
+    Layer.mock(ServerEnvironment.ServerEnvironment)({}),
+    Layer.mock(VcsProcess.VcsProcess)({
+      run: (input) =>
+        Effect.fail(
+          new VcsProcessSpawnError({
+            operation: input.operation,
+            command: input.command,
+            cwd: input.cwd,
+            cause: "No VCS commands in the compression fixture",
+          }),
+        ),
+    }),
+    ProviderInstallationGate.layer,
+    FetchHttpClient.layer,
+    ...extra,
+  );
+
 it.live.each([
   { subject: "desktop-bootstrap", extensions: "", framed: false },
   { subject: "desktop-bootstrap", extensions: "", framed: true },
@@ -922,11 +978,7 @@ it.live.each([
   "negotiates compression for $subject sessions (framed=$framed)",
   ({ subject, extensions, framed }) =>
     Effect.gen(function* () {
-      const services = Layer.mergeAll(
-        layerUnusedConfigRpcServices,
-        Layer.mock(ServerBrowser.ServerBrowser)({
-          profileReporter: Effect.succeed(() => Effect.void),
-        }),
+      const services = layerWsRouteServices(
         Layer.mock(EnvironmentAuth.EnvironmentAuth)({
           authenticateWebSocketUpgrade: () =>
             Effect.succeed({
@@ -936,37 +988,6 @@ it.live.each([
               scopes: [],
             }),
         }),
-        Layer.mock(SessionStore.SessionStore)({
-          cookieName: "compression-test",
-          legacyCookieName: undefined,
-          markConnected: () => Effect.void,
-          markDisconnected: () => Effect.void,
-          awaitInvalidation: () => Effect.never,
-        }),
-        Layer.mock(AnalyticsService.AnalyticsService)({ recordOwners: () => Effect.void }),
-        Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
-          namedProjectsRoot: process.cwd(),
-        }),
-        Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
-        Layer.mock(ProviderRegistry.ProviderRegistry)({}),
-        Layer.mock(UsageLimitSources.UsageLimitSources)({}),
-        Layer.mock(ExternalLauncher.ExternalLauncher)({}),
-        Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
-        Layer.mock(DirectEndpoints.DirectEndpoints)({}),
-        Layer.mock(ServerEnvironment.ServerEnvironment)({}),
-        Layer.mock(VcsProcess.VcsProcess)({
-          run: (input) =>
-            Effect.fail(
-              new VcsProcessSpawnError({
-                operation: input.operation,
-                command: input.command,
-                cwd: input.cwd,
-                cause: "No VCS commands in the compression fixture",
-              }),
-            ),
-        }),
-        ProviderInstallationGate.layer,
-        FetchHttpClient.layer,
       );
       const context = yield* Layer.build(
         HttpRouter.serve(Ws.layer, { disableListenLog: true }).pipe(
@@ -2628,4 +2649,143 @@ it.effect("ACP session RPCs list a thread missing its history and repair it on i
       ),
     ),
   ),
+);
+
+const IAM_ISSUER = "https://hanzo.id";
+const IAM_AUDIENCE = "hanzo-app";
+const IamToken = Schema.Struct({
+  iss: Schema.String,
+  aud: Schema.String,
+  exp: Schema.Number,
+  owner: Schema.String,
+  name: Schema.String,
+});
+
+const freeUdpPort = Effect.callback<number>((resume) => {
+  const socket = Dgram.createSocket("udp4");
+  socket.bind(0, "127.0.0.1", () => {
+    const { port } = socket.address();
+    socket.close(() => resume(Effect.succeed(port)));
+  });
+});
+
+// One session over ZAP on WebTransport, end to end: a client opens a QUIC stream, presents a
+// Hanzo IAM token as the cap of its first envelope, and asks for a thread through the same
+// environment protocol the WebSocket route serves.
+it.live("serves a thread over ZAP on WebTransport, authenticated by a Hanzo IAM token", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const directory = yield* fileSystem.makeTempDirectoryScoped();
+    const certificate = selfSignedCertificate();
+    yield* fileSystem.writeFileString(`${directory}/cert.pem`, certificate.cert);
+    yield* fileSystem.writeFileString(`${directory}/key.pem`, certificate.privateKey);
+
+    const keys = yield* Jwk.generateKeyPair({ algorithm: "ES256" });
+    const signingKey = yield* Jwk.importPrivate(keys.privateKey, "ES256");
+    const keySet = { keys: [{ ...keys.publicKey, kid: "test", alg: "ES256" }] };
+    const now = yield* Clock.currentTimeMillis;
+    const mint = (claims: Partial<typeof IamToken.Type>) =>
+      Jwt.sign(
+        IamToken,
+        {
+          iss: IAM_ISSUER,
+          aud: IAM_AUDIENCE,
+          exp: Math.floor(now / 1000) + 300,
+          owner: "hanzo",
+          name: "z",
+          ...claims,
+        },
+        signingKey,
+        { kid: "test" },
+      ).pipe(Effect.map(Redacted.value));
+
+    const port = yield* freeUdpPort;
+    yield* Layer.build(
+      ZapServer.layer({
+        host: "127.0.0.1",
+        port,
+        path: "/v1/dev/zap/cell",
+        certPath: `${directory}/cert.pem`,
+        keyPath: `${directory}/key.pem`,
+      }).pipe(
+        Layer.provide(
+          ZapAuth.layerIam({ issuer: IAM_ISSUER, audience: IAM_AUDIENCE, principal: "hanzo/z" }).pipe(
+            Layer.provide(Layer.mergeAll(Jwks.layerLocal(keySet), NodeCrypto.layer)),
+          ),
+        ),
+        Layer.provideMerge(Ws.layer.pipe(Layer.provide(HttpRouter.layer))),
+        Layer.provide(
+          layerWsRouteServices(
+            Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
+            Layer.mock(ThreadManagement.ThreadManagementService)({
+              getThreadTitles: () => Effect.succeed({ [ThreadId.make("thread-1")]: "Hello over ZAP" }),
+            }),
+          ),
+        ),
+        Layer.provide(layerConfigSources),
+      ),
+    );
+
+    // A session: send one frame as the first envelope with the token as its cap, read one frame.
+    const call = (token: string | null) =>
+      Effect.promise(async () => {
+        const transport = new WebTransport(`https://127.0.0.1:${port}/v1/dev/zap/cell`, {
+          serverCertificateHashes: [{ algorithm: "sha-256", value: certificate.hash }],
+        });
+        try {
+          await transport.ready;
+          const stream = await transport.createBidirectionalStream();
+          const frame = JSON.stringify({
+            _tag: "Request",
+            id: "1",
+            tag: ORCHESTRATION_V2_WS_METHODS.getThreadTitles,
+            payload: { threadIds: ["thread-1"] },
+            headers: [],
+          });
+          await stream.writable.getWriter().write(
+            lengthPrefixed(
+              buildRequest({
+                method: ZAP_FRAME_METHOD,
+                promiseID: 1,
+                target: 0,
+                cap: token === null ? new Uint8Array(0) : new TextEncoder().encode(token),
+                payload: new TextEncoder().encode(frame),
+              }),
+            ),
+          );
+          const reader = stream.readable.getReader();
+          let buffered: Uint8Array = new Uint8Array(0);
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) return null;
+            const joined = new Uint8Array(buffered.byteLength + value.byteLength);
+            joined.set(buffered);
+            joined.set(value, buffered.byteLength);
+            const { messages, rest } = splitMessages(joined);
+            buffered = rest;
+            if (messages[0] !== undefined) return parseResponse(messages[0]);
+          }
+        } finally {
+          transport.close();
+        }
+      });
+
+    const accepted = yield* call(yield* mint({}));
+    assert.equal(accepted?.status, 200);
+    const reply = JSON.parse(new TextDecoder().decode(accepted?.body));
+    const exit = (Array.isArray(reply) ? reply : [reply]).find((message) => message._tag === "Exit");
+    assert.deepEqual(exit?.exit, { _tag: "Success", value: { "thread-1": "Hello over ZAP" } });
+
+    // Each of these gets a 401 and no frame reaches the protocol.
+    for (const refused of [
+      null,
+      "not-a-jwt",
+      yield* mint({ owner: "hanzo", name: "someone-else" }),
+      yield* mint({ iss: "https://evil.example" }),
+      yield* mint({ aud: "another-app" }),
+      yield* mint({ exp: Math.floor(now / 1000) - 600 }),
+    ]) {
+      assert.equal((yield* call(refused))?.status, 401);
+    }
+  }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );

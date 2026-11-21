@@ -1,7 +1,7 @@
 import { buildRequest, parseRequest } from "@zap-proto/zap";
 import { describe, expect, it } from "@effect/vitest";
 
-import { lengthPrefixed, splitMessages, ZAP_FRAME_METHOD } from "./zapSocket.ts";
+import { lengthPrefixed, splitMessages, ZAP_FRAME_METHOD } from "@hanzodev/shared/zapFrames";
 
 const call = (text: string) =>
   buildRequest({

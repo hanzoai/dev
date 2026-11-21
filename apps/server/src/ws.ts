@@ -3,6 +3,7 @@ import { OrchestrationDispatchCommandError } from "@hanzodev/contracts";
 import * as NodeCrypto from "node:crypto";
 import * as HostProcess from "@hanzodev/shared/HostProcess";
 import * as Context from "effect/Context";
+import type * as Scope from "effect/Scope";
 import * as NodeHttpServerRequest from "@effect/platform-node/NodeHttpServerRequest";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
@@ -3607,6 +3608,23 @@ export const WS_RPC_SERVER_OPTIONS = {
   disableFatalDefects: true,
 } as const;
 
+/** Serves the environment protocol to one authenticated client over a transport the caller mounts. */
+export class RpcSessions extends Context.Service<
+  RpcSessions,
+  {
+    readonly serve: <A, R>(input: {
+      readonly session: EnvironmentAuth.AuthenticatedSession;
+      readonly clientAnalyticsProps: ReturnType<typeof readClientAnalyticsProps>;
+      readonly settingsClient: ReturnType<typeof readSettingsClient>;
+      readonly mount: Effect.Effect<
+        { readonly protocol: RpcServer.Protocol["Service"]; readonly attach: A },
+        never,
+        RpcSerialization.RpcSerialization | R
+      >;
+    }) => Effect.Effect<A, never, Scope.Scope | AnalyticsService.AnalyticsService>;
+  }
+>()("hanzo/ws/RpcSessions") {}
+
 export const layer = Layer.unwrap(
   Effect.gen(function* () {
     const serverBrowser = yield* ServerBrowser.ServerBrowser;
@@ -3620,47 +3638,23 @@ export const layer = Layer.unwrap(
     const peerLinks = yield* PeerLinks.PeerLinks;
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
     const sql = yield* SqlClient.SqlClient;
-    return HttpRouter.add(
-      "GET",
-      "/ws",
-      Effect.gen(function* () {
-        const request = yield* HttpServerRequest.HttpServerRequest;
-        const url = requestUrl(request);
-        if (Option.isNone(url) || !hasCompatibleOrchestrationProtocol(url.value)) {
-          return HttpServerResponse.jsonUnsafe(
-            {
-              code: "orchestration_protocol_incompatible",
-              message: `Update this client to one that supports orchestration protocol ${ORCHESTRATION_PROTOCOL_VERSION}.`,
-              orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
-            },
-            { status: 426 },
-          );
-        }
-        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-        const sessions = yield* SessionStore.SessionStore;
-        const analytics = yield* AnalyticsService.AnalyticsService;
-        const session = yield* serverAuth.authenticateWebSocketUpgrade(request, "rpc").pipe(
-          Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
-            failEnvironmentAuthInvalid(
-              EnvironmentAuth.serverAuthCredentialReason(error),
-              EnvironmentAuth.serverAuthDpopFailureReason(error),
-            ),
-          ),
-          Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
-            failEnvironmentInternal("internal_error", error),
-          ),
-        );
-        // Desktop bootstrap sessions connect to their own backend, including same-machine WSL.
-        if (session.subject === "desktop-bootstrap") {
-          delete NodeHttpServerRequest.toIncomingMessage(request).headers[
-            "sec-websocket-extensions"
-          ];
-        }
-        const clientAnalyticsProps = readClientAnalyticsProps(request);
-        yield* analytics.recordOwners(readClientOwners(request), "client");
-        const reportProfiles = yield* serverBrowser.profileReporter;
-        const rpcWebSocketHttpEffect = yield* Effect.gen(function* () {
-          const { protocol, httpEffect } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket;
+    // One RPC server per client session, whatever carries it: the WebSocket route attaches
+    // the protocol to an upgraded request, ZAP to a socket server.
+    const serveRpc = Effect.fnUntraced(function* <A, R>(input: {
+      readonly session: EnvironmentAuth.AuthenticatedSession;
+      readonly clientAnalyticsProps: ReturnType<typeof readClientAnalyticsProps>;
+      readonly settingsClient: ReturnType<typeof readSettingsClient>;
+      readonly mount: Effect.Effect<
+        { readonly protocol: RpcServer.Protocol["Service"]; readonly attach: A },
+        never,
+        RpcSerialization.RpcSerialization | R
+      >;
+    }) {
+      const { session, clientAnalyticsProps } = input;
+      const analytics = yield* AnalyticsService.AnalyticsService;
+      const reportProfiles = yield* serverBrowser.profileReporter;
+      return yield* Effect.gen(function* () {
+        const { protocol, attach } = yield* input.mount;
           yield* RpcServer.make(ServerWsRpcGroup, WS_RPC_SERVER_OPTIONS).pipe(
             Effect.provideService(RpcServer.Protocol, withOutputWindow(protocol)),
             Effect.provide(
@@ -3685,7 +3679,7 @@ export const layer = Layer.unwrap(
             ),
             Effect.forkScoped,
           );
-          return httpEffect;
+          return attach;
         }).pipe(
           Effect.provide(
             layerWsRpc(
@@ -3693,7 +3687,7 @@ export const layer = Layer.unwrap(
               clientAnalyticsProps,
               serverBrowser,
               reportProfiles,
-              readSettingsClient(url.value),
+              input.settingsClient,
             ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               // Handler-context reporters see only request defects, not server-wide defects.
@@ -3735,6 +3729,58 @@ export const layer = Layer.unwrap(
             ),
           ),
         );
+    });
+    return Layer.merge(
+      // Sessions run in the context the server was built with, which carries every handler's
+      // services; a transport mounts one from a fiber forked there.
+      Layer.succeed(RpcSessions, { serve: serveRpc as RpcSessions["Service"]["serve"] }),
+      HttpRouter.add(
+      "GET",
+      "/ws",
+      Effect.gen(function* () {
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const url = requestUrl(request);
+        if (Option.isNone(url) || !hasCompatibleOrchestrationProtocol(url.value)) {
+          return HttpServerResponse.jsonUnsafe(
+            {
+              code: "orchestration_protocol_incompatible",
+              message: `Update this client to one that supports orchestration protocol ${ORCHESTRATION_PROTOCOL_VERSION}.`,
+              orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
+            },
+            { status: 426 },
+          );
+        }
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const sessions = yield* SessionStore.SessionStore;
+        const analytics = yield* AnalyticsService.AnalyticsService;
+        const session = yield* serverAuth.authenticateWebSocketUpgrade(request, "rpc").pipe(
+          Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
+            failEnvironmentAuthInvalid(
+              EnvironmentAuth.serverAuthCredentialReason(error),
+              EnvironmentAuth.serverAuthDpopFailureReason(error),
+            ),
+          ),
+          Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
+            failEnvironmentInternal("internal_error", error),
+          ),
+        );
+        // Desktop bootstrap sessions connect to their own backend, including same-machine WSL.
+        if (session.subject === "desktop-bootstrap") {
+          delete NodeHttpServerRequest.toIncomingMessage(request).headers[
+            "sec-websocket-extensions"
+          ];
+        }
+        const clientAnalyticsProps = readClientAnalyticsProps(request);
+        yield* analytics.recordOwners(readClientOwners(request), "client");
+        const rpcWebSocketHttpEffect = yield* serveRpc({
+          session,
+          clientAnalyticsProps,
+          settingsClient: readSettingsClient(url.value),
+          mount: Effect.map(RpcServer.makeProtocolWithHttpEffectWebsocket, ({ protocol, httpEffect }) => ({
+            protocol,
+            attach: httpEffect,
+          })),
+        });
         const framedRpcWebSocketHttpEffect = url.value.searchParams.has(
           SOCKET_FRAME_PARTS_QUERY_PARAM,
         )
@@ -3769,6 +3815,7 @@ export const layer = Layer.unwrap(
           EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
           EnvironmentInternalError: HttpServerRespondable.toResponse,
         }),
+      ),
       ),
     );
   }),

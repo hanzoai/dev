@@ -183,7 +183,8 @@ export interface CloudCliOAuthConfig {
   readonly scopes: typeof CLOUD_CLI_OAUTH_SCOPES;
 }
 
-export function makeCloudCliOAuthConfig({
+/** The Hanzo IAM this build signs people in with. */
+export function makeHanzoIamConfig({
   iamIssuerFallback = buildTimeIamIssuer || DEFAULT_HANZO_IAM_ISSUER,
   iamClientIdFallback = buildTimeIamClientId || DEFAULT_HANZO_IAM_CLIENT_ID,
 }: {
@@ -193,7 +194,11 @@ export function makeCloudCliOAuthConfig({
   return Config.all({
     iamIssuer: makePublicValueConfig("HANZO_DEV_IAM_ISSUER", iamIssuerFallback),
     iamClientId: makePublicValueConfig("HANZO_DEV_IAM_CLIENT_ID", iamClientIdFallback),
-  }).pipe(
+  });
+}
+
+export function makeCloudCliOAuthConfig(options: Parameters<typeof makeHanzoIamConfig>[0] = {}) {
+  return makeHanzoIamConfig(options).pipe(
     Config.map(({ iamIssuer, iamClientId }) => {
       const issuer = normalizeHanzoIssuer(iamIssuer);
       return {

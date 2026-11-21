@@ -6,6 +6,8 @@ const CLI_RUNTIME_EXTERNAL_PREFIXES = [
   // Playwright reads package.json and browsers.json beside its runtime modules.
   "playwright-core",
   "node-pty",
+  // QUIC server of ZAP on WebTransport; a native addon found beside the executable.
+  "@fails-components/",
   "ffi-rs",
   "@yuuang/",
   "@ff-labs/",

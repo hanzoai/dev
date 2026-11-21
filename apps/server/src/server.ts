@@ -43,6 +43,7 @@ import {
 import { resolveLauncherPath } from "./cloud/pinnedRuntime.ts";
 import { fixPath } from "./os-jank.ts";
 import * as Ws from "./ws.ts";
+import * as ZapServer from "./zap/ZapServer.ts";
 import * as AgentScopeLive from "./process/agentScope.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as SpawnWorker from "./process/SpawnWorker.ts";
@@ -866,6 +867,7 @@ const layerMakeRoutes = Layer.mergeAll(
     PreviewTunnel.routeLayer,
     ServerHttp.layerStaticAndDevRoute,
     Ws.layer,
+    ZapServer.layerFromEnvironment.pipe(Layer.provide(Ws.layer)),
     speechStreamRouteLayer,
   ),
   McpHttpServer.layer.pipe(

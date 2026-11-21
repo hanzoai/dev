@@ -227,6 +227,10 @@
       "types": "./src/relayUrl.ts",
       "import": "./src/relayUrl.ts"
     },
+    "./zapFrames": {
+      "types": "./src/zapFrames.ts",
+      "import": "./src/zapFrames.ts"
+    },
     "./relayJwt": {
       "types": "./src/relayJwt.ts",
       "import": "./src/relayJwt.ts"

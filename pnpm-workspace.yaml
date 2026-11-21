@@ -14,6 +14,8 @@ allowBuilds:
   bufferutil: false
   core-js: false
   esbuild: true
+  # Downloads its platform's N-API prebuild at install; the QUIC server of ZAP on WebTransport.
+  "@fails-components/webtransport-transport-http3-quiche": true
   # Ships prebuilds; its host-architecture probe triggers source builds during cross-packaging.
   koffi: false
   node-pty: true
