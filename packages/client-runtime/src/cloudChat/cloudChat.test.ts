@@ -318,3 +318,56 @@ describe("thread persistence", () => {
     expect(chat.getState().error).toBeNull();
   });
 });
+
+describe("thread actions", () => {
+  const seeded = async () => {
+    const store = memoryStore();
+    await store.save("u", { key: "k1", remoteId: "c1", title: "Mine", updatedAt: 1000, synced: 2, messages: [{ role: "user", content: "a" }] });
+    const calls: string[] = [];
+    const chat = createCloudChatController({
+      getAuth: async () => auth,
+      store,
+      options: {
+        fetch: async (url, init) => {
+          calls.push(`${init?.method ?? "GET"} ${url.replace("https://api.hanzo.ai", "")}`);
+          return url.endsWith("/conversations")
+            ? json(200, { conversations: [
+                { id: "c1", title: "Server title", updatedAt: new Date(5000).toISOString() },
+                { id: "c2", title: "Other", updatedAt: new Date(3000).toISOString() },
+              ] })
+            : json(200, {});
+        },
+      },
+    });
+    await chat.loadThreads();
+    return { store, chat, calls };
+  };
+
+  it("renames locally and the remote title no longer replaces it", async () => {
+    const { store, chat } = await seeded();
+    await chat.renameThread("k1", "  Launch plan ");
+    expect(chat.getState().threads.find((t) => t.key === "k1")?.title).toBe("Launch plan");
+    expect(store.rows.get("k1")).toMatchObject({ title: "Launch plan", renamed: true });
+    await chat.loadThreads();
+    expect(chat.getState().threads.find((t) => t.key === "k1")?.title).toBe("Launch plan");
+  });
+
+  it("pins a remote-only thread to the top and keeps it across reloads", async () => {
+    const { store, chat } = await seeded();
+    await chat.pinThread("c2", true);
+    expect(chat.getState().threads[0]?.key).toBe("c2");
+    expect(store.rows.get("c2")).toMatchObject({ pinned: true, remoteId: "c2", messages: [] });
+    await chat.loadThreads();
+    expect(chat.getState().threads[0]?.key).toBe("c2");
+  });
+
+  it("deletes: hides it, asks the backend, and stays hidden when the backend still lists it", async () => {
+    const { store, chat, calls } = await seeded();
+    await chat.deleteThread("k1");
+    expect(chat.getState().threads.map((t) => t.key)).toEqual(["c2"]);
+    expect(calls).toContain("DELETE /v1/agents/chat/conversations/c1");
+    expect(store.rows.get("k1")).toMatchObject({ deleted: true });
+    await chat.loadThreads();
+    expect(chat.getState().threads.map((t) => t.key)).toEqual(["c2"]);
+  });
+});

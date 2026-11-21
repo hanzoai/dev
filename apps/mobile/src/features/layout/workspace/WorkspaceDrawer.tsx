@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
+import { Pressable, StyleSheet, View, useColorScheme, useWindowDimensions } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, {
   Easing,
@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   DRAWER_CARD_RADIUS,
-  DRAWER_CARD_SCALE,
+  DRAWER_CARD_SHADOW,
   DRAWER_DURATION,
   DRAWER_EDGE,
   drawerPull,
@@ -28,8 +28,8 @@ import {
   useWorkspaceDrawerOpen,
 } from "./workspace-drawer-store";
 
-// hanzo.app's entrance curve (the sweep/tilt easing of its shell).
-const DRAWER_EASING = Easing.bezier(0.2, 0.8, 0.2, 1);
+// hanzo.app's --ease-emphasis; its --duration-base is DRAWER_DURATION.
+const DRAWER_EASING = Easing.bezier(0.16, 1, 0.3, 1);
 
 /**
  * The phone's side drawer. The menu stands still at the leading edge; the pane slides toward the
@@ -47,6 +47,7 @@ export function WorkspaceDrawer(props: {
   const gt = useGT();
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const isDark = useColorScheme() === "dark";
   const open = useWorkspaceDrawerOpen();
   const reach = drawerReach(width);
   const at = useSharedValue(0);
@@ -102,20 +103,19 @@ export function WorkspaceDrawer(props: {
   const paneStyle = useAnimatedStyle(() => {
     const progress = reach === 0 ? 0 : at.value / reach;
     return {
-      transform: [
-        { translateX: at.value },
-        { scale: interpolate(progress, [0, 1], [1, DRAWER_CARD_SCALE]) },
-      ],
-      shadowOpacity: progress * 0.25,
+      transform: [{ translateX: at.value }],
+      shadowOpacity: progress * (isDark ? DRAWER_CARD_SHADOW.opacityDark : DRAWER_CARD_SHADOW.opacityLight),
     };
   });
   // The floating header's circles leave as the drawer opens, on the same value.
   const floatingStyle = useAnimatedStyle(() => ({
     opacity: reach === 0 ? 1 : 1 - Math.min(1, at.value / reach),
   }));
-  const clipStyle = useAnimatedStyle(() => ({
-    borderRadius: interpolate(reach === 0 ? 0 : at.value / reach, [0, 1], [0, DRAWER_CARD_RADIUS]),
-  }));
+  // Only the start corners round, as hanzo.app's pane does; a hairline edge rides with them.
+  const clipStyle = useAnimatedStyle(() => {
+    const radius = interpolate(reach === 0 ? 0 : at.value / reach, [0, 1], [0, DRAWER_CARD_RADIUS]);
+    return { borderTopLeftRadius: radius, borderBottomLeftRadius: radius };
+  });
 
   return (
     <View className="flex-1 bg-drawer">
@@ -158,10 +158,10 @@ export function WorkspaceDrawer(props: {
 
 const styles = StyleSheet.create({
   menu: { position: "absolute", top: 0, bottom: 0, left: 0 },
-  clip: { overflow: "hidden", borderCurve: "continuous" },
+  clip: { overflow: "hidden", borderCurve: "continuous", borderWidth: StyleSheet.hairlineWidth, borderColor: "rgba(128,128,128,0.32)" },
   card: {
     shadowColor: "#000",
-    shadowOffset: { width: -6, height: 0 },
-    shadowRadius: 18,
+    shadowOffset: { width: 0, height: DRAWER_CARD_SHADOW.offsetY },
+    shadowRadius: DRAWER_CARD_SHADOW.radius,
   },
 });

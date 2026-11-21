@@ -10,6 +10,8 @@ import { useCloudChat } from "../../chat/cloud-chat";
 import { openSettings } from "../../settings/settings-navigation";
 import { closeWorkspaceDrawer } from "./workspace-drawer-store";
 import { drawerThreadRows } from "./workspace-drawer.logic";
+import { useConnectionController } from "../../connection/useConnectionController";
+import { resolveMacTap } from "./drawer-macs.logic";
 import { useDrawerMacs } from "./useDrawerMacs";
 import { useSelectWorkspaceTab } from "./useSelectWorkspaceTab";
 import { useWorkspaceTabs } from "./WorkspaceTabsContext";
@@ -26,6 +28,13 @@ export function WorkspaceDrawerThreads() {
   const workspace = useWorkspaceTabs();
   const chat = useCloudChat();
   const macs = useDrawerMacs();
+  const connection = useConnectionController();
+  const connectedIds = new Set(
+    connection.connectedEnvironments.map((environment) => String(environment.environmentId)),
+  );
+  const relayIds = new Set(
+    connection.relayEnvironments.map((entry) => String(entry.environment.environmentId)),
+  );
   const rows = drawerThreadRows(
     chat.state.threads,
     workspace?.state.tabs.threads.query ?? "",
@@ -48,7 +57,15 @@ export function WorkspaceDrawerThreads() {
               accessibilityLabel={mac.name}
               onPress={() => {
                 closeWorkspaceDrawer();
-                openSettings(navigation, "SettingsEnvironments");
+                const tap = resolveMacTap({ macId: mac.id, connectedIds, relayIds });
+                if (tap === "settings") openSettings(navigation, "SettingsEnvironments");
+                else if (tap === "connect") {
+                  const relay = connection.availableRelayEnvironments.find(
+                    (entry) => String(entry.environment.environmentId) === mac.id,
+                  );
+                  if (relay) void connection.connectRelayEnvironment(relay.environment);
+                  selectTab("threads");
+                } else selectTab("threads");
               }}
               className="h-11 flex-row items-center gap-3 rounded-xl px-3"
             >
@@ -80,8 +97,11 @@ export function WorkspaceDrawerThreads() {
                 accessibilityState={{ selected: chat.state.threadKey === row.key }}
                 accessibilityLabel={row.title}
                 onPress={() => openThread(row.key)}
-                className="h-11 flex-1 justify-center"
+                className="h-11 flex-1 flex-row items-center gap-2"
               >
+                {row.pinned ? (
+                  <SymbolView name="pin.fill" size={12} tintColor={colors["--color-foreground-muted"]} />
+                ) : null}
                 <Text className="text-base text-foreground" numberOfLines={1}>
                   {row.title}
                 </Text>
@@ -93,7 +113,31 @@ export function WorkspaceDrawerThreads() {
                 onPress={() =>
                   Alert.alert(row.title, undefined, [
                     { text: gt("Open"), onPress: () => openThread(row.key) },
+                    {
+                      text: gt("Rename"),
+                      onPress: () =>
+                        Alert.prompt(gt("Rename"), undefined, (title) => {
+                          void chat.renameThread(row.key, title);
+                        }, "plain-text", row.title),
+                    },
+                    {
+                      text: row.pinned ? gt("Unpin") : gt("Pin"),
+                      onPress: () => void chat.pinThread(row.key, !row.pinned),
+                    },
                     { text: gt("Copy title"), onPress: () => void Clipboard.setStringAsync(row.title) },
+                    {
+                      text: gt("Delete"),
+                      style: "destructive",
+                      onPress: () =>
+                        Alert.alert(gt("Delete this chat?"), undefined, [
+                          { text: gt("Cancel"), style: "cancel" },
+                          {
+                            text: gt("Delete"),
+                            style: "destructive",
+                            onPress: () => void chat.deleteThread(row.key),
+                          },
+                        ]),
+                    },
                     { text: gt("Cancel"), style: "cancel" },
                   ])
                 }

@@ -1,7 +1,7 @@
 import { discoverEnvironments } from "@hanzodev/client-runtime/discovery";
 import { describe, expect, it } from "vite-plus/test";
 
-import { drawerMacs } from "./drawer-macs.logic";
+import { drawerMacs, resolveMacTap } from "./drawer-macs.logic";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -43,5 +43,14 @@ describe("drawerMacs", () => {
 
   it("does not offer a cloud session as a Mac", async () => {
     expect(drawerMacs(await discover(() => json(200, { sources: [] })))).toEqual([]);
+  });
+});
+
+describe("resolveMacTap", () => {
+  const sets = { connectedIds: new Set(["a"]), relayIds: new Set(["a", "b"]) };
+  it("opens a connected Mac, connects a relay one, else sends to Settings", () => {
+    expect(resolveMacTap({ macId: "a", ...sets })).toBe("open");
+    expect(resolveMacTap({ macId: "b", ...sets })).toBe("connect");
+    expect(resolveMacTap({ macId: "z", ...sets })).toBe("settings");
   });
 });

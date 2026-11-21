@@ -24,3 +24,18 @@ export function drawerMacs(discovery: EnvironmentDiscovery | null): readonly Dra
   }
   return macs.toSorted((a, b) => Number(b.online) - Number(a.online));
 }
+
+export type MacTap = "open" | "connect" | "settings";
+
+/**
+ * What tapping a linked Mac does: already connected opens its threads; known to the relay and not
+ * yet connected connects it; unknown to the relay is a pairing job, which lives in Settings.
+ */
+export function resolveMacTap(input: {
+  readonly macId: string;
+  readonly connectedIds: ReadonlySet<string>;
+  readonly relayIds: ReadonlySet<string>;
+}): MacTap {
+  if (input.connectedIds.has(input.macId)) return "open";
+  return input.relayIds.has(input.macId) ? "connect" : "settings";
+}

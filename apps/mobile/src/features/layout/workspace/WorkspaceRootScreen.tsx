@@ -50,7 +50,7 @@ import { PhoneFloatingHeader } from "./usePhoneHeaderButtons";
 import { WorkspaceDrawer } from "./WorkspaceDrawer";
 import { WorkspaceDrawerMenu } from "./WorkspaceDrawerMenu";
 import { closeWorkspaceDrawer } from "./workspace-drawer-store";
-import { floatingHeaderTop, workspaceHeaderShown } from "./workspace-drawer.logic";
+import { floatingHeaderTop, phoneHeaderMode, workspaceHeaderShown } from "./workspace-drawer.logic";
 
 const TAB_TITLES = WORKSPACE_TAB_LABELS;
 
@@ -92,14 +92,18 @@ function WorkspaceRootTitle(props: {
 }
 
 /** On the phone the content slides aside for the drawer; elsewhere it is the content. */
-function DrawerHost(props: { readonly drawer: boolean; readonly children: ReactNode }) {
+function DrawerHost(props: {
+  readonly drawer: boolean;
+  readonly floating: boolean;
+  readonly children: ReactNode;
+}) {
   const focused = useIsFocused();
   const insets = useSafeAreaInsets();
   return props.drawer ? (
     <WorkspaceDrawer
       enabled={focused}
       menu={<WorkspaceDrawerMenu />}
-      floating={<PhoneFloatingHeader top={insets.top + 4} />}
+      floating={props.floating ? <PhoneFloatingHeader top={insets.top + 4} /> : null}
     >
       {props.children}
     </WorkspaceDrawer>
@@ -137,7 +141,12 @@ function WorkspaceRootContent() {
   // Settings is a workspace tab too; its list takes the place of the selected tab's.
   const settingsOpen = workspace.settingsOpen;
   const headerOnly = use(NativeWorkspaceTabActivityContext)?.headerOnly === true;
-  const headerShown = workspaceHeaderShown({ drawer: drawer && !headerOnly });
+  const headerMode = phoneHeaderMode({
+    drawer: drawer && !headerOnly,
+    settingsOpen,
+    selectedTab: state.selectedTab,
+  });
+  const headerShown = workspaceHeaderShown(headerMode);
   const renderHeaderTitle = () => (
     <WorkspaceRootTitle
       columnWidth={width}
@@ -207,9 +216,9 @@ function WorkspaceRootContent() {
                 : undefined,
           }}
         />
-        <DrawerHost drawer={drawer && !headerOnly}>
+        <DrawerHost drawer={drawer && !headerOnly} floating={headerMode === "floating"}>
           <SafeAreaInsetsContext
-            value={{ ...insets, top: floatingHeaderTop(insets.top, drawer && !headerOnly) }}
+            value={{ ...insets, top: floatingHeaderTop(insets.top, headerMode) }}
           >
             {/* Usage draws its own header, and skips its body itself. */}
             {headerOnly && (settingsOpen || state.selectedTab !== "usage") ? null : settingsOpen ? (

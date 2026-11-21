@@ -13,6 +13,7 @@ import {
   type CloudChatOptions,
 } from "./api.ts";
 import {
+  deleteRemoteThread,
   listRemoteThreads,
   mergeThreads,
   readRemoteThread,
@@ -50,6 +51,10 @@ export interface CloudChatController {
   /** Reads the device copies, then the remote list, into `state.threads`. */
   loadThreads(): Promise<void>;
   openThread(key: string): Promise<void>;
+  /** Rename, pin and delete keep a device copy; delete also asks the remote store, best effort. */
+  renameThread(key: string, title: string): Promise<void>;
+  pinThread(key: string, pinned: boolean): Promise<void>;
+  deleteThread(key: string): Promise<void>;
   /** A new, empty conversation. */
   reset(): void;
 }
@@ -85,6 +90,8 @@ export function createCloudChatController(input: {
   /** Turns the remote store already holds for the open thread. */
   let synced = 0;
   let writes: Promise<void> = Promise.resolve();
+  /** Remote ids the user deleted: hidden even if the remote store still lists them. */
+  const deleted = new Set<string>();
   const listeners = new Set<() => void>();
   const set = (patch: Partial<CloudChatState>) => {
     state = { ...state, ...patch };
@@ -98,6 +105,7 @@ export function createCloudChatController(input: {
     const last = state.messages.at(-1);
     const settled =
       last?.role === "assistant" && last.content === "" ? state.messages.slice(0, -1) : state.messages;
+    const current = state.threads.find((entry) => entry.key === key);
     const thread: StoredThread = {
       key,
       remoteId: state.threadId,
@@ -105,12 +113,51 @@ export function createCloudChatController(input: {
       updatedAt: now(),
       messages: settled,
       synced,
+      pinned: current?.pinned === true,
+      renamed: current?.renamed === true,
+      ...(current?.renamed === true ? { title: current.title } : {}),
     };
     const others = state.threads.filter((entry) => entry.key !== key);
     set({ threads: [summaryOf(thread), ...others] });
     const { store } = input;
     if (store === undefined) return;
     writes = writes.then(() => store.save(ownerOf(auth), thread)).catch(() => undefined);
+  };
+  /** Writes a thread's flags onto its device copy, creating a message-less stub for a remote one. */
+  const save = async (
+    auth: CloudChatAuth,
+    key: string,
+    entry: ThreadSummary,
+    flags: Partial<StoredThread>,
+  ) => {
+    const { store } = input;
+    if (store === undefined) return;
+    const existing = (await store.load(ownerOf(auth)).catch(() => [])).find((t) => t.key === key);
+    const base: StoredThread = existing ?? {
+      key,
+      remoteId: entry.remoteId,
+      title: entry.title,
+      updatedAt: entry.updatedAt,
+      messages: [],
+      synced: 0,
+    };
+    writes = writes.then(() => store.save(ownerOf(auth), { ...base, ...flags })).catch(() => undefined);
+    await writes;
+  };
+  const patch = async (
+    key: string,
+    flags: { title?: string; pinned?: boolean; renamed?: boolean },
+  ) => {
+    const entry = state.threads.find((thread) => thread.key === key);
+    if (entry === undefined) return;
+    const next = { ...entry, ...flags };
+    set({
+      threads: state.threads
+        .map((thread) => (thread.key === key ? next : thread))
+        .toSorted((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt),
+    });
+    const auth = await input.getAuth().catch(() => ({ accessToken: null }) as CloudChatAuth);
+    await save(auth, key, entry, flags);
   };
   const kindOf = (cause: unknown): CloudChatErrorKind =>
     cause instanceof CloudChatError ? cause.kind : "failed";
@@ -187,9 +234,13 @@ export function createCloudChatController(input: {
     async loadThreads() {
       const auth = await input.getAuth().catch(() => ({ accessToken: null }) as CloudChatAuth);
       const stored = (await input.store?.load(ownerOf(auth)).catch(() => [])) ?? [];
-      const local = stored.map(summaryOf);
+      for (const thread of stored)
+        if (thread.deleted === true && thread.remoteId !== null) deleted.add(thread.remoteId);
+      const local = stored.filter((thread) => thread.deleted !== true).map(summaryOf);
       set({ threads: mergeThreads(local, state.threads.filter((entry) => entry.local)) });
-      const remote = await listRemoteThreads(auth, input.options);
+      const remote = (await listRemoteThreads(auth, input.options)).filter(
+        (entry) => entry.remoteId === null || !deleted.has(entry.remoteId),
+      );
       set({ threads: mergeThreads(state.threads, remote) });
     },
     async openThread(key) {
@@ -200,7 +251,7 @@ export function createCloudChatController(input: {
       const stored = entry.local
         ? ((await input.store?.load(ownerOf(auth)).catch(() => []))?.find((t) => t.key === key) ?? null)
         : null;
-      let messages = stored?.messages ?? null;
+      let messages = stored !== null && stored.messages.length > 0 ? stored.messages : null;
       if (messages === null && entry.remoteId !== null)
         messages = await readRemoteThread(auth, entry.remoteId, input.options);
       if (messages === null) {
@@ -209,6 +260,26 @@ export function createCloudChatController(input: {
       }
       synced = stored?.synced ?? messages.length;
       set({ messages, threadKey: key, threadId: entry.remoteId, sync: entry.remoteId ? "synced" : "local", error: null });
+    },
+    async renameThread(key, title) {
+      const text = title.trim();
+      if (text !== "") await patch(key, { title: text, renamed: true });
+    },
+    async pinThread(key, pinned) {
+      await patch(key, { pinned });
+    },
+    async deleteThread(key) {
+      const entry = state.threads.find((thread) => thread.key === key);
+      if (entry === undefined) return;
+      if (entry.remoteId !== null) deleted.add(entry.remoteId);
+      set({ threads: state.threads.filter((thread) => thread.key !== key) });
+      if (state.threadKey === key) {
+        synced = 0;
+        set({ messages: [], threadId: null, threadKey: null, sync: "local", error: null });
+      }
+      const auth = await input.getAuth().catch(() => ({ accessToken: null }) as CloudChatAuth);
+      if (entry.remoteId !== null) void deleteRemoteThread(auth, entry.remoteId, input.options);
+      await save(auth, key, entry, { deleted: true });
     },
     reset() {
       synced = 0;

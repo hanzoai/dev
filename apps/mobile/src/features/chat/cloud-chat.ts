@@ -24,6 +24,9 @@ export interface CloudChat {
   readonly selectModel: (id: string) => void;
   readonly openThread: (key: string) => Promise<void>;
   readonly newChat: () => void;
+  readonly renameThread: (key: string, title: string) => Promise<void>;
+  readonly pinThread: (key: string, pinned: boolean) => Promise<void>;
+  readonly deleteThread: (key: string) => Promise<void>;
   readonly runInCloud: () => Promise<RunInCloudResult>;
 }
 
@@ -68,6 +71,9 @@ export function useCloudChat(): CloudChat {
       selectModel: chat.selectModel,
       openThread: chat.openThread,
       newChat: chat.reset,
+      renameThread: chat.renameThread,
+      pinThread: chat.pinThread,
+      deleteThread: chat.deleteThread,
       runInCloud: async () => runInCloud(await getAuth()),
     }),
     [chat, isSignedIn, state],

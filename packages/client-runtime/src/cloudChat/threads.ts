@@ -22,6 +22,11 @@ export interface StoredThread {
   readonly messages: ReadonlyArray<CloudChatMessage>;
   /** How many leading messages the remote store already holds. */
   readonly synced: number;
+  readonly pinned?: boolean;
+  /** The user chose this title; a remote title never replaces it. */
+  readonly renamed?: boolean;
+  /** Hidden on this device (and from the remote list) after Delete. */
+  readonly deleted?: boolean;
 }
 
 export interface ThreadSummary {
@@ -31,6 +36,8 @@ export interface ThreadSummary {
   readonly updatedAt: number;
   /** A device copy exists, so it reopens without the network. */
   readonly local: boolean;
+  readonly pinned: boolean;
+  readonly renamed: boolean;
 }
 
 export interface ThreadStore {
@@ -54,6 +61,8 @@ export function summaryOf(thread: StoredThread): ThreadSummary {
     title: thread.title,
     updatedAt: thread.updatedAt,
     local: true,
+    pinned: thread.pinned === true,
+    renamed: thread.renamed === true,
   };
 }
 
@@ -81,12 +90,14 @@ export function mergeThreads(
     if (thread.updatedAt > mine.updatedAt) {
       out[out.indexOf(mine)] = {
         ...mine,
-        title: thread.title !== "" ? thread.title : mine.title,
+        title: !mine.renamed && thread.title !== "" ? thread.title : mine.title,
         updatedAt: thread.updatedAt,
       };
     }
   }
-  return out.toSorted((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_STORED_THREADS);
+  return out
+    .toSorted((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt)
+    .slice(0, MAX_STORED_THREADS);
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -113,6 +124,8 @@ export function parseThreadList(body: unknown): ReadonlyArray<ThreadSummary> {
       title: typeof entry.title === "string" ? entry.title : "",
       updatedAt: toMillis(entry.updatedAt),
       local: false,
+      pinned: false,
+      renamed: false,
     });
   }
   return out;
@@ -170,4 +183,24 @@ export async function readRemoteThread(
   );
   const messages = parseThreadMessages(body);
   return messages.length > 0 ? messages : null;
+}
+
+/** Best-effort remote delete. False when the backend has no such route or refuses. */
+export async function deleteRemoteThread(
+  auth: CloudChatAuth,
+  remoteId: string,
+  options: CloudChatOptions = {},
+): Promise<boolean> {
+  const token = auth.accessToken?.trim();
+  if (!token) return false;
+  const { fetch, baseUrl } = resolveCloudChatOptions(options);
+  try {
+    const response = await fetch(
+      `${baseUrl}/v1/agents/chat/conversations/${encodeURIComponent(remoteId)}`,
+      { method: "DELETE", headers: buildHanzoApiHeaders({ accessToken: token, orgId: auth.orgId }) },
+    );
+    return response.ok;
+  } catch {
+    return false;
+  }
 }

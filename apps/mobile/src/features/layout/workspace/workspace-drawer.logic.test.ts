@@ -17,6 +17,7 @@ import {
   drawerThreadRows,
   floatingHeaderTop,
   FLOATING_HEADER_HEIGHT,
+  phoneHeaderMode,
   workspaceHeaderShown,
 } from "./workspace-drawer.logic";
 
@@ -104,14 +105,21 @@ describe("drawer account", () => {
   });
 });
 
-describe("floating header", () => {
-  it("replaces the native header on the drawer phone only", () => {
-    expect(workspaceHeaderShown({ drawer: true })).toBe(false);
-    expect(workspaceHeaderShown({ drawer: false })).toBe(true);
+describe("phone header mode", () => {
+  const home = { drawer: true, settingsOpen: false, selectedTab: "threads" };
+  it("floats only on the home chat screen", () => {
+    expect(phoneHeaderMode(home)).toBe("floating");
+    expect(phoneHeaderMode({ ...home, settingsOpen: true })).toBe("native");
+    expect(phoneHeaderMode({ ...home, selectedTab: "pullRequests" })).toBe("native");
+    expect(phoneHeaderMode({ ...home, drawer: false })).toBe("native");
   });
-  it("pushes content below the circles only with a drawer", () => {
-    expect(floatingHeaderTop(47, true)).toBe(47 + FLOATING_HEADER_HEIGHT);
-    expect(floatingHeaderTop(47, false)).toBe(47);
+  it("hides the native header only when floating", () => {
+    expect(workspaceHeaderShown("floating")).toBe(false);
+    expect(workspaceHeaderShown("native")).toBe(true);
+  });
+  it("pushes content below the circles only when floating", () => {
+    expect(floatingHeaderTop(47, "floating")).toBe(47 + FLOATING_HEADER_HEIGHT);
+    expect(floatingHeaderTop(47, "native")).toBe(47);
   });
 });
 
@@ -129,7 +137,7 @@ describe("drawer threads", () => {
     ]);
   });
   it("filters by the search field, ignoring case and padding", () => {
-    expect(drawerThreadRows(threads, "  LOGIN ", "New chat")).toEqual([{ key: "c", title: "Fix login" }]);
+    expect(drawerThreadRows(threads, "  LOGIN ", "New chat")).toEqual([{ key: "c", title: "Fix login", pinned: false }]);
   });
 });
 

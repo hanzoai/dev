@@ -15,7 +15,7 @@ export const DRAWER_SLOP = 8;
 /** A flick, pt per ms: faster than this decides by its direction, whatever the distance. */
 export const DRAWER_FLICK = 0.4;
 /** The slide and the dim run on one clock. */
-export const DRAWER_DURATION = 260;
+export const DRAWER_DURATION = 300;
 /** Where a drag may begin, pt from the leading edge. */
 export const DRAWER_EDGE = 24;
 
@@ -107,35 +107,59 @@ export function drawerAccountInitial(name: string): string {
   return first ? first.toUpperCase() : "?";
 }
 
-/** Raised card at full open: scale, corner radius (pt) and the extra top inset for the floating header. */
-export const DRAWER_CARD_SCALE = 0.96;
+/**
+ * hanzo.app's raised pane (@hanzo/app Drawer.tsx and its tokens): no scale; the start corners
+ * round to --radius-composer (28), a 1px --border-strong edge, shadow `0 24px 60px -16px`.
+ */
 export const DRAWER_CARD_RADIUS = 28;
+export const DRAWER_CARD_SHADOW = { offsetY: 24, radius: 30, opacityDark: 0.75, opacityLight: 0.18 } as const;
 export const FLOATING_HEADER_HEIGHT = 52;
 
-/** The phone has no native header: two floating circles ride on the card instead. */
-export function workspaceHeaderShown(input: { readonly drawer: boolean }): boolean {
-  return !input.drawer;
+export type PhoneHeaderMode = "floating" | "native";
+
+/**
+ * The home chat screen has no bar: two circles float over it. Every other screen of the drawer
+ * phone (Settings, Pull requests, Issues...) keeps the native header and its menu.
+ */
+export function phoneHeaderMode(input: {
+  readonly drawer: boolean;
+  readonly settingsOpen: boolean;
+  readonly selectedTab: string;
+}): PhoneHeaderMode {
+  return input.drawer && !input.settingsOpen && input.selectedTab === "threads"
+    ? "floating"
+    : "native";
+}
+
+/** The native header is shown unless the floating circles replace it. */
+export function workspaceHeaderShown(mode: PhoneHeaderMode): boolean {
+  return mode !== "floating";
 }
 
 /** The safe-area top a screen sees under the floating header. */
-export function floatingHeaderTop(safeTop: number, drawer: boolean): number {
-  return drawer ? safeTop + FLOATING_HEADER_HEIGHT : safeTop;
+export function floatingHeaderTop(safeTop: number, mode: PhoneHeaderMode): number {
+  return mode === "floating" ? safeTop + FLOATING_HEADER_HEIGHT : safeTop;
 }
 
 export interface DrawerThreadRow {
   readonly key: string;
   readonly title: string;
+  readonly pinned: boolean;
 }
 
 /** The drawer's cloud threads, filtered by the search field; untitled ones read "New chat". */
 export function drawerThreadRows(
-  threads: readonly { readonly key: string; readonly title: string }[],
+  threads: readonly { readonly key: string; readonly title: string; readonly pinned?: boolean }[],
   query: string,
   untitled: string,
 ): readonly DrawerThreadRow[] {
   const needle = query.trim().toLowerCase();
   return threads
-    .map((thread) => ({ key: thread.key, title: thread.title === "" ? untitled : thread.title }))
+    .map((thread) => ({
+      key: thread.key,
+      title: thread.title === "" ? untitled : thread.title,
+      pinned: thread.pinned === true,
+    }))
     .filter((row) => needle === "" || row.title.toLowerCase().includes(needle));
 }
 

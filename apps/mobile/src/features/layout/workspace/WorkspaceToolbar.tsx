@@ -25,6 +25,8 @@ import {
   useSidebarWorkspaceTabs,
 } from "./useSystemWorkspaceTabBar";
 import { WorkspaceTabToolbarButtons } from "./WorkspaceSectionToolbar";
+import { usePhoneHeaderButtons } from "./usePhoneHeaderButtons";
+import { phoneHeaderMode } from "./workspace-drawer.logic";
 import { useWorkspaceCompose } from "./useWorkspaceCompose";
 
 const SEARCH_LABELS = {
@@ -49,6 +51,12 @@ export function WorkspaceToolbar(props: {
   const bottomSearch = duoSearch && sidebarTabs !== "picker";
   const compose = useWorkspaceCompose();
   const drawer = useDrawerWorkspace();
+  const phoneButtons = usePhoneHeaderButtons();
+  const nativePhoneButtons = drawer && phoneHeaderMode({
+    drawer,
+    settingsOpen: workspace.settingsOpen,
+    selectedTab: workspace.state.selectedTab,
+  }) === "native";
   // On the Duo, compose sits in the list's bar when folded and the detail column's when unfolded.
   const nativeToolbarCompose =
     deviceType === "duo-folded" && compose !== null && activeNewTask === null;
@@ -196,13 +204,16 @@ export function WorkspaceToolbar(props: {
         }}
       />
       {/* UIKit lays trailing items out from the edge inward. */}
+      {nativePhoneButtons ? <Toolbar placement="left">{phoneButtons.menu}</Toolbar> : null}
       {workspace.settingsOpen ? (
         <Toolbar placement="right">
+          {nativePhoneButtons ? phoneButtons.compose : null}
           {searchButton}
           {createNativeHeaderMenu(settingsMenu)}
         </Toolbar>
       ) : (
         <Toolbar placement="right">
+          {nativePhoneButtons ? phoneButtons.compose : null}
           {searchButton}
           {nativeToolbarCompose && foldedSearch ? <Toolbar.Spacer width={8} /> : null}
           {composeButton}
