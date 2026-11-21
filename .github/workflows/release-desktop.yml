@@ -543,6 +543,10 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          # linuxdeploy is an AppImage: runners have no FUSE 2, and its bundled strip
+          # cannot read current ELF sections.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          NO_STRIP: "true"
         run: |
           set -euo pipefail
           mkdir -p release
