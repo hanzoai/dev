@@ -246,4 +246,41 @@ describe("HanzoWebAuthController IAM, Org Switcher & Local AI guard", () => {
     expect(controller.activeAccount?.id).toBe("hanzo/z");
     expect(controller.activeAccount?.accessToken).toBe("tok_pkce_desktop");
   });
+
+  it("adopts the machine identity, keeps its tokens out of client storage, and never spends its refresh token", async () => {
+    const shared = sampleAccount({
+      id: "admin/z",
+      owner: "admin",
+      accessToken: "tok_machine",
+      refreshToken: "ref_machine",
+      expiresAt: Date.now() - 1_000,
+    });
+    const requests: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push(`${init?.method ?? "GET"} ${new URL(url).pathname}`);
+      if (url.endsWith("/v1/hanzo/identities")) {
+        return new Response(JSON.stringify({ activeAccountId: "admin/z", accounts: [shared] }), {
+          status: 200,
+        });
+      }
+      return new Response("[]", { status: 200 });
+    }) as typeof fetch;
+
+    const controller = new HanzoWebAuthController();
+    controller.resetForTesting(
+      upsertHanzoIamVaultAccount(EMPTY_HANZO_IAM_VAULT, sampleAccount(), true),
+    );
+    await controller.syncLocalCliIdentities();
+
+    expect(controller.activeAccount?.id).toBe("admin/z");
+    expect(controller.accounts.map((account) => account.id)).toEqual(["admin/z"]);
+    expect(globalThis.window.localStorage.getItem(HANZO_IAM_VAULT_STORAGE_KEY)).toBeNull();
+    expect(JSON.stringify([...Object.entries(globalThis.window.localStorage)])).not.toContain(
+      "tok_machine",
+    );
+
+    await controller.getToken();
+    expect(requests.some((request) => request.includes("/oauth/token"))).toBe(false);
+  });
 });

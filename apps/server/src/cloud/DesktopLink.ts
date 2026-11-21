@@ -40,6 +40,8 @@ import { fail, makeSourceApi, reject, storageFailure } from "./SourceApi.ts";
 
 const DEVICE_KEY_SECRET = "desktop-device-key";
 const LINK_RECORD_SECRET = "desktop-link";
+/** Set when a person unlinks this desktop, so signing in does not link it again unasked. */
+const LINK_DECLINED_SECRET = "desktop-link-declined";
 const DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 30;
 // HIP-1350: online means a heartbeat in the last 90 seconds.
 const ONLINE_WINDOW_MS = 90_000;
@@ -584,6 +586,7 @@ const make = Effect.gen(function* () {
             );
         }
         const stored = yield* requireToken;
+        yield* secrets.remove(LINK_DECLINED_SECRET).pipe(Effect.mapError(storageFailure));
         const existing = yield* readRecord;
         const name = Option.isSome(existing) ? existing.value.name : NodeOS.hostname();
         const reply = yield* register(name, stored.accessToken);
@@ -627,6 +630,9 @@ const make = Effect.gen(function* () {
         if (Option.isSome(record)) {
           yield* revokeRemote(record.value.id);
           yield* clearLocal;
+          yield* secrets
+            .set(LINK_DECLINED_SECRET, new TextEncoder().encode("1"))
+            .pipe(Effect.mapError(storageFailure));
         }
         return yield* buildStatus;
       }),
@@ -849,23 +855,33 @@ const make = Effect.gen(function* () {
     );
   });
 
-  yield* lock
-    .withPermits(1)(beat)
-    .pipe(
-      Effect.catch((error) => Effect.logWarning("Desktop heartbeat failed.", error.message)),
-      Effect.andThen(
-        usageLock
-          .withPermits(1)(reportUsage)
-          .pipe(Effect.catch((error) => Effect.logWarning("Usage report failed.", error.message))),
+  // Signing in is linking: a desktop with the machine's identity and no record registers itself.
+  const machineIdentity = yield* CliTokenManager.MachineIdentityToken;
+  const autoLink = Effect.gen(function* () {
+    if (Option.isSome(yield* readRecord)) return;
+    const declined = yield* secrets.get(LINK_DECLINED_SECRET).pipe(Effect.mapError(storageFailure));
+    if (Option.isSome(declined)) return;
+    if (Option.isNone(yield* machineIdentity)) return;
+    yield* link({});
+  });
+
+  yield* autoLink.pipe(
+    Effect.catch((error) => Effect.logWarning("Desktop auto-link failed.", error.message)),
+    Effect.andThen(lock.withPermits(1)(beat)),
+    Effect.catch((error) => Effect.logWarning("Desktop heartbeat failed.", error.message)),
+    Effect.andThen(
+      usageLock
+        .withPermits(1)(reportUsage)
+        .pipe(Effect.catch((error) => Effect.logWarning("Usage report failed.", error.message))),
+    ),
+    Effect.andThen(
+      Ref.get(runtime).pipe(
+        Effect.flatMap((state) => Effect.sleep(Duration.seconds(state.intervalSeconds))),
       ),
-      Effect.andThen(
-        Ref.get(runtime).pipe(
-          Effect.flatMap((state) => Effect.sleep(Duration.seconds(state.intervalSeconds))),
-        ),
-      ),
-      Effect.forever,
-      Effect.forkScoped,
-    );
+    ),
+    Effect.forever,
+    Effect.forkScoped,
+  );
 
   return DesktopLink.of({
     outbox: outboxStatus,

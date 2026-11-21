@@ -199,6 +199,7 @@ import {
   watchManagedTunnelOrigin,
 } from "./cloud/managedTunnelStartup.ts";
 import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
+import * as MachineIdentity from "./cloud/MachineIdentity.ts";
 import * as CloudCliState from "./cloud/CliState.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as DesktopAppUpdate from "./desktopUpdate/DesktopAppUpdate.ts";
@@ -812,6 +813,7 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
   Layer.provideMerge(
     Layer.mergeAll(
       CloudCliTokenManager.layer.pipe(
+        Layer.provide(MachineIdentity.layer),
         Layer.provide(ServerSecretStore.layer),
         Layer.provide(ExternalLauncher.layer),
       ),
@@ -862,6 +864,7 @@ const layerMakeRoutes = Layer.mergeAll(
     ),
     ServerHttp.layerOtlpTracesProxyRoute,
     ServerHttp.layerHanzoIdentitiesRoute,
+    ServerHttp.layerHanzoIdentityActionRoutes,
     UsageHttp.layer,
     ServerHttp.layerHanzoAnalyticsRoutes,
     ServerHttp.layerAssetRoute,

@@ -1,16 +1,11 @@
 import type { ServerProvider, ServerProviderModel } from "@hanzodev/contracts";
 import { HANZO_REASONING_CAPABILITIES } from "@hanzodev/shared/model";
-import {
-  buildHanzoIamAccountFromTokens,
-  DEFAULT_HANZO_IAM_ISSUER,
-  type HanzoIamAccount,
-} from "@hanzodev/shared/hanzoIamAuth";
 import * as HostProcess from "@hanzodev/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import * as Schema from "effect/Schema";
+
+import { readSharedIdentity, type SharedIdentityHost } from "./hanzoSharedIdentityNode.ts";
 
 export const CURATED_HANZO_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
@@ -82,83 +77,19 @@ export const CURATED_HANZO_MODELS: ReadonlyArray<ServerProviderModel> = [
   },
 ];
 
-export interface LocalHanzoIdentitySnapshot {
-  readonly activeAccountId: string | null;
-  readonly accounts: ReadonlyArray<HanzoIamAccount>;
-}
-
-const decodeJsonUnknown = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function parseLocalHanzoIdentitiesRaw(raw: string): LocalHanzoIdentitySnapshot {
-  const decoded = decodeJsonUnknown(raw);
-  if (Option.isNone(decoded) || !isRecord(decoded.value)) {
-    return { activeAccountId: null, accounts: [] };
-  }
-  const parsed = decoded.value;
-  const identities = isRecord(parsed.identities) ? parsed.identities : {};
-  const accounts: Array<HanzoIamAccount> = [];
-  for (const [id, entry] of Object.entries(identities)) {
-    if (!isRecord(entry)) continue;
-    const accessToken = typeof entry.access_token === "string" ? entry.access_token.trim() : "";
-    if (!accessToken) continue;
-    const refreshToken =
-      typeof entry.refresh_token === "string" && entry.refresh_token.trim()
-        ? entry.refresh_token.trim()
-        : null;
-    const owner =
-      typeof entry.owner === "string" && entry.owner.trim()
-        ? entry.owner.trim()
-        : (id.split("/")[0] ?? "hanzo");
-    const subject =
-      typeof entry.subject === "string" && entry.subject.trim()
-        ? entry.subject.trim()
-        : (id.split("/")[1] ?? "user");
-    const issuer =
-      typeof entry.issuer === "string" && entry.issuer.trim()
-        ? entry.issuer.trim()
-        : DEFAULT_HANZO_IAM_ISSUER;
-    const email = typeof entry.email === "string" && entry.email.trim() ? entry.email.trim() : null;
-    const account = buildHanzoIamAccountFromTokens({
-      issuer,
-      clientId: "hanzo-app",
-      accessToken,
-      refreshToken,
-      userinfo: {
-        sub: subject,
-        owner,
-        name: subject,
-        displayName: `${owner}/${subject}`,
-        email,
-      },
-    });
-    accounts.push({ ...account, id });
-  }
-  const activeRaw =
-    typeof parsed.active === "string" && parsed.active.trim() ? parsed.active.trim() : null;
-  const activeAccountId =
-    accounts.find((entry) => entry.id === activeRaw)?.id ?? accounts[0]?.id ?? null;
-  return { activeAccountId, accounts };
-}
+export type LocalHanzoIdentitySnapshot = SharedIdentitySnapshot;
+export const sharedIdentityHost = Effect.fn("hanzoLocalIdentity.sharedIdentityHost")(function* () {
+  return {
+    platform: yield* HostProcess.Platform,
+    home: yield* HostProcess.HomeDirectory,
+    env: yield* HostProcess.Environment,
+  } satisfies SharedIdentityHost;
+});
 
 export const readLocalHanzoIdentities = Effect.fn("hanzoLocalIdentity.readLocalHanzoIdentities")(
   function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const home = yield* HostProcess.HomeDirectory;
-    const identitiesPath = path.join(home, ".hanzo", "identities.json");
-    const exists = yield* fs.exists(identitiesPath).pipe(Effect.orElseSucceed(() => false));
-    if (!exists) {
-      return { activeAccountId: null, accounts: [] } satisfies LocalHanzoIdentitySnapshot;
-    }
-    const raw = yield* fs.readFileString(identitiesPath).pipe(Effect.orElseSucceed(() => ""));
-    if (!raw.trim()) {
-      return { activeAccountId: null, accounts: [] } satisfies LocalHanzoIdentitySnapshot;
-    }
-    return parseLocalHanzoIdentitiesRaw(raw);
+    const host = yield* sharedIdentityHost();
+    return yield* Effect.promise(() => readSharedIdentity(host));
   },
 );
 

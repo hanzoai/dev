@@ -57,7 +57,12 @@ import {
   DESKTOP_RENDERER_ORIGINS,
   MCP_HTTP_PATH,
 } from "./httpCors.ts";
-import { readLocalHanzoIdentities } from "./provider/hanzoLocalIdentity.ts";
+import { sharedIdentityHost } from "./provider/hanzoLocalIdentity.ts";
+import {
+  IDENTITY_ID,
+  readFreshSharedIdentity,
+  runHanzoAuth,
+} from "./provider/hanzoSharedIdentityNode.ts";
 import { ingestAnalyticsBody, readRecentAnalyticsSnapshot } from "./analyticsHub.ts";
 import { requestUrl } from "./requestUrl.ts";
 
@@ -428,7 +433,8 @@ export const layerHanzoIdentitiesRoute = HttpRouter.add(
   HANZO_IDENTITIES_PATH,
   Effect.gen(function* () {
     yield* authenticateRawRouteWithScope(AuthOrchestrationReadScope);
-    const snapshot = yield* readLocalHanzoIdentities();
+    const host = yield* sharedIdentityHost();
+    const snapshot = yield* Effect.promise(() => readFreshSharedIdentity(host));
     // @effect-diagnostics-next-line globalJsonInEffect:off
     return HttpServerResponse.text(JSON.stringify(snapshot), {
       contentType: "application/json; charset=utf-8",
@@ -444,6 +450,70 @@ export const layerHanzoIdentitiesRoute = HttpRouter.add(
     }),
     Effect.withTracerEnabled(false),
   ),
+);
+
+/** The `id` of an identity request body: a string, null when absent, undefined when the body is not JSON. */
+const parseIdentityBody = (raw: string): string | null | undefined => {
+  try {
+    const body: unknown = raw ? JSON.parse(raw) : {};
+    const value = (body as { id?: unknown }).id;
+    return typeof value === "string" ? value : null;
+  } catch {
+    return undefined;
+  }
+};
+
+/** The machine's identity is the CLI's: sign-in, switching, and sign-out run `hanzo auth`, which owns the vault and its locks. */
+const identityAction = (
+  action: "login" | "use" | "logout",
+  build: (id: string | null) => ReadonlyArray<string>,
+  timeoutMs: number,
+) =>
+  HttpRouter.add(
+    "POST",
+    `${HANZO_IDENTITIES_PATH}/${action}`,
+    Effect.gen(function* () {
+      yield* authenticateRawRouteWithScope(AuthOrchestrationOperateScope);
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const raw = yield* request.text.pipe(Effect.orElseSucceed(() => ""));
+      const parsed = parseIdentityBody(raw);
+      if (parsed === undefined) {
+        return HttpServerResponse.text("Invalid JSON body.", { status: 400 });
+      }
+      const id = parsed;
+      if (action !== "login" && (id === null || !IDENTITY_ID.test(id))) {
+        return HttpServerResponse.text("Expected an identity as owner/name.", { status: 400 });
+      }
+      const host = yield* sharedIdentityHost();
+      const failure = yield* Effect.promise(() =>
+        runHanzoAuth(host, build(id), timeoutMs).then(
+          () => null,
+          (error: unknown) => (error instanceof Error ? error.message : String(error)),
+        ),
+      );
+      if (failure !== null) {
+        return HttpServerResponse.text(failure, { status: 502 });
+      }
+      const snapshot = yield* Effect.promise(() => readFreshSharedIdentity(host));
+      // @effect-diagnostics-next-line globalJsonInEffect:off
+      return HttpServerResponse.text(JSON.stringify(snapshot), {
+        contentType: "application/json; charset=utf-8",
+        headers: { "Cache-Control": "no-store" },
+      });
+    }).pipe(
+      Effect.catchTags({
+        EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
+        EnvironmentInternalError: HttpServerRespondable.toResponse,
+        EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
+      }),
+      Effect.withTracerEnabled(false),
+    ),
+  );
+
+export const layerHanzoIdentityActionRoutes = Layer.mergeAll(
+  identityAction("login", () => ["login"], 5 * 60_000),
+  identityAction("use", (id) => ["use", id ?? ""], 20_000),
+  identityAction("logout", (id) => ["logout", id ?? ""], 20_000),
 );
 
 const handleAnalyticsIngest = Effect.gen(function* () {

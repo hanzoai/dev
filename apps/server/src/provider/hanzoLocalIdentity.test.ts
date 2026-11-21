@@ -79,52 +79,46 @@ describe("Native Hanzo Agent & Local IAM Multi-Account Identity", () => {
     expect(ordered.map((p) => p.driver)).toEqual(["hanzo", "codex", "claudeAgent"]);
   });
 
-  effectIt.effect(
-    "reads multiple accounts from ~/.hanzo/identities.json and resolves active Hanzo IAM auth",
-    () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const tmpHome = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-identities-test-" });
-        const hanzoDir = path.join(tmpHome, ".hanzo");
-        yield* fs.makeDirectory(hanzoDir, { recursive: true });
-        yield* fs.writeFileString(
-          path.join(hanzoDir, "identities.json"),
-          JSON.stringify({
-            active: "hanzo/z",
-            identities: {
-              "hanzo/z": {
-                owner: "hanzo",
-                subject: "z",
-                email: "z@hanzo.ai",
-                issuer: "https://hanzo.id",
-                access_token: "tok_hanzo_z",
-                refresh_token: "ref_hanzo_z",
-              },
-              "admin/z": {
-                owner: "admin",
-                subject: "z",
-                email: "admin@hanzo.ai",
-                issuer: "https://hanzo.id",
-                access_token: "tok_admin_z",
-              },
-            },
-          }),
-        );
+  effectIt.effect("reads the machine vault and resolves the active Hanzo IAM auth", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tmpHome = yield* fs.makeTempDirectoryScoped({ prefix: "hanzo-identities-test-" });
+      const hanzoDir = path.join(tmpHome, ".local", "share", "hanzo");
+      yield* fs.makeDirectory(hanzoDir, { recursive: true });
+      const jwt = (claims: object) =>
+        `${Buffer.from("{}").toString("base64url")}.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.s`;
+      const set = (claims: object) =>
+        JSON.stringify({ access_token: jwt(claims), refresh_token: "r" });
+      yield* fs.writeFileString(
+        path.join(hanzoDir, "credentials"),
+        JSON.stringify({
+          "hanzo/hanzo/z": set({ owner: "hanzo", name: "z", email: "z@hanzo.ai" }),
+          "hanzo/admin/z": set({ owner: "admin", name: "z", email: "z@hanzo.ai" }),
+        }),
+      );
+      yield* fs.writeFileString(
+        path.join(hanzoDir, "config.toml"),
+        '[auth.active]\nhanzo = "hanzo/z"\n',
+      );
 
-        const homeLayer = Layer.succeed(HostProcess.HomeDirectory, tmpHome);
-        const snapshot = yield* readLocalHanzoIdentities().pipe(Effect.provide(homeLayer));
-        const auth = yield* resolveHanzoProviderAuth().pipe(Effect.provide(homeLayer));
+      const layer = Layer.mergeAll(
+        Layer.succeed(HostProcess.HomeDirectory, tmpHome),
+        Layer.succeed(HostProcess.Platform, "linux"),
+        Layer.succeed(HostProcess.Environment, {}),
+      );
+      const snapshot = yield* readLocalHanzoIdentities().pipe(Effect.provide(layer));
+      const auth = yield* resolveHanzoProviderAuth().pipe(Effect.provide(layer));
 
-        expect(snapshot.activeAccountId).toBe("hanzo/z");
-        expect(snapshot.accounts.map((a) => a.id)).toEqual(["hanzo/z", "admin/z"]);
-        expect(auth).toEqual({
-          status: "authenticated",
-          type: "hanzo",
-          label: "Hanzo IAM (hanzo/z +1)",
-          email: "z@hanzo.ai",
-          workspaceId: "hanzo",
-        });
-      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+      expect(snapshot.activeAccountId).toBe("hanzo/z");
+      expect(snapshot.accounts.map((a) => a.id)).toEqual(["hanzo/z", "admin/z"]);
+      expect(auth).toEqual({
+        status: "authenticated",
+        type: "hanzo",
+        label: "Hanzo IAM (hanzo/z +1)",
+        email: "z@hanzo.ai",
+        workspaceId: "hanzo",
+      });
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
