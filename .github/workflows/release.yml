@@ -452,7 +452,12 @@ jobs:
         working-directory: infra/relay
         run: |
           set -euo pipefail
-          output="$(npx alchemy state read HanzoDevRelay/prod/output --backend cloudflare --log-level error --no-input | sed -n '/^{/,$p')"
+          # Client tracing is optional: with no deployed relay stack the build ships without it.
+          if ! output="$(npx alchemy state read HanzoDevRelay/prod/output --backend cloudflare --log-level error --no-input | sed -n '/^{/,$p')" || [[ -z "$output" ]]; then
+            echo "::warning::No production relay stack state; building without relay client tracing."
+            : > "$RUNNER_TEMP/relay-client-tracing.env"
+            exit 0
+          fi
           field() {
             jq -er --arg key "$1" '.[$key] | if type == "object" then .__redacted__ else . end | select(. != null and . != "")' <<<"$output" \
               || { echo "Relay stack output is missing $1" >&2; exit 1; }

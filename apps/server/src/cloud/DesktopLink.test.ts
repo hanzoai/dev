@@ -220,8 +220,21 @@ it.effect("a heartbeat reports provider state only and is signed by the device k
         "zap",
       ]);
       assert.deepEqual(JSON.parse(heartbeat.body).providers, [
-        { provider: "claude", instance: "claude", kind: "login", state: "ready", plan: "max" },
-        { provider: "codex", instance: "codex", kind: "login", state: "needs_login" },
+        {
+          provider: "claude",
+          instance: "claude",
+          kind: "login",
+          state: "ready",
+          plan: "max",
+          shared: false,
+        },
+        {
+          provider: "codex",
+          instance: "codex",
+          kind: "login",
+          state: "needs_login",
+          shared: false,
+        },
       ]);
       assert.notInclude(heartbeat.body, SECRET_EMAIL);
       assert.notInclude(heartbeat.body, SECRET_TOKEN);
@@ -251,8 +264,8 @@ it.effect("a heartbeat reports provider state only and is signed by the device k
         `${JSON.parse(heartbeat.body).version}\n` +
         "\n" +
         "0\n" +
-        "claude,claude,login,ready,max\n" +
-        "codex,codex,login,needs_login,\n";
+        "claude,claude,login,ready,max,false\n" +
+        "codex,codex,login,needs_login,,false\n";
       const verified = yield* Effect.promise(() =>
         globalThis.crypto.subtle.verify(
           "Ed25519",
@@ -442,3 +455,20 @@ it.effect("an API key's value is sent to Hanzo once and is in no file this deskt
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.provide(NodeServices.layer)),
 );
+
+it("a heartbeat's signed bytes are the ones cloud's beatMessage builds", () => {
+  assert.equal(
+    DesktopLink.beatMessage({
+      id: "src_0123456789abcdef0123456789abcdef",
+      at: "2026-11-20T10:00:00Z",
+      version: "1.8.4",
+      zap: "https://mac.example/zap",
+      busy: 0,
+      providers: [
+        { provider: "claude", instance: "claude-1", kind: "login", state: "ready", plan: "max", shared: true },
+        { provider: "openai", instance: "key-1", kind: "key", state: "limited", shared: false },
+      ],
+    }),
+    "hanzo-source-heartbeat/1\nsrc_0123456789abcdef0123456789abcdef\n2026-11-20T10:00:00Z\n1.8.4\nhttps://mac.example/zap\n0\nclaude,claude-1,login,ready,max,true\nopenai,key-1,key,limited,,false\n",
+  );
+});

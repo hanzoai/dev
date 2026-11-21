@@ -52,11 +52,5 @@ export function CompactBrandTitle(
     </View>
   );
 
-  return props.fit ? (
-    <View className="min-w-0 flex-1 flex-row items-center">
-      {title}
-    </View>
-  ) : (
-    title
-  );
+  return props.fit ? <View className="min-w-0 flex-1 flex-row items-center">{title}</View> : title;
 }

@@ -12,11 +12,7 @@ import {
   mobileClientPlatformLabel,
   mobileClientUpdatedAtLabel,
 } from "./MobileClientsUserProfilePage.logic";
-import {
-  AccountPage,
-  AccountPageRefreshButton,
-  AccountPageRow,
-} from "./AccountPage";
+import { AccountPage, AccountPageRefreshButton, AccountPageRow } from "./AccountPage";
 
 const MOBILE_CLIENT_SKELETON_ROWS = ["primary", "secondary"] as const;
 

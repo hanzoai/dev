@@ -1,20 +1,38 @@
 {
   "name": "@hanzo/dev-core",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "The Hanzo Dev core (threads, composer, model picker) as a library for a host's own shell.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hanzoai/dev.git",
+    "directory": "packages/dev"
+  },
+  "files": [
+    "dist",
+    "index.d.ts",
+    "keymap.d.ts"
+  ],
   "type": "module",
-  "sideEffects": ["**/*.css"],
-  "files": ["dist", "index.d.ts", "keymap.d.ts"],
+  "sideEffects": [
+    "**/*.css"
+  ],
   "exports": {
-    ".": { "types": "./index.d.ts", "import": "./dist/index.js" },
-    "./keymap": { "types": "./keymap.d.ts", "import": "./dist/keymap.js" },
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./keymap": {
+      "types": "./keymap.d.ts",
+      "import": "./dist/keymap.js"
+    },
     "./style.css": "./dist/index.css"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "peerDependencies": {
     "react": "^19",
     "react-dom": "^19"
-  },
-  "publishConfig": { "access": "public" },
-  "repository": { "type": "git", "url": "git+https://github.com/hanzoai/dev.git", "directory": "packages/dev" }
+  }
 }

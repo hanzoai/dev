@@ -29,7 +29,9 @@ const waiting = new Map<string, Array<(id: EnvironmentId) => void>>();
 export function whenPaired(runtimeId: string): Promise<EnvironmentId> {
   const done = paired.get(runtimeId);
   if (done) return Promise.resolve(done);
-  return new Promise((resolve) => waiting.set(runtimeId, [...(waiting.get(runtimeId) ?? []), resolve]));
+  return new Promise((resolve) =>
+    waiting.set(runtimeId, [...(waiting.get(runtimeId) ?? []), resolve]),
+  );
 }
 
 /** Redeems the runtime's pairing credential once per session, then draws the core. */
@@ -41,7 +43,10 @@ function Pair({ runtime, children }: { runtime: DevRuntime; children: ReactNode 
     if (paired.has(runtime.id)) return;
     let live = true;
     void (async () => {
-      const result = await pair({ host: runtime.zap.replace(/^https:/, "zaps:"), pairingCode: await runtime.token() });
+      const result = await pair({
+        host: runtime.zap.replace(/^https:/, "zaps:"),
+        pairingCode: await runtime.token(),
+      });
       if (!live) return;
       if (result._tag === "Success") {
         paired.set(runtime.id, result.value);
@@ -66,7 +71,7 @@ function Pair({ runtime, children }: { runtime: DevRuntime; children: ReactNode 
  * atom registry, so a thread opened in the list is the one the workspace shows.
  */
 export function DevProvider({ runtime, children }: { runtime: DevRuntime; children: ReactNode }) {
-  const router = useMemo(start, []);
+  const router = useMemo(() => start(), []);
   const slots = useMemo(() => ({ threads: createSlot(), workspace: createSlot() }), []);
   const state = useMemo(() => ({ runtime, router, slots }), [runtime, router, slots]);
   const [ready, setReady] = useState(false);

@@ -28,8 +28,7 @@ const iso = (v: unknown, epochSeconds = false): string | undefined => {
   return n === undefined ? undefined : new Date(epochSeconds ? n * 1000 : n).toISOString();
 };
 const json = async (res: Response): Promise<Record<string, unknown>> => {
-  if (res.status === 401 || res.status === 403)
-    throw new Error("Sign in again.");
+  if (res.status === 401 || res.status === 403) throw new Error("Sign in again.");
   if (res.status === 429) throw new Error("Rate limited by the provider; will retry.");
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return obj(await res.json());

@@ -30,7 +30,11 @@ export function DevWorkspace({
   // The code tools hang on a workspace: a conversation has no dock until a project is attached.
   const workspace = useHasWorkspace(open);
   return (
-    <div className={className} data-dev-workspace="" style={{ display: "flex", minWidth: 0, minHeight: 0, flex: 1 }}>
+    <div
+      className={className}
+      data-dev-workspace=""
+      style={{ display: "flex", minWidth: 0, minHeight: 0, flex: 1 }}
+    >
       <div ref={ref} style={{ display: "flex", minWidth: 0, minHeight: 0, flex: 1 }} />
       {embed && dock && workspace ? dock({ runtime: embed.runtime, thread: open }) : null}
     </div>

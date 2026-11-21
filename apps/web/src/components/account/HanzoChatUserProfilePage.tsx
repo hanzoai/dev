@@ -6,11 +6,7 @@ import type { ReactNode } from "react";
 import { useManagedTunnelUsage } from "../../cloud/managedRelayState";
 import { HANZOCHAT_SUBSCRIPTION_URL, TunnelUsageMeter } from "../cloud/TunnelUsage";
 import { Button } from "../ui/button";
-import {
-  AccountPage,
-  AccountPageRefreshButton,
-  AccountPageRow,
-} from "./AccountPage";
+import { AccountPage, AccountPageRefreshButton, AccountPageRow } from "./AccountPage";
 import { useHanzoChatLink } from "./useHanzoChatLink";
 
 function planLabel(link: RelayHanzoChatLink): ReactNode {

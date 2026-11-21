@@ -26,8 +26,12 @@ export function focusThreadList(): boolean {
 }
 
 /** ↑ and ↓ move between rows; Home and End go to the ends. Enter and Space open, as the row does. */
-export function moveThroughRows(event: { key: string; target: EventTarget | null; preventDefault(): void }, list: ParentNode): void {
-  const current = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>(ROW) : null;
+export function moveThroughRows(
+  event: { key: string; target: EventTarget | null; preventDefault(): void },
+  list: ParentNode,
+): void {
+  const current =
+    event.target instanceof HTMLElement ? event.target.closest<HTMLElement>(ROW) : null;
   if (!current) return;
   const all = rows(list);
   const at = all.indexOf(current);

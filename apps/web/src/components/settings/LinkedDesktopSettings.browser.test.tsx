@@ -120,7 +120,14 @@ describe("LinkedDesktopSettings", () => {
         desktop: thisDesktop,
         lastHeartbeatAt: thisDesktop.lastSeen,
         providers: [
-          { provider: "claude", instance: "claude", kind: "login", state: "ready", plan: "max" },
+          {
+            provider: "claude",
+            instance: "claude",
+            kind: "login",
+            state: "ready",
+            plan: "max",
+            shared: false,
+          },
         ],
         report: { body, sent: true },
       },

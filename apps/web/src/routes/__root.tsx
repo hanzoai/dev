@@ -171,7 +171,12 @@ function RootRouteBranch() {
     authGateState.status === "hosted-static",
   );
 
-  if (embed) return <EmbedShell><Outlet /></EmbedShell>;
+  if (embed)
+    return (
+      <EmbedShell>
+        <Outlet />
+      </EmbedShell>
+    );
 
   if (pathname === GUEST_PAGE_PATH) return <Outlet />;
 
