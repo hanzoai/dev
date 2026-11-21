@@ -18,6 +18,8 @@ export const DesktopProviderState = Schema.Struct({
   kind: DesktopProviderKind,
   state: DesktopProviderStateName,
   plan: Schema.optionalKey(TrimmedNonEmptyString),
+  /** Whether this instance is shared with the user's other surfaces. Off until the user turns it on. */
+  shared: Schema.Boolean,
 });
 export type DesktopProviderState = typeof DesktopProviderState.Type;
 

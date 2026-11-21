@@ -135,6 +135,7 @@ const WireProvider = Schema.Struct({
   kind: Schema.Literals(["login", "key"]),
   state: Schema.Literals(["ready", "needs_login", "limited"]),
   plan: Schema.optional(Schema.String),
+  shared: Schema.optional(Schema.Boolean),
 });
 const WireDesktop = Schema.Struct({
   id: Schema.String,
@@ -169,6 +170,7 @@ const toDesktop = (wire: typeof WireDesktop.Type): Desktop => ({
     instance: provider.instance,
     kind: provider.kind,
     state: provider.state,
+    shared: provider.shared ?? false,
     ...(provider.plan === undefined || provider.plan === "" ? {} : { plan: provider.plan }),
   })),
 });
@@ -191,6 +193,7 @@ const providerState = (provider: ServerProvider): DesktopProviderState | null =>
     state:
       provider.auth.status === "unauthenticated" ? "needs_login" : limited ? "limited" : "ready",
     ...(plan === undefined ? {} : { plan }),
+    shared: false,
   };
 };
 
@@ -210,7 +213,7 @@ const ownerOf = (accessToken: string): string | null => {
 };
 
 /** The bytes a heartbeat's `sig` covers; cloud's `beatMessage` builds the same string. */
-const beatMessage = (beat: {
+export const beatMessage = (beat: {
   readonly id: string;
   readonly at: string;
   readonly version: string;
@@ -225,7 +228,7 @@ const beatMessage = (beat: {
     beat.version,
     beat.zap,
     String(beat.busy),
-    ...beat.providers.map((p) => [p.provider, p.instance, p.kind, p.state, p.plan ?? ""].join(",")),
+    ...beat.providers.map((p) => [p.provider, p.instance, p.kind, p.state, p.plan ?? "", String(p.shared)].join(",")),
   ]
     .map((line) => `${line}\n`)
     .join("");
