@@ -54,9 +54,8 @@ the version.
   - nightly releases publish npm dist-tag `nightly`
   - preview releases publish nothing to npm
   - one-time setup: package `hanzo` needs a trusted publisher registered for this workflow file (see below).
-- Builds the hosted web app on Vercel while the desktop jobs run, and makes it live only after a release is published:
-  - stable releases are aliased to the `latest` hosted app channel
-  - nightly releases are aliased to the `nightly` hosted app channel
+- Does not deploy the hosted web app or the marketing site. They ship through Hanzo hosting (platform.hanzo.ai builds, cd.hanzo.ai serves a `hanzoai/static` site); see #20.
+- Attaches the Dev server for cloud sandbox cells as `hanzo-dev-linux-amd64.tar.gz` and `hanzo-dev-linux-arm64.tar.gz` (executable `hanzo-dev` at the root), each with a `.sha256`.
 - Signing is optional and auto-detected per platform from secrets.
 
 ## Pull request macOS previews
