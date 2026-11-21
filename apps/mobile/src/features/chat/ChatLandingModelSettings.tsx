@@ -14,7 +14,7 @@ export function ChatLandingModelSettingsRouteScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<Record<string, object | undefined>>>();
   const chat = useCloudChat();
   const prompt = useComposerDraft(CHAT_LANDING_DRAFT_KEY).text;
-  const selection = cloudChatSelection(chat.state.model, chat.state.effort);
+  const selection = cloudChatSelection(chat.models, chat.state.model, chat.state.effort);
   const options = buildModelOptions(chat.serverConfig, selection, undefined, null);
   const current = options.find((option) => option.selection.model === selection.model) ?? null;
   return (

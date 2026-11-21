@@ -6,6 +6,7 @@ import {
   pickDefaultModel,
   recordTurns,
   streamChatReply,
+  type CloudChatAttachment,
   type CloudChatAuth,
   type CloudChatErrorKind,
   type CloudChatMessage,
@@ -50,7 +51,8 @@ export interface CloudChatController {
   subscribe(listener: () => void): () => void;
   loadModels(): Promise<void>;
   selectModel(id: string, effort?: string | null): void;
-  send(prompt: string): Promise<void>;
+  /** Attachments ride this request and later ones of the open thread; threads store text only. */
+  send(prompt: string, attachments?: ReadonlyArray<CloudChatAttachment>): Promise<void>;
   /** Reads the device copies, then the remote list, into `state.threads`. */
   loadThreads(): Promise<void>;
   openThread(key: string): Promise<void>;
@@ -94,6 +96,8 @@ export function createCloudChatController(input: {
   };
   let state = initial;
   let modelChosen = false;
+  /** Attachments by message index, for the open conversation. */
+  let attached = new Map<number, ReadonlyArray<CloudChatAttachment>>();
   /** Turns the remote store already holds for the open thread. */
   let synced = 0;
   let writes: Promise<void> = Promise.resolve();
@@ -191,11 +195,16 @@ export function createCloudChatController(input: {
       modelChosen = true;
       set({ model: id, effort });
     },
-    async send(prompt) {
+    async send(prompt, attachments = []) {
       const text = prompt.trim();
       if (text === "" || state.sending) return;
       const user: CloudChatMessage = { role: "user", content: text };
       const history = [...state.messages, user];
+      if (attachments.length > 0) attached.set(state.messages.length, attachments);
+      const request = history.map((message, index) => {
+        const files = attached.get(index);
+        return files === undefined ? message : { ...message, attachments: files };
+      });
       set({
         messages: [...history, { role: "assistant", content: "" }],
         sending: true,
@@ -211,7 +220,7 @@ export function createCloudChatController(input: {
           auth,
           model: state.model,
           effort: state.effort,
-          messages: history,
+          messages: request,
           options: input.options,
           onDelta: (chunk) => {
             reply += chunk;
@@ -264,6 +273,7 @@ export function createCloudChatController(input: {
       if (state.sending) return;
       try {
         const messages = await loadChatThread(await input.getAuth(), threadId, input.options);
+        attached = new Map();
         set({ messages, threadId, sync: "synced", error: null });
       } catch (cause) {
         set({ error: kindOf(cause) });
@@ -286,6 +296,7 @@ export function createCloudChatController(input: {
         return;
       }
       synced = stored?.synced ?? messages.length;
+      attached = new Map();
       set({
         messages,
         threadKey: key,
@@ -316,6 +327,7 @@ export function createCloudChatController(input: {
     },
     reset() {
       synced = 0;
+      attached = new Map();
       set({ messages: [], threadId: null, threadKey: null, sync: "local", error: null });
     },
   };

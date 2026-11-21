@@ -1,4 +1,5 @@
 import {
+  type CloudChatAttachment,
   cloudChatServerConfig,
   createCloudChatController,
   runInCloud,
@@ -24,7 +25,7 @@ export interface CloudChat {
   /** The catalog as the server config the thread composer and its model picker read. */
   readonly serverConfig: ServerConfig;
   readonly state: CloudChatState;
-  readonly send: (prompt: string) => Promise<void>;
+  readonly send: (prompt: string, attachments?: readonly CloudChatAttachment[]) => Promise<void>;
   readonly selectModel: (id: string, effort?: string | null) => void;
   readonly openThread: (key: string) => Promise<void>;
   readonly newChat: () => void;

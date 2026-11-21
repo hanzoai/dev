@@ -100,7 +100,7 @@ export function WorkspaceDrawerThreads() {
                 className="h-11 flex-1 flex-row items-center gap-2"
               >
                 {row.pinned ? (
-                  <SymbolView name="pin.fill" size={12} tintColor={colors["--color-foreground-muted"]} />
+                  <SymbolView name="pin" size={12} tintColor={colors["--color-foreground-muted"]} />
                 ) : null}
                 <Text className="text-base text-foreground" numberOfLines={1}>
                   {row.title}

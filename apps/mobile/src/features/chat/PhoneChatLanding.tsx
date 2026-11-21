@@ -1,3 +1,4 @@
+import type { CloudChatAttachment } from "@hanzodev/client-runtime/cloud-chat";
 import { useGT } from "gt-react-native";
 import { useNavigation } from "@react-navigation/native";
 import { useState } from "react";
@@ -62,7 +63,11 @@ export function PhoneChatLanding() {
       { text: gt("Cancel"), style: "cancel" },
     ]);
 
-  const send = (prompt: string, build: boolean): boolean => {
+  const send = (
+    prompt: string,
+    build: boolean,
+    attachments: ReadonlyArray<CloudChatAttachment> = [],
+  ): boolean => {
     const outcome = resolveSend({
       prompt,
       build,
@@ -72,7 +77,7 @@ export function PhoneChatLanding() {
     if (outcome.kind === "machine") startNewTask();
     else if (outcome.kind === "choose-target") chooseTarget();
     else if (outcome.kind === "chat") {
-      void cloudChat.send(prompt);
+      void cloudChat.send(prompt, attachments);
       return true;
     }
     return false;
@@ -128,7 +133,7 @@ export function PhoneChatLanding() {
           <ChatLandingComposer
             chat={cloudChat}
             bottomInset={insets.bottom}
-            onSend={(prompt) => send(prompt, false)}
+            onSend={(prompt, attachments) => send(prompt, false, attachments)}
             onBuild={() => send(getComposerDraftSnapshot(CHAT_LANDING_DRAFT_KEY).text, true)}
             onHeightChange={setComposerHeight}
           />

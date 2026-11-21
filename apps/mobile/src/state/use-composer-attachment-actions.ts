@@ -28,6 +28,8 @@ export function useComposerAttachmentActions(props: {
   readonly draftKey: string | null;
   readonly serverConfig: ServerConfig | null | undefined;
   readonly locked?: boolean;
+  /** Largest file to pick where the server advertises no limit of its own. */
+  readonly maxFileBytes?: number;
 }) {
   const reservedNames = useRef(new Map<string, Set<string>>());
   const capabilities = props.serverConfig?.environment.capabilities;
@@ -86,7 +88,7 @@ export function useComposerAttachmentActions(props: {
   const onPickDraftFiles = async () => {
     const key = props.draftKey;
     if (!key || props.locked) return;
-    const maxBytes = capabilities?.fileAttachments?.maxUploadBytes;
+    const maxBytes = capabilities?.fileAttachments?.maxUploadBytes ?? props.maxFileBytes;
     if (maxBytes === undefined) {
       Dialog.alert(
         m(msg("Could not attach file")),

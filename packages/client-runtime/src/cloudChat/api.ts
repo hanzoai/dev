@@ -24,11 +24,55 @@ export const DEFAULT_MODEL_ID = "enso-flash";
 export interface CloudChatModel {
   readonly id: string;
   readonly label: string;
+  /** Who serves the model (`owned_by` / `provider`), when the catalog says. */
+  readonly provider?: string | undefined;
+  /** What the model reads, from the catalog (`inputs`): absent when the catalog does not say. */
+  readonly inputs?: ReadonlyArray<string> | undefined;
 }
+
+/** What a user message carries besides its text, already read into what the wire needs. */
+export type CloudChatAttachment =
+  | { readonly kind: "image"; readonly dataUrl: string }
+  /** A text file, sent inline as text. */
+  | { readonly kind: "text"; readonly name: string; readonly text: string }
+  /** A file the model reads itself, such as a PDF: a base64 data URL. */
+  | { readonly kind: "file"; readonly name: string; readonly dataUrl: string };
 
 export interface CloudChatMessage {
   readonly role: "user" | "assistant";
   readonly content: string;
+  /** Only on the request being sent: threads store and sync the text alone. */
+  readonly attachments?: ReadonlyArray<CloudChatAttachment> | undefined;
+}
+
+type WirePart =
+  | { readonly type: "text"; readonly text: string }
+  | { readonly type: "image_url"; readonly image_url: { readonly url: string } }
+  | {
+      readonly type: "file";
+      readonly file: { readonly filename: string; readonly file_data: string };
+    };
+
+/** OpenAI-compatible chat message: a string, or content parts when the message has attachments. */
+export function toWireMessage(message: CloudChatMessage): {
+  readonly role: "user" | "assistant";
+  readonly content: string | ReadonlyArray<WirePart>;
+} {
+  const attachments = message.attachments ?? [];
+  if (attachments.length === 0) return { role: message.role, content: message.content };
+  const parts: WirePart[] = [{ type: "text", text: message.content }];
+  for (const attachment of attachments) {
+    if (attachment.kind === "image")
+      parts.push({ type: "image_url", image_url: { url: attachment.dataUrl } });
+    else if (attachment.kind === "text")
+      parts.push({ type: "text", text: `${attachment.name}:\n${attachment.text}` });
+    else
+      parts.push({
+        type: "file",
+        file: { filename: attachment.name, file_data: attachment.dataUrl },
+      });
+  }
+  return { role: message.role, content: parts };
 }
 
 export interface CloudChatAuth {
@@ -84,6 +128,11 @@ export function parseChatModels(body: unknown): ReadonlyArray<CloudChatModel> {
       name?: unknown;
       endpoint?: unknown;
       outputs?: unknown;
+      inputs?: unknown;
+      input_modalities?: unknown;
+      architecture?: { input_modalities?: unknown } | null;
+      owned_by?: unknown;
+      provider?: unknown;
     };
     if (typeof model.id !== "string" || model.id === "") continue;
     const outputs = Array.isArray(model.outputs)
@@ -91,9 +140,22 @@ export function parseChatModels(body: unknown): ReadonlyArray<CloudChatModel> {
       : undefined;
     const endpoint = typeof model.endpoint === "string" ? model.endpoint : undefined;
     if (!writesReplies({ outputs, endpoint })) continue;
+    const strings = (value: unknown) =>
+      Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === "string")
+        : undefined;
+    const inputs =
+      strings(model.inputs) ??
+      strings(model.input_modalities) ??
+      strings(model.architecture?.input_modalities);
+    const owner = [model.owned_by, model.provider].find(
+      (value): value is string => typeof value === "string" && value.trim() !== "",
+    );
     models.push({
       id: model.id,
       label: typeof model.name === "string" && model.name !== "" ? model.name : model.id,
+      ...(owner === undefined ? {} : { provider: owner.trim() }),
+      ...(inputs === undefined ? {} : { inputs }),
     });
   }
   return models;
@@ -148,7 +210,7 @@ export async function streamChatReply(input: {
       }),
       body: JSON.stringify({
         model: input.model,
-        messages: input.messages,
+        messages: input.messages.map(toWireMessage),
         stream: true,
         ...(input.effort ? { reasoning_effort: input.effort } : {}),
       }),

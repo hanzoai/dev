@@ -18,16 +18,46 @@ import type { CloudChatModel } from "./api.ts";
 
 export const REASONING_EFFORT_ID = "reasoningEffort";
 
+/** The catalog's owner names that stand for a provider the picker already knows. */
+const OWNERS: Readonly<Record<string, string>> = {
+  anthropic: "claudeAgent",
+  openai: "codex",
+  xai: "grok",
+  "x-ai": "grok",
+  hanzo: "hanzo",
+  hanzoai: "hanzo",
+  zen: "hanzo",
+  zenlm: "hanzo",
+};
+
 const FAMILIES: ReadonlyArray<{ readonly driver: string; readonly pattern: RegExp }> = [
   { driver: "claudeAgent", pattern: /^(anthropic\/)?claude/i },
   { driver: "codex", pattern: /^(openai\/)?(gpt|o\d|codex)/i },
   { driver: "grok", pattern: /^(xai\/)?grok/i },
 ];
 
-/** The provider a catalog model belongs to; Hanzo's own families and unknown models are Hanzo's. */
-export function cloudChatDriver(modelId: string): string {
-  return FAMILIES.find((family) => family.pattern.test(modelId))?.driver ?? "hanzo";
+const slug = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+/**
+ * The provider a catalog model belongs to: the catalog's own owner when it names one, else a guess
+ * from the model id. Hanzo's families and unknown models are Hanzo's.
+ */
+export function cloudChatDriver(model: CloudChatModel): string {
+  const owner = model.provider === undefined ? "" : slug(model.provider);
+  if (owner !== "") return OWNERS[owner] ?? owner;
+  return FAMILIES.find((family) => family.pattern.test(model.id))?.driver ?? "hanzo";
 }
+
+const KNOWN_DRIVERS: Readonly<Record<string, true>> = {
+  hanzo: true,
+  claudeAgent: true,
+  codex: true,
+  grok: true,
+};
 
 const CHECKED_AT = "1970-01-01T00:00:00.000Z";
 
@@ -35,9 +65,11 @@ export function cloudChatProviders(
   models: ReadonlyArray<CloudChatModel>,
 ): ReadonlyArray<ServerProvider> {
   const byDriver = new Map<string, ServerProviderModel[]>();
+  const owners = new Map<string, string>();
   for (const [index, model] of models.entries()) {
-    const driver = cloudChatDriver(model.id);
+    const driver = cloudChatDriver(model);
     const list = byDriver.get(driver) ?? [];
+    if (!owners.has(driver) && model.provider !== undefined) owners.set(driver, model.provider);
     list.push({
       slug: model.id,
       name: model.label,
@@ -51,6 +83,10 @@ export function cloudChatProviders(
   return [...byDriver.entries()].map(([driver, providerModels]) => ({
     instanceId: ProviderInstanceId.make(driver),
     driver: ProviderDriverKind.make(driver),
+    // A provider the picker does not know is named as the catalog names it.
+    ...(driver in KNOWN_DRIVERS || owners.get(driver) === undefined
+      ? {}
+      : { displayName: owners.get(driver) }),
     enabled: true,
     installed: true,
     version: null,
@@ -76,9 +112,16 @@ export function cloudChatServerConfig(models: ReadonlyArray<CloudChatModel>): Se
 }
 
 /** The picker's selection for a chat model, carrying its effort when one is set. */
-export function cloudChatSelection(modelId: string, effort: string | null): ModelSelection {
-  const instanceId = ProviderInstanceId.make(cloudChatDriver(modelId));
-  return effort === null || cloudChatDriver(modelId) !== "hanzo"
+export function cloudChatSelection(
+  models: ReadonlyArray<CloudChatModel>,
+  modelId: string,
+  effort: string | null,
+): ModelSelection {
+  const driver = cloudChatDriver(
+    models.find((model) => model.id === modelId) ?? { id: modelId, label: modelId },
+  );
+  const instanceId = ProviderInstanceId.make(driver);
+  return effort === null || driver !== "hanzo"
     ? { instanceId, model: modelId }
     : { instanceId, model: modelId, options: [{ id: REASONING_EFFORT_ID, value: effort }] };
 }
@@ -87,4 +130,19 @@ export function cloudChatSelection(modelId: string, effort: string | null): Mode
 export function cloudChatEffort(selection: ModelSelection): string | null {
   const value = selection.options?.find((option) => option.id === REASONING_EFFORT_ID)?.value;
   return typeof value === "string" ? value : null;
+}
+
+const INPUT_KINDS = {
+  image: ["image", "images", "vision"],
+  file: ["file", "files", "pdf", "document", "documents"],
+} as const;
+
+/**
+ * Whether the model reads this kind of input. A catalog that does not list inputs for a model
+ * says nothing against it, so the model is tried.
+ */
+export function cloudChatAcceptsInput(model: CloudChatModel | undefined, kind: "image" | "file") {
+  if (model?.inputs === undefined) return true;
+  const accepted: ReadonlyArray<string> = INPUT_KINDS[kind];
+  return model.inputs.some((input) => accepted.includes(input.toLowerCase()));
 }

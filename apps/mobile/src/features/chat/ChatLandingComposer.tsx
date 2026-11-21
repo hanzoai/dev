@@ -1,4 +1,8 @@
-import { cloudChatSelection } from "@hanzodev/client-runtime/cloud-chat";
+import {
+  cloudChatAcceptsInput,
+  cloudChatSelection,
+  type CloudChatAttachment,
+} from "@hanzodev/client-runtime/cloud-chat";
 import { EnvironmentId, MessageId, ProjectId, ThreadId } from "@hanzodev/contracts";
 import { useGT } from "gt-react-native";
 import { View } from "react-native";
@@ -8,6 +12,7 @@ import * as Dialog from "../../components/ui/Dialog";
 import { ComposerInlineControl } from "../../components/ComposerToolbar";
 import { useComposerAttachmentActions } from "../../state/use-composer-attachment-actions";
 import {
+  clearComposerDraftContent,
   getComposerDraftSnapshot,
   removeComposerDraftAttachment,
   setComposerDraftText,
@@ -17,6 +22,11 @@ import { ComposerPopoverHost } from "../threads/ComposerPopoverHost";
 import { ThreadComposer } from "../threads/ThreadComposer";
 import { draftThreadShell } from "../threads/draft-thread-shell";
 import { CHAT_LANDING_DRAFT_KEY } from "./chat-landing.logic";
+import {
+  CLOUD_CHAT_FILE_BYTES,
+  cloudAttachmentKind,
+  readCloudAttachments,
+} from "./cloud-attachments";
 import type { CloudChat } from "./cloud-chat";
 
 // Stand-ins for the thread the composer expects. No environment owns them, so every
@@ -37,7 +47,7 @@ export function ChatLandingComposer(props: {
   readonly onBuild: () => void;
   readonly onHeightChange: (height: number) => void;
   /** Sends the draft as a chat; false when it cannot be sent as one. */
-  readonly onSend: (prompt: string) => boolean;
+  readonly onSend: (prompt: string, attachments: ReadonlyArray<CloudChatAttachment>) => boolean;
 }) {
   const gt = useGT();
   const popoverHeight = useSharedValue(0);
@@ -46,12 +56,13 @@ export function ChatLandingComposer(props: {
   const attachments = useComposerAttachmentActions({
     draftKey: CHAT_LANDING_DRAFT_KEY,
     serverConfig: chat.serverConfig,
+    maxFileBytes: CLOUD_CHAT_FILE_BYTES,
   });
   const thread = draftThreadShell({
     environmentId: CLOUD_ENVIRONMENT,
     threadId: CLOUD_THREAD,
     projectId: CLOUD_PROJECT,
-    modelSelection: cloudChatSelection(chat.state.model, chat.state.effort),
+    modelSelection: cloudChatSelection(chat.models, chat.state.model, chat.state.effort),
     runtimeMode: "full-access",
     interactionMode: "default",
     branch: null,
@@ -60,16 +71,39 @@ export function ChatLandingComposer(props: {
   });
   const send = async () => {
     const current = getComposerDraftSnapshot(CHAT_LANDING_DRAFT_KEY);
-    if (current.attachments.length > 0) {
-      // A chat reply sees text only; files and photos travel with a task on a machine.
+    const model = chat.models.find((candidate) => candidate.id === chat.state.model);
+    const kinds = new Set(current.attachments.map(cloudAttachmentKind));
+    // Say plainly what this model cannot read, instead of sending and getting a refusal.
+    if (kinds.has("other")) {
       Dialog.alert(
-        gt("Attachments need a machine"),
-        gt("Remove them to keep chatting, or tap Build to run this on a machine."),
+        gt("Can't send that file in a chat"),
+        gt("Chat reads images, PDFs and text files. Remove it, or tap Build to run on a machine."),
       );
       return null;
     }
-    if (!props.onSend(current.text)) return null;
-    setComposerDraftText(CHAT_LANDING_DRAFT_KEY, "");
+    if (kinds.has("image") && !cloudChatAcceptsInput(model, "image")) {
+      Dialog.alert(
+        gt("This model can't read images"),
+        gt("Choose another model, or remove the image."),
+      );
+      return null;
+    }
+    if (kinds.has("pdf") && !cloudChatAcceptsInput(model, "file")) {
+      Dialog.alert(
+        gt("This model can't read PDFs"),
+        gt("Choose another model, or remove the file."),
+      );
+      return null;
+    }
+    const files = await readCloudAttachments(current.attachments).catch(() => null);
+    if (files === null) {
+      Dialog.alert(gt("Couldn't read an attachment"), gt("Remove it and try again."));
+      return null;
+    }
+    const text =
+      current.text.trim() === "" && files.length > 0 ? gt("See attached.") : current.text;
+    if (!props.onSend(text, files)) return null;
+    clearComposerDraftContent(CHAT_LANDING_DRAFT_KEY);
     return SENT;
   };
   return (
