@@ -25,11 +25,11 @@ Yes.
 
 ## How much does Hanzo Dev cost?
 
-Nothing. There's no way to pay us to use Hanzo Dev. You bring your own sub. It is free and open source (MIT). You still pay your provider like you already do. Hanzo Connect is free too, for now. Every account can connect up to 3 machines running Hanzo Dev. Phones and browsers that connect to them do not count. Need more? Link a paid Hanzo Chat account. [More machines](#can-i-connect-more-than-3-machines-with-hanzo-connect) We don't want to charge for this, but if the bill gets unacceptable we may have to change course. If you hit limits or have issues, you can always fork it, self host, or use Tailscale. [Install](./install.md)
+Nothing. There's no way to pay us to use Hanzo Dev. You bring your own sub. It is free and open source (MIT). You still pay your provider like you already do. Hanzo Link is free too, for now. Every account can connect up to 3 machines running Hanzo Dev. Phones and browsers that connect to them do not count. Need more? Link a paid Hanzo Chat account. [More machines](#can-i-connect-more-than-3-machines-with-hanzo-connect) We don't want to charge for this, but if the bill gets unacceptable we may have to change course. If you hit limits or have issues, you can always fork it, self host, or use Tailscale. [Install](./install.md)
 
-## Can I connect more than 3 machines with Hanzo Connect?
+## Can I connect more than 3 machines with Hanzo Link?
 
-Yes. Link your Hanzo Chat account and Hanzo Connect raises your limit: up to 10 machines with Hanzo Chat Pro, or 100 with Premier. Open your account menu in Hanzo Dev, go to **Hanzo Chat**, and select **Link Hanzo Chat**. Sign in to Hanzo Chat and approve. The free Hanzo Chat plan keeps the normal limit of 3. [More machines with Hanzo Chat](./remote-access.md#more-machines-with-hanzo-chat)
+Yes. Link your Hanzo Chat account and Hanzo Link raises your limit: up to 10 machines with Hanzo Chat Pro, or 100 with Premier. Open your account menu in Hanzo Dev, go to **Hanzo Chat**, and select **Link Hanzo Chat**. Sign in to Hanzo Chat and approve. The free Hanzo Chat plan keeps the normal limit of 3. [More machines with Hanzo Chat](./remote-access.md#more-machines-with-hanzo-chat)
 
 ## Why is my Claude 5-hour limit draining so fast?
 
@@ -37,15 +37,15 @@ It shouldn't anymore. Hanzo Dev drives Claude through Anthropic's Agent SDK, and
 
 ## How do I use Hanzo Dev remotely?
 
-Your agents run wherever Hanzo Dev runs: your desktop, a server, a VPS. You connect to it from anywhere. I do this constantly. Less than 5% of my prompts run on my laptop. Run `hanzo up` on that machine and you get really good remote support. Hanzo Connect is the easy path. LAN pairing and Tailscale work too, and [hanzo.bot](https://hanzo.bot) is the web client. [Remote access](./remote-access.md)
+Your agents run wherever Hanzo Dev runs: your desktop, a server, a VPS. You connect to it from anywhere. I do this constantly. Less than 5% of my prompts run on my laptop. Run `hanzo up` on that machine and you get really good remote support. Hanzo Link is the easy path. LAN pairing and Tailscale work too, and [hanzo.bot](https://hanzo.bot) is the web client. [Remote access](./remote-access.md)
 
 ## How do I use Hanzo Dev on my phone?
 
-Get the [iOS](https://apps.apple.com/us/app/hanzo-dev-remote-claude-more/id6787819824) or [Android](https://play.google.com/store/apps/details?id=ai.hanzo.dev) app, then connect it to your computer with Hanzo Connect or a pairing link. The phone is a remote. Your computer does the work and needs to stay on. [Mobile setup](./install.md#mobile-app) · [Remote access](./remote-access.md)
+Get the [iOS](https://apps.apple.com/us/app/hanzo-dev-remote-claude-more/id6787819824) or [Android](https://play.google.com/store/apps/details?id=ai.hanzo.dev) app, then connect it to your computer with Hanzo Link or a pairing link. The phone is a remote. Your computer does the work and needs to stay on. [Mobile setup](./install.md#mobile-app) · [Remote access](./remote-access.md)
 
-## Why does Hanzo Connect keep disconnecting?
+## Why does Hanzo Link keep disconnecting?
 
-Hanzo Connect is our built-in alternative to Tailscale for remote connections. If it keeps dropping, open **Settings > Environments**, find the machine, and select **Details**. The first part marked as failed is the cause. I will not be disappointed if you set up Tailscale as a fallback (I do this personally). [Hanzo Connect troubleshooting](./hanzo-connect-troubleshooting.md)
+Hanzo Link is our built-in alternative to Tailscale for remote connections. If it keeps dropping, open **Settings > Environments**, find the machine, and select **Details**. The first part marked as failed is the cause. I will not be disappointed if you set up Tailscale as a fallback (I do this personally). [Hanzo Link troubleshooting](./hanzo-connect-troubleshooting.md)
 
 ## Will I get banned for using my subscription?
 
@@ -69,7 +69,7 @@ No. Hanzo Dev is a serious developer tool. Locally runnable models are not capab
 
 ## Does my code go to Hanzo servers?
 
-No. Your code and prompts go from your machine to your provider (Anthropic, OpenAI, etc.), not to us. With Hanzo Connect, traffic rides a Cloudflare tunnel (`cloudflared` on your machine). Our relay sets up the link. It does not proxy your HTTP or WebSocket sessions. Hanzo Dev does send basic product usage events (provider, model, token totals, that kind of thing). No prompts, no file contents. That is the same on Tailscale, LAN, or Hanzo Connect. Set `HANZO_DEV_TELEMETRY_ENABLED=false` if you want it off. [Product usage data](./telemetry.md)
+No. Your code and prompts go from your machine to your provider (Anthropic, OpenAI, etc.), not to us. With Hanzo Link, traffic rides a Cloudflare tunnel (`cloudflared` on your machine). Our relay sets up the link. It does not proxy your HTTP or WebSocket sessions. Hanzo Dev does send basic product usage events (provider, model, token totals, that kind of thing). No prompts, no file contents. That is the same on Tailscale, LAN, or Hanzo Link. Set `HANZO_DEV_TELEMETRY_ENABLED=false` if you want it off. [Product usage data](./telemetry.md)
 
 ## Worktrees are eating my disk. How do I clean them up?
 

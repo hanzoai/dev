@@ -78,7 +78,7 @@ describe("presentConnectionDiagnosis", () => {
     expect(diagnosis?.steps.join(" ")).not.toContain("On Mac mini");
   });
 
-  it("stops at Hanzo Connect when this device cannot reach the relay", () => {
+  it("stops at Hanzo Link when this device cannot reach the relay", () => {
     const failure = mapManagedRelayError(
       new ManagedRelayRequestFailedError({
         action: "connect relay environment",
@@ -86,7 +86,7 @@ describe("presentConnectionDiagnosis", () => {
         cause: new TypeError("Failed to fetch"),
       }),
     );
-    expect(diagnose(backoff(failure))?.headline).toBe("This device can't reach Hanzo Connect");
+    expect(diagnose(backoff(failure))?.headline).toBe("This device can't reach Hanzo Link");
     expect(results(backoff(failure))).toEqual([
       "device:ok",
       "relay:failed",
@@ -95,7 +95,7 @@ describe("presentConnectionDiagnosis", () => {
     ]);
   });
 
-  it("does not blame this device's network when Hanzo Connect answered with an error", () => {
+  it("does not blame this device's network when Hanzo Link answered with an error", () => {
     const failure = mapManagedRelayError(
       new ManagedRelayRequestFailedError({
         action: "connect relay environment",
@@ -104,7 +104,7 @@ describe("presentConnectionDiagnosis", () => {
       }),
     );
     const diagnosis = diagnose(backoff(failure));
-    expect(diagnosis?.headline).toBe("Hanzo Connect returned an error");
+    expect(diagnosis?.headline).toBe("Hanzo Link returned an error");
     expect(diagnosis?.steps.join(" ")).not.toContain("this device");
   });
 
@@ -131,17 +131,17 @@ describe("presentConnectionDiagnosis", () => {
     expect(origin?.hops.map((hop) => hop.hop)).toEqual(["device", "relay", "tunnel", "server"]);
   });
 
-  it("blames this device, not the host, while its own Hanzo Connect sign-in loads", () => {
+  it("blames this device, not the host, while its own Hanzo Link sign-in loads", () => {
     const failure = new ConnectionTransientError({
       reason: "session-pending",
-      detail: "Waiting for the Hanzo Connect sign-in to load.",
+      detail: "Waiting for the Hanzo Link sign-in to load.",
     });
     const diagnosis = diagnose(backoff(failure));
     expect(diagnosis?.headline).not.toContain("did not answer");
     expect(diagnosis?.hops.find((hop) => hop.result === "failed")?.hop).toBe("device");
     expect(diagnosis?.steps.join(" ")).not.toContain("Mac mini");
     expect(diagnosis?.moreInfoUrl).toContain("sign-in-account-or-link-problems");
-    // A host with a LAN route as well uses the direct route, still authorized through Hanzo Connect.
+    // A host with a LAN route as well uses the direct route, still authorized through Hanzo Link.
     expect(diagnose(backoff(failure), "direct")?.moreInfoUrl).toContain(
       "sign-in-account-or-link-problems",
     );

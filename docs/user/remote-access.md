@@ -3,11 +3,11 @@
 Connect a phone, browser, or another desktop app to Hanzo Dev running on a different
 machine. That machine must stay running and reachable while you work.
 
-## Hanzo Connect
+## Hanzo Link
 
-Hanzo Connect makes an environment available to your other devices without setting
+Hanzo Link makes an environment available to your other devices without setting
 up router forwarding. In the desktop app on the host, open **Settings →
-Sharing & access**, sign in, and enable **Hanzo Connect** for that environment.
+Sharing & access**, sign in, and enable **Hanzo Link** for that environment.
 
 For a command-line host, run:
 
@@ -15,8 +15,8 @@ For a command-line host, run:
 hanzo up
 ```
 
-It asks how your other devices reach the machine: Hanzo Connect, the local network,
-or both. Choose Hanzo Connect and follow the sign-in instructions. It then runs
+It asks how your other devices reach the machine: Hanzo Link, the local network,
+or both. Choose Hanzo Link and follow the sign-in instructions. It then runs
 Hanzo Dev as a [background service](./background-service.md).
 `hanzo connect` is the same as `hanzo up --connect`. Run `hanzo up` again to change your
 choice, and `hanzo status` to see it.
@@ -26,24 +26,24 @@ its local environment enabled. Closing the desktop app's last window stops its
 local server. Saving your sign-in alone does not start a server or make the
 machine reachable.
 
-On your other device, sign in to the same Hanzo Connect account and choose the
+On your other device, sign in to the same Hanzo Link account and choose the
 environment. On the hanzo.bot home page with no computer added yet, signing
 in adds compatible computers linked to your account. Over SSH, the CLI prints a
 browser link and a short code. Open the link on any device, confirm the code
 matches, and approve. The CLI continues on its own, so you do not need to forward
 an OAuth callback port.
 
-Hanzo Connect renews access credentials when needed without disconnecting a healthy
+Hanzo Link renews access credentials when needed without disconnecting a healthy
 connection. Pull request diffs and provider settings keep working after the
 previous credential expires. A failed renewal affects that request; it does not
 disconnect an otherwise healthy conversation.
 
 ### Approve new devices
 
-By default, any device signed in to your Hanzo Connect account can open a linked
+By default, any device signed in to your Hanzo Link account can open a linked
 machine. To require approval instead, turn on **Require approval for new
-devices** with the Hanzo Connect settings in **Settings → Sharing & access** on the
-host, or when you first set up Hanzo Connect. Then someone who takes over your Hanzo
+devices** with the Hanzo Link settings in **Settings → Sharing & access** on the
+host, or when you first set up Hanzo Link. Then someone who takes over your Hanzo
 Connect account cannot reach the machine from a new device without your
 approval. Review the devices that are already approved, described below.
 
@@ -55,10 +55,10 @@ headless host, run `hanzo auth connect-device list` and then
 and the device asks again when it retries. Deny keeps that device out until its
 request expires.
 
-Each device is approved once. Revoke it from **Hanzo Connect devices** in the same
+Each device is approved once. Revoke it from **Hanzo Link devices** in the same
 settings page, or with `hanzo auth connect-device revoke <code>`. With approval on,
 it has to ask again. With approval off, it can connect again on its own, so
-revoking in the app offers to turn approval on first. Devices that connected through Hanzo Connect while approval was off stay
+revoking in the app offers to turn approval on first. Devices that connected through Hanzo Link while approval was off stay
 approved and appear in that list for you to review. A device that has not
 connected since you updated Hanzo Dev asks for approval like a new one. Older apps
 cannot show the code, so update them before you turn approval on.
@@ -69,7 +69,7 @@ cannot show the code, so update them before you turn approval on.
 `--no-` forms. Choices you do not name keep their settings, and `--yes` takes
 the defaults. Without a terminal:
 
-- Hanzo Connect sign-in prints a URL and a code. Approve it on any device.
+- Hanzo Link sign-in prints a URL and a code. Approve it on any device.
 - A needed restart runs without asking, and stops running agent turns.
 - With nothing set up and no choice named, `hanzo up` stops and names the flags.
 
@@ -78,7 +78,7 @@ examples.
 
 ### More machines with Hanzo Chat
 
-Each Hanzo Connect account can link up to 3 machines. Phones and browsers do not
+Each Hanzo Link account can link up to 3 machines. Phones and browsers do not
 count. A paid Hanzo Chat plan raises the limit to 10 machines with Pro, or 100 with
 Premier.
 
@@ -137,18 +137,18 @@ another link to share.
 ### Reach one machine several ways
 
 A machine can have more than one route: LAN, Tailscale, another VPN, a public
-URL, SSH, or Hanzo Connect. Tailscale shares its `100.64.0.0/10` address range with
+URL, SSH, or Hanzo Link. Tailscale shares its `100.64.0.0/10` address range with
 other VPNs such as Cloudflare WARP, so an address in that range shows as VPN
 unless the machine confirms it is on Tailscale. To add a route, choose **Add
-route** in the machine's route list, or next to it in the Hanzo Connect list.
+route** in the machine's route list, or next to it in the Hanzo Link list.
 A pairing link for a saved machine is refused when it comes from an address
 that machine does not have yet; add that address with **Add route** instead.
 Pairing again over an address the machine already has still works. A new route
 is placed by speed, in that order, and you can reorder routes at any time.
 
-While connected through Hanzo Connect or a paired address, Hanzo Dev also learns the
+While connected through Hanzo Link or a paired address, Hanzo Dev also learns the
 machine's current LAN and Tailscale addresses and adds them as routes, so
-pairing once through Hanzo Connect is enough to use the LAN at home. When the
+pairing once through Hanzo Link is enough to use the LAN at home. When the
 machine's LAN address changes, for example after it joins another Wi-Fi network,
 the learned route follows it. The machine must allow network access for its LAN
 address to be learned: **Network access** in the desktop app, or the
@@ -168,14 +168,14 @@ refused**; pair that address again with **Add route** to use it.
 On web and desktop, select the route count under the machine's name in
 **Settings → Environments** to see its routes. Drag a route to change the order,
 or remove it. On mobile, open the machine under **Settings → Environments** and
-choose **Edit**. Signing out of Hanzo Connect removes only that route; a machine
+choose **Edit**. Signing out of Hanzo Link removes only that route; a machine
 you can still reach another way stays saved.
 
 Open **Permissions** next to **Routes** in web or desktop, or **Your permissions**
 in the mobile route details, to see what your current connection can do on that
 environment. For a remote environment, this is in its route details. Permissions
 shown there apply only to the route marked **In use**; other routes are not
-checked. Direct pairing and Hanzo Connect have separate sessions and may grant
+checked. Direct pairing and Hanzo Link have separate sessions and may grant
 different permissions.
 
 ### Balance new threads across machines
@@ -391,7 +391,7 @@ off, its result arrives once it is back on.
 
 On the machine you will work from, open **Settings → Environments → Linked environments**,
 choose **Link**, and pick the other machine or enter its address. The list
-holds the machines this app knows and those on your Hanzo Connect account. If this
+holds the machines this app knows and those on your Hanzo Link account. If this
 app has an address for that machine and is connected to it with a session that
 manages access there, it makes the pairing code itself; otherwise paste one
 from that machine's **Settings → Sharing & access**. An address you type always
@@ -432,7 +432,7 @@ management is available through `hanzo auth --help`.
 
 When the app connects to more than one environment, choose one at the top of the
 page. A desktop app with **Local environment** off can manage a background
-service on the same machine this way, including its Hanzo Connect link.
+service on the same machine this way, including its Hanzo Link link.
 
 A session with an open connection stays listed after its access credential
 expires.
@@ -447,7 +447,7 @@ The selected scopes replace the default permissions. The same option works with
 `hanzo auth pairing create` and `hanzo auth session issue`; each command's
 `--help` lists the available scopes. Without `--scope`, pairing tokens and issued
 bearer sessions get the standard client permissions, including managing access.
-Setting up or replacing a Hanzo Connect link requires the separate `relay:configure` permission.
+Setting up or replacing a Hanzo Link link requires the separate `relay:configure` permission.
 A terminal or a full-access agent on the host can reach those as well, so a
 client that should not manage access also needs to go without `terminal:operate`
 and `orchestration:operate`.
@@ -470,8 +470,8 @@ worktree still creates that branch and worktree with `orchestration:operate`,
 and the agent it runs can use Git however the environment allows.
 
 Settings changes, provider management, environment maintenance, access
-management, and Hanzo Connect preferences can each be granted separately. Setting
-up or replacing a Hanzo Connect link requires the administrative
+management, and Hanzo Link preferences can each be granted separately. Setting
+up or replacing a Hanzo Link link requires the administrative
 `relay:configure` permission. `relay:write` covers preferences and unlinking.
 New pairings without `--scope` include the standard client permissions. Existing clients keep the
 permissions they paired with and can stay connected after an update, but newly
@@ -490,12 +490,12 @@ can access, even when the pairing link omits file permissions. With
 credentials. Grant these permissions only to clients you trust with those
 capabilities.
 
-To remove an environment from Hanzo Connect, open your account menu's **Hanzo Connect**
-page, or **Settings → Hanzo Connect** on mobile, and choose **Deregister**. This
+To remove an environment from Hanzo Link, open your account menu's **Hanzo Link**
+page, or **Settings → Hanzo Link** on mobile, and choose **Deregister**. This
 revokes its cloud access and frees its host space even when the environment is
-offline or has been wiped. When Hanzo Connect rejects a host's link, the host
-shows that it was removed from Hanzo Connect. To link it again, turn on
-**Hanzo Connect** in **Settings → Sharing & access** on web or desktop, or turn on
+offline or has been wiped. When Hanzo Link rejects a host's link, the host
+shows that it was removed from Hanzo Link. To link it again, turn on
+**Hanzo Link** in **Settings → Sharing & access** on web or desktop, or turn on
 **Live Activity Updates** in **Settings → Notifications** on mobile; if it is
 already on, turn it off and on again. Either needs a client paired with
 `relay:read`, `relay:write`, and `relay:configure`. The desktop app's own session
@@ -505,16 +505,16 @@ run `hanzo connect link` on the host and then restart Hanzo Dev there. A
 command-line host that released its tunnel when it last stopped may link itself
 again on its next start; run `hanzo connect unlink` on that host to keep it off.
 Removing an environment from a device's connection settings only forgets it on
-that device and doesn't change your Hanzo Connect account. A device keeps a saved
+that device and doesn't change your Hanzo Link account. A device keeps a saved
 environment after it's deregistered until you remove it from that device.
 
-When idle tunnel cleanup is enabled, Hanzo Connect removes a linked environment's
+When idle tunnel cleanup is enabled, Hanzo Link removes a linked environment's
 tunnel after it stays offline for several minutes. The environment stays linked
-and keeps the same address. When the host starts again or wakes, Hanzo Connect
+and keeps the same address. When the host starts again or wakes, Hanzo Link
 creates a replacement tunnel on its own. You do not need to pair again. Cleanup
 usually runs five to ten minutes after the tunnel goes down.
 
-Hanzo Connect also removes the tunnel of an environment running an older version of
+Hanzo Link also removes the tunnel of an environment running an older version of
 Hanzo Dev once it has been offline for seven days. That environment shows a message
 asking you to update. Start Hanzo Dev on that computer and update it to the latest
 version; it reconnects at the same address without pairing again.
@@ -526,10 +526,10 @@ your login; `hanzo connect logout` also clears that login. Background-service
 Treat pairing URLs and authorization codes as passwords. Do not include them in
 screenshots, logs, or bug reports.
 
-## Hanzo Connect troubleshooting
+## Hanzo Link troubleshooting
 
-When a Hanzo Connect connection fails, see
-[Hanzo Connect troubleshooting](./hanzo-connect-troubleshooting.md). It explains each
+When a Hanzo Link connection fails, see
+[Hanzo Link troubleshooting](./hanzo-connect-troubleshooting.md). It explains each
 error, where the problem is, and how to fix it.
 
 ## Using the Desktop App as a Remote Only
@@ -538,7 +538,7 @@ If a computer should only drive work running elsewhere, turn off its local envir
 desktop app, open **Settings → Environments** and switch off **Local
 environment**. Hanzo Dev restarts without a local server: no local agents or terminals run, WSL
 backends stay off, and other devices can no longer connect to this computer. Your projects,
-history, and saved connections are kept, and you keep working through pairing, Hanzo Connect, or SSH.
+history, and saved connections are kept, and you keep working through pairing, Hanzo Link, or SSH.
 If a [background service](./background-service.md) on this computer uses the same Hanzo home, the
 app still treats it as this computer: **Open in** and file reveal for its projects run here,
 whichever connection you reach it through.

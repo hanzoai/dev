@@ -672,7 +672,7 @@ export class RelayEnvironmentPrincipal extends Context.Service<
 const RelayClientBearerAuthorization = HttpApiSecurity.http({ scheme: "bearer" }).pipe(
   HttpApiSecurity.annotate(
     OpenApi.Description,
-    "Hanzo IAM access token for the signed-in Hanzo Connect user.",
+    "Hanzo IAM access token for the signed-in Hanzo Link user.",
   ),
 );
 

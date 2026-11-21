@@ -150,7 +150,7 @@ import {
   RevokeConnectDeviceDialog,
 } from "./RevokeConnectDeviceDialog";
 
-// Sessions Hanzo Connect minted for a device signed in to the linked account.
+// Sessions Hanzo Link minted for a device signed in to the linked account.
 const CLOUD_CONNECT_SESSION_SUBJECT = "cloud-connect";
 const DEFAULT_TAILSCALE_SERVE_PORT = 443;
 const EMPTY_ADVERTISED_ENDPOINTS: ReadonlyArray<AdvertisedEndpoint> = [];
@@ -740,7 +740,7 @@ function ConnectionsSettingsContent({
     }
   };
 
-  // Removing a Hanzo Connect route preserves account registration; use a separate dialog pointing to
+  // Removing a Hanzo Link route preserves account registration; use a separate dialog pointing to
   // deregistration.
   const [pendingHanzoConnectRemoval, setPendingHanzoConnectRemoval] =
     useState<EnvironmentPresentation | null>(null);
@@ -759,7 +759,7 @@ function ConnectionsSettingsContent({
     if (confirmed === true) await removeSavedBackend(environment);
   };
 
-  // Hanzo Connect devices waiting for approval have their own list.
+  // Hanzo Link devices waiting for approval have their own list.
   const visibleDesktopPairingLinks = desktopPairingLinks.filter(
     (pairingLink) => pairingLink.connectDeviceRequest === undefined,
   );
@@ -774,7 +774,7 @@ function ConnectionsSettingsContent({
   const updateAccessSettings = useUpdateEnvironmentSettings(accessEnvironmentId);
   const [pendingConnectRevoke, setPendingConnectRevoke] =
     useState<ConnectDeviceRevokeRequest | null>(null);
-  // With approval off a revoked Hanzo Connect device signs straight back in, so offer to turn it
+  // With approval off a revoked Hanzo Link device signs straight back in, so offer to turn it
   // on. Older servers have no such setting, and revoking there goes ahead as before.
   const connectApprovalOff =
     accessEnvironment?.serverConfig?.settings.requireConnectDeviceApproval === false;
@@ -1481,7 +1481,7 @@ function ConnectionsSettingsContent({
                         "Let your other devices connect to Hanzo Dev over the network. Pair devices to give them access. Hanzo Dev will restart.",
                       )
                     : gt(
-                        "Devices connected over your local network will disconnect. Existing tunnels, such as Hanzo Connect or Tailscale HTTPS, keep working. Hanzo Dev will restart.",
+                        "Devices connected over your local network will disconnect. Existing tunnels, such as Hanzo Link or Tailscale HTTPS, keep working. Hanzo Dev will restart.",
                       )}
                 </AlertDialogDescription>
               </AlertDialogHeader>

@@ -172,7 +172,7 @@ const connectDeviceListCommand = Command.make("list", {
   json: jsonFlag,
 }).pipe(
   Command.withDescription(
-    "List Hanzo Connect devices waiting for approval and those already trusted.",
+    "List Hanzo Link devices waiting for approval and those already trusted.",
   ),
   Command.withHandler((flags) =>
     runWithEnvironmentAuth(
@@ -198,7 +198,7 @@ const connectDeviceApproveCommand = Command.make("approve", {
   ...authLocationFlags,
   code: verificationCodeArgument,
 }).pipe(
-  Command.withDescription("Approve the waiting Hanzo Connect device that shows this code."),
+  Command.withDescription("Approve the waiting Hanzo Link device that shows this code."),
   Command.withHandler((flags) =>
     runWithEnvironmentAuth(flags, (environmentAuth) =>
       Effect.gen(function* () {
@@ -217,7 +217,7 @@ const connectDeviceRevokeCommand = Command.make("revoke", {
   ...authLocationFlags,
   code: verificationCodeArgument,
 }).pipe(
-  Command.withDescription("Stop trusting a Hanzo Connect device and end its sessions."),
+  Command.withDescription("Stop trusting a Hanzo Link device and end its sessions."),
   Command.withHandler((flags) =>
     runWithEnvironmentAuth(flags, (environmentAuth) =>
       Effect.gen(function* () {
@@ -235,7 +235,7 @@ const connectDeviceRevokeCommand = Command.make("revoke", {
 );
 
 const connectDeviceCommand = Command.make("connect-device").pipe(
-  Command.withDescription("Approve and revoke devices that reach this host through Hanzo Connect."),
+  Command.withDescription("Approve and revoke devices that reach this host through Hanzo Link."),
   Command.withSubcommands([
     connectDeviceListCommand,
     connectDeviceApproveCommand,

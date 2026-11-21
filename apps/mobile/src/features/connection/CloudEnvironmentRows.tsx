@@ -102,7 +102,7 @@ function CloudEnvironmentRowsContent(
       {showHeader ? (
         <View className="px-1">
           <Text className="text-sm font-hanzo-bold uppercase text-foreground-muted">
-            Hanzo Connect
+            Hanzo Link
           </Text>
         </View>
       ) : null}
@@ -158,7 +158,7 @@ function CloudEnvironmentRowsContent(
       !controller.relayDiscovery.isRefreshing ? (
         <View collapsable={false} className="gap-3 rounded-[24px] bg-grouped-card p-5">
           <Text className="text-base font-hanzo-bold text-foreground">
-            {gt("Could not load {product} environments", { product: "Hanzo Connect" })}
+            {gt("Could not load {product} environments", { product: "Hanzo Link" })}
           </Text>
           <Text className="text-sm text-foreground-muted">{controller.relayDiscovery.error}</Text>
           {controller.relayDiscovery.errorTraceId ? (

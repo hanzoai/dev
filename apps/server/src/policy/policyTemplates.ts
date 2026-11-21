@@ -76,7 +76,7 @@ const policies = (): ReadonlyArray<Policy> => [
   {
     id: "Clients",
     title: "Allowed clients",
-    help: "What may connect to Hanzo Dev on this machine.\n\nWithout Remote, Hanzo Dev only listens on this machine, does not create pairing links, signs out devices that paired earlier, and turns Hanzo Connect off. Check at least one client.\n\nDisabled or Not Configured: no restriction.",
+    help: "What may connect to Hanzo Dev on this machine.\n\nWithout Remote, Hanzo Dev only listens on this machine, does not create pairing links, signs out devices that paired earlier, and turns Hanzo Link off. Check at least one client.\n\nDisabled or Not Configured: no restriction.",
     elements: [
       {
         kind: "checkbox",
@@ -103,8 +103,8 @@ const policies = (): ReadonlyArray<Policy> => [
   },
   {
     id: "Connect",
-    title: "Allow Hanzo Connect",
-    help: "Disabled turns Hanzo Connect off and unlinks this machine. Other remote access still follows Allowed clients.\n\nEnabled or Not Configured leaves Hanzo Connect available.",
+    title: "Allow Hanzo Link",
+    help: "Disabled turns Hanzo Link off and unlinks this machine. Other remote access still follows Allowed clients.\n\nEnabled or Not Configured leaves Hanzo Link available.",
     toggle: "Connect",
   },
   {

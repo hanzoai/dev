@@ -509,7 +509,7 @@ export function resolveAccessEnvironmentId(input: {
   );
 }
 
-/** A short name for a Hanzo Connect device: its label, or what it runs on. */
+/** A short name for a Hanzo Link device: its label, or what it runs on. */
 export function connectDeviceName(
   {
     client,
@@ -521,7 +521,7 @@ export function connectDeviceName(
   return client?.label ?? client?.os ?? client?.browser ?? resolve(msg("this device"));
 }
 
-/** How a Hanzo Connect device describes itself. It can say anything, so the code is what to trust. */
+/** How a Hanzo Link device describes itself. It can say anything, so the code is what to trust. */
 export function describeConnectDeviceClient(
   {
     client,

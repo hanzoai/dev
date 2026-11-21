@@ -21,7 +21,7 @@ export function webhookAddress(
     return {
       address: endpoint.path,
       copyable: false,
-      note: resolve(msg("Link this environment to Hanzo Connect for a public URL.")),
+      note: resolve(msg("Link this environment to Hanzo Link for a public URL.")),
     };
   }
   const url = new URL(endpoint.path, httpBaseUrl);
@@ -30,11 +30,11 @@ export function webhookAddress(
     copyable: true,
     note: isLocalLoopbackHost(url.hostname)
       ? resolve(
-          msg("Only this computer can call this address. Link Hanzo Connect for a public URL."),
+          msg("Only this computer can call this address. Link Hanzo Link for a public URL."),
         )
       : resolve(
           msg(
-            "Works wherever this environment's address is reachable, for example over Tailscale or your own proxy. Link Hanzo Connect for a public URL.",
+            "Works wherever this environment's address is reachable, for example over Tailscale or your own proxy. Link Hanzo Link for a public URL.",
           ),
         ),
   };

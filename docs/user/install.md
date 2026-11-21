@@ -173,7 +173,7 @@ Install Hanzo Dev from the
 [App Store](https://apps.apple.com/us/app/hanzo-dev-remote-claude-more/id6787819824) or
 [Google Play](https://play.google.com/store/apps/details?id=ai.hanzo.dev).
 The phone connects to a server on another machine. Follow
-[remote access](./remote-access.md) to link it through Hanzo Connect or a pairing URL.
+[remote access](./remote-access.md) to link it through Hanzo Link or a pairing URL.
 
 Store links and QR codes are also available in **Settings → About → Mobile app**
 on web and desktop. The store apps work with both stable and Nightly servers. Test builds are optional:

@@ -1,6 +1,6 @@
-# Hanzo Connect
+# Hanzo Link
 
-Hanzo Connect uses Hanzo IAM for cloud identity; sign-in starts at hanzo.ai and the issuer is whatever its discovery document names. The relay verifies IAM access tokens against the issuer's JWKS (found through OIDC discovery) and checks `iss` and `aud`. The relay manages environment links,
+Hanzo Link uses Hanzo IAM for cloud identity; sign-in starts at hanzo.ai and the issuer is whatever its discovery document names. The relay verifies IAM access tokens against the issuer's JWKS (found through OIDC discovery) and checks `iss` and `aud`. The relay manages environment links,
 credentials for reaching environments, and managed tunnel allocations. After
 bootstrap, clients send application traffic through the environment's tunnel
 hostname; the relay Worker does not proxy their HTTP or WebSocket sessions.
@@ -65,7 +65,7 @@ exchange from credential reuse; it does not make a compromised relay signing
 key harmless. Keep that trust assumption explicit when changing the protocol.
 
 Device approval, off by default, limits what that authority buys. With
-`requireConnectDeviceApproval` on, the environment trusts Hanzo Connect device
+`requireConnectDeviceApproval` on, the environment trusts Hanzo Link device
 keys, meaning DPoP thumbprints, and not the relay. A mint for an untrusted key
 still succeeds, so the relay protocol does not change. The credential it returns
 cannot be spent until someone with `access:write` on the environment approves

@@ -72,7 +72,7 @@ export function HanzoChatUserProfilePage() {
     <AccountPage
       title="Hanzo Chat"
       description={gt(
-        "Link a paid Hanzo Chat account for more Hanzo Connect tunnels: up to {pro} with Pro, {premier} with Premier.",
+        "Link a paid Hanzo Chat account for more Hanzo Link tunnels: up to {pro} with Pro, {premier} with Premier.",
         { pro: HANZOCHAT_PLAN_TUNNEL_LIMITS.pro, premier: HANZOCHAT_PLAN_TUNNEL_LIMITS.premier },
       )}
       action={
@@ -92,7 +92,7 @@ export function HanzoChatUserProfilePage() {
         </div>
       ) : data === null ? null : !data.available ? (
         <p className="border-t py-4 text-xs text-muted-foreground">
-          <T>This Hanzo Connect server does not support Hanzo Chat linking.</T>
+          <T>This Hanzo Link server does not support Hanzo Chat linking.</T>
         </p>
       ) : (
         <ul className="border-t">

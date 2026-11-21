@@ -1,15 +1,15 @@
-# Hanzo Connect Relay
+# Hanzo Link Relay
 
 > [!NOTE]
-> Sign in to Hanzo Connect from the app under Settings > Sharing & access.
+> Sign in to Hanzo Link from the app under Settings > Sharing & access.
 
-The relay is the hosted control plane for Hanzo Connect. It helps clients discover and connect to
+The relay is the hosted control plane for Hanzo Link. It helps clients discover and connect to
 remote environments, manages the cloud-side records needed for those connections, and delivers
 optional mobile notifications and Live Activities.
 
 The relay is intentionally not in the hot path for normal Hanzo Dev traffic. After a client connects,
 regular API and WebSocket traffic goes directly between that client and the selected environment.
-See the [Hanzo Connect architecture note](../../docs/internals/hanzo-connect.md) for the larger system
+See the [Hanzo Link architecture note](../../docs/internals/hanzo-connect.md) for the larger system
 design.
 
 ## Responsibilities
@@ -169,6 +169,6 @@ and hosted web builds.
 
 See:
 
-- [Hanzo Connect setup](../../docs/operations/connect-setup.md) for the IAM application and client configuration.
+- [Hanzo Link setup](../../docs/operations/connect-setup.md) for the IAM application and client configuration.
 - [Relay Observability](../../docs/operations/relay-observability.md) for deployment tracing and diagnostics.
-- [Hanzo Connect architecture](../../docs/internals/hanzo-connect.md) for environment linking and trust boundaries.
+- [Hanzo Link architecture](../../docs/internals/hanzo-connect.md) for environment linking and trust boundaries.

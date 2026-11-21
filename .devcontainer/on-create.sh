@@ -31,7 +31,7 @@ Hanzo Dev devcontainer
 
   vp run dev            start server + web, then open the pairing URL it
                         prints (the bare forwarded port will not authenticate)
-  cp .env.example .env  optional: enable Hanzo Connect cloud features
+  cp .env.example .env  optional: enable Hanzo Link cloud features
                         (public identifiers, not secrets)
 
 Details: docs/internals/devcontainer.md

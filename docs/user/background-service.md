@@ -45,13 +45,13 @@ under Hanzo home. Pass `--yes` from a script.
 ## Local network access
 
 A new service answers only on this machine. Other devices reach it through
-Hanzo Connect, or directly once you choose the local network in `hanzo up` (or run
+Hanzo Link, or directly once you choose the local network in `hanzo up` (or run
 `hanzo up --lan`, which sets `HANZO_DEV_LAN=true` in `service.env`). It then listens on
 your local network and Tailscale addresses, so the desktop and mobile apps on
-the same network connect directly instead of through Hanzo Connect. It still does
+the same network connect directly instead of through Hanzo Link. It still does
 not answer on public addresses. Anyone on the same network can reach the port,
 so a pairing code is all that keeps them out. The hosted web app at hanzo.bot
-stays on Hanzo Connect, because browsers block plain HTTP from an HTTPS page.
+stays on Hanzo Link, because browsers block plain HTTP from an HTTPS page.
 
 A service installed before `HANZO_DEV_LAN` existed keeps listening on the local
 network. `hanzo status` says so, and `hanzo up --no-lan` turns it off. Any
@@ -99,8 +99,8 @@ of signing out, and keep the PC awake, for unattended remote access. Installing
 over SSH while nobody is signed in at the PC can fail at the final start step;
 the service is still installed and will start at the next sign-in.
 
-`hanzo up` installs the service when you set up Hanzo Connect, but the two are managed
-separately. Signing out of Hanzo Connect does not stop or uninstall the service.
+`hanzo up` installs the service when you set up Hanzo Link, but the two are managed
+separately. Signing out of Hanzo Link does not stop or uninstall the service.
 
 ## Keep the server responsive when agents use all memory
 
@@ -157,7 +157,7 @@ Downloads, it may need Full Disk Access for the `hanzo` executable listed in
 `ProgramArguments` in
 `~/Library/LaunchAgents/ai.hanzo.dev.service.plist`.
 
-For failures after signing in to Hanzo Connect, see
+For failures after signing in to Hanzo Link, see
 [connection troubleshooting](./hanzo-connect-troubleshooting.md).
 
 ## Reclaim database space

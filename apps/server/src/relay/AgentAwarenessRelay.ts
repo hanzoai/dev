@@ -955,12 +955,12 @@ export const make = Effect.gen(function* () {
       switch (startupState) {
         case "waiting-for-link":
           yield* Effect.logInfo(
-            "agent activity publishing standby; waiting for Hanzo Connect link reconciliation",
+            "agent activity publishing standby; waiting for Hanzo Link link reconciliation",
           );
           break;
         case "disabled":
           yield* Effect.logInfo(
-            "agent activity publishing disabled by Hanzo Connect configuration",
+            "agent activity publishing disabled by Hanzo Link configuration",
           );
           break;
         case "enabled":

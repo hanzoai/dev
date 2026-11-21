@@ -51,7 +51,7 @@ const boldTerminalText = (value: string): string => `\u001b[1m${value}\u001b[22m
 
 function formatLoopbackAuthorizationPrompt(authorizationUrl: string): string {
   return [
-    "Open this URL to authorize Hanzo Connect:",
+    "Open this URL to authorize Hanzo Link:",
     `  ${authorizationUrl}`,
     "",
     `Press ${boldTerminalText("Enter")} to open it in your browser.`,
@@ -198,7 +198,7 @@ export class CloudCliCredentialRemovalError extends Schema.TaggedError<CloudCliC
   { cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return "Could not remove the stored Hanzo Connect CLI credential.";
+    return "Could not remove the stored Hanzo Link CLI credential.";
   }
 }
 
@@ -216,10 +216,10 @@ export class CloudCliCredentialRefreshError extends Schema.TaggedError<CloudCliC
 
   override get message(): string {
     return this.requiresLogin
-      ? `Could not refresh the Hanzo Connect CLI credential${
+      ? `Could not refresh the Hanzo Link CLI credential${
           this.oauthErrorCode === undefined ? "" : ` (OAuth error: ${this.oauthErrorCode})`
         }. Run \`hanzo connect login\` to authorize again.`
-      : "Could not refresh the Hanzo Connect CLI credential.";
+      : "Could not refresh the Hanzo Link CLI credential.";
   }
 }
 
@@ -230,7 +230,7 @@ export class CloudCliCredentialReadError extends Schema.TaggedError<CloudCliCred
   { cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return "Could not read the stored Hanzo Connect CLI credential.";
+    return "Could not read the stored Hanzo Link CLI credential.";
   }
 }
 
@@ -239,7 +239,7 @@ export class CloudCliAuthorizationError extends Schema.TaggedError<CloudCliAutho
   { cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return "Could not authorize the Hanzo Connect CLI.";
+    return "Could not authorize the Hanzo Link CLI.";
   }
 }
 
@@ -248,7 +248,7 @@ export class CloudCliAuthorizationTimeoutError extends Schema.TaggedError<CloudC
   { cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return "Timed out waiting for Hanzo Connect authorization.";
+    return "Timed out waiting for Hanzo Link authorization.";
   }
 }
 
@@ -257,7 +257,7 @@ export class CloudCliAuthorizationDeniedError extends Schema.TaggedError<CloudCl
   {},
 ) {
   override get message(): string {
-    return "Hanzo Connect authorization was denied in the browser.";
+    return "Hanzo Link authorization was denied in the browser.";
   }
 }
 
@@ -527,7 +527,7 @@ export const make = Effect.gen(function* () {
         const url = new URL(request.originalUrl, metadata.redirectUri);
         const code = url.searchParams.get("code");
         if (url.searchParams.get("state") !== state || !code) {
-          return HttpServerResponse.text("Invalid Hanzo Connect authorization callback.", {
+          return HttpServerResponse.text("Invalid Hanzo Link authorization callback.", {
             status: 400,
           });
         }

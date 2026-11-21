@@ -300,7 +300,7 @@ export const getTelemetryIdentity = Effect.flatMap(
 );
 
 /**
- * Owners the server can read without a client: the linked Hanzo Connect account
+ * Owners the server can read without a client: the linked Hanzo Link account
  * and the provider logins under `homeDirectory`. Clients add `connect` and
  * `device` owners when they connect.
  */
@@ -311,7 +311,7 @@ export const getServerOwnersForHome = Effect.fn("getServerOwnersForHome")(functi
   const connectUser = yield* secrets.get(CLOUD_LINKED_USER_ID).pipe(
     Effect.map(Option.map((bytes) => new TextDecoder().decode(bytes))),
     Effect.catch((cause) =>
-      Effect.logWarning("Failed to read the linked Hanzo Connect account for telemetry", {
+      Effect.logWarning("Failed to read the linked Hanzo Link account for telemetry", {
         errorTag: cause._tag,
       }).pipe(Effect.as(Option.none<string>())),
     ),

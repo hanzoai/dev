@@ -21,7 +21,7 @@ export interface ConnectDeviceRevokeRequest {
 }
 
 /**
- * With approval off, a revoked Hanzo Connect device signs straight back in, so revoking offers to
+ * With approval off, a revoked Hanzo Link device signs straight back in, so revoking offers to
  * turn approval on first.
  */
 export function RevokeConnectDeviceDialog({
@@ -82,7 +82,7 @@ function RevokeConnectDeviceDialogPopup({
         <AlertDialogTitle>{request.title}</AlertDialogTitle>
         <AlertDialogDescription>
           <T>
-            Approval for new devices is off, so a revoked device signed in to your Hanzo Connect
+            Approval for new devices is off, so a revoked device signed in to your Hanzo Link
             account can connect again on its own.
           </T>
         </AlertDialogDescription>

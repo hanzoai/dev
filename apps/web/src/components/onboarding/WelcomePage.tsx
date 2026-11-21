@@ -298,7 +298,7 @@ export function WelcomePage({
                 <T>
                   Hanzo Dev orchestrates local workspaces, Git worktrees, terminal commands, browser
                   previews, and Local AI (Zen 6 / Qwen3+). Microphone, OS Keychain, folder access,
-                  and Hanzo Connect tunnels are requested only when you first use each capability.
+                  and Hanzo Link tunnels are requested only when you first use each capability.
                 </T>
               </p>
             </div>
@@ -1075,7 +1075,7 @@ function PhoneConnectLink({ environmentId }: { readonly environmentId: Environme
   if (isSignedIn && link === null && linkState.isPending) {
     return (
       <p className="text-sm text-muted-foreground">
-        <T>Checking Hanzo Connect…</T>
+        <T>Checking Hanzo Link…</T>
       </p>
     );
   }
@@ -1083,9 +1083,9 @@ function PhoneConnectLink({ environmentId }: { readonly environmentId: Environme
     return (
       <>
         <p className="text-sm text-foreground">
-          <T>Could not check Hanzo Connect.</T>
+          <T>Could not check Hanzo Link.</T>
         </p>
-        {settingsLink(gt("Check Hanzo Connect"))}
+        {settingsLink(gt("Check Hanzo Link"))}
       </>
     );
   }
@@ -1100,7 +1100,7 @@ function PhoneConnectLink({ environmentId }: { readonly environmentId: Environme
   if (isSignedIn && shared && reachability === undefined) {
     return (
       <p className="text-sm text-foreground">
-        <T>Hanzo Connect is on for this computer. Sign in to the app with the same account.</T>
+        <T>Hanzo Link is on for this computer. Sign in to the app with the same account.</T>
       </p>
     );
   }
@@ -1110,20 +1110,20 @@ function PhoneConnectLink({ environmentId }: { readonly environmentId: Environme
       <>
         <p className="text-sm text-foreground">
           {shared
-            ? gt("Hanzo Connect is on, but the app cannot reach this computer.")
+            ? gt("Hanzo Link is on, but the app cannot reach this computer.")
             : gt("Signed in. Share this computer so the app can reach it.")}
         </p>
-        {settingsLink(shared ? gt("Check Hanzo Connect") : gt("Set up Hanzo Connect"))}
+        {settingsLink(shared ? gt("Check Hanzo Link") : gt("Set up Hanzo Link"))}
       </>
     );
   }
   return (
     <>
       <p className="text-sm text-foreground">
-        <T>Sign in to Hanzo Connect here, then in the app with the same account.</T>
+        <T>Sign in to Hanzo Link here, then in the app with the same account.</T>
       </p>
       <Button variant="outline" size="xs" disabled={!isLoaded} onClick={openAuthPrompt}>
-        <T>Sign in to Hanzo Connect</T>
+        <T>Sign in to Hanzo Link</T>
       </Button>
     </>
   );

@@ -225,9 +225,9 @@ function ConfiguredConnectOnboardingDialog() {
     if (!ok) return;
     toastManager.add({
       type: "success",
-      title: gt("Hanzo Connect enabled"),
+      title: gt("Hanzo Link enabled"),
       description: exposeEnvironment
-        ? gt("This environment is available to your other devices through Hanzo Connect.")
+        ? gt("This environment is available to your other devices through Hanzo Link.")
         : gt("This environment publishes agent activity to your mobile clients."),
     });
     setStep("devices");
@@ -251,7 +251,7 @@ function ConfiguredConnectOnboardingDialog() {
     >
       <WizardPopup>
         <WizardHeader
-          title={gt("Set up Hanzo Connect")}
+          title={gt("Set up Hanzo Link")}
           description={
             <T>
               Mesh your devices together. Publish this environment and connect the rest, all in one
@@ -371,7 +371,7 @@ function PublishStep({
         <OnboardingToggleRow
           title={gt("Publish this environment")}
           description={gt(
-            "Make this environment available to your other devices through Hanzo Connect.",
+            "Make this environment available to your other devices through Hanzo Link.",
           )}
           checked={exposeEnvironment}
           disabled={disabled}
@@ -390,7 +390,7 @@ function PublishStep({
           <OnboardingToggleRow
             title={gt("Require approval for new devices")}
             description={gt(
-              "Devices that sign in to your Hanzo Connect account wait until someone already connected here approves them.",
+              "Devices that sign in to your Hanzo Link account wait until someone already connected here approves them.",
             )}
             checked={requireDeviceApproval}
             disabled={disabled || requireDeviceApprovalLocked}

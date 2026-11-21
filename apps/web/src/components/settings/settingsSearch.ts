@@ -1388,7 +1388,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "hanzo-connect",
     localEnvironmentOnly: true,
-    title: msg("Hanzo Connect"),
+    title: msg("Hanzo Link"),
     to: "/settings/access",
     targetId: "connections-environment",
     searchTerms: [msg("managed tunnel cloud other devices remote tunnels limit hanzo chat")],

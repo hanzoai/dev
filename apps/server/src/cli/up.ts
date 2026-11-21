@@ -37,9 +37,9 @@ type Routes = Readonly<Record<Route, boolean>>;
 /** How other devices reach this machine now. */
 interface Setup {
   readonly service: BootService.BootServiceStatus;
-  /** Null in builds without Hanzo Connect. Off when Hanzo Connect revoked the link. */
+  /** Null in builds without Hanzo Link. Off when Hanzo Link revoked the link. */
   readonly connect: boolean | null;
-  /** Hanzo Connect revoked the link; `hanzo connect` links again. */
+  /** Hanzo Link revoked the link; `hanzo connect` links again. */
   readonly connectRevoked: boolean;
   readonly lan: boolean;
   /** An installed service with no HANZO_DEV_LAN or HANZO_DEV_HOST keeps the old default: on. */
@@ -48,7 +48,7 @@ interface Setup {
 }
 
 /**
- * Hanzo Connect is on when this CLI asked for a managed link, or when the desktop or
+ * Hanzo Link is on when this CLI asked for a managed link, or when the desktop or
  * web app made one: that saves the tunnel config but no CLI marker. Revoked is off.
  */
 export const connectEnabled = (link: {
@@ -93,7 +93,7 @@ const readSetup = Effect.fn("cli.up.read_setup")(function* () {
 
 /**
  * The routes `hanzo up` starts from. With no route flag it asks about every
- * route, starting a machine with no service from Hanzo Connect. Any route flag
+ * route, starting a machine with no service from Hanzo Link. Any route flag
  * means it asks nothing and keeps the routes not named as they are.
  */
 export const planRoutes = (
@@ -116,12 +116,12 @@ export const planRoutes = (
   };
 };
 
-/** A running service reads HANZO_DEV_LAN and its Hanzo Connect link only when it starts. */
+/** A running service reads HANZO_DEV_LAN and its Hanzo Link link only when it starts. */
 const needsRestart = (before: Routes, after: Routes) =>
   after.lan !== before.lan || (after.connect && !before.connect);
 
 const CHOICES = {
-  connect: { title: "Hanzo Connect", description: "Creates a tunnel to control your PC." },
+  connect: { title: "Hanzo Link", description: "Creates a tunnel to control your PC." },
   lan: { title: "Local network", description: "LAN and tailnet. Pairing code required." },
 } satisfies Record<Route, { readonly title: string; readonly description: string }>;
 
@@ -166,7 +166,7 @@ const formatSetup = (setup: Setup, hints: Hints) => {
       ? []
       : [
           [
-            "Hanzo Connect",
+            "Hanzo Link",
             setup.connect
               ? "on · your Hanzo account"
               : setup.connectRevoked
@@ -202,7 +202,7 @@ const formatSetup = (setup: Setup, hints: Hints) => {
 const formatNextSteps = (routes: Routes, serviceInstalled: boolean, hints: Hints) =>
   [
     ...(routes.connect
-      ? ["On your other device, sign in to Hanzo Connect with the same account."]
+      ? ["On your other device, sign in to Hanzo Link with the same account."]
       : []),
     ...(routes.lan ? [`Run \`${hints.pair}\`. Use the code on your other device.`] : []),
     ...(routes.connect || routes.lan
@@ -241,7 +241,7 @@ const setUp = Effect.fn("cli.up")(function* (flags: {
   if (before.connect === null && Option.getOrElse(flags.connect, () => false)) {
     return yield* new CliError.UserError({
       cause: "connect",
-      userMessage: "Hanzo Connect is unavailable in this build.",
+      userMessage: "Hanzo Link is unavailable in this build.",
     });
   }
 
@@ -329,7 +329,7 @@ const setUp = Effect.fn("cli.up")(function* (flags: {
     });
     if (linked === null) return;
     yield* Console.log(
-      `✓ Signed in to Hanzo Connect${linked.identity ? ` as ${linked.identity}` : ""}`,
+      `✓ Signed in to Hanzo Link${linked.identity ? ` as ${linked.identity}` : ""}`,
     );
   }
   // A running server unlinks live; when that fails, only a restart stops its tunnel.
@@ -342,7 +342,7 @@ const setUp = Effect.fn("cli.up")(function* (flags: {
   yield* CliService.writeServiceEnv(baseDir, { HANZO_DEV_LAN: String(routes.lan) });
   // When the service step fails, an installed service still runs with the old
   // value, so the file goes back to match it.
-  // A new Hanzo Connect link is undone too, with any tunnel the failed start saved, so a
+  // A new Hanzo Link link is undone too, with any tunnel the failed start saved, so a
   // rerun sees it as a change and restarts. The sign-in stays.
   const restoreServiceEnv = before.service.installed
     ? CliService.writeServiceEnv(baseDir, { HANZO_DEV_LAN: previousLan }).pipe(
@@ -418,13 +418,13 @@ const setUp = Effect.fn("cli.up")(function* (flags: {
         (yield* Prompt.run(
           Prompt.Confirm({
             message:
-              "The running service still has Hanzo Connect on. Restart it? Running agent turns will stop.",
+              "The running service still has Hanzo Link on. Restart it? Running agent turns will stop.",
             initial: true,
           }),
         ).pipe(Effect.catchTags({ QuitError: () => Effect.succeed(false) })));
       if (!confirmed) {
         const { command } = yield* resolveHostCliCommand("service restart", baseDirArgs);
-        yield* Console.log(`Run \`${command}\` to turn Hanzo Connect off.`);
+        yield* Console.log(`Run \`${command}\` to turn Hanzo Link off.`);
       } else {
         if (!interactive && !stopped) {
           yield* Console.log("Restarting Hanzo Dev. Running agent turns will stop.");
@@ -459,7 +459,7 @@ export const upCommand = Command.make("up", {
   ...projectLocationFlags,
   connect: Flag.Boolean("connect").pipe(
     Flag.withDescription(
-      "Allow access through Hanzo Connect with your Hanzo account. Turn off with --no-connect.",
+      "Allow access through Hanzo Link with your Hanzo account. Turn off with --no-connect.",
     ),
     Flag.optional,
   ),
@@ -471,7 +471,7 @@ export const upCommand = Command.make("up", {
   ),
   yes: Flag.Boolean("yes").pipe(
     Flag.withDescription(
-      "Ask nothing. Keep the access settings; a new machine gets Hanzo Connect. A restart stops running agent turns.",
+      "Ask nothing. Keep the access settings; a new machine gets Hanzo Link. A restart stops running agent turns.",
     ),
     Flag.withDefault(false),
   ),
@@ -483,7 +483,7 @@ export const upCommand = Command.make("up", {
   ),
   Command.withExamples([
     { command: "hanzo up", description: "Choose remote access." },
-    { command: "hanzo up --connect", description: "Turn on Hanzo Connect. Keep other settings." },
+    { command: "hanzo up --connect", description: "Turn on Hanzo Link. Keep other settings." },
     { command: "hanzo up --lan", description: "Allow LAN access with pairing codes." },
     { command: "hanzo up --no-lan", description: "Stop LAN access." },
     { command: "hanzo up --yes", description: "Take the defaults with no questions." },
@@ -496,7 +496,7 @@ export const connectCommand = Command.make("connect", {
   ...projectLocationFlags,
   headless: headlessFlag,
 }).pipe(
-  Command.withDescription("Set up Hanzo Connect for this machine. Same as `hanzo up --connect`."),
+  Command.withDescription("Set up Hanzo Link for this machine. Same as `hanzo up --connect`."),
   Command.withHandler((flags) =>
     runCloudCommand(
       flags,
@@ -546,7 +546,7 @@ export const statusCommand = Command.make("status", {
       const config = yield* resolveCliAuthConfig(flags, yield* GlobalFlag.LogLevel, {
         quietLogs: flags.json,
       });
-      // Only what readSetup reads: no database, unlike the Hanzo Connect commands.
+      // Only what readSetup reads: no database, unlike the Hanzo Link commands.
       const setup = yield* readSetup().pipe(
         Effect.provide(
           Layer.merge(CliService.layer(config), ServerSecretStore.layer).pipe(

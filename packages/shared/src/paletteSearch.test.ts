@@ -213,9 +213,9 @@ describe("scoreThreadSearch", () => {
           branch: "hanzo/diagnose-connect",
           projectTitle: "hanzodev",
         }),
-        thread("Hanzo Connect Tunnel Lifecycle Review", { projectTitle: "hanzodev" }),
+        thread("Hanzo Link Tunnel Lifecycle Review", { projectTitle: "hanzodev" }),
       ])[0],
-    ).toBe("Hanzo Connect Tunnel Lifecycle Review");
+    ).toBe("Hanzo Link Tunnel Lifecycle Review");
     expect(
       rankTitles("hanzodev", [
         thread("Fix sidebar lag", { ...busy, projectTitle: "hanzodev", branch: "hanzo/sidebar" }),

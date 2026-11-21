@@ -313,7 +313,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodePlatformCrypto.layer))(
     );
 
     it.effect(
-      "holds an untrusted Hanzo Connect device until it is approved, and revocation cuts it off",
+      "holds an untrusted Hanzo Link device until it is approved, and revocation cuts it off",
       () =>
         Effect.gen(function* () {
           const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
@@ -385,8 +385,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodePlatformCrypto.layer))(
           });
           const [oldestDeviceSession, newestDeviceSession] = yield* deviceSessions();
           expect(newestDeviceSession).toBeDefined();
-          // Authorized clients lists Hanzo Connect sessions under this name.
-          expect(newestDeviceSession?.client.label).toBe("Hanzo Connect");
+          // Authorized clients lists Hanzo Link sessions under this name.
+          expect(newestDeviceSession?.client.label).toBe("Hanzo Link");
           // Revoking any one of the device's sessions ends all of them and its trust.
           expect(
             yield* serverAuth.revokeClientSession(admin.sessionId, oldestDeviceSession!.sessionId),
@@ -495,7 +495,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodePlatformCrypto.layer))(
         expect(yield* refused(renewed.access_token, other.thumbprint)).toBe(
           "ServerAuthInvalidCredentialError",
         );
-        // Bearer and Hanzo Connect sessions keep their fixed lifetimes, so unlinking still cuts off.
+        // Bearer and Hanzo Link sessions keep their fixed lifetimes, so unlinking still cuts off.
         const bearer = yield* pair();
         expect(yield* refused(bearer.access_token, key.thumbprint)).toBe(
           "ServerAuthInvalidCredentialError",

@@ -135,14 +135,14 @@ export function createManagedRelaySession(input: ManagedRelaySessionInput): Mana
           try: () => readCachedIamToken(nowMillis),
           catch: (cause) =>
             new ManagedRelaySessionError({
-              ...translatableMessage(msg("Could not obtain the Hanzo Connect session token.")),
+              ...translatableMessage(msg("Could not obtain the Hanzo Link session token.")),
               cause,
             }),
         }).pipe(Effect.timeoutOption(IAM_TOKEN_READ_TIMEOUT_MS));
         if (Option.isSome(token)) return token.value;
       }
       return yield* new ManagedRelaySessionError(
-        translatableMessage(msg("Timed out obtaining the Hanzo Connect session token.")),
+        translatableMessage(msg("Timed out obtaining the Hanzo Link session token.")),
       );
     }),
   };
@@ -197,16 +197,16 @@ function readSessionIamToken(
       (token): token is string => Boolean(token),
       () =>
         new ManagedRelaySessionError(
-          translatableMessage(msg("The Hanzo Connect session token is unavailable.")),
+          translatableMessage(msg("The Hanzo Link session token is unavailable.")),
         ),
     ),
   );
 }
 
 const SIGN_IN_BEFORE = {
-  deregister: msg("Sign in to Hanzo Connect before deregistering an environment."),
-  "link-hanzochat": msg("Sign in to Hanzo Connect before linking Hanzo Chat."),
-  "unlink-hanzochat": msg("Sign in to Hanzo Connect before unlinking Hanzo Chat."),
+  deregister: msg("Sign in to Hanzo Link before deregistering an environment."),
+  "link-hanzochat": msg("Sign in to Hanzo Link before linking Hanzo Chat."),
+  "unlink-hanzochat": msg("Sign in to Hanzo Link before unlinking Hanzo Chat."),
 };
 
 function requireSessionIamToken(
@@ -257,7 +257,7 @@ function requireIamToken(
   if (!session || session.accountId !== accountId) {
     return Effect.fail(
       new ManagedRelaySessionError(
-        translatableMessage(msg("Sign in to Hanzo Connect before loading relay data.")),
+        translatableMessage(msg("Sign in to Hanzo Link before loading relay data.")),
       ),
     );
   }
@@ -276,7 +276,7 @@ function describeManagedRelayFailure(cause: Cause.Cause<unknown>): {
   }
   return error instanceof Error
     ? { ...messageFromError(error), traceId }
-    : { ...translatableMessage(msg("Could not load Hanzo Connect data.")), traceId };
+    : { ...translatableMessage(msg("Could not load Hanzo Link data.")), traceId };
 }
 
 export function readManagedRelaySnapshotState<A>(

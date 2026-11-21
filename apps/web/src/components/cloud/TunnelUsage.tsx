@@ -67,7 +67,7 @@ export function TunnelUsageMeter({
       </div>
       <div
         role="meter"
-        aria-label={gt("Hanzo Connect tunnels in use")}
+        aria-label={gt("Hanzo Link tunnels in use")}
         aria-valuemin={0}
         aria-valuemax={limit}
         aria-valuenow={used}
