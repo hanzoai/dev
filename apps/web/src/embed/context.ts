@@ -39,6 +39,22 @@ export function createSlot(): Slot {
   };
 }
 
+/** Whether the host shows Dev's code-only sidebar icons (source control, issues). */
+let tools = true;
+const toolListeners = new Set<() => void>();
+export const embedTools = {
+  set(next: boolean) {
+    if (next === tools) return;
+    tools = next;
+    for (const notify of toolListeners) notify();
+  },
+  get: () => tools,
+  subscribe(notify: () => void) {
+    toolListeners.add(notify);
+    return () => toolListeners.delete(notify);
+  },
+};
+
 export const EmbedContext = createContext<EmbedState | null>(null);
 
 export function useEmbed(): EmbedState | null {

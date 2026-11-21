@@ -32,3 +32,18 @@ export function useHasWorkspace(ref: string | null): boolean {
       ?.serverConfig?.scratchWorkspaceRoot ?? null;
   return !isScratchProject(project, scratchRoot);
 }
+
+/**
+ * Whether the sidebar shows the code-only icons (source control, issues). Standalone Dev always
+ * does; an embedding host asks for them (/dev yes, /chat no), and a conversation with no
+ * workspace has no code for them to act on.
+ */
+export function showsCodeTools(input: {
+  readonly embedded: boolean;
+  readonly hostWantsTools: boolean;
+  readonly openThread: string | null;
+  readonly hasWorkspace: boolean;
+}): boolean {
+  if (!input.embedded) return true;
+  return input.hostWantsTools && (input.openThread === null || input.hasWorkspace);
+}

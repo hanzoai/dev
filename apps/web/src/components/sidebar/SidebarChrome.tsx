@@ -6,6 +6,10 @@ import {
   SettingsIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { useSyncExternalStore } from "react";
+import { embedTools, useEmbed } from "../../embed/context";
+import { showsCodeTools, useHasWorkspace } from "../../embed/capabilities";
+import { refOf } from "../../embed/navigation";
 import { T, useGT } from "gt-react";
 import { memo } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
@@ -199,8 +203,20 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const isOnUtilityPage = useLocation({
     select: (location) => isSidebarUtilityPage(location.pathname),
   });
-  const pullRequestsSupported = usePullRequestsSupported();
-  const issuesSupported = useIssuesSupported();
+  // A host that embeds the core owns the bottom-left control (its account menu: settings,
+  // usage); the core keeps only the code-only icons, and only where there is code.
+  const embed = useEmbed();
+  const toolsOn = useSyncExternalStore(embedTools.subscribe, embedTools.get, () => true);
+  const openRef = useLocation({ select: (location) => refOf(location.pathname) });
+  const hasWorkspace = useHasWorkspace(openRef);
+  const codeTools = showsCodeTools({
+    embedded: embed !== null,
+    hostWantsTools: toolsOn,
+    openThread: openRef,
+    hasWorkspace,
+  });
+  const pullRequestsSupported = usePullRequestsSupported() && codeTools;
+  const issuesSupported = useIssuesSupported() && codeTools;
   const closeMobileSidebar = () => {
     if (isMobile) {
       setOpenMobile(false);
@@ -247,11 +263,13 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
         </SidebarMenuItem>
       ) : (
         <>
-          <SidebarUtilityItem
-            icon={<SettingsIcon />}
-            label={gt("Settings")}
-            onClick={handleSettingsClick}
-          />
+          {embed === null ? (
+            <SidebarUtilityItem
+              icon={<SettingsIcon />}
+              label={gt("Settings")}
+              onClick={handleSettingsClick}
+            />
+          ) : null}
           {pullRequestsSupported ? (
             <SidebarUtilityItem
               icon={<PullRequestGlyph.pullRequest />}
@@ -266,11 +284,13 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
               onClick={handleIssuesClick}
             />
           ) : null}
-          <SidebarUtilityItem
-            icon={<ChartNoAxesColumnIcon />}
-            label={gt("Usage")}
-            onClick={handleUsageClick}
-          />
+          {embed === null ? (
+            <SidebarUtilityItem
+              icon={<ChartNoAxesColumnIcon />}
+              label={gt("Usage")}
+              onClick={handleUsageClick}
+            />
+          ) : null}
         </>
       )}
       <SidebarThreadUndoNotice />

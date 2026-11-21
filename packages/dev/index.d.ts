@@ -19,6 +19,8 @@ export function DevProvider(props: { runtime: DevRuntime; children?: ReactNode }
 export function DevThreadList(props: {
   active?: string | null;
   onOpen?: (ref: string | null) => void;
+  /** Show the code-only sidebar icons (source control, issues): /dev yes, /chat no. */
+  tools?: boolean;
   className?: string;
 }): ReactNode;
 
