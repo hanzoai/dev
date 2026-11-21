@@ -16,7 +16,6 @@
     "@alchemy.run/cloudflare": "catalog:",
     "@alchemy.run/drizzle": "catalog:",
     "@alchemy.run/planetscale": "catalog:",
-    "@clerk/backend": "catalog:",
     "@distilled.cloud/cloudflare": "catalog:",
     "@effect/sql-pg": "catalog:",
     "@effect/sql-sqlite-do": "catalog:",
@@ -27,7 +26,8 @@
     "@noble/hashes": "catalog:",
     "alchemy": "catalog:",
     "drizzle-orm": "1.0.0-rc.5",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "jose": "catalog:"
   },
   "devDependencies": {
     "@alchemy.run/test": "catalog:",

@@ -654,6 +654,8 @@ export class RelayClientPrincipal extends Context.Service<
   {
     readonly userId: string;
     readonly token: string;
+    /** The `email` claim of the IAM access token, when the token carries one. */
+    readonly email?: string;
     readonly proofKeyThumbprint?: string;
     readonly dpopScopes?: ReadonlyArray<RelayDpopAccessTokenScope>;
   }
@@ -670,7 +672,7 @@ export class RelayEnvironmentPrincipal extends Context.Service<
 const RelayClientBearerAuthorization = HttpApiSecurity.http({ scheme: "bearer" }).pipe(
   HttpApiSecurity.annotate(
     OpenApi.Description,
-    "Clerk session or OAuth bearer token for the signed-in Hanzo Connect user.",
+    "Hanzo IAM access token for the signed-in Hanzo Connect user.",
   ),
 );
 
@@ -766,7 +768,7 @@ export const RelayWebClientId = "hanzo-web" as const;
 export const RelayDpopAccessTokenRequest = Schema.Struct({
   grant_type: Schema.Literal(RelayDpopTokenExchangeGrantType),
   subject_token: TrimmedNonEmptyString.annotate({
-    description: "Clerk bearer token for the signed-in cloud user.",
+    description: "Hanzo IAM access token for the signed-in cloud user.",
   }),
   subject_token_type: Schema.Literal(RelayJwtSubjectTokenType),
   requested_token_type: Schema.Literal(RelayAccessTokenType),
@@ -1164,10 +1166,10 @@ export const RelayExchangeDpopAccessTokenEndpoint = HttpApiEndpoint.post(
     error: RelayAuthAndInternalErrors,
   },
 )
-  .annotate(OpenApi.Summary, "Exchange a Clerk token for a DPoP access token")
+  .annotate(OpenApi.Summary, "Exchange a Hanzo IAM token for a DPoP access token")
   .annotate(
     OpenApi.Description,
-    "Bootstrap endpoint. Send the DPoP proof JWT in the dpop header and the Clerk token in subject_token. The returned access token is bound to the proof key.",
+    "Bootstrap endpoint. Send the DPoP proof JWT in the dpop header and the IAM access token in subject_token. The returned access token is bound to the proof key.",
   );
 
 const RelayTokenGroup = HttpApiGroup.make("token")

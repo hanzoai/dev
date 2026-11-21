@@ -42,9 +42,8 @@ const mintKeys = NodeCrypto.generateKeyPairSync("ed25519", {
 const settings: RelayConfiguration.RelayConfiguration["Service"] = {
   relayIssuer: "https://relay.example.test",
   apns: null,
-  clerkSecretKey: Redacted.make("clerk-secret-key"),
-  clerkPublishableKey: "pk_test_test",
-  clerkJwtAudience: "hanzo-dev-relay",
+  iamIssuer: "https://hanzo.id",
+  iamAudience: "hanzo-dev-relay",
   apnsDeliveryJobSigningSecret: Redacted.make("apns-delivery-secret"),
   cloudMintPrivateKey: Redacted.make(mintKeys.privateKey),
   cloudMintPublicKey: mintKeys.publicKey,

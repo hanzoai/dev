@@ -90,11 +90,11 @@ function createClient(overrides?: Partial<ManagedRelay.ManagedRelayClient["Servi
 function setSession() {
   setManagedRelaySession(registry, {
     accountId: "account-1",
-    readClerkToken: () => Promise.resolve("clerk-token"),
+    readIamToken: () => Promise.resolve("iam-token"),
   });
 }
 
-function clerkToken(expiresAtSeconds: number): string {
+function iamToken(expiresAtSeconds: number): string {
   const encode = (value: unknown) =>
     btoa(JSON.stringify(value)).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
   return `${encode({ alg: "RS256" })}.${encode({ exp: expiresAtSeconds })}.c2lnbmF0dXJl`;
@@ -164,11 +164,11 @@ describe("createManagedRelayQueryManager", () => {
     }),
   );
 
-  it.effect("deduplicates concurrent Clerk token reads and reuses the token until JWT expiry", () =>
+  it.effect("deduplicates concurrent IAM token reads and reuses the token until JWT expiry", () =>
     Effect.gen(function* () {
-      const token = clerkToken(4_102_444_800);
+      const token = iamToken(4_102_444_800);
       let resolveToken!: (value: string) => void;
-      const readClerkToken = vi.fn(
+      const readIamToken = vi.fn(
         () =>
           new Promise<string>((resolve) => {
             resolveToken = resolve;
@@ -176,55 +176,55 @@ describe("createManagedRelayQueryManager", () => {
       );
       const session = createManagedRelaySession({
         accountId: "account-1",
-        readClerkToken,
+        readIamToken,
       });
 
-      const readsFiber = yield* Effect.all([session.readClerkToken(), session.readClerkToken()], {
+      const readsFiber = yield* Effect.all([session.readIamToken(), session.readIamToken()], {
         concurrency: "unbounded",
       }).pipe(Effect.forkChild);
       yield* Effect.yieldNow;
-      expect(readClerkToken).toHaveBeenCalledTimes(1);
+      expect(readIamToken).toHaveBeenCalledTimes(1);
 
       resolveToken(token);
       expect(yield* Fiber.join(readsFiber)).toEqual([token, token]);
-      expect(yield* session.readClerkToken()).toBe(token);
-      expect(readClerkToken).toHaveBeenCalledTimes(1);
+      expect(yield* session.readIamToken()).toBe(token);
+      expect(readIamToken).toHaveBeenCalledTimes(1);
     }),
   );
 
-  it.effect("replaces a Clerk token read that has not answered after 4 seconds", () =>
+  it.effect("replaces a IAM token read that has not answered after 4 seconds", () =>
     Effect.gen(function* () {
-      const token = clerkToken(4_102_444_800);
-      const readClerkToken = vi
+      const token = iamToken(4_102_444_800);
+      const readIamToken = vi
         .fn<() => Promise<string | null>>()
         .mockReturnValueOnce(new Promise(() => {}))
         .mockResolvedValue(token);
-      const session = createManagedRelaySession({ accountId: "account-1", readClerkToken });
+      const session = createManagedRelaySession({ accountId: "account-1", readIamToken });
 
-      const readsFiber = yield* Effect.all([session.readClerkToken(), session.readClerkToken()], {
+      const readsFiber = yield* Effect.all([session.readIamToken(), session.readIamToken()], {
         concurrency: "unbounded",
       }).pipe(Effect.forkChild);
       yield* TestClock.adjust("3999 millis");
-      expect(readClerkToken).toHaveBeenCalledTimes(1);
+      expect(readIamToken).toHaveBeenCalledTimes(1);
 
       yield* TestClock.adjust("1 millis");
       expect(yield* Fiber.join(readsFiber)).toEqual([token, token]);
-      expect(readClerkToken).toHaveBeenCalledTimes(2);
+      expect(readIamToken).toHaveBeenCalledTimes(2);
     }),
   );
 
-  it.effect("fails a Clerk token read that never answers after three tries", () =>
+  it.effect("fails a IAM token read that never answers after three tries", () =>
     Effect.gen(function* () {
-      const readClerkToken = vi.fn(() => new Promise<string | null>(() => {}));
-      const session = createManagedRelaySession({ accountId: "account-1", readClerkToken });
+      const readIamToken = vi.fn(() => new Promise<string | null>(() => {}));
+      const session = createManagedRelaySession({ accountId: "account-1", readIamToken });
 
-      const readFiber = yield* session.readClerkToken().pipe(Effect.flip, Effect.forkChild);
+      const readFiber = yield* session.readIamToken().pipe(Effect.flip, Effect.forkChild);
       yield* TestClock.adjust("12 seconds");
 
       expect((yield* Fiber.join(readFiber)).message).toBe(
         "Timed out obtaining the Hanzo Connect session token.",
       );
-      expect(readClerkToken).toHaveBeenCalledTimes(3);
+      expect(readIamToken).toHaveBeenCalledTimes(3);
     }),
   );
 
@@ -233,20 +233,20 @@ describe("createManagedRelayQueryManager", () => {
       const firstRead = vi.fn(() => Promise.resolve<string | null>(null));
       setManagedRelaySession(registry, {
         accountId: "account-1",
-        readClerkToken: firstRead,
+        readIamToken: firstRead,
       });
       const firstSession = registry.get(managedRelaySessionAtom);
       expect(firstSession).not.toBeNull();
-      expect(yield* firstSession!.readClerkToken()).toBeNull();
+      expect(yield* firstSession!.readIamToken()).toBeNull();
 
       const secondRead = vi.fn(() => Promise.resolve<string | null>("refreshed-token"));
       setManagedRelaySession(registry, {
         accountId: "account-1",
-        readClerkToken: secondRead,
+        readIamToken: secondRead,
       });
 
       expect(registry.get(managedRelaySessionAtom)).toBe(firstSession);
-      expect(yield* firstSession!.readClerkToken()).toBe("refreshed-token");
+      expect(yield* firstSession!.readIamToken()).toBe("refreshed-token");
       expect(firstRead).toHaveBeenCalledTimes(1);
       expect(secondRead).toHaveBeenCalledTimes(1);
     }),
@@ -257,21 +257,21 @@ describe("createManagedRelayQueryManager", () => {
       let resolveFirst!: (token: string) => void;
       setManagedRelaySession(registry, {
         accountId: "account-1",
-        readClerkToken: () =>
+        readIamToken: () =>
           new Promise<string>((resolve) => {
             resolveFirst = resolve;
           }),
       });
       const session = registry.get(managedRelaySessionAtom);
-      const firstRead = yield* session!.readClerkToken().pipe(Effect.forkChild);
+      const firstRead = yield* session!.readIamToken().pipe(Effect.forkChild);
       yield* Effect.yieldNow;
 
       setManagedRelaySession(registry, {
         accountId: "account-1",
-        readClerkToken: () => Promise.resolve("refreshed-token"),
+        readIamToken: () => Promise.resolve("refreshed-token"),
       });
 
-      expect(yield* session!.readClerkToken()).toBe("refreshed-token");
+      expect(yield* session!.readIamToken()).toBe("refreshed-token");
       resolveFirst("older-token");
       expect(yield* Fiber.join(firstRead)).toBe("older-token");
     }),

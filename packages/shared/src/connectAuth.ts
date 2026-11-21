@@ -17,7 +17,7 @@ export interface ConnectAuthorizeRequest {
   readonly loopbackPort: number;
 }
 
-/** Route through /connect because Clerk's signed-out redirect can lose OAuth query parameters. */
+/** Route through /connect because IAM's signed-out redirect can lose OAuth query parameters. */
 export function buildConnectAuthorizeRequestUrl(input: {
   readonly hostedAppUrl: string;
   readonly state: string;
@@ -52,12 +52,12 @@ function parseLoopbackPort(value: string): number | null {
   return port >= 1 && port <= 65535 ? port : null;
 }
 
-/** Must match the loopback redirect URI registered on the Clerk CLI OAuth app. */
+/** Must match the loopback redirect URI registered on the IAM CLI application. */
 export function connectLoopbackRedirectUri(port: number): string {
   return `http://127.0.0.1:${port}${CONNECT_LOOPBACK_CALLBACK_PATH}`;
 }
 
-export function buildConnectClerkAuthorizeUrl(input: {
+export function buildConnectAuthorizeUrl(input: {
   readonly authorizationEndpoint: string;
   readonly clientId: string;
   readonly redirectUri: string;

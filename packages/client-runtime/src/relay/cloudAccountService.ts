@@ -1,7 +1,7 @@
 import { reportAtomCommandResult, settlePromise } from "../state/runtime.ts";
 
 /**
- * The slice of a Clerk instance the account service needs. Clerk emits on
+ * The slice of an IAM session the account service needs. It emits on
  * every resource change (token refreshes, profile edits), so the service
  * dedupes emissions down to account changes.
  */
@@ -30,7 +30,7 @@ export type CloudAccountStep =
   | CloudAccountSignIn;
 
 /**
- * `previous` is undefined until Clerk's first emission. A first emission that
+ * `previous` is undefined until the session's first emission. A first emission that
  * is signed out still cleans up, so data left by an account that signed out
  * while the app was closed does not linger.
  */
@@ -72,7 +72,7 @@ export interface CloudAccountHandlers<S extends CloudAccountSource> {
     readonly isAccountTransition: boolean;
   }) => void;
   readonly onSignOutTransition?: () => void;
-  /** Releases credentials when the service stops observing a Clerk instance. */
+  /** Releases credentials when the service stops observing a session. */
   readonly detach: () => void;
 }
 
@@ -83,7 +83,7 @@ export type CloudAccountState =
   | { readonly _tag: "Active"; readonly accountId: string }
   /**
    * Activation rejected. The next emission for the same account retries the
-   * original step, so a transient failure recovers on Clerk's next resource
+   * original step, so a transient failure recovers on the session's next resource
    * change (token refreshes emit regularly) without re-requesting onboarding.
    */
   | {
@@ -197,7 +197,7 @@ export function createCloudAccountService<S extends CloudAccountSource>(
       const current = {
         source,
         unsubscribe: source.addListener((resources) => {
-          // Clerk reports `user: undefined` until it loads; pending sessions
+          // The session reports `user: undefined` until it loads; pending sessions
           // still carry a user and count as signed in.
           if (resources.user === undefined) return;
           observe(source, resources.user?.id ?? null);

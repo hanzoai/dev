@@ -98,7 +98,7 @@ describe("planCloudAccountStep", () => {
 });
 
 describe("createCloudAccountService", () => {
-  it("activates once per account however often Clerk emits", async () => {
+  it("activates once per account however often the session emits", async () => {
     const { service, log, nextActivation } = makeService();
     const { source, emit } = makeSource();
     service.attach(source);
@@ -216,7 +216,7 @@ describe("createCloudAccountService", () => {
     ]);
   });
 
-  it("detaches from a replaced Clerk instance", () => {
+  it("detaches from a replaced session", () => {
     const { service, log } = makeService();
     const first = makeSource();
     const second = makeSource();

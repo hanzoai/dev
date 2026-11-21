@@ -9,7 +9,7 @@ import * as RelayTokens from "../auth/RelayTokens.ts";
 import * as Devices from "../agentActivity/Devices.ts";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Crypto has no generateKeyPairSync.
 import * as NodeCrypto from "node:crypto";
-import { createClerkClient, verifyToken } from "@clerk/backend";
+import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
@@ -68,11 +68,6 @@ import * as AgentActivityPublisher from "../agentActivity/AgentActivityPublisher
 import * as EnvironmentPublishSignatures from "../environments/EnvironmentPublishSignatures.ts";
 import * as HanzoChatAccounts from "../hanzochat/HanzoChatAccounts.ts";
 
-vi.mock("@clerk/backend", () => ({
-  createClerkClient: vi.fn(),
-  verifyToken: vi.fn(),
-}));
-
 const relaySettings: RelayConfiguration.RelayConfiguration["Service"] = {
   relayIssuer: "https://relay.example.test",
   apns: {
@@ -82,9 +77,8 @@ const relaySettings: RelayConfiguration.RelayConfiguration["Service"] = {
     bundleId: "com.example.hanzo",
     environment: "sandbox",
   },
-  clerkSecretKey: Redacted.make("clerk-secret-key"),
-  clerkPublishableKey: "pk_test_test",
-  clerkJwtAudience: "hanzo-dev-relay",
+  iamIssuer: "https://iam.example.test",
+  iamAudience: "hanzo-dev-relay",
   apnsDeliveryJobSigningSecret: Redacted.make("apns-delivery-secret"),
   cloudMintPrivateKey: Redacted.make("cloud-mint-private-key"),
   cloudMintPublicKey: "cloud-mint-public-key",
@@ -386,58 +380,45 @@ describe("Cloudflare rate-limit retry hint", () => {
 });
 
 describe("relay client authentication", () => {
-  it.effect("preserves the existing Clerk session JWT path", () =>
-    Effect.gen(function* () {
-      vi.mocked(verifyToken).mockResolvedValue({
-        sub: "user_session",
-        aud: relaySettings.clerkJwtAudience,
-      } as never);
+  const signIamToken = async (claims: { readonly aud: string; readonly iss?: string }) => {
+    const { publicKey, privateKey } = await generateKeyPair("ES256");
+    const jwk = { ...(await exportJWK(publicKey)), kid: "test-key", alg: "ES256", use: "sig" };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input instanceof Request ? input.url : input);
+        if (url.endsWith("/.well-known/openid-configuration")) {
+          return Response.json({ jwks_uri: "https://iam.example.test/jwks" });
+        }
+        return Response.json({ keys: [jwk] });
+      }),
+    );
+    return new SignJWT({ email: "person@example.test" })
+      .setProtectedHeader({ alg: "ES256", kid: "test-key" })
+      .setSubject("user_iam")
+      .setAudience(claims.aud)
+      .setIssuer(claims.iss ?? relaySettings.iamIssuer)
+      .setExpirationTime("5m")
+      .sign(privateKey);
+  };
 
-      expect(yield* verifyRelayClientBearerToken(relaySettings, "session-token")).toEqual({
-        sub: "user_session",
-        mode: "clerk_session_bearer",
+  it.effect("accepts a Hanzo IAM access token signed by the issuer's JWKS", () =>
+    Effect.gen(function* () {
+      const token = yield* Effect.promise(() => signIamToken({ aud: relaySettings.iamAudience }));
+      expect(yield* verifyRelayClientBearerToken(relaySettings, token)).toMatchObject({
+        sub: "user_iam",
+        email: "person@example.test",
+        mode: "iam_bearer",
       });
-      expect(verifyToken).toHaveBeenCalledWith("session-token", {
-        secretKey: "clerk-secret-key",
-        audience: relaySettings.clerkJwtAudience,
-      });
-      expect(createClerkClient).not.toHaveBeenCalled();
-    }).pipe(
-      Effect.ensuring(
-        Effect.sync(() => {
-          vi.mocked(verifyToken).mockReset();
-          vi.mocked(createClerkClient).mockReset();
-        }),
-      ),
-    ),
+    }).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllGlobals()))),
   );
 
-  it.effect("falls back to Clerk OAuth token verification for the headless CLI", () =>
+  it.effect("rejects a token for another audience", () =>
     Effect.gen(function* () {
-      vi.mocked(verifyToken).mockRejectedValue(new Error("not a session JWT"));
-      vi.mocked(createClerkClient).mockReturnValue({
-        authenticateRequest: vi.fn().mockResolvedValue({
-          isAuthenticated: true,
-          toAuth: () => ({ userId: "user_oauth" }),
-        }),
-      } as never);
-
-      expect(yield* verifyRelayClientBearerToken(relaySettings, "oauth-token")).toEqual({
-        sub: "user_oauth",
-        mode: "clerk_oauth_bearer",
-      });
-      expect(createClerkClient).toHaveBeenCalledWith({
-        secretKey: "clerk-secret-key",
-        publishableKey: "pk_test_test",
-      });
-    }).pipe(
-      Effect.ensuring(
-        Effect.sync(() => {
-          vi.mocked(verifyToken).mockReset();
-          vi.mocked(createClerkClient).mockReset();
-        }),
-      ),
-    ),
+      const token = yield* Effect.promise(() => signIamToken({ aud: "someone-else" }));
+      const error = yield* Effect.flip(verifyRelayClientBearerToken(relaySettings, token));
+      expect(error._tag).toBe("IamTokenVerificationFailed");
+    }).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllGlobals()))),
   );
 });
 

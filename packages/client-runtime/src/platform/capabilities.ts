@@ -29,7 +29,7 @@ export class CloudSession extends Context.Service<
   CloudSession,
   {
     readonly identity: Effect.Effect<Option.Option<CloudSessionIdentity>>;
-    readonly clerkToken: Effect.Effect<string, ConnectionAttemptError>;
+    readonly iamToken: Effect.Effect<string, ConnectionAttemptError>;
   }
 >()("@hanzodev/client-runtime/platform/capabilities/CloudSession") {}
 

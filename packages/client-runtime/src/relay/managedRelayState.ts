@@ -16,27 +16,27 @@ import { relayProtectedErrorText } from "./errorPresentation.ts";
 
 const DEFAULT_STALE_TIME_MS = 15_000;
 const DEFAULT_IDLE_TTL_MS = 5 * 60_000;
-const CLERK_TOKEN_EXPIRY_SKEW_MS = 5_000;
-// Clerk retries a failed token request itself, but waits 3 s before the first
+const IAM_TOKEN_EXPIRY_SKEW_MS = 5_000;
+// The IAM client retries a failed token request itself, but waits 3 s before the first
 // retry and longer before each next one. A fresh request usually answers at
 // once, so a slow read is replaced instead of waited out.
-const CLERK_TOKEN_READ_TIMEOUT_MS = 4_000;
-const CLERK_TOKEN_READ_ATTEMPTS = 3;
+const IAM_TOKEN_READ_TIMEOUT_MS = 4_000;
+const IAM_TOKEN_READ_ATTEMPTS = 3;
 const isManagedRelayRequestFailedError = Schema.is(ManagedRelay.ManagedRelayRequestFailedError);
 
 export interface ManagedRelaySession {
   readonly accountId: string;
-  readonly readClerkToken: () => Effect.Effect<string | null, ManagedRelaySessionError>;
+  readonly readIamToken: () => Effect.Effect<string | null, ManagedRelaySessionError>;
 }
 
 export interface ManagedRelaySessionInput {
   readonly accountId: string;
-  readonly readClerkToken: () => Promise<string | null>;
+  readonly readIamToken: () => Promise<string | null>;
 }
 
 interface ManagedRelaySessionControl {
-  readonly updateReadClerkToken: (
-    readClerkToken: ManagedRelaySessionInput["readClerkToken"],
+  readonly updateReadIamToken: (
+    readIamToken: ManagedRelaySessionInput["readIamToken"],
   ) => void;
 }
 
@@ -51,7 +51,7 @@ export interface ManagedRelaySnapshotState<A> {
 
 export interface ManagedRelayQueryEvent {
   readonly operation: "environments" | "devices" | "hanzochat-link";
-  readonly stage: "clerk-token" | "relay-request";
+  readonly stage: "iam-token" | "relay-request";
   readonly phase: "start" | "success" | "failure";
   readonly accountId: string;
   readonly environmentId?: string;
@@ -81,21 +81,21 @@ export function createManagedRelaySession(input: ManagedRelaySessionInput): Mana
     readonly operation: Promise<string | null>;
     readonly startedAtMillis: number;
   } | null = null;
-  let readClerkToken = input.readClerkToken;
+  let readIamToken = input.readIamToken;
   let tokenProviderGeneration = 0;
 
-  const readCachedClerkToken = async (nowMillis: number): Promise<string | null> => {
-    if (cachedToken && cachedToken.expiresAtMillis > nowMillis + CLERK_TOKEN_EXPIRY_SKEW_MS) {
+  const readCachedIamToken = async (nowMillis: number): Promise<string | null> => {
+    if (cachedToken && cachedToken.expiresAtMillis > nowMillis + IAM_TOKEN_EXPIRY_SKEW_MS) {
       return cachedToken.token;
     }
     // A read that outlived its timeout is left running, since it still fills
     // the cache, but later readers start a fresh one instead of joining it.
-    if (pendingToken && nowMillis - pendingToken.startedAtMillis < CLERK_TOKEN_READ_TIMEOUT_MS) {
+    if (pendingToken && nowMillis - pendingToken.startedAtMillis < IAM_TOKEN_READ_TIMEOUT_MS) {
       return await pendingToken.operation;
     }
 
     const operationGeneration = tokenProviderGeneration;
-    const operation = readClerkToken().then((token) => {
+    const operation = readIamToken().then((token) => {
       if (operationGeneration !== tokenProviderGeneration) {
         return token;
       }
@@ -128,17 +128,17 @@ export function createManagedRelaySession(input: ManagedRelaySessionInput): Mana
 
   const session: ManagedRelaySession = {
     accountId: input.accountId,
-    readClerkToken: Effect.fn("clientRuntime.managedRelaySession.readClerkToken")(function* () {
-      for (let attempt = 0; attempt < CLERK_TOKEN_READ_ATTEMPTS; attempt += 1) {
+    readIamToken: Effect.fn("clientRuntime.managedRelaySession.readIamToken")(function* () {
+      for (let attempt = 0; attempt < IAM_TOKEN_READ_ATTEMPTS; attempt += 1) {
         const nowMillis = yield* Clock.currentTimeMillis;
         const token = yield* Effect.tryPromise({
-          try: () => readCachedClerkToken(nowMillis),
+          try: () => readCachedIamToken(nowMillis),
           catch: (cause) =>
             new ManagedRelaySessionError({
               ...translatableMessage(msg("Could not obtain the Hanzo Connect session token.")),
               cause,
             }),
-        }).pipe(Effect.timeoutOption(CLERK_TOKEN_READ_TIMEOUT_MS));
+        }).pipe(Effect.timeoutOption(IAM_TOKEN_READ_TIMEOUT_MS));
         if (Option.isSome(token)) return token.value;
       }
       return yield* new ManagedRelaySessionError(
@@ -147,8 +147,8 @@ export function createManagedRelaySession(input: ManagedRelaySessionInput): Mana
     }),
   };
   managedRelaySessionControls.set(session, {
-    updateReadClerkToken: (nextReadClerkToken) => {
-      readClerkToken = nextReadClerkToken;
+    updateReadIamToken: (nextReadIamToken) => {
+      readIamToken = nextReadIamToken;
       tokenProviderGeneration += 1;
       pendingToken = null;
     },
@@ -170,9 +170,9 @@ export function setManagedRelaySession(
   if (current?.accountId === input.accountId) {
     const control = managedRelaySessionControls.get(current);
     if (control) {
-      // Clerk can replace its token reader during routine same-account refreshes.
+      // The session can replace its token reader during routine same-account refreshes.
       // Keep the session stable so those refreshes do not invalidate queries or reconnect leases.
-      control.updateReadClerkToken(input.readClerkToken);
+      control.updateReadIamToken(input.readIamToken);
       return;
     }
   }
@@ -189,10 +189,10 @@ export function managedRelayAccountChanges(
   );
 }
 
-function readSessionClerkToken(
+function readSessionIamToken(
   session: ManagedRelaySession,
 ): Effect.Effect<string, ManagedRelaySessionError> {
-  return session.readClerkToken().pipe(
+  return session.readIamToken().pipe(
     Effect.filterOrFail(
       (token): token is string => Boolean(token),
       () =>
@@ -209,7 +209,7 @@ const SIGN_IN_BEFORE = {
   "unlink-hanzochat": msg("Sign in to Hanzo Connect before unlinking Hanzo Chat."),
 };
 
-function requireSessionClerkToken(
+function requireSessionIamToken(
   registry: AtomRegistry.AtomRegistry,
   accountId: string,
   action: "deregister" | "link-hanzochat" | "unlink-hanzochat",
@@ -218,7 +218,7 @@ function requireSessionClerkToken(
   if (!session || session.accountId !== accountId) {
     return Effect.fail(new ManagedRelaySessionError(translatableMessage(SIGN_IN_BEFORE[action])));
   }
-  return readSessionClerkToken(session);
+  return readSessionIamToken(session);
 }
 
 export const deregisterManagedRelayEnvironment = Effect.fn(
@@ -227,29 +227,29 @@ export const deregisterManagedRelayEnvironment = Effect.fn(
   registry: AtomRegistry.AtomRegistry,
   input: { readonly accountId: string; readonly environmentId: EnvironmentId },
 ) {
-  const clerkToken = yield* requireSessionClerkToken(registry, input.accountId, "deregister");
+  const iamToken = yield* requireSessionIamToken(registry, input.accountId, "deregister");
   const relay = yield* ManagedRelay.ManagedRelayClient;
-  yield* relay.unlinkEnvironment({ clerkToken, environmentId: input.environmentId });
+  yield* relay.unlinkEnvironment({ iamToken, environmentId: input.environmentId });
 });
 
 /** Returns the Hanzo Chat page URL where the signed-in user confirms the link. */
 export const createManagedRelayHanzoChatLinkRequest = Effect.fn(
   "clientRuntime.managedRelaySession.createHanzoChatLinkRequest",
 )(function* (registry: AtomRegistry.AtomRegistry, input: { readonly accountId: string }) {
-  const clerkToken = yield* requireSessionClerkToken(registry, input.accountId, "link-hanzochat");
+  const iamToken = yield* requireSessionIamToken(registry, input.accountId, "link-hanzochat");
   const relay = yield* ManagedRelay.ManagedRelayClient;
-  return (yield* relay.createHanzoChatLinkRequest({ clerkToken })).url;
+  return (yield* relay.createHanzoChatLinkRequest({ iamToken })).url;
 });
 
 export const unlinkManagedRelayHanzoChat = Effect.fn(
   "clientRuntime.managedRelaySession.unlinkHanzoChat",
 )(function* (registry: AtomRegistry.AtomRegistry, input: { readonly accountId: string }) {
-  const clerkToken = yield* requireSessionClerkToken(registry, input.accountId, "unlink-hanzochat");
+  const iamToken = yield* requireSessionIamToken(registry, input.accountId, "unlink-hanzochat");
   const relay = yield* ManagedRelay.ManagedRelayClient;
-  yield* relay.unlinkHanzoChat({ clerkToken });
+  yield* relay.unlinkHanzoChat({ iamToken });
 });
 
-function requireClerkToken(
+function requireIamToken(
   get: Atom.AtomContext,
   accountId: string,
 ): Effect.Effect<string, ManagedRelaySessionError> {
@@ -261,7 +261,7 @@ function requireClerkToken(
       ),
     );
   }
-  return readSessionClerkToken(session);
+  return readSessionIamToken(session);
 }
 
 function describeManagedRelayFailure(cause: Cause.Cause<unknown>): {
@@ -346,14 +346,14 @@ export function createManagedRelayQueryManager(
       .atom((get) =>
         Effect.gen(function* () {
           const base = { operation: "environments" as const, accountId };
-          const clerkToken = yield* observe(
-            { ...base, stage: "clerk-token" },
-            requireClerkToken(get, accountId),
+          const iamToken = yield* observe(
+            { ...base, stage: "iam-token" },
+            requireIamToken(get, accountId),
           );
           const relay = yield* ManagedRelay.ManagedRelayClient;
           return yield* observe(
             { ...base, stage: "relay-request" },
-            relay.listEnvironments({ clerkToken }),
+            relay.listEnvironments({ iamToken }),
           );
         }).pipe(logListingFailure("environment")),
       )
@@ -369,14 +369,14 @@ export function createManagedRelayQueryManager(
       .atom((get) =>
         Effect.gen(function* () {
           const base = { operation: "devices" as const, accountId };
-          const clerkToken = yield* observe(
-            { ...base, stage: "clerk-token" },
-            requireClerkToken(get, accountId),
+          const iamToken = yield* observe(
+            { ...base, stage: "iam-token" },
+            requireIamToken(get, accountId),
           );
           const relay = yield* ManagedRelay.ManagedRelayClient;
           return yield* observe(
             { ...base, stage: "relay-request" },
-            relay.listDevices({ clerkToken }),
+            relay.listDevices({ iamToken }),
           );
         }).pipe(logListingFailure("device")),
       )
@@ -392,14 +392,14 @@ export function createManagedRelayQueryManager(
       .atom((get) =>
         Effect.gen(function* () {
           const base = { operation: "hanzochat-link" as const, accountId };
-          const clerkToken = yield* observe(
-            { ...base, stage: "clerk-token" },
-            requireClerkToken(get, accountId),
+          const iamToken = yield* observe(
+            { ...base, stage: "iam-token" },
+            requireIamToken(get, accountId),
           );
           const relay = yield* ManagedRelay.ManagedRelayClient;
           return yield* observe(
             { ...base, stage: "relay-request" },
-            relay.getHanzoChatLink({ clerkToken }),
+            relay.getHanzoChatLink({ iamToken }),
           );
         }),
       )

@@ -277,7 +277,7 @@ export function parseHanzoIamCallbackUrl(rawUrl: string): ParsedHanzoIamCallback
     return null;
   }
 
-  // Clerk's Electron bridge owns `<scheme>://app/auth/callback`.
+  // The Electron bridge owns `<scheme>://app/auth/callback`.
   if (
     isCustomScheme &&
     parsed.host.toLowerCase() === "app" &&

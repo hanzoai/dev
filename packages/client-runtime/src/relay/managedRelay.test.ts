@@ -33,7 +33,7 @@ function layerManagedRelayTest(
   }).pipe(Layer.provide(layerSigner), Layer.provide(layerHttpClient));
 }
 
-function clerkToken(subject: string, nonce: string): string {
+function iamToken(subject: string, nonce: string): string {
   const encode = (value: unknown) =>
     btoa(JSON.stringify(value)).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
   return `${encode({ alg: "RS256" })}.${encode({ sub: subject, nonce })}.c2lnbmF0dXJl`;
@@ -50,7 +50,7 @@ describe("ManagedRelayClient", () => {
     return Effect.gen(function* () {
       const relayClient = yield* ManagedRelay.ManagedRelayClient;
       const error = yield* relayClient
-        .listEnvironments({ clerkToken: "clerk-token" })
+        .listEnvironments({ iamToken: "iam-token" })
         .pipe(Effect.flip);
 
       expect(error).toMatchObject({
@@ -120,7 +120,7 @@ describe("ManagedRelayClient", () => {
     return Effect.gen(function* () {
       const relayClient = yield* ManagedRelay.ManagedRelayClient;
       const statusInput = {
-        clerkToken: clerkToken("user-1", "session-1"),
+        iamToken: iamToken("user-1", "session-1"),
         scopes: [RelayEnvironmentStatusScope],
         environmentId: EnvironmentId.make("env-1"),
       } as const;
@@ -158,7 +158,7 @@ describe("ManagedRelayClient", () => {
     );
   });
 
-  it.effect("reuses a persisted token across runtimes and Clerk session token rotation", () => {
+  it.effect("reuses a persisted token across runtimes and IAM access token rotation", () => {
     let tokenExchangeCount = 0;
     let persistedTokens: ReadonlyArray<ManagedRelay.ManagedRelayAccessTokenCacheEntry> = [];
     const accessTokenStore: ManagedRelay.ManagedRelayAccessTokenStore = {
@@ -207,7 +207,7 @@ describe("ManagedRelayClient", () => {
     }) satisfies typeof globalThis.fetch;
     const statusInput = (token: string) =>
       ({
-        clerkToken: token,
+        iamToken: token,
         scopes: [RelayEnvironmentStatusScope],
         environmentId: EnvironmentId.make("env-1"),
       }) as const;
@@ -215,7 +215,7 @@ describe("ManagedRelayClient", () => {
     return Effect.gen(function* () {
       yield* Effect.gen(function* () {
         const relayClient = yield* ManagedRelay.ManagedRelayClient;
-        yield* relayClient.getEnvironmentStatus(statusInput(clerkToken("user-1", "session-1")));
+        yield* relayClient.getEnvironmentStatus(statusInput(iamToken("user-1", "session-1")));
       }).pipe(Effect.provide(layerManagedRelayTest(fetchFn, undefined, accessTokenStore)));
 
       expect(tokenExchangeCount).toBe(1);
@@ -223,7 +223,7 @@ describe("ManagedRelayClient", () => {
 
       yield* Effect.gen(function* () {
         const relayClient = yield* ManagedRelay.ManagedRelayClient;
-        yield* relayClient.getEnvironmentStatus(statusInput(clerkToken("user-1", "session-2")));
+        yield* relayClient.getEnvironmentStatus(statusInput(iamToken("user-1", "session-2")));
       }).pipe(Effect.provide(layerManagedRelayTest(fetchFn, undefined, accessTokenStore)));
 
       expect(tokenExchangeCount).toBe(1);
@@ -308,7 +308,7 @@ describe("ManagedRelayClient", () => {
     return Effect.gen(function* () {
       const relayClient = yield* ManagedRelay.ManagedRelayClient;
       const result = yield* relayClient.getEnvironmentStatus({
-        clerkToken: clerkToken("user-1", "session-1"),
+        iamToken: iamToken("user-1", "session-1"),
         scopes: [RelayEnvironmentStatusScope],
         environmentId: EnvironmentId.make("env-1"),
       });
@@ -324,7 +324,7 @@ describe("ManagedRelayClient", () => {
     }).pipe(Effect.provide(layerManagedRelayTest(fetchFn, undefined, accessTokenStore)));
   });
 
-  it.effect("does not persist tokens when the Clerk subject cannot be decoded", () => {
+  it.effect("does not persist tokens when the IAM subject cannot be decoded", () => {
     let persistedTokens: ReadonlyArray<ManagedRelay.ManagedRelayAccessTokenCacheEntry> = [];
     const accessTokenStore: ManagedRelay.ManagedRelayAccessTokenStore = {
       load: Effect.succeed([]),
@@ -371,7 +371,7 @@ describe("ManagedRelayClient", () => {
     return Effect.gen(function* () {
       const relayClient = yield* ManagedRelay.ManagedRelayClient;
       yield* relayClient.getEnvironmentStatus({
-        clerkToken: "not-a-jwt",
+        iamToken: "not-a-jwt",
         scopes: [RelayEnvironmentStatusScope],
         environmentId: EnvironmentId.make("env-1"),
       });
@@ -398,7 +398,7 @@ describe("ManagedRelayClient", () => {
       const relayClient = yield* ManagedRelay.ManagedRelayClient;
       const error = yield* relayClient
         .linkEnvironment({
-          clerkToken: "clerk-token",
+          iamToken: "iam-token",
           payload: {
             proof: "link-proof",
             notificationsEnabled: true,
@@ -436,7 +436,7 @@ describe("ManagedRelayClient", () => {
     return Effect.gen(function* () {
       const relayClient = yield* ManagedRelay.ManagedRelayClient;
       const error = yield* relayClient
-        .listEnvironments({ clerkToken: "clerk-token" })
+        .listEnvironments({ iamToken: "iam-token" })
         .pipe(Effect.flip);
 
       expect(error).toMatchObject({

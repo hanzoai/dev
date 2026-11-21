@@ -380,57 +380,57 @@ export class ManagedRelayClient extends Context.Service<
   {
     readonly relayUrl: string;
     readonly listEnvironments: (input: {
-      readonly clerkToken: string;
+      readonly iamToken: string;
     }) => Effect.Effect<ReadonlyArray<RelayClientEnvironmentRecord>, ManagedRelayClientError>;
     readonly listDevices: (input: {
-      readonly clerkToken: string;
+      readonly iamToken: string;
     }) => Effect.Effect<ReadonlyArray<RelayClientDeviceRecord>, ManagedRelayClientError>;
     readonly createEnvironmentLinkChallenge: (input: {
-      readonly clerkToken: string;
+      readonly iamToken: string;
       readonly payload: RelayEnvironmentLinkChallengeRequest;
     }) => Effect.Effect<RelayEnvironmentLinkChallengeResponse, ManagedRelayClientError>;
     readonly linkEnvironment: (input: {
-      readonly clerkToken: string;
+      readonly iamToken: string;
       readonly payload: RelayEnvironmentLinkRequest;
     }) => Effect.Effect<RelayEnvironmentLinkResponse, ManagedRelayClientError>;
     readonly unlinkEnvironment: (input: {
-      readonly clerkToken: string;
+      readonly iamToken: string;
       readonly environmentId: RelayClientEnvironmentRecord["environmentId"];
     }) => Effect.Effect<RelayOkResponse, ManagedRelayClientError>;
     readonly getHanzoChatLink: (input: {
-      readonly clerkToken: string;
+      readonly iamToken: string;
     }) => Effect.Effect<RelayHanzoChatLinkResponse, ManagedRelayClientError>;
     readonly createHanzoChatLinkRequest: (input: {
-      readonly clerkToken: string;
+      readonly iamToken: string;
     }) => Effect.Effect<RelayHanzoChatLinkRequestResponse, ManagedRelayClientError>;
     readonly unlinkHanzoChat: (input: {
-      readonly clerkToken: string;
+      readonly iamToken: string;
     }) => Effect.Effect<RelayOkResponse, ManagedRelayClientError>;
     readonly getEnvironmentStatus: (input: {
-      readonly clerkToken: string;
+      readonly iamToken: string;
       readonly scopes: ReadonlyArray<RelayDpopAccessTokenScope>;
       readonly environmentId: RelayClientEnvironmentRecord["environmentId"];
     }) => Effect.Effect<RelayEnvironmentStatusResponse, ManagedRelayClientError>;
     readonly connectEnvironment: (input: {
-      readonly clerkToken: string;
+      readonly iamToken: string;
       readonly scopes: ReadonlyArray<RelayDpopAccessTokenScope>;
       readonly environmentId: RelayClientEnvironmentRecord["environmentId"];
       readonly deviceId?: string;
     }) => Effect.Effect<RelayEnvironmentConnectResponse, ManagedRelayClientError>;
     readonly registerDevice: (input: {
-      readonly clerkToken: string;
+      readonly iamToken: string;
       readonly payload: RelayDeviceRegistrationRequest;
     }) => Effect.Effect<RelayOkResponse, ManagedRelayClientError>;
     readonly unregisterDevice: (input: {
-      readonly clerkToken: string;
+      readonly iamToken: string;
       readonly deviceId: string;
     }) => Effect.Effect<RelayOkResponse, ManagedRelayClientError>;
     readonly registerLiveActivity: (input: {
-      readonly clerkToken: string;
+      readonly iamToken: string;
       readonly payload: RelayLiveActivityRegistrationRequest;
     }) => Effect.Effect<RelayOkResponse, ManagedRelayClientError>;
     readonly getAgentActivitySnapshot: (input: {
-      readonly clerkToken: string;
+      readonly iamToken: string;
     }) => Effect.Effect<RelayAgentActivitySnapshotResponse, ManagedRelayClientError>;
     readonly resetTokenCache: Effect.Effect<void>;
   }
@@ -526,15 +526,15 @@ function tokenMatches(
 }
 
 const relayAccountId = Effect.fn("clientRuntime.managedRelay.relayAccountId")(function* (
-  clerkToken: string,
+  iamToken: string,
 ) {
-  const claims = yield* decodeRelayJwt(clerkToken).pipe(Effect.option);
+  const claims = yield* decodeRelayJwt(iamToken).pipe(Effect.option);
   const sub = Option.isSome(claims) ? claims.value.sub : undefined;
   return typeof sub === "string" && sub.length > 0 ? Option.some(sub) : Option.none<string>();
 });
 
-function bearerHeaders(clerkToken: string) {
-  return { authorization: `Bearer ${clerkToken}` };
+function bearerHeaders(iamToken: string) {
+  return { authorization: `Bearer ${iamToken}` };
 }
 
 function dpopHeaders(authorization: ManagedRelayAuthorization) {
@@ -629,7 +629,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
 
   const exchangeAccessToken = Effect.fn("clientRuntime.managedRelay.exchangeAccessToken")(
     function* (input: {
-      readonly clerkToken: string;
+      readonly iamToken: string;
       readonly scopes: ReadonlyArray<RelayDpopAccessTokenScope>;
     }) {
       yield* Effect.annotateCurrentSpan({
@@ -648,7 +648,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
           headers: { dpop: proof },
           payload: {
             grant_type: RelayDpopTokenExchangeGrantType,
-            subject_token: input.clerkToken,
+            subject_token: input.iamToken,
             subject_token_type: RelayJwtSubjectTokenType,
             requested_token_type: RelayAccessTokenType,
             resource: relayUrl,
@@ -672,7 +672,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
 
   const obtainAccessToken = Effect.fn("clientRuntime.managedRelay.obtainAccessToken")(
     function* (input: {
-      readonly clerkToken: string;
+      readonly iamToken: string;
       readonly scopes: ReadonlyArray<RelayDpopAccessTokenScope>;
       readonly thumbprint: string;
     }) {
@@ -681,7 +681,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
         "relay.scopes": input.scopes.join(" "),
       });
       const nowMillis = yield* Clock.currentTimeMillis;
-      const accountId = yield* relayAccountId(input.clerkToken);
+      const accountId = yield* relayAccountId(input.iamToken);
       if (Option.isNone(accountId)) {
         yield* Effect.annotateCurrentSpan({
           "relay.token_cache.result": "bypass",
@@ -754,7 +754,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
   );
 
   const authorize = Effect.fn("clientRuntime.managedRelay.authorize")(function* (input: {
-    readonly clerkToken: string;
+    readonly iamToken: string;
     readonly scopes: ReadonlyArray<RelayDpopAccessTokenScope>;
     readonly target: DpopProofTarget;
   }) {
@@ -766,7 +766,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
     });
     const thumbprint = yield* signer.thumbprint;
     const token = yield* obtainAccessToken({
-      clerkToken: input.clerkToken,
+      iamToken: input.iamToken,
       scopes: input.scopes,
       thumbprint,
     });
@@ -799,7 +799,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
 
   const runDpopRequest = <A>(
     input: {
-      readonly clerkToken: string;
+      readonly iamToken: string;
       readonly scopes: ReadonlyArray<RelayDpopAccessTokenScope>;
       readonly target: DpopProofTarget;
     },
@@ -838,7 +838,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
 
   const mobileRegistrationRequest = <A>(
     input: {
-      readonly clerkToken: string;
+      readonly iamToken: string;
       readonly target: DpopProofTarget;
     },
     request: (
@@ -858,7 +858,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
     listEnvironments: Effect.fnUntraced(
       function* (input) {
         return yield* client.client
-          .listEnvironments({ headers: bearerHeaders(input.clerkToken) })
+          .listEnvironments({ headers: bearerHeaders(input.iamToken) })
           .pipe(
             Effect.map((response) => response.environments),
             Effect.mapError(relayRequestError("list relay-managed environments")),
@@ -872,7 +872,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
       function* (input) {
         return yield* client.client
           .listDevicesV2({
-            headers: bearerHeaders(input.clerkToken),
+            headers: bearerHeaders(input.iamToken),
           })
           .pipe(
             Effect.map((response) => response.devices),
@@ -887,7 +887,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
       function* (input) {
         return yield* client.client
           .createEnvironmentLinkChallenge({
-            headers: bearerHeaders(input.clerkToken),
+            headers: bearerHeaders(input.iamToken),
             payload: input.payload,
           })
           .pipe(
@@ -902,7 +902,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
       function* (input) {
         return yield* client.client
           .linkEnvironment({
-            headers: bearerHeaders(input.clerkToken),
+            headers: bearerHeaders(input.iamToken),
             payload: input.payload,
           })
           .pipe(
@@ -917,7 +917,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
       function* (input) {
         return yield* client.client
           .unlinkEnvironment({
-            headers: bearerHeaders(input.clerkToken),
+            headers: bearerHeaders(input.iamToken),
             params: { environmentId: input.environmentId },
           })
           .pipe(
@@ -931,7 +931,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
     getHanzoChatLink: Effect.fnUntraced(
       function* (input) {
         return yield* client.client
-          .getHanzoChatLink({ headers: bearerHeaders(input.clerkToken) })
+          .getHanzoChatLink({ headers: bearerHeaders(input.iamToken) })
           .pipe(
             Effect.mapError(relayRequestError("read linked Hanzo Chat account")),
             timeoutRelayRequest("Relay Hanzo Chat link lookup"),
@@ -943,7 +943,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
     createHanzoChatLinkRequest: Effect.fnUntraced(
       function* (input) {
         return yield* client.client
-          .createHanzoChatLinkRequest({ headers: bearerHeaders(input.clerkToken) })
+          .createHanzoChatLinkRequest({ headers: bearerHeaders(input.iamToken) })
           .pipe(
             Effect.mapError(relayRequestError("start Hanzo Chat linking")),
             timeoutRelayRequest("Relay Hanzo Chat link request"),
@@ -955,7 +955,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
     unlinkHanzoChat: Effect.fnUntraced(
       function* (input) {
         return yield* client.client
-          .unlinkHanzoChat({ headers: bearerHeaders(input.clerkToken) })
+          .unlinkHanzoChat({ headers: bearerHeaders(input.iamToken) })
           .pipe(
             Effect.mapError(relayRequestError("unlink Hanzo Chat account")),
             timeoutRelayRequest("Relay Hanzo Chat unlinking"),
@@ -971,7 +971,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
         });
         return yield* runDpopRequest(
           {
-            clerkToken: input.clerkToken,
+            iamToken: input.iamToken,
             scopes: input.scopes,
             target: dpopProofTargets.getEnvironmentStatus(input.environmentId),
           },
@@ -997,7 +997,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
         });
         return yield* runDpopRequest(
           {
-            clerkToken: input.clerkToken,
+            iamToken: input.iamToken,
             scopes: input.scopes,
             target: dpopProofTargets.connectEnvironment(input.environmentId),
           },
@@ -1026,7 +1026,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
       function* (input) {
         return yield* mobileRegistrationRequest(
           {
-            clerkToken: input.clerkToken,
+            iamToken: input.iamToken,
             target: dpopProofTargets.registerDevice(),
           },
           (authorization) =>
@@ -1048,7 +1048,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
       function* (input) {
         return yield* mobileRegistrationRequest(
           {
-            clerkToken: input.clerkToken,
+            iamToken: input.iamToken,
             target: dpopProofTargets.unregisterDevice(input.deviceId),
           },
           (authorization) =>
@@ -1070,7 +1070,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
       function* (input) {
         return yield* mobileRegistrationRequest(
           {
-            clerkToken: input.clerkToken,
+            iamToken: input.iamToken,
             target: dpopProofTargets.getAgentActivitySnapshot(),
           },
           (authorization) =>
@@ -1091,7 +1091,7 @@ export const make = Effect.fn("ManagedRelayClient.make")(function* (
       function* (input) {
         return yield* mobileRegistrationRequest(
           {
-            clerkToken: input.clerkToken,
+            iamToken: input.iamToken,
             target: dpopProofTargets.registerLiveActivity(),
           },
           (authorization) =>

@@ -11,13 +11,6 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as RelayConfiguration from "../Config.ts";
 import * as HanzoChatAccounts from "./HanzoChatAccounts.ts";
 
-const clerk = vi.hoisted(() => ({
-  getUser: async (): Promise<unknown> => ({ primaryEmailAddress: { emailAddress: "a@b.co" } }),
-}));
-vi.mock("@clerk/backend", () => ({
-  createClerkClient: () => ({ users: { getUser: () => clerk.getUser() } }),
-}));
-
 const SECRET = "shared-link-secret";
 
 const relaySettings = (
@@ -25,9 +18,8 @@ const relaySettings = (
 ): RelayConfiguration.RelayConfiguration["Service"] => ({
   relayIssuer: "https://relay.example.test",
   apns: null,
-  clerkSecretKey: Redacted.make("clerk-secret-key"),
-  clerkPublishableKey: "pk_test_test",
-  clerkJwtAudience: "hanzo-dev-relay",
+  iamIssuer: "https://hanzo.id",
+  iamAudience: "hanzo-dev-relay",
   apnsDeliveryJobSigningSecret: Redacted.make("apns-delivery-secret"),
   cloudMintPrivateKey: Redacted.make("cloud-mint-private-key"),
   cloudMintPublicKey: "cloud-mint-public-key",
@@ -78,7 +70,7 @@ describe("HanzoChatAccounts", () => {
   it.effect("signs link tokens in the format Hanzo Chat verifies", () =>
     Effect.gen(function* () {
       const accounts = yield* HanzoChatAccounts.HanzoChatAccounts;
-      const url = new URL(yield* accounts.createLinkUrl({ userId: "user_1" }));
+      const url = new URL(yield* accounts.createLinkUrl({ userId: "user_1", email: "a@b.co" }));
       expect(`${url.origin}${url.pathname}`).toBe("https://chat.example.test/link/hanzodev");
 
       const [payload = "", signature = ""] = (url.searchParams.get("token") ?? "").split(".");
@@ -121,7 +113,7 @@ describe("HanzoChatAccounts", () => {
         {
           url: "https://chat.example.test/api/hanzo/link",
           authorization: `Bearer ${SECRET}`,
-          body: { clerkUserId: "user_1" },
+          body: { userId: "user_1" },
         },
       ]);
     }).pipe(provide(hanzoChat.client));
@@ -153,17 +145,11 @@ describe("HanzoChatAccounts", () => {
     }).pipe(provide(client));
   });
 
-  it.effect("times out when Clerk stalls on the email lookup", () =>
+  it.effect("refuses to link an account whose token carries no email", () =>
     Effect.gen(function* () {
-      const getUser = clerk.getUser;
-      clerk.getUser = () => new Promise(() => {});
       const accounts = yield* HanzoChatAccounts.HanzoChatAccounts;
-      const fiber = yield* Effect.forkChild(Effect.flip(accounts.createLinkUrl({ userId: "u" })));
-      yield* TestClock.adjust("5 seconds");
-      const error = yield* Fiber.join(fiber).pipe(
-        Effect.ensuring(Effect.sync(() => (clerk.getUser = getUser))),
-      );
-      expect(error._tag).toBe("ClerkUserLookupFailed");
+      const error = yield* Effect.flip(accounts.createLinkUrl({ userId: "u", email: undefined }));
+      expect(error._tag).toBe("AccountEmailMissing");
     }).pipe(provide(fakeHanzoChat({}).client)),
   );
 

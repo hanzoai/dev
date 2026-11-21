@@ -190,7 +190,7 @@ describe("DpopProofReplay.verifyAndConsume", () => {
           method: "POST",
           url: "https://relay.example.com/v1/environments/env/connect",
           expectedThumbprint: proof.thumbprint,
-          expectedAccessToken: "clerk-access-token",
+          expectedAccessToken: "iam-access-token",
           now,
         }),
       );
@@ -209,7 +209,7 @@ describe("DpopProofReplay.verifyAndConsume", () => {
       url: "https://relay.example.com/v1/environments/env/status",
       iat: Math.floor(now.epochMilliseconds / 1_000),
       jti: "proof-status-1",
-      accessToken: "clerk-access-token",
+      accessToken: "iam-access-token",
     });
 
     return Effect.gen(function* () {
@@ -218,7 +218,7 @@ describe("DpopProofReplay.verifyAndConsume", () => {
         proof: proof.proof,
         method: "POST",
         url: "https://relay.example.com/v1/environments/env/status",
-        expectedAccessToken: "clerk-access-token",
+        expectedAccessToken: "iam-access-token",
         now,
       });
       const second = yield* Effect.exit(
@@ -226,7 +226,7 @@ describe("DpopProofReplay.verifyAndConsume", () => {
           proof: proof.proof,
           method: "POST",
           url: "https://relay.example.com/v1/environments/env/status",
-          expectedAccessToken: "clerk-access-token",
+          expectedAccessToken: "iam-access-token",
           now,
         }),
       );

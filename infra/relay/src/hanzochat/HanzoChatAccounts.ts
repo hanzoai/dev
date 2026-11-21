@@ -1,4 +1,3 @@
-import { createClerkClient } from "@clerk/backend";
 import { hmac } from "@noble/hashes/hmac";
 import { sha256 } from "@noble/hashes/sha2";
 import * as Context from "effect/Context";
@@ -31,12 +30,12 @@ export class HanzoChatNotConfigured extends Schema.TaggedError<HanzoChatNotConfi
   }
 }
 
-export class ClerkUserLookupFailed extends Schema.TaggedError<ClerkUserLookupFailed>()(
-  "ClerkUserLookupFailed",
-  { cause: Schema.Defect() },
+export class AccountEmailMissing extends Schema.TaggedError<AccountEmailMissing>()(
+  "AccountEmailMissing",
+  {},
 ) {
   override get message(): string {
-    return "Could not read the Clerk user's primary email";
+    return "The signed-in account's access token carries no email";
   }
 }
 
@@ -62,7 +61,8 @@ export class HanzoChatAccounts extends Context.Service<
     readonly available: boolean;
     readonly createLinkUrl: (input: {
       readonly userId: string;
-    }) => Effect.Effect<string, HanzoChatNotConfigured | ClerkUserLookupFailed>;
+      readonly email: string | undefined;
+    }) => Effect.Effect<string, HanzoChatNotConfigured | AccountEmailMissing>;
     readonly getLink: (input: {
       readonly userId: string;
     }) => Effect.Effect<RelayHanzoChatLink | null, HanzoChatNotConfigured | HanzoChatRequestFailed>;
@@ -104,7 +104,7 @@ export const make = Effect.gen(function* () {
     const { baseUrl, linkSecret } = yield* requireSettings;
     return yield* HttpClientRequest.post(new URL(path, baseUrl).toString()).pipe(
       HttpClientRequest.bearerToken(Redacted.value(linkSecret)),
-      HttpClientRequest.bodyJsonUnsafe({ clerkUserId: userId }),
+      HttpClientRequest.bodyJsonUnsafe({ userId }),
       client.execute,
       Effect.flatMap(HttpClientResponse.filterStatusOk),
       Effect.flatMap((response) => response.json),
@@ -113,33 +113,12 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  const lookupClerkPrimaryEmail = Effect.fn("relay.hanzochat.lookup_clerk_primary_email")(
-    function* (userId: string) {
-      return yield* Effect.tryPromise({
-        try: async () => {
-          const user = await createClerkClient({
-            secretKey: Redacted.value(config.clerkSecretKey),
-            publishableKey: config.clerkPublishableKey,
-          }).users.getUser(userId);
-          const email = user.primaryEmailAddress?.emailAddress;
-          if (!email) throw new Error("Clerk user has no primary email address.");
-          return email;
-        },
-        catch: (cause) => new ClerkUserLookupFailed({ cause }),
-      }).pipe(
-        Effect.timeoutOrElse({
-          duration: HANZOCHAT_REQUEST_TIMEOUT,
-          orElse: () => Effect.fail(new ClerkUserLookupFailed({ cause: "timed out" })),
-        }),
-      );
-    },
-  );
-
   return HanzoChatAccounts.of({
     available: settings !== undefined,
     createLinkUrl: Effect.fn("relay.hanzochat.create_link_url")(function* (input) {
       const { baseUrl, linkSecret } = yield* requireSettings;
-      const email = yield* lookupClerkPrimaryEmail(input.userId);
+      const email = input.email;
+      if (!email) return yield* new AccountEmailMissing();
       const now = yield* DateTime.now;
       const token = signLinkToken(Redacted.value(linkSecret), {
         sub: input.userId,

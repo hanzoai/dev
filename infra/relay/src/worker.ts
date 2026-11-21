@@ -22,6 +22,10 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import * as HttpApiScalar from "effect/http-api/HttpApiScalar";
 
 import { RelayApi } from "@hanzodev/contracts/relay";
+import {
+  DEFAULT_HANZO_IAM_CLIENT_ID,
+  DEFAULT_HANZO_IAM_ISSUER,
+} from "@hanzodev/shared/hanzoIamAuth";
 
 import {
   RELAY_HTTP_ROUTER_CONFIG,
@@ -161,9 +165,12 @@ export const layer = Api.make(
     const apnsDeliveryQueueSender = yield* Cloudflare.Queues.WriteQueue(apnsDeliveryQueue);
     const fcmDeliveryQueueSender = yield* Cloudflare.Queues.WriteQueue(fcmDeliveryQueue);
 
-    const clerkSecretKey = yield* Config.Redacted("CLERK_SECRET_KEY");
-    const clerkPublishableKey = yield* Config.String("CLERK_PUBLISHABLE_KEY");
-    const clerkJwtAudience = yield* Config.String("CLERK_JWT_AUDIENCE");
+    const iamIssuer = yield* Config.String("HANZO_IAM_ISSUER").pipe(
+      Config.withDefault(DEFAULT_HANZO_IAM_ISSUER),
+    );
+    const iamAudience = yield* Config.String("HANZO_IAM_AUDIENCE").pipe(
+      Config.withDefault(DEFAULT_HANZO_IAM_CLIENT_ID),
+    );
     const hanzoChatLinkSecret = Option.getOrUndefined(
       Option.filter(
         yield* Config.option(Config.Redacted("HANZOCHAT_LINK_SECRET")),
@@ -233,9 +240,8 @@ export const layer = Api.make(
         ...(fcmServiceAccount ? { fcmServiceAccount } : {}),
         apns: apnsCredentials,
         apnsDeliveryJobSigningSecret: yield* apnsDeliveryJobSigningSecret,
-        clerkSecretKey,
-        clerkPublishableKey,
-        clerkJwtAudience,
+        iamIssuer,
+        iamAudience,
         cloudMintPrivateKey: yield* cloudMintPrivateKey,
         cloudMintPublicKey: yield* cloudMintPublicKey,
         managedEndpointBaseDomain: yield* managedEndpointZoneName,

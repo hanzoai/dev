@@ -86,7 +86,7 @@ vp run --filter hanzodev-relay deploy
 The stack provisions the Cloudflare Worker and queues, managed endpoint resources, database
 connectivity, and relay tracing resources. Copy [`infra/relay/.env.example`](./.env.example) to
 `infra/relay/.env` and fill in the deployment-specific values before deploying. Alchemy loads that
-file from the relay directory. Runtime secrets include Clerk, APNs, and optional FCM credentials. Set
+file from the relay directory. Runtime secrets include APNs and optional FCM credentials. Identity is Hanzo IAM and needs no secret. Set
 `APNS_ENABLED=false` for an Android-only development deployment without Apple credentials. Production adopts
 the configured API and tunnel DNS zones as retained Cloudflare resources. Personal stages reference
 the production-owned zones.
@@ -147,9 +147,7 @@ The `production` GitHub environment must define these Actions variables:
   creates no monitors or health dashboard. See
   [Relay alerts](../../docs/operations/relay-observability.md#alerts).
 - `RELAY_WARNING_NOTIFIER_ID`, optional, the Axiom notifier for relay warnings
-- `CLERK_PUBLISHABLE_KEY`
-- `CLERK_JWT_AUDIENCE`
-- `CLERK_JWT_TEMPLATE`
+- `HANZO_IAM_ISSUER` and `HANZO_IAM_AUDIENCE`, optional (defaults `https://hanzo.id` and `hanzo-app`)
 - `APNS_ENVIRONMENT`
 - `APNS_TEAM_ID`
 - `APNS_KEY_ID`
@@ -157,7 +155,6 @@ The `production` GitHub environment must define these Actions variables:
 
 The `production` GitHub environment must define these Actions secrets:
 
-- `CLERK_SECRET_KEY`
 - `APNS_PRIVATE_KEY`
 - `FCM_SERVICE_ACCOUNT` when Android push is enabled
 - `HANZOCHAT_LINK_SECRET`, optional, shared with Hanzo Chat's `HANZO_DEV_LINK_SECRET`. Without it the
@@ -167,11 +164,11 @@ The `production` GitHub environment must define these Actions secrets:
 The account-scoped repository credentials are consumed by Alchemy while provisioning relay stages; they
 are not bound into the relay Worker. The production deployment uses an Axiom personal access token,
 so `AXIOM_ORG_ID` must accompany `AXIOM_TOKEN`. The release workflow reads the production relay's
-derived public URL and Clerk publishable key from the same environment for downstream desktop, CLI,
+derived public URL from the same environment for downstream desktop, CLI,
 and hosted web builds.
 
 See:
 
-- [Hanzo Connect setup](../../docs/operations/connect-setup.md) for Clerk keys, JWT templates, and sign-up restrictions.
+- [Hanzo Connect setup](../../docs/operations/connect-setup.md) for the IAM application and client configuration.
 - [Relay Observability](../../docs/operations/relay-observability.md) for deployment tracing and diagnostics.
 - [Hanzo Connect architecture](../../docs/internals/hanzo-connect.md) for environment linking and trust boundaries.

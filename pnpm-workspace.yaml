@@ -30,10 +30,6 @@ catalog:
   "@alchemy.run/drizzle": 2.0.0-beta.85
   "@alchemy.run/planetscale": 2.0.0-beta.85
   "@alchemy.run/test": 2.0.0-beta.85
-  "@clerk/backend": 3.27.0
-  "@clerk/clerk-js": 6.42.3
-  "@clerk/react": 6.18.6
-  "@clerk/shared": 4.44.1
   # Must match the version alchemy depends on: the relay overrides its
   # Cloudflare retry policy through this package's Retry service.
   "@distilled.cloud/cloudflare": 1.0.0-rc.18
@@ -137,13 +133,6 @@ overrides:
   "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-linux-x64-musl": "-"
   "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-win32-arm64": "-"
   "@anthropic-ai/claude-agent-sdk>@anthropic-ai/claude-agent-sdk-win32-x64": "-"
-  "@clerk/backend": "catalog:"
-  "@clerk/clerk-js": "catalog:"
-  "@clerk/clerk-js>@base-org/account": "-"
-  "@clerk/clerk-js>@coinbase/wallet-sdk": "-"
-  "@clerk/clerk-js>@wallet-standard/core": "-"
-  "@clerk/react": "catalog:"
-  "@clerk/shared": "catalog:"
   "@effect/atom-react": "catalog:"
   "@effect/platform-bun": "catalog:"
   "@effect/platform-node": "catalog:"

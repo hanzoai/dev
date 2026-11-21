@@ -331,7 +331,7 @@ describe("remote environment authorization", () => {
             ClientCapabilities.CloudSession,
             ClientCapabilities.CloudSession.of({
               identity: Effect.succeedSome({ accountId: "user_connect" }),
-              clerkToken: Effect.succeed("clerk-token"),
+              iamToken: Effect.succeed("iam-token"),
             }),
           ),
           Effect.provideService(ClientCapabilities.AnalyticsDevice, {
