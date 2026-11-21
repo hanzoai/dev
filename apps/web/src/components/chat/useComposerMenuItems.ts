@@ -260,6 +260,20 @@ export function useComposerMenuItems({
           label: "/model",
           description: gt("Switch response model for this thread"),
         },
+        {
+          id: "slash:private",
+          type: "slash-command",
+          command: "private",
+          label: "/private",
+          description: gt("Continue privately, nothing saved or recorded"),
+        },
+        {
+          id: "slash:persona",
+          type: "slash-command",
+          command: "persona",
+          label: "/persona",
+          description: gt("Switch or clear the active persona"),
+        },
         ...(sideChatAvailable
           ? ([
               {

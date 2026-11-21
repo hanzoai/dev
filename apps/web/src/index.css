@@ -2647,3 +2647,11 @@ code {
 .messages-timeline-scroll:focus-visible {
   outline: none;
 }
+
+/* When embedded inside a host pane (Hanzo.app / hanzo.ai), clamp viewport-tall SidebarInset
+   views (h-dvh / h-svh) to the host pane's height so the composer toolbar is never clipped. */
+[data-dev-workspace] [data-slot="sidebar-inset"] {
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+}

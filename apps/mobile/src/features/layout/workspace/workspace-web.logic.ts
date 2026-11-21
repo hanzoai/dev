@@ -3,11 +3,11 @@ import type { WebSection } from "./workspace-section.logic";
 /** hanzo.app is served at hanzo.ai: the app is a path on the apex (@hanzo/app lib/host). */
 export const HANZO_APP_ORIGIN = "https://hanzo.ai";
 
-/** The routes of hanzo.ai's app/design, app/library and app/tabs pages. */
+/** The routes of hanzo.ai's app/library, app/design and plugins pages. */
 export const WEB_SECTION_PATHS = {
-  design: "/design",
   library: "/library",
-  tabs: "/tabs",
+  design: "/design",
+  plugins: "/dev/-/customize/plugins",
 } as const satisfies Readonly<Record<WebSection, string>>;
 
 export function webSectionUrl(section: WebSection, origin: string = HANZO_APP_ORIGIN): string {

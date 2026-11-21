@@ -987,6 +987,16 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             onFocusSearch={focusSearchInput}
             instanceEntries={sidebarInstanceEntries}
             showFavorites
+            {...(props.onOpenProviderSetup
+              ? {
+                  onAddProvider: () => {
+                    props.onRequestClose?.();
+                    props.onOpenProviderSetup?.(
+                      sidebarInstanceEntries[0]?.instanceId ?? ("hanzo" as ProviderInstanceId),
+                    );
+                  },
+                }
+              : {})}
             {...(selectableUnavailableInstanceIds ? { selectableUnavailableInstanceIds } : {})}
             {...(lockedDisabledInstanceIds
               ? {

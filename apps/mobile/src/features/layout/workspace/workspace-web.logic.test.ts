@@ -3,10 +3,10 @@ import { describe, expect, it } from "vite-plus/test";
 import { SESSION_KEYS, isAppUrl, sessionScript, webSectionUrl } from "./workspace-web.logic";
 
 describe("web section urls", () => {
-  it("are hanzo.ai's design, library and tabs routes", () => {
-    expect(webSectionUrl("design")).toBe("https://hanzo.ai/design");
+  it("are hanzo.ai's library, design and plugins routes", () => {
     expect(webSectionUrl("library")).toBe("https://hanzo.ai/library");
-    expect(webSectionUrl("tabs")).toBe("https://hanzo.ai/tabs");
+    expect(webSectionUrl("design")).toBe("https://hanzo.ai/design");
+    expect(webSectionUrl("plugins")).toBe("https://hanzo.ai/dev/-/customize/plugins");
   });
 
   it("keeps the view on the app's origin over https", () => {

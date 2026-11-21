@@ -15,7 +15,7 @@ export interface DevRuntimeSource {
 }
 
 export function DevProvider(props: {
-  runtime: DevRuntime;
+  runtime: DevRuntime | null;
   /** The runtime would not pair: the host may try another. */
   onFail?: (runtime: DevRuntime) => void;
   children?: ReactNode;

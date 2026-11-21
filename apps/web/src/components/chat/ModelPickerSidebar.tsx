@@ -2,7 +2,7 @@ import { Toolbar } from "@base-ui/react/toolbar";
 import { type ProviderInstanceId } from "@hanzodev/contracts";
 import { Fragment, memo, useLayoutEffect, useRef, useState } from "react";
 import { msg, T, useMessages } from "gt-react";
-import { StarIcon } from "lucide-react";
+import { PlusIcon, StarIcon } from "lucide-react";
 import { EnsoRing } from "./EnsoRing";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -66,6 +66,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   disabledInstanceIds?: ReadonlySet<ProviderInstanceId>;
   selectableUnavailableInstanceIds?: ReadonlySet<ProviderInstanceId>;
   getDisabledInstanceTooltip?: (entry: ProviderInstanceEntry) => string;
+  onAddProvider?: () => void;
 }) {
   const m = useMessages();
   const handleSelect = (instanceId: PickerTab) => {
@@ -262,6 +263,35 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
               </Fragment>
             );
           })}
+          {props.onAddProvider ? (
+            <>
+              <div className="mt-auto border-t border-border/70 pt-1" aria-hidden="true" />
+              <div className="relative w-full">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Toolbar.Button
+                        className="relative isolate flex w-full cursor-pointer aspect-square items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:bg-foreground/10 focus-visible:outline-none"
+                        onClick={props.onAddProvider}
+                        type="button"
+                        data-testid="model-picker-add-provider"
+                        aria-label={m(msg("Connect provider account"))}
+                      >
+                        <PlusIcon className="size-4 shrink-0" aria-hidden />
+                      </Toolbar.Button>
+                    }
+                  />
+                  <TooltipPopup
+                    side={PICKER_TOOLTIP_SIDE}
+                    sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
+                    align="center"
+                  >
+                    <T>Connect provider</T>
+                  </TooltipPopup>
+                </Tooltip>
+              </div>
+            </>
+          ) : null}
         </div>
       </div>
     </Toolbar.Root>

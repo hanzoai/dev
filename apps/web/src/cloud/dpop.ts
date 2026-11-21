@@ -26,7 +26,23 @@ const DPOP_DATABASE_NAME = "hanzodev:cloud-auth";
 const DPOP_DATABASE_VERSION = 1;
 const DPOP_KEY_STORE_NAME = "keys";
 const DPOP_KEY_ID = "relay-dpop-proof-key";
+const DPOP_JWK_KEY_ID = "relay-dpop-proof-key-jwk";
 const decodeDpopPublicJwk = Schema.decodeUnknownEffect(DpopPublicJwk);
+
+interface StoredJwkDpopKey {
+  readonly privateJwk: JsonWebKey;
+  readonly publicJwk: DpopPublicJwk;
+  readonly thumbprint: string;
+}
+
+/** WKWebView wraps IndexedDB CryptoKeys in macOS Keychain, prompting on rebuilt Tauri apps. */
+function shouldAvoidIndexedDbCryptoKey(): boolean {
+  if (typeof globalThis === "undefined") return false;
+  const g = globalThis as Record<string, unknown>;
+  if ("__TAURI_INTERNALS__" in g || "__TAURI__" in g) return true;
+  if (typeof location !== "undefined" && location.protocol === "tauri:") return true;
+  return false;
+}
 
 export const layer = Layer.mergeAll(Digest.layerWebCrypto, Signature.layerWebCrypto).pipe(
   Layer.provideMerge(SecureRandom.layerWebCrypto),
@@ -55,32 +71,32 @@ function openDpopDatabase(): Effect.Effect<IDBDatabase, BrowserDpopError> {
   });
 }
 
-function readStoredBrowserDpopKey(): Effect.Effect<BrowserDpopKey | null, BrowserDpopError> {
+function readStoredEntry<T>(keyId: string): Effect.Effect<T | null, BrowserDpopError> {
   if (typeof indexedDB === "undefined") {
     return Effect.succeed(null);
   }
   return Effect.acquireUseRelease(
     openDpopDatabase(),
     (database) =>
-      Effect.callback<BrowserDpopKey | null, BrowserDpopError>((resume) => {
+      Effect.callback<T | null, BrowserDpopError>((resume) => {
         const request = database
           .transaction(DPOP_KEY_STORE_NAME, "readonly")
           .objectStore(DPOP_KEY_STORE_NAME)
-          .get(DPOP_KEY_ID);
+          .get(keyId);
         request.addEventListener("error", () =>
           resume(
             Effect.fail(dpopError(m(msg("Could not read DPoP key.")), request.error ?? undefined)),
           ),
         );
         request.addEventListener("success", () =>
-          resume(Effect.succeed((request.result as BrowserDpopKey | undefined) ?? null)),
+          resume(Effect.succeed((request.result as T | undefined) ?? null)),
         );
       }),
     (database) => Effect.sync(() => database.close()),
   );
 }
 
-function writeStoredBrowserDpopKey(key: BrowserDpopKey): Effect.Effect<void, BrowserDpopError> {
+function writeStoredEntry(keyId: string, value: unknown): Effect.Effect<void, BrowserDpopError> {
   if (typeof indexedDB === "undefined") {
     return Effect.void;
   }
@@ -97,13 +113,23 @@ function writeStoredBrowserDpopKey(key: BrowserDpopKey): Effect.Effect<void, Bro
           ),
         );
         transaction.addEventListener("complete", () => resume(Effect.void));
-        transaction.objectStore(DPOP_KEY_STORE_NAME).put(key, DPOP_KEY_ID);
+        transaction.objectStore(DPOP_KEY_STORE_NAME).put(value, keyId);
       }),
     (database) => Effect.sync(() => database.close()),
   );
 }
 
-const generateBrowserDpopKey = Effect.gen(function* () {
+function importDpopPrivateKey(privateJwk: JsonWebKey): Effect.Effect<CryptoKey, BrowserDpopError> {
+  return Effect.tryPromise({
+    try: () =>
+      crypto.subtle.importKey("jwk", privateJwk, { name: "ECDSA", namedCurve: "P-256" }, false, [
+        "sign",
+      ]),
+    catch: (cause) => dpopError(m(msg("Could not import DPoP private key.")), cause),
+  });
+}
+
+const generateBrowserDpopKeyWithJwk = Effect.gen(function* () {
   const generated = yield* Effect.tryPromise({
     try: () =>
       crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
@@ -127,26 +153,41 @@ const generateBrowserDpopKey = Effect.gen(function* () {
         : dpopError(m(msg("Generated DPoP public key is invalid.")), cause),
     ),
   );
-  const privateKey = yield* Effect.tryPromise({
-    try: () =>
-      crypto.subtle.importKey("jwk", privateJwk, { name: "ECDSA", namedCurve: "P-256" }, false, [
-        "sign",
-      ]),
-    catch: (cause) => dpopError(m(msg("Could not import DPoP private key.")), cause),
-  });
+  const privateKey = yield* importDpopPrivateKey(privateJwk);
+  const thumbprint = computeDpopJwkThumbprint(publicJwk);
   return {
-    privateKey,
-    publicJwk,
-    thumbprint: computeDpopJwkThumbprint(publicJwk),
+    browserKey: { privateKey, publicJwk, thumbprint } satisfies BrowserDpopKey,
+    storedJwk: { privateJwk, publicJwk, thumbprint } satisfies StoredJwkDpopKey,
   };
 });
 
 /** The stored key, or a new one persisted on first use, as a DPoP proof key. */
 export const loadOrCreateProofKey = Effect.fn("dpop.loadOrCreateProofKey")(function* () {
   const signature = yield* Signature.Signature;
-  const stored = yield* readStoredBrowserDpopKey();
-  const browserKey = stored ?? (yield* generateBrowserDpopKey);
-  if (stored === null) yield* writeStoredBrowserDpopKey(browserKey);
+  let browserKey: BrowserDpopKey;
+  if (shouldAvoidIndexedDbCryptoKey()) {
+    const storedJwk = yield* readStoredEntry<StoredJwkDpopKey>(DPOP_JWK_KEY_ID);
+    if (storedJwk !== null) {
+      browserKey = {
+        privateKey: yield* importDpopPrivateKey(storedJwk.privateJwk),
+        publicJwk: storedJwk.publicJwk,
+        thumbprint: storedJwk.thumbprint,
+      };
+    } else {
+      const created = yield* generateBrowserDpopKeyWithJwk;
+      yield* writeStoredEntry(DPOP_JWK_KEY_ID, created.storedJwk);
+      browserKey = created.browserKey;
+    }
+  } else {
+    const stored = yield* readStoredEntry<BrowserDpopKey>(DPOP_KEY_ID);
+    if (stored !== null) {
+      browserKey = stored;
+    } else {
+      const created = yield* generateBrowserDpopKeyWithJwk;
+      yield* writeStoredEntry(DPOP_KEY_ID, created.browserKey);
+      browserKey = created.browserKey;
+    }
+  }
   const privateKey = yield* Signature.privateKeyFromCryptoKey(
     Signature.ecdsaP256,
     browserKey.privateKey,

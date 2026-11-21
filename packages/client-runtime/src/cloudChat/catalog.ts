@@ -25,6 +25,12 @@ const OWNERS: Readonly<Record<string, string>> = {
   openai: "codex",
   xai: "grok",
   "x-ai": "grok",
+  google: "antigravity",
+  gemini: "antigravity",
+  ollama: "ollama",
+  local: "ollama",
+  "hanzo-local": "ollama",
+  openrouter: "openrouter",
   hanzo: "hanzo",
   hanzoai: "hanzo",
   zen: "hanzo",
@@ -35,6 +41,7 @@ const FAMILIES: ReadonlyArray<{ readonly driver: string; readonly pattern: RegEx
   { driver: "claudeAgent", pattern: /^(anthropic\/)?claude/i },
   { driver: "codex", pattern: /^(openai\/)?(gpt|o\d|codex)/i },
   { driver: "grok", pattern: /^(xai\/)?grok/i },
+  { driver: "antigravity", pattern: /^(google\/)?gemini/i },
 ];
 
 const slug = (value: string) =>
@@ -58,6 +65,9 @@ const KNOWN_DRIVERS: Readonly<Record<string, true>> = {
   claudeAgent: true,
   codex: true,
   grok: true,
+  antigravity: true,
+  ollama: true,
+  openrouter: true,
 };
 
 const CHECKED_AT = "1970-01-01T00:00:00.000Z";

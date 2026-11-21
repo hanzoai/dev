@@ -7,17 +7,19 @@ import { startNewCloudChat } from "../../chat/cloud-chat";
 import { useAdaptiveWorkspaceLayout } from "../adaptive-workspace-context";
 import { openWorkspaceDrawer } from "./workspace-drawer-store";
 import { useSelectWorkspaceTab } from "./useSelectWorkspaceTab";
+import { useWorkspaceSection } from "./workspace-section-store";
 import { WorkspaceComposeButton, WorkspaceMenuButton } from "./WorkspaceCircleButton";
 
 function usePhoneNewChat() {
   const { startNewTask } = useAdaptiveWorkspaceLayout();
   const { state } = useWorkspaceState();
+  const { section } = useWorkspaceSection();
   const selectTab = useSelectWorkspaceTab();
   return () => {
-    if (state.hasReadyEnvironment) startNewTask();
+    if (section === "dev" && state.hasReadyEnvironment) startNewTask();
     else {
       startNewCloudChat();
-      selectTab("threads");
+      selectTab("threads", section === "dev" ? "dev" : "chat");
     }
   };
 }

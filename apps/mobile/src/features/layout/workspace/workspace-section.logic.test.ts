@@ -14,7 +14,7 @@ import {
 
 describe("drawer sections", () => {
   it("are hanzo.app's pinned nav, in its order, with an icon each", () => {
-    expect(WORKSPACE_SECTIONS).toEqual(["chat", "dev", "design", "library", "tabs"]);
+    expect(WORKSPACE_SECTIONS).toEqual(["chat", "dev", "library", "design", "plugins"]);
     expect(Object.keys(SECTION_ICONS)).toEqual([...WORKSPACE_SECTIONS]);
   });
 
@@ -23,8 +23,8 @@ describe("drawer sections", () => {
     expect(INITIAL_SECTION_STATE.section).toBe("chat");
   });
 
-  it("draws only design, library and tabs in a web view", () => {
-    expect(WORKSPACE_SECTIONS.filter(isWebSection)).toEqual(["design", "library", "tabs"]);
+  it("draws only library, design and plugins in a web view", () => {
+    expect(WORKSPACE_SECTIONS.filter(isWebSection)).toEqual(["library", "design", "plugins"]);
   });
 });
 
@@ -60,8 +60,8 @@ describe("section reducer", () => {
     state = sectionReducer(state, { type: "macs", macs: true });
     expect(state).toEqual({ section: "dev", macs: true });
     expect(sectionReducer(state, { type: "open", section: "dev" })).toBe(state);
-    expect(sectionReducer(state, { type: "open", section: "tabs" })).toEqual({
-      section: "tabs",
+    expect(sectionReducer(state, { type: "open", section: "plugins" })).toEqual({
+      section: "plugins",
       macs: false,
     });
   });

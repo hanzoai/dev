@@ -51,9 +51,9 @@ function useSectionLabels(): Readonly<Record<WorkspaceSection, string>> {
   return {
     chat: gt("Chat"),
     dev: gt("Dev"),
-    design: gt("Design"),
     library: gt("Library"),
-    tabs: gt("Tabs"),
+    design: gt("Design"),
+    plugins: gt("Plugins"),
   };
 }
 
@@ -180,10 +180,10 @@ export function WorkspaceDrawerMenu() {
   const devSelected: DevContent = macs ? "macs" : workspace.state.selectedTab;
   const newChat = () => {
     closeWorkspaceDrawer();
-    if (catalog.hasReadyEnvironment) startNewTask();
+    if (section === "dev" && catalog.hasReadyEnvironment) startNewTask();
     else {
       startNewCloudChat();
-      select.section("chat");
+      select.section(section === "dev" ? "dev" : "chat");
     }
   };
   return (

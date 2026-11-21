@@ -59,6 +59,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
 }: {
   isElectron: boolean;
 }) {
+  const embed = useEmbed();
   const stageLabel = useEnvironmentStageLabel();
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
   const backdropVariant = resolveSidebarStageBackdropVariant(
@@ -69,6 +70,11 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
     environmentIdentificationMode === "pill"
       ? resolveEnvironmentIdentificationPillLabel(stageLabel)
       : null;
+
+  // An embedding host (Hanzo.app / hanzo.ai) already draws its own window title bar and Back/Forward arrows.
+  if (embed !== null) {
+    return null;
+  }
 
   return (
     <div
@@ -303,6 +309,11 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
 });
 
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
+  const embed = useEmbed();
+  // An embedding host owns Settings, Issues, Projects, Usage, and Update chrome in its own sidebar.
+  if (embed !== null) {
+    return null;
+  }
   return (
     <SidebarFooter>
       <SidebarProviderUpdatePill />

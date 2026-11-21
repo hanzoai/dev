@@ -27,19 +27,20 @@ export function TalkMode({ cloud }: { cloud: DevCloud }) {
           : gt("Connecting…")
       : null;
   return (
-    <div className="flex min-w-0 items-center gap-2">
+    <div className="inline-flex min-w-0 items-center gap-1.5">
       <button
         type="button"
         data-testid="talk-mode"
         aria-label={talk.open ? gt("End talk mode") : gt("Start talk mode")}
         aria-pressed={talk.open}
+        title={talk.open ? gt("End voice conversation") : gt("Voice conversation")}
         onClick={talk.toggle}
-        className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent aria-pressed:text-foreground"
+        className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground aria-pressed:bg-foreground/15 aria-pressed:text-foreground"
       >
         <AudioLinesIcon className="size-4" />
       </button>
       {status ? (
-        <span role="status" aria-live="polite" className="min-w-0 truncate text-xs text-muted-foreground">
+        <span role="status" aria-live="polite" className="max-w-44 min-w-0 truncate text-xs text-muted-foreground">
           {status}
         </span>
       ) : null}

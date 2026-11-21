@@ -16,9 +16,21 @@ import { createSseParser } from "./sse.ts";
 
 export const CLOUD_CHAT_BASE_URL = "https://api.hanzo.ai";
 export const FALLBACK_MODELS: ReadonlyArray<CloudChatModel> = [
-  { id: "enso-flash", label: "enso-flash" },
-  { id: "enso", label: "enso" },
-  { id: "zen6-flash", label: "zen6-flash" },
+  { id: "enso-flash", label: "enso-flash", provider: "hanzo" },
+  { id: "enso", label: "enso", provider: "hanzo" },
+  { id: "zen6", label: "Zen 6", provider: "hanzo" },
+  { id: "zen6-flash", label: "Zen 6 Flash", provider: "hanzo" },
+  { id: "zen6-coder", label: "Zen 6 Coder", provider: "hanzo" },
+  { id: "claude-opus-4-6", label: "Claude Opus 4.6", provider: "anthropic" },
+  { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", provider: "anthropic" },
+  { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", provider: "anthropic" },
+  { id: "gpt-5.4", label: "GPT-5.4", provider: "openai" },
+  { id: "gpt-5.4-mini", label: "GPT-5.4 Mini", provider: "openai" },
+  { id: "o3", label: "o3", provider: "openai" },
+  { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", provider: "google" },
+  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", provider: "google" },
+  { id: "grok-4", label: "Grok 4", provider: "xai" },
+  { id: "deepseek-r1", label: "DeepSeek R1", provider: "deepseek" },
 ];
 export const DEFAULT_MODEL_ID = "enso-flash";
 /** Auto: the model id that lets the gateway route each turn (hanzo.app Chat's `ENSO`). */
@@ -188,17 +200,18 @@ export async function listChatModels(
   auth: CloudChatAuth,
   options: CloudChatOptions = {},
 ): Promise<ReadonlyArray<CloudChatModel>> {
-  const token = requireToken(auth);
+  const token = auth.accessToken?.trim() ?? "";
   const { fetch, baseUrl } = resolveCloudChatOptions(options);
+  const headers = token
+    ? buildHanzoApiHeaders({ accessToken: token, orgId: auth.orgId })
+    : undefined;
   let response: Response;
   try {
-    response = await fetch(`${baseUrl}/v1/models`, {
-      headers: buildHanzoApiHeaders({ accessToken: token, orgId: auth.orgId }),
-    });
+    response = await fetch(`${baseUrl}/v1/models`, headers ? { headers } : undefined);
   } catch {
-    throw new CloudChatError("unavailable", "Network unavailable");
+    return withAuto(FALLBACK_MODELS);
   }
-  if (!response.ok) throw httpFailure(response.status);
+  if (!response.ok) return withAuto(FALLBACK_MODELS);
   const models = parseChatModels(await response.json().catch(() => null));
   return withAuto(models.length > 0 ? models : FALLBACK_MODELS);
 }

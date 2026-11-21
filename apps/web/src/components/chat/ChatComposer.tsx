@@ -492,6 +492,9 @@ export interface ChatComposerProps {
   setThreadError: (threadId: ThreadId | null, error: string | null) => void;
   onExpandImage: (preview: ExpandedImagePreview) => void;
   onFileOpen: (attachment: ChatFileAttachment) => void;
+  extraPrimaryActions?: ReactNode;
+  onTogglePrivate?: () => void;
+  onOpenPersona?: () => void;
 }
 
 const NO_PROVIDER_SKILLS: ServerProvider["skills"] = [];
@@ -1992,6 +1995,27 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         if (applied) {
           setComposerHighlightedItemId(null);
           setIsComposerModelPickerOpen(true);
+        }
+        return;
+      }
+      if (item.command === "private") {
+        const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+        });
+        if (applied) {
+          setComposerHighlightedItemId(null);
+          props.onTogglePrivate?.();
+        }
+        return;
+      }
+      if (item.command === "persona") {
+        const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+          focusEditorAfterReplace: false,
+        });
+        if (applied) {
+          setComposerHighlightedItemId(null);
+          props.onOpenPersona?.();
         }
         return;
       }
@@ -3953,6 +3977,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         onStart={() => speechInput.setup.setOpen(true)}
                       />
                     )}
+                    {props.extraPrimaryActions}
                     <VoiceInputSetup
                       environmentId={speechInput.transcriptionEnvironmentId}
                       open={speechInput.setup.open}

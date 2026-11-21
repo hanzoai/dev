@@ -2,26 +2,26 @@ import type { AppSymbolName } from "../../../components/ui/AppSymbol";
 import { enabledNavigationTabs, type NavigationTab } from "./navigation-tab-order";
 
 /**
- * hanzo.app's pinned nav (@hanzo/app Rail `DEFAULT_NAV`): Chat, Dev, Design, Library, Tabs.
+ * hanzo.app's pinned nav (@hanzo/app Rail `DEFAULT_NAV`): Chat, Dev, Library, Design, Plugins.
  * The drawer lists exactly these, in this order, then Recents, then the account.
  */
-export const WORKSPACE_SECTIONS = ["chat", "dev", "design", "library", "tabs"] as const;
+export const WORKSPACE_SECTIONS = ["chat", "dev", "library", "design", "plugins"] as const;
 export type WorkspaceSection = (typeof WORKSPACE_SECTIONS)[number];
 
 /** Chat is where the app opens. */
 export const DEFAULT_SECTION: WorkspaceSection = "chat";
 
-/** SF symbols for hanzo.app's lucide marks (@hanzo/build MARKS): MessageSquare, CodeXml, WandSparkles, Library, SquareTerminal. */
+/** SF symbols for hanzo.app's lucide marks: MessageSquare, Code, Library, Palette, Plug. */
 export const SECTION_ICONS = {
   chat: "bubble.left",
   dev: "chevron.left.forwardslash.chevron.right",
-  design: "wand.and.stars",
   library: "books.vertical",
-  tabs: "terminal",
+  design: "wand.and.stars",
+  plugins: "cable.connector",
 } as const satisfies Readonly<Record<WorkspaceSection, AppSymbolName>>;
 
-/** Design, Library and Tabs have no native screen: hanzo.app's route is drawn in a web view. */
-export const WEB_SECTIONS = ["design", "library", "tabs"] as const;
+/** Library, Design and Plugins have no native screen: hanzo.app's route is drawn in a web view. */
+export const WEB_SECTIONS = ["library", "design", "plugins"] as const;
 export type WebSection = (typeof WEB_SECTIONS)[number];
 
 export function isWebSection(section: WorkspaceSection): section is WebSection {

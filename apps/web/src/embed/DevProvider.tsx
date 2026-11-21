@@ -119,17 +119,19 @@ export function DevProvider({
   onFail,
   children,
 }: {
-  runtime: DevRuntime;
+  /** Null until a machine runtime is active; keeping DevProvider mounted avoids remounting host children. */
+  runtime: DevRuntime | null;
   /** The runtime would not pair: the host may try another (a machine, else a cloud cell). */
   onFail?: (runtime: DevRuntime) => void;
   children: ReactNode;
 }) {
-  const router = start();
   const slots = { threads: createSlot(), workspace: createSlot() };
-  const state = { runtime, router, slots };
+  const router = runtime ? start() : null;
+  const state = runtime && router ? { runtime, router, slots } : null;
   const [ready, setReady] = useState(false);
   // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- waits on the router's load and the locale catalog while mounted
   useEffect(() => {
+    if (!router) return;
     let live = true;
     void router
       .load()
@@ -143,7 +145,11 @@ export function DevProvider({
     <EmbedContext.Provider value={state}>
       <I18nProvider>
         <AppAtomRegistryProvider>
-          <Pair runtime={runtime} onFail={onFail}>{ready ? <RouterProvider router={router} /> : null}</Pair>
+          {runtime && router ? (
+            <Pair runtime={runtime} onFail={onFail}>
+              {ready ? <RouterProvider router={router} /> : null}
+            </Pair>
+          ) : null}
           {children}
         </AppAtomRegistryProvider>
       </I18nProvider>
