@@ -10,6 +10,7 @@ export { useDevOpen } from "./useDevOpen";
 export type { DevCloud, DevEnvironment, DevRuntime, DevRuntimeSource } from "./runtime";
 export { focusComposer, focusThreadList } from "./focus";
 export { DevHome } from "./DevHome";
+export { DevChatList } from "./ChatList";
 export { useReplyModels } from "./useReplyModels";
 export { PublishDialog as DevPublish } from "./PublishDialog";
 export type { PublishSource } from "./publish";

@@ -126,3 +126,11 @@ export function DevPublish(props: {
   source: PublishSource | null;
   onClose: () => void;
 }): ReactNode;
+
+/** The account's cloud conversations as a sidebar list (the ones hanzo.app Chat and the phone list). `ref` is a remote conversation id, or a device key until the cloud holds it. */
+export function DevChatList(props: {
+  cloud: DevCloud;
+  active?: string | null;
+  onOpen?: (ref: string | null) => void;
+  className?: string;
+}): ReactNode;

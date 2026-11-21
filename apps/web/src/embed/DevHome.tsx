@@ -8,6 +8,7 @@ import { I18nProvider } from "../i18n/I18nProvider";
 import { startI18n, whenLocaleReady } from "../i18n/runtime";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
 import { HomeComposer } from "./HomeComposer";
+import { threadFor } from "./chatList";
 import { TalkMode } from "./TalkMode";
 import { useHomeChat } from "./homeChat";
 import { prepareTurn } from "./homeSend";
@@ -98,14 +99,20 @@ function Home(props: DevHomeProps): ReactNode {
   const { state, controller } = chat;
   const { onConversation, conversation } = props;
   useEffect(() => {
-    if (conversation && conversation !== state.threadId) void controller.open(conversation);
+    const known = threadFor(state.threads, conversation ?? null);
+    if (conversation && conversation !== state.threadId && conversation !== state.threadKey) {
+      // A device copy opens from its key (it may never have reached the cloud); anything else by its remote id.
+      if (known !== null) void controller.openThread(known.key);
+      else void controller.open(conversation);
+    }
     if (!conversation && state.threadId === null && state.messages.length > 0 && !state.sending) controller.reset();
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- follows the host's address only.
   }, [conversation]);
   useEffect(() => {
-    if (state.threadId && state.threadId !== conversation) onConversation?.(state.threadId);
+    const ref = state.threadId ?? state.threadKey;
+    if (ref && ref !== conversation && state.messages.length > 0) onConversation?.(ref);
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- reports a new thread once.
-  }, [state.threadId]);
+  }, [state.threadId, state.threadKey]);
   const error = state.error
     ? state.error === "offline"
       ? "The linked Mac is not reachable."

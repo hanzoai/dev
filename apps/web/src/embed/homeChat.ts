@@ -22,7 +22,7 @@ import type { DevCloud, DevEnvironment } from "./runtime";
  */
 const controllers = new Map<string, { controller: CloudChatController; local: LocalChatHost | null }>();
 
-function controllerFor(cloud: DevCloud) {
+export function controllerFor(cloud: DevCloud) {
   let held = controllers.get(cloud.api);
   if (held === undefined) {
     const box: { controller: CloudChatController; local: LocalChatHost | null } = {
@@ -104,4 +104,14 @@ export function useHomeChat(cloud: DevCloud, machine: DevEnvironment | null) {
     }),
     [state, controller, personas, persona, personaRecord],
   );
+}
+
+/** The account's cloud conversations, newest first (pinned first): the ones hanzo.app Chat lists and the phone shows. */
+export function useCloudThreads(cloud: DevCloud) {
+  const { controller } = controllerFor(cloud);
+  const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
+  useEffect(() => {
+    void controller.loadThreads();
+  }, [controller]);
+  return { controller, threads: state.threads, open: state.threadKey ?? state.threadId };
 }
