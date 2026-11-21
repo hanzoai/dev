@@ -80,6 +80,7 @@ const thisDesktop: Desktop = {
 const body = '{\n  "at": "2026-11-20T10:00:00.000Z",\n  "version": "1.8.4",\n  "providers": []\n}';
 const base: DesktopLinkStatus = {
   signedIn: true,
+  deviceCode: null,
   identity: "z@hanzo.ai",
   organization: "hanzo",
   desktop: null,

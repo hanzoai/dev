@@ -282,6 +282,7 @@ const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const usageSummary = yield* SourceUsageSummary.SourceUsageSummary;
   const usageLock = yield* Semaphore.make(1);
+  const deviceCode = yield* Ref.make<DesktopLinkStatus["deviceCode"]>(null);
   const outboxPath = path.join(config.stateDir, OUTBOX_FILE);
   const runtime = yield* Ref.make<Runtime>({
     lastReportAtMs: null,
@@ -408,6 +409,7 @@ const make = Effect.gen(function* () {
         };
     return {
       signedIn: Option.isSome(stored),
+      deviceCode: yield* Ref.get(deviceCode),
       identity: Option.isSome(stored) ? (stored.value.identity ?? null) : null,
       organization: Option.isSome(stored) ? ownerOf(stored.value.accessToken) : null,
       desktop,
@@ -489,6 +491,29 @@ const make = Effect.gen(function* () {
               expiresAtEpochMs: input.token.expiresAtEpochMs,
             })
             .pipe(Effect.mapError(storageFailure));
+        }
+        const held = yield* tokens.getExisting.pipe(Effect.orElseSucceed(() => Option.none()));
+        if (Option.isNone(held) && input.signIn === "browser") {
+          yield* tokens.signInWithBrowser.pipe(
+            Effect.mapError((cause) =>
+              fail("sign_in_required", "Sign-in did not finish in the browser.", cause),
+            ),
+          );
+        }
+        if (Option.isNone(held) && input.signIn === "device") {
+          yield* tokens
+            .signInWithDeviceCode((prompt) =>
+              Ref.set(deviceCode, {
+                verificationUri: prompt.verificationUriComplete ?? prompt.verificationUri,
+                userCode: prompt.userCode,
+              }),
+            )
+            .pipe(
+              Effect.ensuring(Ref.set(deviceCode, null)),
+              Effect.mapError((cause) =>
+                fail("sign_in_required", "Sign-in with a code did not finish.", cause),
+              ),
+            );
         }
         const stored = yield* requireToken;
         const existing = yield* readRecord;

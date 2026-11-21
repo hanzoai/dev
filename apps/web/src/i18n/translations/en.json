@@ -8790,6 +8790,8 @@
   "6794fb306cfce2f0": "Could not unlink this desktop",
   "8d658d8ca30189d9": "Could not rename this desktop",
   "e9e6454753146a88": "Link this desktop to your Hanzo account to see it, and the providers it can reach, on hanzo.app.",
+  "39a2d2d679c7743a": "Enter {code} at {uri}",
+  "e9918f458eb35bbd": "Use a code instead",
   "fda858fdb5eb1090": "Link to Hanzo",
   "58b7b0e79013a091": "Linked",
   "e5ee09e07f5ec659": "Linked as {identity}",

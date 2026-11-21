@@ -44,8 +44,16 @@ export type Desktop = typeof Desktop.Type;
 
 export const DesktopReportLevel = Schema.Literals(["metadata", "metadata+content"]);
 
+/** A code the user types at the verification page while this desktop waits (RFC 8628). */
+export const DesktopDeviceCode = Schema.Struct({
+  verificationUri: Schema.String,
+  userCode: Schema.String,
+});
+
 export const DesktopLinkStatus = Schema.Struct({
   signedIn: Schema.Boolean,
+  /** Set while a device-code sign-in waits for the user. */
+  deviceCode: Schema.NullOr(DesktopDeviceCode),
   /** The IAM identity and organization the link belongs to. */
   identity: Schema.NullOr(Schema.String),
   organization: Schema.NullOr(Schema.String),
@@ -61,6 +69,10 @@ export const DesktopLinkStatus = Schema.Struct({
 export type DesktopLinkStatus = typeof DesktopLinkStatus.Type;
 
 export const DesktopLinkInput = Schema.Struct({
+  /**
+   * With no credential yet, how this install signs in: the browser (loopback PKCE) or a device code.
+   */
+  signIn: Schema.optionalKey(Schema.Literals(["browser", "device"])),
   /**
    * Hanzo IAM tokens from a web sign-in, stored as `hanzo connect login` stores them.
    * Omitted when the server already holds a credential.

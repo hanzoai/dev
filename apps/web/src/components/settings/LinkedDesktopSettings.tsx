@@ -14,7 +14,6 @@ import {
   type ProviderAccount,
   type ProviderRouteClass,
 } from "@hanzodev/contracts";
-import { DEFAULT_HANZO_LOGIN_URL, HANZO_LOGIN_PATH } from "@hanzodev/shared/hanzoIamAuth";
 import { useGT, useMessages } from "gt-react";
 import { useState } from "react";
 
@@ -39,10 +38,6 @@ import { ITEM_ROW_CLASSNAME, ITEM_ROW_INNER_CLASSNAME } from "./itemRows";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
 const REFRESH_INTERVAL_MS = 15_000;
-
-// Sign-in lives at hanzo.ai; no identity host is named here.
-const openHanzoLogin = () =>
-  window.open(`${DEFAULT_HANZO_LOGIN_URL}${HANZO_LOGIN_PATH}`, "_blank", "noopener");
 
 function OnlineDot({ online, label }: { readonly online: boolean; readonly label: string }) {
   return (
@@ -79,7 +74,7 @@ export function LinkedDesktopSettings() {
             <SettingsRow title={gt("Loading…")} role="status" />
           )
         ) : (
-          <StatusRow environmentId={environmentId} status={data} />
+          <StatusRow environmentId={environmentId} status={data} onRefresh={status.refresh} />
         )}
       </SettingsSection>
       {environmentId !== null && data !== null && data.desktop !== null ? (
@@ -116,9 +111,11 @@ function useFailureToast() {
 function StatusRow({
   environmentId,
   status,
+  onRefresh,
 }: {
   readonly environmentId: EnvironmentIdProp;
   readonly status: DesktopLinkStatus;
+  readonly onRefresh: () => void;
 }) {
   const gt = useGT();
   const reportFailure = useFailureToast();
@@ -156,7 +153,11 @@ function StatusRow({
     }
     const accessToken = activeAccount === null ? null : await getToken();
     if (activeAccount === null || accessToken === null) {
-      openHanzoLogin();
+      // No sign-in anywhere: this server opens the browser at Hanzo's authorization endpoint.
+      await settle(
+        () => link({ environmentId, input: { signIn: "browser" } }),
+        gt("Could not link this desktop"),
+      );
       return;
     }
     await settle(
@@ -171,6 +172,15 @@ function StatusRow({
             },
           },
         }),
+      gt("Could not link this desktop"),
+    );
+  };
+
+  const startDeviceLink = async () => {
+    // The code appears in the status once the server has asked Hanzo for it.
+    setTimeout(onRefresh, 2_000);
+    await settle(
+      () => link({ environmentId, input: { signIn: "device" } }),
       gt("Could not link this desktop"),
     );
   };
@@ -203,9 +213,29 @@ function StatusRow({
           "Link this desktop to your Hanzo account to see it, and the providers it can reach, on hanzo.app.",
         )}
         control={
-          <Button size="xs" disabled={busy || !canLink} onClick={() => void startLink()}>
-            {busy ? gt("Linking…") : gt("Link to Hanzo")}
-          </Button>
+          <>
+            {status.deviceCode === null ? null : (
+              <span className="text-sm">
+                {gt("Enter {code} at {uri}", {
+                  code: status.deviceCode.userCode,
+                  uri: status.deviceCode.verificationUri,
+                })}
+              </span>
+            )}
+            {status.signedIn ? null : (
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={busy || !canLink}
+                onClick={() => void startDeviceLink()}
+              >
+                {gt("Use a code instead")}
+              </Button>
+            )}
+            <Button size="xs" disabled={busy || !canLink} onClick={() => void startLink()}>
+              {busy ? gt("Linking…") : gt("Link to Hanzo")}
+            </Button>
+          </>
         }
       />
     );
