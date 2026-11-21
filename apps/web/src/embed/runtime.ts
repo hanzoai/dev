@@ -1,4 +1,4 @@
-// The one interface between a host and the Dev core: a machine (Hanzo Connect) or a cloud cell
+// The one interface between a host and the Dev core: a machine (Hanzo Link) or a cloud cell
 // (`/v1/dev`, HIP-1330), reached over ZAP on WebTransport with the IAM token as the first `cap`.
 // Wire framing: docs/internals/embed-runtime.md. A null `resolve` keeps the host's previous view.
 

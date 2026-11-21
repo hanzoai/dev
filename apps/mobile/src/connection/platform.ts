@@ -165,7 +165,7 @@ const layerCapabilities = Layer.effectContext(
               reason: "authentication",
               detail: m(
                 msg("Sign in to {product} to connect this environment.", {
-                  product: "Hanzo Connect",
+                  product: "Hanzo Link",
                 }),
               ),
             });
@@ -182,7 +182,7 @@ const layerCapabilities = Layer.effectContext(
           if (token === null) {
             return yield* new ConnectionBlockedError({
               reason: "authentication",
-              detail: m(msg("The {product} session is unavailable.", { product: "Hanzo Connect" })),
+              detail: m(msg("The {product} session is unavailable.", { product: "Hanzo Link" })),
             });
           }
           return token;

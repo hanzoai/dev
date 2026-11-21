@@ -1,6 +1,6 @@
-# Hanzo Connect setup
+# Hanzo Link setup
 
-Deployment and client configuration for Hanzo Connect. The [architecture note](../internals/hanzo-connect.md)
+Deployment and client configuration for Hanzo Link. The [architecture note](../internals/hanzo-connect.md)
 explains the trust boundaries; the [relay README](../../infra/relay/README.md#deployment) owns relay
 provisioning instructions.
 
@@ -9,7 +9,7 @@ the access token to the relay, which verifies it against the issuer's JWKS.
 
 ## Public application configuration
 
-Hanzo Connect is disabled in a fresh clone. To build against the production deployment, copy the
+Hanzo Link is disabled in a fresh clone. To build against the production deployment, copy the
 repository-root example:
 
 ```sh

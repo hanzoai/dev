@@ -19,7 +19,7 @@ import { useConnectionController } from "../connection/useConnectionController";
 import { optOutOfConnectOnboarding } from "./connectOnboardingOptOut";
 import { hasCloudPublicConfig } from "./publicConfig";
 
-// Only reachable with cloud config: onboarding is requested after a Hanzo Connect
+// Only reachable with cloud config: onboarding is requested after a Hanzo Link
 // sign-in, and appLinking drops the deep link otherwise.
 export function ConnectOnboardingRouteScreen() {
   return hasCloudPublicConfig() ? <ConfiguredConnectOnboardingRouteScreen /> : null;
@@ -62,7 +62,7 @@ function ConfiguredConnectOnboardingRouteScreen() {
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
       <AppBar
-        title={gt("Set up {product}", { product: "Hanzo Connect" })}
+        title={gt("Set up {product}", { product: "Hanzo Link" })}
         onClose={handleClose}
         refresh={{
           accessibilityLabel: gt("Refresh environments"),
@@ -95,7 +95,7 @@ function ConfiguredConnectOnboardingRouteScreen() {
           <View collapsable={false} className="rounded-[24px] bg-grouped-card p-5">
             <Text className="text-sm leading-normal text-foreground-muted">
               {gt("Sign in to your Hanzo account to set up {product}.", {
-                product: "Hanzo Connect",
+                product: "Hanzo Link",
               })}
             </Text>
           </View>

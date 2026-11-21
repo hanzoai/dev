@@ -100,7 +100,7 @@ function UseInAnotherAppDialog({ requested }: { readonly requested: EnvironmentI
                 title={
                   environment === null
                     ? gt("Connect to an environment first.")
-                    : gt("Hanzo Connect is not available in this build.")
+                    : gt("Hanzo Link is not available in this build.")
                 }
               />
             </WizardPanel>
@@ -319,7 +319,7 @@ function useGate(environment: EnvironmentPresentation) {
   );
   const runReachabilityCheck = async () => {
     setCheck("running");
-    // A saved machine's address comes from Hanzo Connect's list, which can be stale.
+    // A saved machine's address comes from Hanzo Link's list, which can be stale.
     if (!thisMachine) void refreshDiscovery();
     const prior = readCachedCloudLinkState({ environmentId });
     const result = await runCheck({ target: { environmentId } });
@@ -349,11 +349,11 @@ function useGate(environment: EnvironmentPresentation) {
   useEffect(() => {
     if (canCheck) queueMicrotask(checkOnce);
   }, [canCheck]);
-  // Hanzo Connect lists machines only once something asks, and a saved machine's gate reads that list.
+  // Hanzo Link lists machines only once something asks, and a saved machine's gate reads that list.
   const discoverIfUnasked = useEffectEvent(() => {
     if (!thisMachine && !discovery.listed && !discovery.refreshing) void refreshDiscovery();
   });
-  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- asks Hanzo Connect for its machine list once the wizard opens signed in
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- asks Hanzo Link for its machine list once the wizard opens signed in
   useEffect(() => {
     if (isSignedIn) discoverIfUnasked();
   }, [isSignedIn]);
@@ -401,28 +401,28 @@ function GateScreen({
       <T>Check again</T>
     </Button>
   );
-  const offlineTitle = gt("{environment}''s Hanzo Connect is offline", { environment: name });
-  const cannotCheckTitle = gt("Can't check Hanzo Connect on {environment}", { environment: name });
+  const offlineTitle = gt("{environment}''s Hanzo Link is offline", { environment: name });
+  const cannotCheckTitle = gt("Can't check Hanzo Link on {environment}", { environment: name });
   const checkAgain = retry(() => void check());
   switch (gate.kind) {
     case "checking":
       return (
         <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner size="sm" tone="muted" />
-          <T>Checking Hanzo Connect…</T>
+          <T>Checking Hanzo Link…</T>
         </p>
       );
     case "sign-in":
       return (
         <GateMessage
-          title={gt("Sign in to Hanzo Connect")}
+          title={gt("Sign in to Hanzo Link")}
           lines={[
             gt(
               "Apps like Poke and Claude run in the cloud. They need a public address to reach {environment}.",
               { environment: name },
             ),
             gt(
-              "Hanzo Connect gives {environment} that address. Each app still needs your approval.",
+              "Hanzo Link gives {environment} that address. Each app still needs your approval.",
               {
                 environment: name,
               },
@@ -436,7 +436,7 @@ function GateScreen({
               openAuthPrompt();
             }}
           >
-            <T>Sign in to Hanzo Connect</T>
+            <T>Sign in to Hanzo Link</T>
           </Button>
         </GateMessage>
       );
@@ -484,7 +484,7 @@ function GateScreen({
       }
       return (
         <GateMessage
-          title={gt("Turn on Hanzo Connect for {environment}", { environment: name })}
+          title={gt("Turn on Hanzo Link for {environment}", { environment: name })}
           lines={[
             gt("{environment} gets a public https address, with no router setup.", {
               environment: name,
@@ -503,7 +503,7 @@ function GateScreen({
               {tunnelLimit !== null ? (
                 <>
                   <p className="text-sm text-destructive-foreground">
-                    <T>Your Hanzo Connect account is out of tunnels.</T>
+                    <T>Your Hanzo Link account is out of tunnels.</T>
                   </p>
                   <ManageAccessButton environment={environment} label={gt("Manage tunnels")} />
                 </>
@@ -619,10 +619,10 @@ function ConnectStep({
       <p className="text-sm text-muted-foreground">
         {app === null
           ? gt(
-              "When the app opens the sign-in page, choose what it may do and approve with your Hanzo Connect account.",
+              "When the app opens the sign-in page, choose what it may do and approve with your Hanzo Link account.",
             )
           : gt(
-              "When {app} opens the sign-in page, choose what it may do and approve with your Hanzo Connect account.",
+              "When {app} opens the sign-in page, choose what it may do and approve with your Hanzo Link account.",
               { app: app.name },
             )}
       </p>
@@ -915,7 +915,7 @@ function LinkedLine({
   );
 }
 
-/** Opens Sharing & access on this environment, where its clients and Hanzo Connect tunnels live. */
+/** Opens Sharing & access on this environment, where its clients and Hanzo Link tunnels live. */
 function ManageAccessButton({
   environment,
   label,

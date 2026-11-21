@@ -42,7 +42,7 @@ without expanding shell expressions.
 ## Where agents run
 
 Registry agents always run on the machine that hosts your Hanzo Dev server. That stays true when you
-connect through `hanzo.bot`, Hanzo Connect, or a relay.
+connect through `hanzo.bot`, Hanzo Link, or a relay.
 
 Agents install under `tools/<agent-id>/<version>/` inside Hanzo home. Hanzo Dev verifies SHA-256 when the Registry entry
 provides one; entries without a checksum retain the Registry's HTTPS distribution guarantee.

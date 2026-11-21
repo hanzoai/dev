@@ -37,7 +37,7 @@ export const AuthPairingLinkRecord = Schema.Struct({
   expiresAt: Schema.DateTimeUtcFromString,
   consumedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
   revokedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
-  /** Spendable only once `proofKeyThumbprint` is a trusted Hanzo Connect device. */
+  /** Spendable only once `proofKeyThumbprint` is a trusted Hanzo Link device. */
   requiresConnectApproval: SqliteFlag,
   connectApproved: SqliteFlag,
   requestedClient: Schema.NullOr(Schema.fromJsonString(AuthClientMetadata)),
@@ -484,7 +484,7 @@ export const make = Effect.gen(function* () {
     Result: Schema.Struct({ id: Schema.String }),
     execute: ({ proofKeyThumbprint, keepProofKeyThumbprint, revokedAt }) =>
       sql`
-        -- Only Hanzo Connect mints bind a proof key, so these are that key's connect credentials.
+        -- Only Hanzo Link mints bind a proof key, so these are that key's connect credentials.
         UPDATE auth_pairing_links
         SET revoked_at = ${revokedAt}
         WHERE proof_key_thumbprint IS NOT NULL

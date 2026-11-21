@@ -138,13 +138,13 @@ export function codexNeedsSetup(
 }
 
 /**
- * The phone joins by signing in to Hanzo Connect, which shares the primary computer. Another
- * computer, a build without Hanzo Connect, or a policy that turns it off gets no Phone section.
+ * The phone joins by signing in to Hanzo Link, which shares the primary computer. Another
+ * computer, a build without Hanzo Link, or a policy that turns it off gets no Phone section.
  */
 export function welcomeOffersPhone(input: {
   readonly isPrimary: boolean;
   readonly cloud: boolean;
-  // Relay read and write access, which sharing this computer through Hanzo Connect needs.
+  // Relay read and write access, which sharing this computer through Hanzo Link needs.
   readonly canShare: boolean;
   readonly policy: ManagedPolicySummary | undefined;
 }) {

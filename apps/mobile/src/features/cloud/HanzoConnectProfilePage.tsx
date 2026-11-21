@@ -58,7 +58,7 @@ function confirmDeregister(environment: RelayClientEnvironmentRecord, onConfirm:
   const message = m(
     msg(
       "“{environment}” will be removed from this account. {product} access will be revoked, any managed tunnel will be removed, and a host space will become available. Local connections on your devices are not changed.",
-      { environment: environment.label, product: "Hanzo Connect" },
+      { environment: environment.label, product: "Hanzo Link" },
     ),
   );
   Dialog.confirm({
@@ -283,7 +283,7 @@ export function HanzoConnectProfilePage() {
       {environmentsState.error ? (
         <>
           <ClerkRow
-            title={gt("Could not load {product} environments", { product: "Hanzo Connect" })}
+            title={gt("Could not load {product} environments", { product: "Hanzo Link" })}
             subtitle={environmentsState.error}
           />
           {errorTraceId ? (
@@ -348,7 +348,7 @@ export function HanzoConnectProfilePage() {
         <ClerkRow
           title={gt("No servers registered")}
           subtitle={gt("Link a server from its local Settings to reach it through {product}.", {
-            product: "Hanzo Connect",
+            product: "Hanzo Link",
           })}
         />
       )}

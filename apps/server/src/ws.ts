@@ -859,7 +859,7 @@ function readClientAnalyticsProps(request: HttpServerRequest.HttpServerRequest) 
 }
 
 /**
- * Owners a connecting client reports: its hashed Hanzo Connect account and its
+ * Owners a connecting client reports: its hashed Hanzo Link account and its
  * hashed device id. Only hashes are accepted, so a raw id never reaches analytics.
  */
 function readClientOwners(

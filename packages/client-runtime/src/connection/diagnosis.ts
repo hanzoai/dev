@@ -28,7 +28,7 @@ export interface ConnectionDiagnosis {
   readonly hops: ReadonlyArray<ConnectionDiagnosisHop>;
   readonly steps: ReadonlyArray<string>;
   readonly facts: ReadonlyArray<readonly [label: string, value: string]>;
-  /** The troubleshooting guide section for this failure. Null for direct routes, except a pending Hanzo Connect sign-in. */
+  /** The troubleshooting guide section for this failure. Null for direct routes, except a pending Hanzo Link sign-in. */
   readonly moreInfoUrl: string | null;
 }
 
@@ -107,7 +107,7 @@ function headline(
     case "offline":
       return resolve(msg("This device is offline"));
     case "session_pending":
-      return resolve(msg("This device is still loading its Hanzo Connect sign-in"));
+      return resolve(msg("This device is still loading its Hanzo Link sign-in"));
     case "approval_pending":
       return resolve(msg("{host} is waiting for someone to approve this device", { host }));
     case "outdated":
@@ -115,13 +115,13 @@ function headline(
     case "clock_skew":
       return resolve(msg("This device's clock is off"));
     case "not_linked":
-      return resolve(msg("{host} is not linked to your Hanzo Connect account", { host }));
+      return resolve(msg("{host} is not linked to your Hanzo Link account", { host }));
     case "relay_error":
-      return resolve(msg("Hanzo Connect returned an error"));
+      return resolve(msg("Hanzo Link returned an error"));
     case "tunnel_pending":
       return resolve(msg("{host}'s tunnel is still being set up", { host }));
     case "tunnel_not_enabled":
-      return resolve(msg("Hanzo Connect is not turned on for {host}", { host }));
+      return resolve(msg("Hanzo Link is not turned on for {host}", { host }));
     case "released":
     case "tunnel_down":
       return resolve(msg("{host}'s tunnel is offline", { host }));
@@ -146,15 +146,15 @@ function headline(
       return resolve(msg("This device could not prepare the connection"));
     case "relay":
       return failure?.reason === "authentication"
-        ? resolve(msg("Hanzo Connect did not accept this device's sign-in"))
-        : resolve(msg("This device can't reach Hanzo Connect"));
+        ? resolve(msg("Hanzo Link did not accept this device's sign-in"))
+        : resolve(msg("This device can't reach Hanzo Link"));
     case "tunnel":
       // The relay already reached the host when this device fails on its own.
       return failure?.reason === "network" ||
         failure?.reason === "transport" ||
         failure?.reason === "timeout"
         ? resolve(msg("This device can't reach {host}'s tunnel", { host }))
-        : resolve(msg("Hanzo Connect could not reach {host}'s tunnel", { host }));
+        : resolve(msg("Hanzo Link could not reach {host}'s tunnel", { host }));
     case "server":
       return failure?.reason === "authentication" || failure?.reason === "permission"
         ? resolve(msg("Hanzo Dev on {host} did not accept this device", { host }))
@@ -219,10 +219,10 @@ function steps(
     case "not_linked":
       return [
         resolve(
-          msg("Check that this device is signed in to the same Hanzo Connect account as the host."),
+          msg("Check that this device is signed in to the same Hanzo Link account as the host."),
         ),
         resolve(
-          msg("On {host}, open Settings > Sharing & access and turn Hanzo Connect on.", { host }),
+          msg("On {host}, open Settings > Sharing & access and turn Hanzo Link on.", { host }),
         ),
       ];
     case "tunnel_pending":
@@ -235,7 +235,7 @@ function steps(
     case "tunnel_not_enabled":
       return [
         resolve(
-          msg("On {host}, open Settings > Sharing & access and turn Hanzo Connect on.", { host }),
+          msg("On {host}, open Settings > Sharing & access and turn Hanzo Link on.", { host }),
         ),
       ];
     case "released":
@@ -273,10 +273,10 @@ function steps(
       ];
     case "relay":
       return failure?.reason === "authentication"
-        ? [resolve(msg("Sign out of Hanzo Connect and sign in again."))]
+        ? [resolve(msg("Sign out of Hanzo Link and sign in again."))]
         : [
             resolve(msg("Check this device's internet connection.")),
-            resolve(msg("A VPN, firewall, or ad blocker on this device can block Hanzo Connect.")),
+            resolve(msg("A VPN, firewall, or ad blocker on this device can block Hanzo Link.")),
           ];
     case "tunnel":
       return failure?.reason === "network" ||
@@ -358,7 +358,7 @@ function helpSection(
   }
 }
 
-const HANZO_CONNECT_NAME = "Hanzo Connect";
+const HANZO_CONNECT_NAME = "Hanzo Link";
 
 const HOP_ORDER = {
   relay: ["device", "relay", "tunnel", "server"],
@@ -431,7 +431,7 @@ export function presentConnectionDiagnosis(
   );
   add(
     resolve(msg("Route", { $context: "diagnostics field label" })),
-    relayPath ? "Hanzo Connect" : resolve(msg("Direct", { $context: "connection route" })),
+    relayPath ? "Hanzo Link" : resolve(msg("Direct", { $context: "connection route" })),
   );
   add(resolve(msg("App version")), input.clientVersion);
   add(resolve(msg("Host version")), input.serverVersion);

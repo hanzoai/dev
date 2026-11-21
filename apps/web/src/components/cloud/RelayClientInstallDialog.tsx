@@ -74,10 +74,10 @@ export function RelayClientInstallDialog() {
           <DialogDescription>
             {isInstalling
               ? gt(
-                  "Hanzo Dev is preparing this environment for secure access through Hanzo Connect.",
+                  "Hanzo Dev is preparing this environment for secure access through Hanzo Link.",
                 )
               : gt(
-                  "Hanzo Dev needs the relay client to make this environment available through Hanzo Connect.",
+                  "Hanzo Dev needs the relay client to make this environment available through Hanzo Link.",
                 )}
           </DialogDescription>
         </DialogHeader>

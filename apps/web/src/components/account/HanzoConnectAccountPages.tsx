@@ -19,7 +19,7 @@ const HANZO_CONNECT_ACCOUNT_PAGES = [
     content: <MobileClientsUserProfilePage />,
   },
   {
-    label: "Hanzo Connect",
+    label: "Hanzo Link",
     url: "hanzo-connect",
     icon: <ServerIcon className="size-4" />,
     content: <HanzoConnectUserProfilePage />,

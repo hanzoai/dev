@@ -99,7 +99,7 @@ function HanzoConnectEnvironmentRow(props: {
               </p>
               <p className="mt-4 max-w-xl text-xs leading-4.5 text-muted-foreground">
                 <T>
-                  Hanzo Connect access will be revoked, any managed tunnel will be removed, and a
+                  Hanzo Link access will be revoked, any managed tunnel will be removed, and a
                   host space will become available. Local connections on your devices are not
                   changed.
                 </T>
@@ -227,7 +227,7 @@ export function HanzoConnectUserProfilePage() {
       toastManager.add({
         type: "success",
         title: gt("Server deregistered"),
-        description: gt("Hanzo Connect access was revoked and a host space is now available."),
+        description: gt("Hanzo Link access was revoked and a host space is now available."),
       });
       return;
     }
@@ -278,7 +278,7 @@ export function HanzoConnectUserProfilePage() {
 
   return (
     <AccountPage
-      title="Hanzo Connect"
+      title="Hanzo Link"
       description={gt(
         "Environments registered to your account. Connections on this device are managed in Settings.",
       )}
@@ -295,7 +295,7 @@ export function HanzoConnectUserProfilePage() {
         {environmentsState.error ? (
           <div className="mb-4 border-t border-destructive/35 py-3 text-xs" role="alert">
             <p className="font-medium text-destructive-foreground">
-              <T>Could not load Hanzo Connect environments</T>
+              <T>Could not load Hanzo Link environments</T>
             </p>
             <p className="mt-1 text-xs text-muted-foreground">{environmentsState.error}</p>
           </div>
@@ -328,12 +328,12 @@ export function HanzoConnectUserProfilePage() {
               </EmptyMedia>
               <EmptyHeader>
                 <EmptyTitle>
-                  <T>No Hanzo Connect environments</T>
+                  <T>No Hanzo Link environments</T>
                 </EmptyTitle>
                 <EmptyDescription>
                   <T>
                     Link an environment from its local Settings to make it available through Hanzo
-                    Connect.
+                    Link.
                   </T>
                 </EmptyDescription>
               </EmptyHeader>

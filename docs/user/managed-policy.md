@@ -75,7 +75,7 @@ Administrative Templates > Hanzo Dev. Set **Organization** whenever you set any 
 Locks and provider fields go in the two JSON policies, as the same objects a policy file would hold.
 Machines pick up a change at the next Group Policy refresh; run `gpupdate /target:computer /force`
 to apply it now, then restart Hanzo Dev.
-Setting **Allow Hanzo Connect**, **Allow webhook tasks**, **Allow importing browser cookies**, or
+Setting **Allow Hanzo Link**, **Allow webhook tasks**, **Allow importing browser cookies**, or
 **Allow usage data** to **Disabled** turns that feature off. Setting any other Hanzo Dev policy to
 **Disabled** restricts nothing, the same as **Not Configured**.
 
@@ -212,7 +212,7 @@ Hanzo Dev can place under the limit. Users still choose which ACP Registry agent
 The limit decides which modes Hanzo Dev asks the provider for. It is not a sandbox; see
 [What a policy does not cover](#what-a-policy-does-not-cover).
 
-### Clients and Hanzo Connect
+### Clients and Hanzo Link
 
 `clients` lists how the server may run:
 
@@ -231,7 +231,7 @@ address or `localhost`. A [background service](./background-service.md) installe
 Run `hanzo up --no-lan` when its `service.env` sets no `HANZO_DEV_HOST`, or set
 `HANZO_DEV_HOST=127.0.0.1` in `service.env`, then run `hanzo service restart`. The desktop app starts
 with network access and Tailscale Serve off, whatever the user chose. That also turns off
-Hanzo Connect. To keep other remote access but turn off Hanzo Connect alone, set `"connect": false`.
+Hanzo Link. To keep other remote access but turn off Hanzo Link alone, set `"connect": false`.
 
 When it starts, the server also turns off each Tailscale Serve route, HTTPS or TCP, that forwards
 to it, such as one `hanzo pair --tailscale` set up, and leaves other routes alone. It does not start

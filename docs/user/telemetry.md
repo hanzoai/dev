@@ -2,7 +2,7 @@
 
 The Hanzo Dev server sends product usage events to Hanzo Dev's own endpoint at `ingest.dev.hanzo.ai`,
 associated with a hashed account or installation identifier. To count how many installations one person
-uses, the server also sends hashed account identifiers: your Hanzo Connect account, your OpenAI and
+uses, the server also sends hashed account identifiers: your Hanzo Link account, your OpenAI and
 Claude accounts when you are signed in, and a random identifier for each device that connects. The endpoint keeps a copy of each
 event and forwards events to PostHog. Events include the provider, model, reasoning effort,
 permission mode, turn and request results, duration, release channel, and token counts when
@@ -14,7 +14,7 @@ raw provider events, or child-agent output.
 
 ## Relay connection diagnostics
 
-Hanzo Dev sends relay connection traces to Axiom to diagnose Hanzo Connect connectivity. These are
+Hanzo Dev sends relay connection traces to Axiom to diagnose Hanzo Link connectivity. These are
 separate from product events. Depending on the client version, traces can include connection
 timings, environment identifiers and the connected machine's name. Failed spans can include error
 messages and stack traces; error text can quote a value the app was handling.
@@ -39,7 +39,7 @@ if the server has opted out. The browser app has no relay tracing toggle.
 When the iOS or Android app crashes or hits an error, it sends a report to Hanzo Dev: the error
 message, the stack trace, the app version, and the device model and OS version. Each launch also
 sends startup timings, and every report carries a random ID for the install. Reports go through
-the Hanzo Connect relay to Axiom. They do not include your threads, prompts, or connection details,
+the Hanzo Link relay to Axiom. They do not include your threads, prompts, or connection details,
 but an error message can quote a value the app was handling.
 
 To stop sending them, turn off **Send crash reports** in **Settings > About Hanzo Dev > Diagnostics**.
@@ -52,7 +52,7 @@ managed policy do not disable mobile tracing.
 ## Agent activity for mobile notifications
 
 When **Publish agent activity** is enabled on a host, it sends project and thread titles, model
-names, activity status, and environment and thread identifiers to the Hanzo Connect relay for
+names, activity status, and environment and thread identifiers to the Hanzo Link relay for
 [mobile notifications and live activities](./mobile-notifications.md). This is separate from
 product events and relay diagnostics. The telemetry opt-out does not disable it.
 

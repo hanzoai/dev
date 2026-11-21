@@ -2006,7 +2006,7 @@ describe("EnvironmentSupervisor routes", () => {
         prepare: (_attempt, target) => {
           attempted.push(target._tag);
           return target._tag === "RelayConnectionTarget"
-            ? Effect.fail(blocked("Sign in to Hanzo Connect."))
+            ? Effect.fail(blocked("Sign in to Hanzo Link."))
             : Effect.succeed(preparedFor(target));
         },
       });
@@ -2051,7 +2051,7 @@ describe("EnvironmentSupervisor routes", () => {
     }).pipe(Effect.provide(TestClock.layer())),
   );
 
-  it.effect("skips a silent LAN route and connects over Hanzo Connect", () =>
+  it.effect("skips a silent LAN route and connects over Hanzo Link", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({
         checkRoute: (route) =>
@@ -2093,7 +2093,7 @@ describe("EnvironmentSupervisor routes", () => {
       const failures = [
         new ConnectionBlockedError({
           reason: "permission",
-          detail: "Hanzo Connect is not enabled on this machine.",
+          detail: "Hanzo Link is not enabled on this machine.",
           hop: "tunnel",
           failureCause: "tunnel_not_enabled",
         }),
@@ -2278,7 +2278,7 @@ describe("EnvironmentSupervisor routes", () => {
         checkRoute: () => Effect.succeed("answered"),
         prepare: (_attempt, target) =>
           target._tag === "RelayConnectionTarget"
-            ? Effect.fail(blocked("Sign in to Hanzo Connect."))
+            ? Effect.fail(blocked("Sign in to Hanzo Link."))
             : Effect.fail(transient("LAN socket refused.")),
       });
       const supervisor = yield* EnvironmentSupervisor.make(LAN_THEN_RELAY_ENTRY, {
@@ -2499,7 +2499,7 @@ describe("EnvironmentSupervisor routes", () => {
   );
 
   it.effect.each(["initial", "late", "withdrawn", "withdrawn-upgrade", "omitted"] as const)(
-    "learns the %s direct endpoint over Hanzo Connect",
+    "learns the %s direct endpoint over Hanzo Link",
     (discovery) =>
       Effect.gen(function* () {
         const relayEntry: ConnectionCatalogEntry =

@@ -93,7 +93,7 @@ function formatDeviceAuthorizationPrompt(
 ): string {
   const minutes = Math.max(1, Math.round(Duration.toMinutes(prompt.expiresIn)));
   return [
-    "Sign in to Hanzo Connect. Open on any device:",
+    "Sign in to Hanzo Link. Open on any device:",
     `  ${prompt.verificationUriComplete ?? prompt.verificationUri}`,
     `Code: ${prompt.userCode}`,
     `Waiting for approval. Expires in ${minutes} min. Ctrl+C cancels.`,
@@ -118,7 +118,7 @@ const authorizeCli = Effect.fn("cloud.cli.authorize")(function* (options: {
   const existing = yield* tokens.getExisting.pipe(
     Effect.catchTags({
       CloudCliCredentialRefreshError: () =>
-        Console.log("Hanzo Connect sign-in expired. Sign in again.").pipe(Effect.as(Option.none())),
+        Console.log("Hanzo Link sign-in expired. Sign in again.").pipe(Effect.as(Option.none())),
     }),
   );
   if (Option.isSome(existing)) {
@@ -194,7 +194,7 @@ function formatCloudStatus(
   }
 
   const provisioned = status.revoked
-    ? "removed from Hanzo Connect"
+    ? "removed from Hanzo Link"
     : status.linked
       ? "provisioned"
       : status.desired && status.authenticated
@@ -202,11 +202,11 @@ function formatCloudStatus(
         : "not provisioned";
   const publishOnly = status.desired && status.linkMode === "publish_only";
   const nextStep = !status.authenticated
-    ? `Run \`${commands.link}\` to authorize and enable Hanzo Connect.`
+    ? `Run \`${commands.link}\` to authorize and enable Hanzo Link.`
     : status.revoked
       ? `Run \`${commands.link}\` to link this environment again.`
       : !status.desired
-        ? `Run \`${commands.link}\` to enable Hanzo Connect.`
+        ? `Run \`${commands.link}\` to enable Hanzo Link.`
         : !status.linked
           ? publishOnly
             ? "Start Hanzo to provision the environment link."
@@ -214,7 +214,7 @@ function formatCloudStatus(
           : undefined;
 
   return [
-    "Hanzo Connect",
+    "Hanzo Link",
     `  Exposure: ${publishOnly ? "publish-only" : status.desired ? "enabled" : "disabled"}`,
     `  Authorization: ${status.authenticated ? "stored credential" : "missing"}`,
     `  Environment link: ${provisioned}`,
@@ -226,7 +226,7 @@ function formatCloudStatus(
       : publishOnly
         ? [
             "",
-            "This link only publishes agent activity. Remote access through Hanzo Connect is off, so other devices need their own route to this machine, such as LAN or Tailscale.",
+            "This link only publishes agent activity. Remote access through Hanzo Link is off, so other devices need their own route to this machine, such as LAN or Tailscale.",
           ]
         : status.reachability === null
           ? [
@@ -248,7 +248,7 @@ const CLOUD_CLI_LIVE_SERVER_TIMEOUT = Duration.seconds(5);
 const confirmRelayClientInstall = (version: string) =>
   Prompt.run(
     Prompt.Confirm({
-      message: `The Hanzo relay client is required for Hanzo Connect. Download and install version ${version}?`,
+      message: `The Hanzo relay client is required for Hanzo Link. Download and install version ${version}?`,
       initial: false,
     }),
   );
@@ -352,7 +352,7 @@ const CLOUD_CLI_REACHABILITY_TIMEOUT = Duration.seconds(30);
 const CLOUD_CLI_REACHABILITY_WAIT = Duration.seconds(60);
 const CLOUD_CLI_REACHABILITY_RETRY = Duration.seconds(5);
 
-/** Asks the running server to check Hanzo Connect now. `null` when no server answers. */
+/** Asks the running server to check Hanzo Link now. `null` when no server answers. */
 const checkLiveReachability = Effect.fn("cloud.cli.check_live_reachability")(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const runtimeState = yield* readLiveServerRuntimeState(config.serverRuntimeStatePath);
@@ -387,14 +387,14 @@ function formatAlertBox(text: string): string {
  * can reach it, so a broken tunnel fails setup instead of looking green.
  */
 export const waitForReachability = Effect.fn("cloud.cli.wait_for_reachability")(function* () {
-  yield* Console.log("Checking Hanzo Connect...");
+  yield* Console.log("Checking Hanzo Link...");
   const deadline =
     (yield* Clock.currentTimeMillis) + Duration.toMillis(CLOUD_CLI_REACHABILITY_WAIT);
   let last: EnvironmentConnectReachability | null = null;
   while (true) {
     last = (yield* checkLiveReachability()) ?? last;
     if (last?.status === "reachable") {
-      yield* Console.log("✓ Hanzo Connect is reachable.");
+      yield* Console.log("✓ Hanzo Link is reachable.");
       return;
     }
     if ((yield* Clock.currentTimeMillis) >= deadline) break;
@@ -403,7 +403,7 @@ export const waitForReachability = Effect.fn("cloud.cli.wait_for_reachability")(
   yield* Console.error(
     formatAlertBox(
       last === null
-        ? "✕ Could not check Hanzo Connect\n  The Hanzo server on this machine did not answer.\n  Fix: run `hanzo service status`, then `hanzo connect status`."
+        ? "✕ Could not check Hanzo Link\n  The Hanzo server on this machine did not answer.\n  Fix: run `hanzo service status`, then `hanzo connect status`."
         : formatReachabilityFailure(last),
     ),
   );
@@ -424,7 +424,7 @@ const logCloudDisconnectFailure = (
   clearAuthorization: boolean,
   cause: Cause.Cause<unknown>,
 ) =>
-  Effect.logWarning("Hanzo Connect disconnect operation failed.").pipe(
+  Effect.logWarning("Hanzo Link disconnect operation failed.").pipe(
     Effect.annotateLogs({
       operation,
       clearAuthorization,
@@ -460,7 +460,7 @@ const unlinkRelayEnvironment = Effect.fn("cloud.cli.unlink_relay_environment")(f
 /**
  * Prints the local disconnect outcome, then whether the relay record was revoked.
  * A missing CLI login or a failed relay DELETE leaves that record registered, so
- * those outcomes warn to deregister it from the Hanzo Connect account page.
+ * those outcomes warn to deregister it from the Hanzo Link account page.
  */
 const reportCloudDisconnectResults = Effect.fn("cloud.cli.report_disconnect_results")(
   function* (input: {
@@ -475,14 +475,14 @@ const reportCloudDisconnectResults = Effect.fn("cloud.cli.report_disconnect_resu
         input.liveResult.cause,
       );
       yield* Console.warn(
-        "Hanzo Connect is disabled, but the running server could not stop its tunnel.\nRestart that server to stop the connector.",
+        "Hanzo Link is disabled, but the running server could not stop its tunnel.\nRestart that server to stop the connector.",
       );
     } else {
-      yield* Console.log("Hanzo Connect is disabled locally.");
+      yield* Console.log("Hanzo Link is disabled locally.");
       // A killed server cannot stop the connector it started, and nothing adopts it on restart.
       if (input.liveResult.status === "server-gone") {
         yield* Console.warn(
-          "The server that ran Hanzo Connect is gone, but its cloudflared process may still be running.\nStop that process if it is.",
+          "The server that ran Hanzo Link is gone, but its cloudflared process may still be running.\nStop that process if it is.",
         );
       }
     }
@@ -496,11 +496,11 @@ const reportCloudDisconnectResults = Effect.fn("cloud.cli.report_disconnect_resu
       yield* Console.warn(
         input.clearAuthorization
           ? "Could not revoke the relay-side environment record before signing out.\nThe stored CLI authorization was still removed locally."
-          : "Could not revoke the relay-side environment record yet.\nRun `hanzo connect unlink` again when the relay is reachable, or deregister it from the Hanzo Connect page of your Hanzo account.",
+          : "Could not revoke the relay-side environment record yet.\nRun `hanzo connect unlink` again when the relay is reachable, or deregister it from the Hanzo Link page of your Hanzo account.",
       );
     } else if (input.relayResult.value.status === "not-authenticated") {
       yield* Console.warn(
-        "The relay-side environment record was not revoked.\nDeregister it from the Hanzo Connect page of your Hanzo account, or run `hanzo connect login` and retry.",
+        "The relay-side environment record was not revoked.\nDeregister it from the Hanzo Link page of your Hanzo account, or run `hanzo connect login` and retry.",
       );
     } else if (input.relayResult.value.status === "revoked") {
       yield* Console.log("Revoked the relay-side environment record.");
@@ -529,7 +529,7 @@ export const disconnectCloud = Effect.fn("cloud.cli.disconnect")(function* (opti
 
   if (options.clearAuthorization) {
     yield* Console.log(
-      "Signed out of Hanzo Connect locally.\nThe background service is managed separately with `hanzo service`.",
+      "Signed out of Hanzo Link locally.\nThe background service is managed separately with `hanzo service`.",
     );
   }
   return liveResult;
@@ -596,7 +596,7 @@ function formatRelayClientReady(version: string): string {
 const linkEnvironmentForConnect = Effect.fn("cloud.cli.link_environment")(function* (options: {
   readonly headless: boolean;
   readonly publishOnly?: boolean;
-  /** For `hanzo up`, where the user already chose Hanzo Connect: install it quietly, without asking. */
+  /** For `hanzo up`, where the user already chose Hanzo Link: install it quietly, without asking. */
   readonly installRelayClient?: boolean;
 }) {
   const publishOnly = options.publishOnly ?? false;
@@ -608,12 +608,12 @@ const linkEnvironmentForConnect = Effect.fn("cloud.cli.link_environment")(functi
       options.installRelayClient === true
         ? (event) =>
             event.type === "progress" && event.stage === "downloading"
-              ? Console.log("Installing the Hanzo Connect relay client...")
+              ? Console.log("Installing the Hanzo Link relay client...")
               : Effect.void
         : reportRelayClientInstallProgress,
     );
     if (Option.isNone(installed)) {
-      yield* Console.log("Hanzo Connect setup cancelled. The relay client was not installed.");
+      yield* Console.log("Hanzo Link setup cancelled. The relay client was not installed.");
       return null;
     }
     if (options.installRelayClient !== true) {
@@ -624,7 +624,7 @@ const linkEnvironmentForConnect = Effect.fn("cloud.cli.link_environment")(functi
   const identity = yield* authorizeCli(options);
   yield* CliState.setCliDesiredCloudLink(true, publishOnly ? "publish_only" : "managed");
   if (yield* CliState.dropRevokedCloudLink) {
-    yield* Console.log("Replacing the link Hanzo Connect revoked.");
+    yield* Console.log("Replacing the link Hanzo Link revoked.");
   }
   if (publishOnly) {
     const secrets = yield* ServerSecretStore.ServerSecretStore;
@@ -638,13 +638,13 @@ const connectLoginCommand = Command.make("login", {
   ...projectLocationFlags,
   headless: headlessFlag,
 }).pipe(
-  Command.withDescription("Authorize the Hanzo Connect CLI without enabling remote access."),
+  Command.withDescription("Authorize the Hanzo Link CLI without enabling remote access."),
   Command.withHandler((flags) =>
     runCloudCommand(
       flags,
       Effect.gen(function* () {
         yield* requireConnectAllowed;
-        yield* Console.log("Hanzo Connect\n");
+        yield* Console.log("Hanzo Link\n");
         const identity = yield* authorizeCli(flags);
         yield* Console.log(`✓ Signed in${connectedAs(identity)}`);
       }),
@@ -662,13 +662,13 @@ const connectLinkCommand = Command.make("link", {
     Flag.withDefault(false),
   ),
 }).pipe(
-  Command.withDescription("Authorize this environment for Hanzo Connect on next start."),
+  Command.withDescription("Authorize this environment for Hanzo Link on next start."),
   Command.withHandler((flags) =>
     runCloudCommand(
       flags,
       Effect.gen(function* () {
         yield* requireConnectAllowed;
-        yield* Console.log("Hanzo Connect\n");
+        yield* Console.log("Hanzo Link\n");
         const linked = yield* linkEnvironmentForConnect(flags);
         if (linked) {
           const serveCommand = yield* resolveHostCliHint("serve", flags.baseDir);
@@ -688,7 +688,7 @@ const connectStatusCommand = Command.make("status", {
   json: jsonFlag,
 }).pipe(
   Command.withDescription(
-    "Show Hanzo Connect setup and check that other devices can reach this machine.",
+    "Show Hanzo Link setup and check that other devices can reach this machine.",
   ),
   Command.withHandler((flags) =>
     runCloudCommand(
@@ -777,7 +777,7 @@ const connectPublishCommand = Command.make("publish", {
           const linkedNow = Option.isSome(yield* secrets.get(CLOUD_LINKED_USER_ID));
           if (!linkedNow && (yield* CliState.readCliDesiredLinkMode) === "publish_only") {
             yield* CliState.setCliDesiredCloudLink(false);
-            yield* Console.log("Cancelled the pending publish-only Hanzo Connect link.");
+            yield* Console.log("Cancelled the pending publish-only Hanzo Link link.");
           }
           yield* Console.log("Publishing agent activity disabled.");
           return;
@@ -799,7 +799,7 @@ const connectPublishCommand = Command.make("publish", {
         // A desired managed link already covers publishing and must not be downgraded.
         if (yield* CliState.readCliDesiredCloudLink) {
           yield* Console.log(
-            "A Hanzo Connect link is already pending. Start Hanzo to finish provisioning it; publishing starts once it links.",
+            "A Hanzo Link link is already pending. Start Hanzo to finish provisioning it; publishing starts once it links.",
           );
           return;
         }
@@ -815,7 +815,7 @@ const connectPublishCommand = Command.make("publish", {
 const connectUnlinkCommand = Command.make("unlink", {
   ...projectLocationFlags,
 }).pipe(
-  Command.withDescription("Disable Hanzo Connect while retaining the stored authorization."),
+  Command.withDescription("Disable Hanzo Link while retaining the stored authorization."),
   Command.withHandler((flags) =>
     runCloudCommand(flags, disconnectCloud({ clearAuthorization: false })),
   ),
@@ -824,7 +824,7 @@ const connectUnlinkCommand = Command.make("unlink", {
 const connectLogoutCommand = Command.make("logout", {
   ...projectLocationFlags,
 }).pipe(
-  Command.withDescription("Disable Hanzo Connect and clear the stored CLI authorization."),
+  Command.withDescription("Disable Hanzo Link and clear the stored CLI authorization."),
   Command.withHandler((flags) =>
     runCloudCommand(flags, disconnectCloud({ clearAuthorization: true })),
   ),

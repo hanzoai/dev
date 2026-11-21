@@ -50,12 +50,12 @@ describe("resolveMcpGate", () => {
       kind: "open",
       mcpUrl: "https://prod-a1.hanzodevrelay.com/mcp",
     });
-    // A saved machine's address comes from Hanzo Connect, not from what it reports itself.
+    // A saved machine's address comes from Hanzo Link, not from what it reports itself.
     expect(resolveMcpGate(saved)).toEqual({
       kind: "open",
       mcpUrl: "https://prod-b2.hanzodevrelay.com/mcp",
     });
-    // A disconnected saved machine follows Hanzo Connect's list. Offline or an unreadable list keeps
+    // A disconnected saved machine follows Hanzo Link's list. Offline or an unreadable list keeps
     // a retry; only a list showing nothing wrong asks to reconnect.
     const away = { ...saved, connected: false };
     const listed = (
@@ -72,7 +72,7 @@ describe("resolveMcpGate", () => {
     expect(resolveMcpGate(listed("checking")).kind).toBe("checking");
     expect(resolveMcpGate(listed("offline"))).toEqual({ kind: "disconnected", relay: "offline" });
     expect(resolveMcpGate(listed("error"))).toEqual({ kind: "disconnected", relay: "failed" });
-    // Hanzo Connect refuses to check a publish-only link, so that failure says nothing.
+    // Hanzo Link refuses to check a publish-only link, so that failure says nothing.
     expect(resolveMcpGate(listed("error", "manual"))).toEqual({
       kind: "disconnected",
       relay: null,
@@ -92,8 +92,8 @@ describe("resolveMcpGate", () => {
   });
 
   it.each([
-    ["no Hanzo Connect sign-in", { ...open, signedIn: false }, "sign-in"],
-    ["no permission to read Hanzo Connect", { ...open, canReadRelay: false }, "no-relay-read"],
+    ["no Hanzo Link sign-in", { ...open, signedIn: false }, "sign-in"],
+    ["no permission to read Hanzo Link", { ...open, canReadRelay: false }, "no-relay-read"],
     ["a server without approval codes", { ...open, approvalCodes: false }, "update"],
     ["no tunnel", { ...open, linkState: { ...tunnel, managedTunnelActive: false } }, "turn-on"],
     ["a removed link", { ...open, linkState: { ...tunnel, linkRevoked: true } }, "turn-on"],
@@ -113,18 +113,18 @@ describe("resolveMcpGate", () => {
       "turn-on",
     ],
     [
-      "a saved machine Hanzo Connect does not list",
+      "a saved machine Hanzo Link does not list",
       { ...saved, relay: { status: "listed", endpoint: undefined } },
       "turn-on",
     ],
-    ["Hanzo Connect's list still loading", { ...saved, relay: { status: "loading" } }, "checking"],
+    ["Hanzo Link's list still loading", { ...saved, relay: { status: "loading" } }, "checking"],
     [
-      "a disconnected saved machine while Hanzo Connect's list refreshes",
+      "a disconnected saved machine while Hanzo Link's list refreshes",
       { ...saved, connected: false, relay: { status: "loading" } },
       "checking",
     ],
     [
-      "no tunnel, before Hanzo Connect's list loads",
+      "no tunnel, before Hanzo Link's list loads",
       {
         ...saved,
         linkState: { ...tunnel, managedTunnelActive: false },

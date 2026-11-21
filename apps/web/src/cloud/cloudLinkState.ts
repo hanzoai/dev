@@ -60,7 +60,7 @@ export function useCloudLinkState(environmentId: EnvironmentId | null) {
     const cause = Cause.squash(result.cause);
     error =
       (cause instanceof Error ? thrownErrorMessage(cause, resolve) : null) ??
-      gt("Could not read Hanzo Connect link state.");
+      gt("Could not read Hanzo Link link state.");
   }
 
   return {

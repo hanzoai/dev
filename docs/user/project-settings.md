@@ -109,7 +109,7 @@ Leaving an edited form asks before discarding unsaved changes.
 In **Settings → Scheduled tasks**, choose **On webhook**
 as a task's schedule to run it whenever another service calls its URL, such as
 GitHub on a new pull request or a CI job that failed. A public URL needs a
-[Hanzo Connect](remote-access.md) managed tunnel; after you save the task, copy
+[Hanzo Link](remote-access.md) managed tunnel; after you save the task, copy
 its URL from the editor. Without one, the editor shows only the URL's path.
 **Rotate** replaces the URL and the old one stops working.
 
@@ -165,9 +165,9 @@ requests and the prompt each one produced.
 
 If the environment is offline, the sender gets an error and nothing runs;
 redeliver from the sender, such as GitHub's **Recent Deliveries**, once it is
-back. To have Hanzo Connect keep requests instead, turn on **Hold webhooks while
-offline** in **Settings → Sharing & access**. Hanzo Connect then stores requests to a
-Hanzo Connect URL for up to 24 hours and delivers them when the environment
+back. To have Hanzo Link keep requests instead, turn on **Hold webhooks while
+offline** in **Settings → Sharing & access**. Hanzo Link then stores requests to a
+Hanzo Link URL for up to 24 hours and delivers them when the environment
 returns. Leave it off if you don't want request bodies stored outside your
 machine. To skip requests that waited too long, set **Skip requests older
 than** on the task.

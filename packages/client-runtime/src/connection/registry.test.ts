@@ -2047,7 +2047,7 @@ describe("EnvironmentRegistry routes", () => {
   const lanRegistration = (target = LAN_TARGET, profile = LAN_PROFILE) =>
     new BearerConnectionRegistration({ target, profile, credential: BEARER_CREDENTIAL });
 
-  it.effect("adds a paired LAN route ahead of Hanzo Connect instead of replacing it", () =>
+  it.effect("adds a paired LAN route ahead of Hanzo Link instead of replacing it", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness([RELAY_TARGET]);
       yield* Effect.gen(function* () {
@@ -2154,7 +2154,7 @@ describe("EnvironmentRegistry routes", () => {
       }),
   );
 
-  it.effect("signing out of Hanzo Connect keeps an environment that still has a LAN route", () =>
+  it.effect("signing out of Hanzo Link keeps an environment that still has a LAN route", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness(
         [LAN_TARGET, RELAY_TARGET, SECOND_RELAY_TARGET],

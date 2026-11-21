@@ -130,7 +130,7 @@ export const apiBaseUrlConfig = makePublicValueConfig(
 const NIGHTLY_HOSTED_APP_URL = "https://nightly.hanzo.bot";
 
 /**
- * Where agent sign-ins on the Hanzo Connect address are approved. A nightly build defaults to the
+ * Where agent sign-ins on the Hanzo Link address are approved. A nightly build defaults to the
  * nightly hosted app, which ships the same approval page; hanzo.bot serves stable.
  */
 export const agentApprovalAppUrlConfig = makePublicValueConfig(

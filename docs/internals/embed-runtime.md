@@ -8,7 +8,7 @@ The one interface between a host (hanzo.ai/dev) and the Dev core.
 A host resolves a `DevRuntime` for the signed-in person and hands it to `DevProvider`.
 Two kinds implement it:
 
-  machine  the person's own computer, linked through Hanzo Connect.
+  machine  the person's own computer, linked through Hanzo Link.
   cell     a Hanzo cloud sandbox leased through `/v1/dev` (HIP-1330) on api.hanzo.ai.
 
 The client speaks ZAP to either, over WebTransport (HTTP/3): no WebSocket, no HTTP
