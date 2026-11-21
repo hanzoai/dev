@@ -1,0 +1,86 @@
+# Publishes @hanzo/dev (packages/dev), the Dev core as a library, when its package.json
+# names a version npm does not serve yet. hanzo.ai takes it from npm. The question is asked
+# of the registry, not of the diff, so a re-run is idempotent. The npm token is read from
+# KMS at run time (NPM_TOKEN at the org root, env prod).
+name: Publish @hanzo/dev
+
+on:
+  push:
+    branches: [main]
+    paths: ["packages/dev/package.json"]
+  workflow_dispatch:
+
+concurrency:
+  group: publish-dev
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: [linux-amd64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Is this version on npm?
+        id: ahead
+        run: |
+          set -euo pipefail
+          NAME=$(jq -r .name packages/dev/package.json)
+          NEW=$(jq -r .version packages/dev/package.json)
+          if curl -sf -o /dev/null "https://registry.npmjs.org/${NAME}/${NEW}"; then
+            echo "${NAME} ${NEW} is already on npm"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: pnpm/action-setup@v4
+        if: steps.ahead.outputs.release == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.ahead.outputs.release == 'true'
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Build the library
+        if: steps.ahead.outputs.release == 'true'
+        run: |
+          set -euo pipefail
+          npm install -g vite-plus
+          vp install --ignore-scripts --filter '@hanzodev/web...'
+          vp run --filter @hanzodev/web build:embed
+          test -s packages/dev/dist/index.js
+          test -s packages/dev/dist/index.css
+
+      - name: Read the npm token from KMS
+        if: steps.ahead.outputs.release == 'true'
+        id: npm
+        env:
+          KMS_CLIENT_ID: ${{ secrets.KMS_CLIENT_ID }}
+          KMS_CLIENT_SECRET: ${{ secrets.KMS_CLIENT_SECRET }}
+          KMS_ENDPOINT: ${{ vars.KMS_ENDPOINT || 'https://kms.hanzo.ai' }}
+          KMS_SECRET_ENV: ${{ vars.KMS_SECRET_ENV || 'prod' }}
+        run: |
+          set -uo pipefail
+          body="{\"clientId\":\"${KMS_CLIENT_ID}\",\"clientSecret\":\"${KMS_CLIENT_SECRET}\"}"
+          out=$(curl -sS -w '\n%{http_code}' "${KMS_ENDPOINT}/v1/kms/auth/login" -H 'Content-Type: application/json' --data-binary "$body")
+          code=${out##*$'\n'}; resp=${out%$'\n'*}
+          [ "$code" = "200" ] || { echo "::error::KMS login answered HTTP $code"; exit 1; }
+          token=$(printf '%s' "$resp" | jq -r '.accessToken // empty')
+          [ -n "$token" ] || { echo "::error::KMS login carried no accessToken"; exit 1; }
+          out=$(curl -sS -w '\n%{http_code}' "${KMS_ENDPOINT}/v1/kms/secrets/NPM_TOKEN?env=${KMS_SECRET_ENV}" -H "Authorization: Bearer ${token}")
+          code=${out##*$'\n'}; resp=${out%$'\n'*}
+          [ "$code" = "200" ] || { echo "::error::KMS secret read answered HTTP $code"; exit 1; }
+          npm_token=$(printf '%s' "$resp" | jq -r '.value // empty')
+          [ -n "$npm_token" ] || { echo "::error::No NPM_TOKEN in KMS"; exit 1; }
+          echo "::add-mask::${npm_token}"
+          echo "token=${npm_token}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish
+        if: steps.ahead.outputs.release == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ steps.npm.outputs.token }}
+        run: |
+          set -euo pipefail
+          cd packages/dev
+          npm publish --access public

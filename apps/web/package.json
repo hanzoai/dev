@@ -8,6 +8,7 @@
     "dev": "vp dev",
     "dev:built": "vp build --watch",
     "build": "vp build",
+    "build:embed": "vp build --config vite.embed.config.ts",
     "i18n:generate": "gt generate",
     "preview": "vp preview",
     "test": "vp test run --passWithNoTests --project unit --project browser",

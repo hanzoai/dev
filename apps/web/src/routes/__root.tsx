@@ -43,6 +43,8 @@ import { Button } from "../components/ui/button";
 import { StandalonePage, StandalonePageHeader } from "../components/ui/standalone-page";
 import { AnchoredToastProvider, ToastProvider } from "../components/ui/toast";
 import { isElectron } from "../env";
+import { isEmbedded, useEmbed } from "../embed/context";
+import { EmbedShell } from "../embed/EmbedShell";
 import { useClientSettings } from "../hooks/useSettings";
 import {
   deriveLogicalProjectKeyFromSettings,
@@ -84,7 +86,11 @@ export const Route = createRootRoute({
       };
     }
 
-    if (isLocalEnvironmentDisabled() || isHostedStaticApp(new URL(window.location.href))) {
+    if (
+      isEmbedded() ||
+      isLocalEnvironmentDisabled() ||
+      isHostedStaticApp(new URL(window.location.href))
+    ) {
       return {
         authGateState: {
           status: "hosted-static",
@@ -152,6 +158,7 @@ function RootRouteView() {
 }
 
 function RootRouteBranch() {
+  const embed = useEmbed();
   const pathname = useLocation({ select: (location) => location.pathname });
   const { authGateState } = Route.useRouteContext();
   const primaryEnvironmentAuthenticated = authGateState.status === "authenticated";
@@ -163,6 +170,8 @@ function RootRouteBranch() {
   const hostedPromptLinkLanding = useHostedPromptLinkLanding(
     authGateState.status === "hosted-static",
   );
+
+  if (embed) return <EmbedShell><Outlet /></EmbedShell>;
 
   if (pathname === GUEST_PAGE_PATH) return <Outlet />;
 

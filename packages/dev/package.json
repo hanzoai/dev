@@ -1,0 +1,19 @@
+{
+  "name": "@hanzo/dev",
+  "version": "0.1.0",
+  "description": "The Hanzo Dev core (threads, composer, model picker) as a library for a host's own shell.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": ["**/*.css"],
+  "files": ["dist", "index.d.ts"],
+  "exports": {
+    ".": { "types": "./index.d.ts", "import": "./dist/index.js" },
+    "./style.css": "./dist/index.css"
+  },
+  "peerDependencies": {
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "publishConfig": { "access": "public" },
+  "repository": { "type": "git", "url": "git+https://github.com/hanzoai/dev-desktop.git", "directory": "packages/dev" }
+}

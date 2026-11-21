@@ -8,8 +8,8 @@
 //   cell     a Hanzo cloud sandbox leased through `POST /v1/dev` (HIP-1330),
 //            running `hanzo-dev serve`; the cloud bridges its WebSocket at `host`.
 //
-// Both speak the same Dev environment protocol (`/ws` + `/api`, packages/contracts),
-// authenticated with the person's Hanzo IAM access token. When `resolve` returns
+// Both speak the same Dev environment protocol (`/ws` + `/api`, packages/contracts);
+// the person's Hanzo IAM identity is what lets the relay or `/v1/dev` mint the pairing credential. When `resolve` returns
 // null the host keeps its previous Dev view: no runtime is not an empty screen.
 
 export interface DevRuntime {
@@ -20,8 +20,9 @@ export interface DevRuntime {
   readonly label: string;
   /** HTTPS origin that serves the Dev environment's `/ws`, `/api`, `/.well-known`. */
   readonly host: string;
-  /** Bearer for `host`: the person's Hanzo IAM access token, or the pairing credential
-   *  the relay minted. Never stored by the core beyond the session. */
+  /** Mints a fresh one-time pairing credential for `host` (the one `/pair` redeems): the relay's
+   *  bootstrap for a machine, `/v1/dev`'s for a cell. The core redeems it once per session and
+   *  keeps the environment session it gets back; it never keeps the credential. */
   readonly token: () => Promise<string>;
   /** Sandbox that backs the dock (`/v1/sandboxes/:id/{terminal|screen}/ticket`).
    *  Absent: the dock shows only what `host` itself serves. */
