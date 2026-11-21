@@ -1757,7 +1757,6 @@
   "167b99c44a181473": "Délai dépassé en attendant le retour en arrière du fil.",
   "cd82f739455a9406": "{reason} Démarrez un nouveau fil pour utiliser ce modèle.",
   "e447e12ceb134557": "Revue : {label}",
-  "c0a33666a9800e1e": "Chargement du modèle…",
   "f967fe7fc56614f5": "La zone de saisie n’est pas prête",
   "1c07566252e98588": "Réessayez de citer la sélection une fois la connexion ou la saisie en attente résolue.",
   "2e995206e087c3fc": "Réessayez de répondre une fois la connexion ou la saisie en attente résolue.",
@@ -4598,6 +4597,7 @@
   "36fb7b9046d2e288": "Appels d’outils",
   "e81991d4a58ce959": "Script de configuration",
   "512e5f7d08325a74": "La configuration en arrière-plan est toujours en cours : {scriptName}. Afficher la progression.",
+  "35e9f6eb8b2e0a05": "Chargement du modèle…",
   "ff6edf13509031be": "Configuration du worktree…",
   "eb06160a98c4dd18": [
     "Travaille depuis ",

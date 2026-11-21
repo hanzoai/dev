@@ -1757,7 +1757,6 @@
   "167b99c44a181473": "Se agotó el tiempo de espera para volver atrás en el hilo.",
   "cd82f739455a9406": "{reason} Inicia un hilo nuevo para usar este modelo.",
   "e447e12ceb134557": "Revisión: {label}",
-  "c0a33666a9800e1e": "Cargando el modelo…",
   "f967fe7fc56614f5": "El cuadro de mensaje no está listo",
   "1c07566252e98588": "Prueba a citar la selección cuando se resuelva la conexión o la entrada pendiente.",
   "2e995206e087c3fc": "Prueba a responder cuando se resuelva la conexión o la entrada pendiente.",
@@ -4597,6 +4596,7 @@
   "36fb7b9046d2e288": "Llamadas a herramientas",
   "e81991d4a58ce959": "Script de configuración",
   "512e5f7d08325a74": "La configuración en segundo plano aún se está ejecutando: {scriptName}. Mostrar el progreso.",
+  "35e9f6eb8b2e0a05": "Cargando el modelo…",
   "ff6edf13509031be": "Configurando el worktree…",
   "eb06160a98c4dd18": [
     "Trabajando durante ",

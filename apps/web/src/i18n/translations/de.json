@@ -1756,7 +1756,6 @@
   "167b99c44a181473": "Zeitüberschreitung beim Warten auf das Zurückspulen des Threads.",
   "cd82f739455a9406": "{reason} Starte einen neuen Thread, um dieses Modell zu verwenden.",
   "e447e12ceb134557": "Review: {label}",
-  "c0a33666a9800e1e": "Modell wird geladen…",
   "f967fe7fc56614f5": "Das Eingabefeld ist nicht bereit",
   "1c07566252e98588": "Versuche, die Auswahl zu zitieren, sobald die Verbindung oder ausstehende Eingabe geklärt ist.",
   "2e995206e087c3fc": "Versuche zu antworten, sobald die Verbindung oder ausstehende Eingabe geklärt ist.",
@@ -4599,6 +4598,7 @@
   "36fb7b9046d2e288": "Tool-Aufrufe",
   "e81991d4a58ce959": "Setup-Skript",
   "512e5f7d08325a74": "Die Einrichtung im Hintergrund läuft noch: {scriptName}. Fortschritt anzeigen.",
+  "35e9f6eb8b2e0a05": "Modell wird geladen…",
   "ff6edf13509031be": "Worktree wird eingerichtet…",
   "eb06160a98c4dd18": [
     "Arbeitet seit ",

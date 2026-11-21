@@ -1,6 +1,6 @@
 import { m } from "../i18n/messages";
 import { thrownErrorMessage } from "@hanzodev/client-runtime/errors";
-import { msg, useGT, useMessages } from "gt-react";
+import { useGT, useMessages } from "gt-react";
 import { isLocalEngineInstanceId } from "@hanzodev/shared/localAi";
 import { ChildThreadApprovals } from "./chat/ChildThreadApprovals";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
@@ -1518,14 +1518,6 @@ export default function ChatView(props: ChatViewProps) {
     isCompacting,
     runlessWorkStartedAt,
   });
-  // A local engine loads its model and reads the whole prompt before the first word: say so.
-  const localModelLoading =
-    isWorking &&
-    activeRuntime !== null &&
-    isLocalEngineInstanceId(String(activeRuntime.providerInstanceId)) &&
-    !(serverVisibleTurnItems ?? []).some(
-      ({ item }) => item.runId === activeRuntime.activeRunId && item.type !== "user_message",
-    );
   const activeContextWindow = deriveLatestContextWindowSnapshot(
     serverVisibleTurnItems ?? [],
     activeThreadLiveTokenUsage,
@@ -3518,16 +3510,13 @@ export default function ChatView(props: ChatViewProps) {
                     activePendingApproval?.requestId ?? activePendingUserInput?.requestId ?? null
                   }
                   activeTurnStartedAt={activeWorkStartedAt}
+                  localModel={isLocalEngineInstanceId(
+                    String(activeRuntime?.providerInstanceId ?? ""),
+                  )}
                   providerStartingLabel={
                     activeActivityRun?.providerStartingLabelMsg
                       ? messages(activeActivityRun.providerStartingLabelMsg)
-                      : localModelLoading
-                        ? messages(
-                            msg("Loading model…", {
-                              $context: "a local model is loading before its first reply",
-                            }),
-                          )
-                        : null
+                      : null
                   }
                   worktreeSetup={worktreeSetup}
                   onCancelWorktreeSetup={onCancelWorktreeSetupStable}

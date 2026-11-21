@@ -1757,7 +1757,6 @@
   "167b99c44a181473": "Tempo esgotado ao aguardar a thread voltar.",
   "cd82f739455a9406": "{reason} Inicie uma nova thread para usar este modelo.",
   "e447e12ceb134557": "Revisão: {label}",
-  "c0a33666a9800e1e": "Carregando o modelo…",
   "f967fe7fc56614f5": "O editor de mensagens não está pronto",
   "1c07566252e98588": "Tente citar a seleção depois que a conexão ou a resposta pendente for resolvida.",
   "2e995206e087c3fc": "Tente responder depois que a conexão ou a resposta pendente for resolvida.",
@@ -4597,6 +4596,7 @@
   "36fb7b9046d2e288": "Chamadas de ferramenta",
   "e81991d4a58ce959": "Script de configuração",
   "512e5f7d08325a74": "A configuração em segundo plano ainda está em execução: {scriptName}. Mostrar o progresso.",
+  "35e9f6eb8b2e0a05": "Carregando o modelo…",
   "ff6edf13509031be": "Configurando o worktree…",
   "eb06160a98c4dd18": [
     "Trabalhando há ",

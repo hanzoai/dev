@@ -1757,7 +1757,6 @@
   "167b99c44a181473": "Timed out waiting for the thread to rewind.",
   "cd82f739455a9406": "{reason} Start a new thread to use this model.",
   "e447e12ceb134557": "Review: {label}",
-  "c0a33666a9800e1e": "Loading model…",
   "f967fe7fc56614f5": "The composer is not ready",
   "1c07566252e98588": "Try citing the selection after the connection or pending input is resolved.",
   "2e995206e087c3fc": "Try replying after the connection or pending input is resolved.",
@@ -4599,6 +4598,7 @@
   "36fb7b9046d2e288": "Tool calls",
   "e81991d4a58ce959": "Setup script",
   "512e5f7d08325a74": "Background setup is still running: {scriptName}. Show setup progress.",
+  "35e9f6eb8b2e0a05": "Loading model…",
   "ff6edf13509031be": "Setting up worktree…",
   "eb06160a98c4dd18": [
     "Working for ",
