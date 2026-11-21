@@ -297,7 +297,7 @@ export function WelcomePage({
               <p className="mt-1 leading-relaxed">
                 <T>
                   Hanzo Dev orchestrates local workspaces, Git worktrees, terminal commands, browser
-                  previews, and Local AI (Zen 6 / Qwen3+). Microphone, OS Keychain, folder access,
+                  previews, and Local AI (Zen 6). Microphone, OS Keychain, folder access,
                   and Hanzo Connect tunnels are requested only when you first use each capability.
                 </T>
               </p>
