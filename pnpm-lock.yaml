@@ -431,9 +431,6 @@ importers:
       '@effect/atom-react':
         specifier: 4.1.2
         version: 4.1.2(effect@4.1.3)(react@19.3.0)(scheduler@0.28.0)
-      '@expo-google-fonts/dm-sans':
-        specifier: ^0.4.2
-        version: 0.4.2
       '@expo/metro-runtime':
         specifier: ~58.0.17
         version: 58.0.17(@expo/log-box@58.0.15)(expo@58.0.23)(react-dom@19.3.0(react@19.3.0))(react-native@0.88.1(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.1(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.3.0)
@@ -452,6 +449,9 @@ importers:
       '@formatjs/intl-pluralrules':
         specifier: 5.4.6
         version: 5.4.6
+      '@hanzo/font':
+        specifier: 1.11.0
+        version: 1.11.0
       '@hanzodev/client-runtime':
         specifier: workspace:*
         version: link:../../packages/client-runtime
@@ -515,6 +515,9 @@ importers:
       expo:
         specifier: 58.0.23
         version: 58.0.23(d226faf1ca90e630d8c56a2108dee32d)
+      expo-alternate-app-icons:
+        specifier: 11.0.0
+        version: 11.0.0(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.1(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.3.0)
       expo-application:
         specifier: ~58.1.2
         version: 58.1.2(expo@58.0.23)
@@ -3928,9 +3931,6 @@ packages:
 
   '@exodus/schemasafe@1.3.0':
     resolution: {integrity: sha512-5Aap/GaRupgNx/feGBwLLTVv8OQFfv3pq2lPRzPg9R+IOBnDgghTGW7l7EuVXOvg5cc/xSAlRW8rBrjIC3Nvqw==}
-
-  '@expo-google-fonts/dm-sans@0.4.2':
-    resolution: {integrity: sha512-e/fLH5aCJzkEenz7axvEn8N7IJAKhUwNjIxS75h9j+Ip1M9S7d22M19gJN3A7QW4egVkBJRyQh1hQFhngQn9yA==}
 
   '@expo-google-fonts/material-symbols@0.4.38':
     resolution: {integrity: sha512-IJkBtN1o8u9BW5fvSii1MyHPQ7Q0HxbWcVBvOrOzgMLpVtZw7R2w94wBTVR7kZwv3w1JNTESMmLA5Sqn1+Z36A==}
@@ -8585,6 +8585,13 @@ packages:
   expect-type@1.4.0:
     resolution: {integrity: sha512-KfYbmpRm0VbLjEvVa9yGwCi9GI34xvi7A/HXYWQO65CSD2u3MczUJSuwXKFIxlGsgBQizV9q5J9NHj4VG0n+pA==}
     engines: {node: '>=12.0.0'}
+
+  expo-alternate-app-icons@11.0.0:
+    resolution: {integrity: sha512-9k25v/LIaX52FSOwKTZcCvh/VrpuITEtn9ini4Rs8k08YGDA26LIx7Jum6tngWfRQn9RbQD3uGA7vDTUEGUWFg==}
+    peerDependencies:
+      expo: '>=53'
+      react: '*'
+      react-native: '*'
 
   expo-app-metrics@58.0.15:
     resolution: {integrity: sha512-c0Am9fMovxBI+wcvNFc/EXhAQayy3FXqg/3sRuQi27uyYzvAEUG5mrSLpS96V3QfYOc6T8+IMI1mM8apRkeH/Q==}
@@ -13370,8 +13377,6 @@ snapshots:
 
   '@exodus/schemasafe@1.3.0': {}
 
-  '@expo-google-fonts/dm-sans@0.4.2': {}
-
   '@expo-google-fonts/material-symbols@0.4.38': {}
 
   '@expo/cli@58.1.19(71c6c18c67381aed8a99e0cd5abbf7da)':
@@ -17414,6 +17419,12 @@ snapshots:
       eventsource-parser: 3.1.0
 
   expect-type@1.4.0: {}
+
+  expo-alternate-app-icons@11.0.0(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.1(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.3.0):
+    dependencies:
+      expo: 58.0.23(d226faf1ca90e630d8c56a2108dee32d)
+      react: 19.3.0
+      react-native: 0.88.1(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.1(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(supports-color@8.1.1)(utf-8-validate@6.0.6)
 
   expo-app-metrics@58.0.15(expo@58.0.23)(react-native@0.88.1(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.88.1(@babel/core@7.29.7(supports-color@8.1.1))(bufferutil@4.1.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(@types/react@19.3.0)(bufferutil@4.1.0)(react@19.3.0)(supports-color@8.1.1)(utf-8-validate@6.0.6))(react@19.3.0):
     dependencies:

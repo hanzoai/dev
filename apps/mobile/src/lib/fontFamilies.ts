@@ -1,5 +1,5 @@
 export const FONT_FAMILIES = {
-  regular: "DMSans-Regular",
-  medium: "DMSans-Medium",
-  bold: "DMSans-Bold",
+  regular: "Zen-Regular",
+  medium: "Zen-Medium",
+  bold: "Zen-Bold",
 } as const;

@@ -23,6 +23,7 @@ import {
   getProviderOptionDescriptors,
 } from "@hanzodev/shared/model";
 import { isEnsoModel } from "@hanzodev/client-runtime/enso-ring";
+import { writesReplies } from "@hanzodev/client-runtime/replyModels";
 import { resolveModelShortName } from "@hanzodev/client-runtime/provider-clients";
 import { resolveProvidersForCwd } from "@hanzodev/client-runtime/providerSkills";
 
@@ -412,7 +413,8 @@ export function buildModelOptions(
     const hiddenModels = new Set(preferences?.hiddenModels ?? []);
     const order = new Map((preferences?.modelOrder ?? []).map((slug, index) => [slug, index]));
     const models = provider.models.filter(
-      (model) => includeHidden || model.isCustom || !hiddenModels.has(model.slug),
+      (model) =>
+        writesReplies(model) && (includeHidden || model.isCustom || !hiddenModels.has(model.slug)),
     );
     if (order.size > 0)
       models.sort((a, b) => (order.get(a.slug) ?? Infinity) - (order.get(b.slug) ?? Infinity));
