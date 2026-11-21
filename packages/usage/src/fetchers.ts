@@ -160,41 +160,26 @@ const hanzoToken = async (env: UsageEnv): Promise<string | undefined> => {
   return str(pick.access_token);
 };
 
+/** commerce `GET /v1/billing/balance`: amounts in cents, available = balance - holds. */
 export const parseHanzo = (
   body: Record<string, unknown>,
-): Pick<ProviderSnapshot, "windows" | "credits" | "plan"> => {
-  const cents = (k: string, alt: string) => num(body[k]) ?? num(body[alt]);
-  const used = cents("monthly_used_cents", "used_cents");
-  const limit = cents("monthly_limit_cents", "limit_cents");
-  const balance = cents("credit_balance_cents", "balance_cents");
-  const plan = str(body.plan);
-  const resetsAt = iso(body.period_end ?? body.resets_at);
+): Pick<ProviderSnapshot, "windows" | "credits"> => {
+  const available = num(body.available) ?? num(body.balance);
+  const holds = num(body.holds);
   return {
-    windows:
-      used !== undefined && limit
-        ? [
-            {
-              kind: "monthly",
-              label: "Monthly",
-              usedPercent: clamp((used / limit) * 100),
-              ...(resetsAt ? { resetsAt } : {}),
-            },
-          ]
-        : [],
+    windows: [],
     credits: {
-      currency: "USD",
-      ...(balance !== undefined ? { balance: balance / 100 } : {}),
-      ...(used !== undefined ? { spent: used / 100 } : {}),
-      ...(limit !== undefined ? { limit: limit / 100 } : {}),
+      currency: (str(body.currency) ?? "usd").toUpperCase(),
+      ...(available !== undefined ? { balance: available / 100 } : {}),
+      ...(holds ? { spent: holds / 100 } : {}),
     },
-    ...(plan ? { plan } : {}),
   };
 };
 
 export const hanzo: Fetcher = async (env) => {
   const token = await hanzoToken(env);
   if (!token) throw new NotConfigured("Sign in to Hanzo.");
-  const res = await env.fetch("https://api.hanzo.ai/v1/billing/summary", {
+  const res = await env.fetch("https://api.hanzo.ai/v1/billing/balance", {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
   });
   return { ...base(env, "hanzo", "oauth"), ...parseHanzo(await json(res)) };

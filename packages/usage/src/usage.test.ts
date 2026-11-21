@@ -59,15 +59,9 @@ describe("parsers", () => {
       [["Premium", 75]],
     );
   });
-  it("hanzo billing summary", () => {
-    const r = parseHanzo({
-      plan: "pro",
-      monthly_used_cents: 500,
-      monthly_limit_cents: 2000,
-      credit_balance_cents: 1500,
-    });
-    assert.strictEqual(r.windows[0]!.usedPercent, 25);
-    assert.deepStrictEqual(r.credits, { currency: "USD", balance: 15, spent: 5, limit: 20 });
+  it("hanzo balance is cents, available after holds", () => {
+    const r = parseHanzo({ currency: "usd", balance: 2000, holds: 500, available: 1500 });
+    assert.deepStrictEqual(r.credits, { currency: "USD", balance: 15, spent: 5 });
   });
 });
 
@@ -81,16 +75,17 @@ describe("fetchers", () => {
         }),
       },
       {
-        "https://api.hanzo.ai/v1/billing/summary": {
-          plan: "pro",
-          monthly_used_cents: 100,
-          monthly_limit_cents: 1000,
+        "https://api.hanzo.ai/v1/billing/balance": {
+          currency: "usd",
+          balance: 1000,
+          holds: 0,
+          available: 1000,
         },
       },
     );
     const s = await FETCHERS.hanzo!(env);
     assert.strictEqual(s.provider, "hanzo");
-    assert.strictEqual(s.windows[0]!.usedPercent, 10);
+    assert.strictEqual(s.credits?.balance, 10);
     assert.isTrue(isSnapshot(s));
   });
   it("fails loudly when no credential is present", async () => {
@@ -223,11 +218,7 @@ describe("service and report", () => {
       }),
     };
     const routes = {
-      "https://api.hanzo.ai/v1/billing/summary": {
-        plan: "pro",
-        monthly_used_cents: 900,
-        monthly_limit_cents: 1000,
-      },
+      "https://api.hanzo.ai/v1/billing/balance": { currency: "usd", available: 1000 },
     };
     const svc = createUsageService(fakeEnv(files, routes), () => ({
       providers: {},
@@ -235,20 +226,22 @@ describe("service and report", () => {
       notifyAtPercent: [80],
       refreshSeconds: 300,
     }));
-    const { summary, alerts } = await svc.refresh({ local: [local], cost });
-    assert.strictEqual(
-      summary.snapshots.find((x) => x.provider === "hanzo")!.windows[0]!.usedPercent,
-      90,
-    );
+    const hot: ProviderSnapshot = {
+      ...local,
+      provider: "codex",
+      windows: [{ kind: "weekly", label: "Weekly", usedPercent: 90 }],
+    };
+    const { summary, alerts } = await svc.refresh({ local: [local, hot], cost });
+    assert.strictEqual(summary.snapshots.find((x) => x.provider === "hanzo")!.credits?.balance, 10);
     assert.strictEqual(
       summary.snapshots.find((x) => x.provider === "claude")!.windows[0]!.usedPercent,
       50,
     );
     assert.deepStrictEqual(
       alerts.map((a) => a.provider),
-      ["hanzo"],
+      ["codex"],
     );
-    assert.isTrue(summary.snapshots.some((x) => x.provider === "codex" && x.error));
+    assert.isTrue(summary.snapshots.some((x) => x.provider === "copilot" && x.error));
     const report = svc.report("dev-1", new Date("2026-11-01T00:00:00Z"));
     assert.isTrue(isReport(report));
     assert.strictEqual(report.cost.length, 1);
