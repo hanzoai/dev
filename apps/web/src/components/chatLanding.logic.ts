@@ -39,3 +39,27 @@ export function hostedLanding(input: {
   if (!input.isLoaded) return "loading";
   return input.isSignedIn ? "chat" : "sign-in";
 }
+
+/** A saved thread's row label: its title, else the fallback. */
+export function threadRowLabel(
+  thread: { readonly title: string },
+  fallback: string,
+): string {
+  const title = thread.title.trim();
+  return title === "" ? fallback : title;
+}
+
+/** What "Run in the cloud" says after the sandbox request. Null while nothing was asked. */
+export function cloudRunNote(
+  result: { readonly kind: "started" | "unavailable" | "failed" } | null,
+): "started" | "unavailable" | "failed" | null {
+  return result === null ? null : result.kind;
+}
+
+/** The model pill's label: the chosen model's name, falling back to its id. */
+export function modelPillLabel(
+  models: ReadonlyArray<{ readonly id: string; readonly label: string }>,
+  id: string,
+): string {
+  return models.find((model) => model.id === id)?.label ?? id;
+}
