@@ -1464,3 +1464,36 @@ export function sortScopedProjectsForSidebar<
       left.id.localeCompare(right.id),
   );
 }
+
+/** Titles that differ only in numbers, ids or trailing detail read as one: "workspace: Reply with the si…". */
+export function similarTitleKey(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[0-9a-f]{7,}|\d+/g, "#")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 28);
+}
+
+/**
+ * Runs of three or more neighbours with the same similar-title key, as the leader (newest, the
+ * first of the run) and the followers that fold under it. Nothing is deleted: a folded run opens
+ * from its leader's row.
+ */
+export function foldSimilarRuns(
+  titles: ReadonlyArray<string>,
+  minimum = 3,
+): ReadonlyMap<number, { readonly leader: number; readonly size: number }> {
+  const out = new Map<number, { readonly leader: number; readonly size: number }>();
+  let start = 0;
+  while (start < titles.length) {
+    const key = similarTitleKey(titles[start]!);
+    let end = start + 1;
+    while (end < titles.length && similarTitleKey(titles[end]!) === key) end += 1;
+    if (end - start >= minimum && key !== "") {
+      for (let i = start; i < end; i += 1) out.set(i, { leader: start, size: end - start });
+    }
+    start = end;
+  }
+  return out;
+}

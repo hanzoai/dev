@@ -7,6 +7,8 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import {
+  foldSimilarRuns,
+  similarTitleKey,
   shouldCreateNewThreadInCurrentProject,
   deleteSelectedThreadEntries,
   getFallbackThreadIdAfterDelete,
@@ -1704,5 +1706,24 @@ describe("shouldCreateNewThreadInCurrentProject", () => {
     expect(shouldCreateNewThreadInCurrentProject(false, 1, 3)).toBe(true);
     expect(shouldCreateNewThreadInCurrentProject(false, 0, 0)).toBe(true);
     expect(shouldCreateNewThreadInCurrentProject(true, 2, 2)).toBe(true);
+  });
+});
+
+describe("foldSimilarRuns", () => {
+  it("folds a run of near-duplicate titles under its newest and leaves distinct ones alone", () => {
+    const titles = [
+      "workspace: Reply with the si 1",
+      "workspace: Reply with the si 2",
+      "workspace: Reply with the si 3",
+      "Fix the login redirect",
+      "iam: This branch is hanzoai/ia",
+    ];
+    const folded = foldSimilarRuns(titles);
+    expect([...folded.keys()]).toEqual([0, 1, 2]);
+    expect(folded.get(2)).toEqual({ leader: 0, size: 3 });
+    expect(similarTitleKey("a 12 b")).toBe(similarTitleKey("a 99 b"));
+  });
+  it("needs three in a row to fold", () => {
+    expect(foldSimilarRuns(["same 1", "same 2", "other"]).size).toBe(0);
   });
 });

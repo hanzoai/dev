@@ -211,6 +211,7 @@ import {
   sortThreadsForSidebar,
   sortWorkingThreadsBySend,
   useSnoozeWakeClock,
+  foldSimilarRuns,
   threadShortcutContext,
   useThreadJumpHintsVisible,
   type SidebarListItem,
@@ -1988,6 +1989,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     items.push(...settledRows);
     return items;
   })();
+  // Near-duplicate threads fold under their newest; the run opens from its leader's row.
+  const [openRuns, setOpenRuns] = useState<ReadonlySet<string>>(() => new Set());
   // Preserve the list while streamed updates leave order unchanged to retain row memoization.
   const sidebarListItemsKey = sidebarListItemsFresh
     .map((item) => (item.kind === "thread" ? item.section + ":" + item.key : item.marker))
@@ -3526,11 +3529,55 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           onDraftContextMenu={handleDraftContextMenu}
                         />,
                       ];
+                      const foldable = sidebarListItems.filter(
+                        (item) =>
+                          item.kind === "thread" &&
+                          (item.section === "active" || item.section === "settled"),
+                      );
+                      const folds = foldSimilarRuns(
+                        foldable.map((item) =>
+                          item.kind === "thread" ? (threadByKey.get(item.key)?.title ?? "") : "",
+                        ),
+                      );
+                      const foldIndex = new Map(
+                        foldable.map((item, index) => [item, index] as const),
+                      );
                       for (const item of sidebarListItems) {
                         if (item.kind === "thread") {
                           // Folders draw active rows in their own place below.
                           if (projectFolders !== null && item.section === "active") continue;
+                          const fold = folds.get(foldIndex.get(item) ?? -1);
+                          const leaderKey =
+                            fold && foldable[fold.leader]?.kind === "thread"
+                              ? (foldable[fold.leader] as { key: string }).key
+                              : null;
+                          const isLeader = fold !== undefined && leaderKey === item.key;
+                          if (fold && !isLeader && leaderKey !== null && !openRuns.has(leaderKey)) {
+                            continue;
+                          }
                           items.push(renderThreadRow(threadByKey.get(item.key)!, item.section));
+                          if (isLeader && fold && leaderKey !== null) {
+                            items.push(
+                              <button
+                                key={`similar:${leaderKey}`}
+                                type="button"
+                                data-slot="similar-threads"
+                                aria-expanded={openRuns.has(leaderKey)}
+                                className="text-muted-foreground hover:text-foreground w-full px-3 py-1 text-left text-xs"
+                                onClick={() =>
+                                  setOpenRuns((current) => {
+                                    const next = new Set(current);
+                                    if (!next.delete(leaderKey)) next.add(leaderKey);
+                                    return next;
+                                  })
+                                }
+                              >
+                                {openRuns.has(leaderKey)
+                                  ? gt("Hide {count} similar", { count: String(fold.size - 1) })
+                                  : gt("{count} similar", { count: String(fold.size - 1) })}
+                              </button>,
+                            );
+                          }
                           continue;
                         }
                         if (projectFolders !== null && item.marker === "active-placeholder") {

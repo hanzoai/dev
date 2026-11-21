@@ -2491,6 +2491,8 @@
   "0b58e43fd858408a": "Keine aktiven Threads in {project}",
   "e3ed00af71363d39": "Noch keine Threads in diesen Projekten",
   "981053bcf95b3d3f": "Noch keine Threads in {project}",
+  "38b4a0e3f95f7737": "Hide {count} similar",
+  "0c48bb344334030f": "{count} similar",
   "151767f20fa67c48": "Angeheftet",
   "db8f17154d4f0cfa": "Aktiv",
   "9578dc3e84f82081": "In Arbeit",
