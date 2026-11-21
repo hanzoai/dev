@@ -84,14 +84,11 @@ const WireDesktop = Schema.Struct({
   arch: Schema.String,
   version: Schema.String,
   state: Schema.Literals(["online", "offline", "revoked"]),
-  last_seen: Schema.NullOr(Schema.String),
+  last_seen: Schema.optional(Schema.String),
   linked_at: Schema.String,
   providers: Schema.optional(Schema.Array(WireProvider)),
 });
-const WireDesktopList = Schema.Union([
-  Schema.Array(WireDesktop),
-  Schema.Struct({ desktops: Schema.Array(WireDesktop) }),
-]);
+const WireDesktopList = Schema.Struct({ sources: Schema.Array(WireDesktop) });
 
 const decodeLinkReply = Schema.decodeUnknownEffect(LinkReply);
 const decodeBeatReply = Schema.decodeUnknownEffect(BeatReply);
@@ -105,7 +102,7 @@ const toDesktop = (wire: typeof WireDesktop.Type): Desktop => ({
   arch: wire.arch,
   version: wire.version,
   state: wire.state,
-  lastSeen: wire.last_seen,
+  lastSeen: wire.last_seen ?? null,
   linkedAt: wire.linked_at,
   providers: (wire.providers ?? []).map((provider) => ({
     provider: provider.provider,
@@ -161,14 +158,32 @@ const ownerOf = (accessToken: string): string | null => {
   }
 };
 
+/** The bytes a heartbeat's `sig` covers; cloud's `beatMessage` builds the same string. */
+const beatMessage = (beat: {
+  readonly id: string;
+  readonly at: string;
+  readonly version: string;
+  readonly zap: string;
+  readonly busy: number;
+  readonly providers: ReadonlyArray<DesktopProviderState>;
+}) =>
+  [
+    "hanzo-source-heartbeat/1",
+    beat.id,
+    beat.at,
+    beat.version,
+    beat.zap,
+    String(beat.busy),
+    ...beat.providers.map((p) => [p.provider, p.instance, p.kind, p.state, p.plan ?? ""].join(",")),
+  ]
+    .map((line) => `${line}\n`)
+    .join("");
+
 const iso = (epochMs: number) => DateTime.formatIso(DateTime.makeUnsafe(epochMs));
 // Pretty-printed so the Settings view shows the very bytes that are sent.
 const encodeBody = (value: unknown) => JSON.stringify(value, null, 2);
 
 const subtle = () => globalThis.crypto.subtle;
-const bytesToHex = (bytes: ArrayBuffer) =>
-  Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
-
 export class DesktopLink extends Context.Service<
   DesktopLink,
   {
@@ -253,26 +268,20 @@ const make = Effect.gen(function* () {
     return key.value;
   }).pipe(Effect.withSpan("DesktopLink.readDeviceKey"));
 
-  const sign = Effect.fn("DesktopLink.sign")(function* (
+  const signBeat = Effect.fn("DesktopLink.signBeat")(function* (
     key: typeof DeviceKeyJwk.Type,
-    method: string,
-    path: string,
-    body: string,
+    message: string,
   ) {
-    const timestamp = String(yield* Clock.currentTimeMillis);
     const signature = yield* Effect.tryPromise({
       try: async () => {
         const privateKey = await subtle().importKey("jwk", key, "Ed25519", false, ["sign"]);
-        const digest = bytesToHex(await subtle().digest("SHA-256", new TextEncoder().encode(body)));
-        const message = new TextEncoder().encode(`${method}\n${path}\n${timestamp}\n${digest}`);
-        return new Uint8Array(await subtle().sign("Ed25519", privateKey, message));
+        return new Uint8Array(
+          await subtle().sign("Ed25519", privateKey, new TextEncoder().encode(message)),
+        );
       },
       catch: storageFailure,
     });
-    return {
-      "x-hanzo-timestamp": timestamp,
-      "x-hanzo-signature": Base64Url.encode(signature),
-    };
+    return Base64Url.encode(signature);
   });
 
   /** One call to the registry. The status code is the caller's to read, the body is JSON. */
@@ -280,12 +289,9 @@ const make = Effect.gen(function* () {
     readonly method: "GET" | "POST" | "DELETE";
     readonly path: string;
     readonly accessToken: string;
-    readonly key: typeof DeviceKeyJwk.Type;
     readonly body?: string;
   }) {
     const url = `${apiBaseUrl}${input.path}`;
-    const body = input.body ?? "";
-    const headers = yield* sign(input.key, input.method, input.path, body);
     const base =
       input.method === "GET"
         ? HttpClientRequest.get(url)
@@ -294,7 +300,6 @@ const make = Effect.gen(function* () {
           : HttpClientRequest.delete(url);
     const request = base.pipe(
       HttpClientRequest.bearerToken(input.accessToken),
-      HttpClientRequest.setHeaders(headers),
       input.body === undefined
         ? (self) => self
         : HttpClientRequest.bodyText(input.body, "application/json"),
@@ -346,10 +351,22 @@ const make = Effect.gen(function* () {
     ),
   );
 
-  const beatBody = (providers: ReadonlyArray<DesktopProviderState>) =>
+  // Before the first heartbeat there is no id or signature, so the preview shows the rest.
+  const beatPreview = (providers: ReadonlyArray<DesktopProviderState>) =>
     Clock.currentTimeMillis.pipe(
-      Effect.map((now) => encodeBody({ at: iso(now), version, providers })),
+      Effect.map((now) => encodeBody({ at: iso(now), version, zap: "", busy: 0, providers })),
     );
+
+  const signedBeat = Effect.fn("DesktopLink.signedBeat")(function* (
+    id: string,
+    key: typeof DeviceKeyJwk.Type,
+    providers: ReadonlyArray<DesktopProviderState>,
+  ) {
+    const at = iso(yield* Clock.currentTimeMillis);
+    const beat = { id, at, version, zap: "", busy: 0, providers };
+    const sig = yield* signBeat(key, beatMessage(beat));
+    return encodeBody({ ...beat, sig });
+  });
 
   const buildStatus = Effect.gen(function* () {
     const record = yield* readRecord;
@@ -383,7 +400,7 @@ const make = Effect.gen(function* () {
       lastHeartbeatAt: state.lastHeartbeatAtMs === null ? null : iso(state.lastHeartbeatAtMs),
       level: state.level,
       providers,
-      report: { body: state.lastBody ?? (yield* beatBody(providers)), sent },
+      report: { body: state.lastBody ?? (yield* beatPreview(providers)), sent },
     } satisfies DesktopLinkStatus;
   });
 
@@ -393,12 +410,11 @@ const make = Effect.gen(function* () {
     const stored = yield* tokens.getExisting.pipe(Effect.orElseSucceed(() => Option.none()));
     if (Option.isNone(stored)) return;
     const key = yield* readDeviceKey;
-    const body = yield* beatBody(yield* reportedProviders);
+    const body = yield* signedBeat(record.value.id, key, yield* reportedProviders);
     const response = yield* call({
       method: "POST",
       path: `/v1/sources/${encodeURIComponent(record.value.id)}/heartbeat`,
       accessToken: stored.value.accessToken,
-      key,
       body,
     });
     const now = yield* Clock.currentTimeMillis;
@@ -406,6 +422,8 @@ const make = Effect.gen(function* () {
       yield* clearLocal;
       return;
     }
+    // 409 and 429 mean this beat was not newer or came too soon; the next one is fine.
+    if (response.status === 409 || response.status === 429) return;
     if (response.status !== 200) return yield* reject(response.status);
     yield* Ref.update(runtime, (state) => ({ ...state, lastHeartbeatAtMs: now, lastBody: body }));
     const reply = yield* decodeBeatReply(response.json).pipe(
@@ -428,7 +446,6 @@ const make = Effect.gen(function* () {
       method: "POST",
       path: "/v1/sources",
       accessToken,
-      key,
       body: encodeBody({
         kind: "desktop",
         name,
@@ -485,12 +502,10 @@ const make = Effect.gen(function* () {
 
   const revokeRemote = Effect.fn("DesktopLink.revokeRemote")(function* (id: string) {
     const stored = yield* requireToken;
-    const key = yield* readDeviceKey;
     const response = yield* call({
       method: "DELETE",
       path: `/v1/sources/${encodeURIComponent(id)}`,
       accessToken: stored.accessToken,
-      key,
     });
     // A desktop that is already revoked or gone is the state the caller asked for.
     if (response.status !== 404 && response.status !== 410 && !(response.status < 300)) {
@@ -529,18 +544,16 @@ const make = Effect.gen(function* () {
 
   const list = Effect.fn("DesktopLink.list")(function* () {
     const stored = yield* requireToken;
-    const key = yield* readDeviceKey;
     const response = yield* call({
       method: "GET",
       path: "/v1/sources",
       accessToken: stored.accessToken,
-      key,
     });
     if (response.status !== 200) return yield* reject(response.status);
     const wire = yield* decodeDesktopList(response.json).pipe(
       Effect.mapError((cause) => fail("rejected", "Hanzo sent an unreadable reply.", cause)),
     );
-    return (Array.isArray(wire) ? wire : "desktops" in wire ? wire.desktops : []).map(toDesktop);
+    return wire.sources.map(toDesktop);
   });
 
   const revoke = Effect.fn("DesktopLink.revoke")(function* (id: string) {

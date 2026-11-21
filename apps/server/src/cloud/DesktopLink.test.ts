@@ -154,8 +154,12 @@ it.effect("a heartbeat reports provider state only and is signed by the device k
       assert.equal(heartbeat.path, "/v1/sources/src_1/heartbeat");
       assert.deepEqual(Object.keys(JSON.parse(heartbeat.body)).toSorted(), [
         "at",
+        "busy",
+        "id",
         "providers",
+        "sig",
         "version",
+        "zap",
       ]);
       assert.deepEqual(JSON.parse(heartbeat.body).providers, [
         { provider: "claude", instance: "claude", kind: "login", state: "ready", plan: "max" },
@@ -176,28 +180,27 @@ it.effect("a heartbeat reports provider state only and is signed by the device k
           ["verify"],
         ),
       );
-      const digest = yield* Effect.promise(async () =>
-        Array.from(
-          new Uint8Array(
-            await globalThis.crypto.subtle.digest(
-              "SHA-256",
-              new TextEncoder().encode(heartbeat.body),
-            ),
-          ),
-          (byte) => byte.toString(16).padStart(2, "0"),
-        ).join(""),
-      );
-      const decoded = Base64Url.decode(heartbeat.headers["x-hanzo-signature"] ?? "");
+      const sig = JSON.parse(heartbeat.body).sig as string;
+      assert.notInclude(sig, "=");
+      const decoded = Base64Url.decode(sig);
       assert.equal(decoded._tag, "Success");
       const signature = decoded._tag === "Success" ? decoded.success : new Uint8Array();
+      // Cloud's beatMessage (apps/source/source.go), written out by hand for these fields.
+      const expected =
+        "hanzo-source-heartbeat/1\n" +
+        "src_1\n" +
+        "1970-01-01T00:00:00.000Z\n" +
+        `${JSON.parse(heartbeat.body).version}\n` +
+        "\n" +
+        "0\n" +
+        "claude,claude,login,ready,max\n" +
+        "codex,codex,login,needs_login,\n";
       const verified = yield* Effect.promise(() =>
         globalThis.crypto.subtle.verify(
           "Ed25519",
           verifyKey,
           signature,
-          new TextEncoder().encode(
-            `POST\n${heartbeat.path}\n${heartbeat.headers["x-hanzo-timestamp"]}\n${digest}`,
-          ),
+          new TextEncoder().encode(expected),
         ),
       );
       assert.equal(verified, true);
