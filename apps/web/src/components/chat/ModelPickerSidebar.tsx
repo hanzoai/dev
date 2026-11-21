@@ -233,7 +233,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                             aria-label={ENSO}
                             aria-pressed={props.selectedInstanceId === "enso"}
                           >
-                            <EnsoRing gap={0} className="size-5 shrink-0" />
+                            <EnsoRing gap={0} className="size-4.5 shrink-0" />
                           </Toolbar.Button>
                         }
                       />

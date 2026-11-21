@@ -29,6 +29,8 @@ export const ModelListRow = memo(function ModelListRow(props: {
   /** In Favorites every row is starred, so the star shows only on hover. */
   favoriteStarOnHover?: boolean;
   isSelected: boolean;
+  /** The chosen effort of the selected Enso row; other Enso rows show the plain ring. */
+  ensoRing?: { readonly gap: number; readonly dot: boolean } | null;
   /** Marks this instance apart from another of the same provider. */
   showInstanceBadge: boolean;
   showNewBadge?: boolean;
@@ -59,7 +61,11 @@ export const ModelListRow = memo(function ModelListRow(props: {
     >
       {/* One row shape in every tab: the logo names the provider, so Favorites needs no second line. */}
       {props.driverKind === "hanzo" && isEnsoModel(props.slug) ? (
-        <EnsoRing gap={0} className="size-4 shrink-0" />
+        <EnsoRing
+          gap={props.isSelected ? (props.ensoRing?.gap ?? 0) : 0}
+          dot={props.isSelected ? (props.ensoRing?.dot ?? false) : false}
+          className="size-4 shrink-0"
+        />
       ) : (
         <ProviderInstanceIcon
           driverKind={props.driverKind}

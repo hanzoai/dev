@@ -79,7 +79,14 @@
     "apps/web": {
       // Worktree setup (scripts/setup-worktree.ts) runs this directly, and evidence
       // fixtures run under node.
-      "entry": ["scripts/warm-dep-cache.ts", "test/fixtures/**/*.mjs"],
+      // `@hanzo/dev-core` is built from the embed config (build:embed, publish-dev-core).
+      "entry": [
+        "scripts/warm-dep-cache.ts",
+        "test/fixtures/**/*.mjs",
+        "vite.embed.config.ts",
+        "src/embed/index.ts",
+        "src/embed/keymap.ts",
+      ],
       // UI component modules are copied and adapted as cohesive sets. Keep their
       // named subcomponents even before they have callers; the file audit still
       // reports an entire component module when nothing imports it.
@@ -102,6 +109,8 @@
       // Fonts are configured as asset paths; Expo autolinks the native packages.
       "ignoreDependencies": [
         "@expo-google-fonts/dm-sans",
+        // app.config.ts names its font files by path.
+        "@hanzo/font",
         "@hanzodev/mobile-review-diff-native",
         "@hanzodev/mobile-terminal-native",
       ],

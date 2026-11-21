@@ -2472,9 +2472,6 @@ importers:
 
   packages/usage:
     dependencies:
-      '@hanzodev/shared':
-        specifier: workspace:*
-        version: link:../shared
       effect:
         specifier: 4.1.3
         version: 4.1.3

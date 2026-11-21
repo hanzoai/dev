@@ -308,6 +308,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             },
           }
         : {})}
+      activeRing={props.triggerRing ?? null}
       lockedProvider={props.lockedProvider}
       lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
       instanceEntries={props.instanceEntries}

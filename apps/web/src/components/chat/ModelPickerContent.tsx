@@ -362,6 +362,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   docked?: boolean;
   /** Right at the end of the search text moves into the popup's effort column. */
   onFocusEffort?: () => void;
+  /** The active Enso model's effort ring, shown on its selected row. */
+  activeRing?: { readonly gap: number; readonly dot: boolean } | null;
   /** Closes the list column, inside the popup's fixed height. */
   listFooter?: ReactNode;
 }) {
@@ -1231,6 +1233,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         ? selectedModelKeySet.has(modelKey)
                         : modelKey === activeModelKey
                     }
+                    ensoRing={selectedModelKeys === undefined ? props.activeRing : null}
                     favoriteStarOnHover={selectedInstanceId === "favorites" && !isSearching}
                     showInstanceBadge={badgedInstanceIds.has(model.instanceId)}
                     showNewBadge={model.badge === "new"}
