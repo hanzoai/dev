@@ -819,6 +819,28 @@ jobs:
           merge-multiple: true
           path: release-assets
 
+      # The Dev server for cloud sandbox cells (hanzoai/dev#55): the Linux archive with its
+      # executable named `hanzo-dev` at the root, as hanzo-dev-linux-<amd64|arm64>.tar.gz,
+      # each with a .sha256 beside it. The name never collides with the cloud CLI `hanzo`.
+      - name: Package hanzo-dev server archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          for pair in x64:amd64 arm64:arm64; do
+            src=(hanzo-*-linux-"${pair%%:*}".tar.gz)
+            [[ -f "${src[0]}" ]] || { echo "Missing Linux ${pair%%:*} CLI archive." >&2; exit 1; }
+            work="$(mktemp -d)"
+            tar -xzf "${src[0]}" -C "$work"
+            root="$(find "$work" -mindepth 1 -maxdepth 1 -type d | head -1)"
+            mv "$root/hanzo" "$root/hanzo-dev"
+            out="hanzo-dev-linux-${pair##*:}.tar.gz"
+            tar -czf "$out" -C "$root" .
+            sha256sum "$out" | cut -d' ' -f1 > "$out.sha256"
+            echo "$out $(cat "$out.sha256")"
+            rm -rf "$work"
+          done
+
       # Installers verify archives against this file, so it is written from the
       # signed bytes that get uploaded, never from an earlier stage.
       - name: Write CLI archive checksums
@@ -886,6 +908,7 @@ jobs:
                 [[ -f "$apk" ]] && echo "$apk"
               done
             fi
+            echo 'release-assets/*.sha256'
             echo 'release-assets/SHA256SUMS'
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
