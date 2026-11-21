@@ -46,9 +46,9 @@ jobs:
         if: steps.ahead.outputs.release == 'true'
         run: |
           set -euo pipefail
-          npm install -g vite-plus
-          vp install --ignore-scripts --filter '@hanzodev/web...'
-          vp run --filter @hanzodev/web build:embed
+          corepack enable
+          pnpm install --frozen-lockfile --ignore-scripts --filter '@hanzodev/web...'
+          (cd apps/web && ./node_modules/.bin/vp build --config vite.embed.config.ts)
           test -s packages/dev/dist/index.js
           test -s packages/dev/dist/index.css
 
