@@ -8,6 +8,9 @@ import { tailwindPlugins } from "./vite/tailwind";
 import pkg from "./package.json" with { type: "json" };
 
 export default defineConfig({
+  // Relative, so a worker the library ships is addressed from the file that starts it; an
+  // absolute "/assets/..." is the host's own server root, which a host's bundler cannot resolve.
+  base: "./",
   publicDir: false, // the host serves its own public files; the library ships code and its own assets
   assetsInclude: ["**/*.wasm"],
   plugins: [tanstackRouter({ autoCodeSplitting: false }), react({ compiler: true }), tailwindPlugins(false)],
