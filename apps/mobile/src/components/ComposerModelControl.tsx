@@ -1,6 +1,6 @@
 import type { ModelSelection, ProviderDriverKind } from "@hanzodev/contracts";
 import { useGT, useMessages } from "gt-react-native";
-import { ensoRingGap, isEnsoModel } from "@hanzodev/client-runtime/enso-ring";
+import { ensoRingDot, ensoRingGap, isEnsoModel } from "@hanzodev/client-runtime/enso-ring";
 import {
   buildTraitsTriggerDisplay,
   getDescriptorStringValue,
@@ -94,6 +94,7 @@ export function ComposerModelControl(props: {
               ensoSelect.options.map((option) => option.id),
               ensoEffort,
             )}
+            ensoDot={ensoRingDot(ensoEffort)}
             size={size}
           />
         ) : badge?.showBadge ? (

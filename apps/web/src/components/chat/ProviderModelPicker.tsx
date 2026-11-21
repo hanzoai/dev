@@ -122,7 +122,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /** Names the suffix for the tooltip and screen readers. */
   triggerDetail?: string | null;
   /** Open share of the Enso ring when the model is Enso; the ring then stands in for the logo. */
-  triggerRingGap?: number | null;
+  triggerRing?: { readonly gap: number; readonly dot: boolean } | null;
   /** Composer shortcuts this trigger answers besides the picker's own. */
   triggerShortcuts?: string;
   /**
@@ -418,9 +418,10 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           ) : activeEntry && props.triggerLabel === undefined ? (
             // Narrow compacted composers hide the provider icon before truncating the name.
             <span data-chat-provider-model-picker-icon className="contents">
-              {props.triggerRingGap != null ? (
+              {props.triggerRing != null ? (
                 <EnsoRing
-                  gap={props.triggerRingGap}
+                  gap={props.triggerRing.gap}
+                  dot={props.triggerRing.dot}
                   className={cn("size-4 shrink-0", props.activeProviderIconClassName)}
                 />
               ) : (
