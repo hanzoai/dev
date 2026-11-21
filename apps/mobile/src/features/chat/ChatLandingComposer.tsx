@@ -5,11 +5,9 @@ import {
 } from "@hanzodev/client-runtime/cloud-chat";
 import { EnvironmentId, MessageId, ProjectId, ThreadId } from "@hanzodev/contracts";
 import { useGT } from "gt-react-native";
-import { View } from "react-native";
 import { useSharedValue } from "react-native-reanimated";
 
 import * as Dialog from "../../components/ui/Dialog";
-import { ComposerInlineControl } from "../../components/ComposerToolbar";
 import { useComposerAttachmentActions } from "../../state/use-composer-attachment-actions";
 import {
   clearComposerDraftContent,
@@ -44,7 +42,6 @@ const CREATED_AT = "2026-01-01T00:00:00.000Z";
 export function ChatLandingComposer(props: {
   readonly chat: CloudChat;
   readonly bottomInset: number;
-  readonly onBuild: () => void;
   readonly onHeightChange: (height: number) => void;
   /** Sends the draft as a chat; false when it cannot be sent as one. */
   readonly onSend: (prompt: string, attachments: ReadonlyArray<CloudChatAttachment>) => boolean;
@@ -114,17 +111,6 @@ export function ChatLandingComposer(props: {
         canOperateThread
         canSwitchProvider
         placeholder={gt("Ask anything")}
-        draftControls={
-          <View className="flex-row gap-2 pb-2">
-            <ComposerInlineControl
-              icon="hammer"
-              label={gt("Build")}
-              showChevron={false}
-              accessibilityLabel={gt("Build on a machine")}
-              onPress={props.onBuild}
-            />
-          </View>
-        }
         bottomInset={props.bottomInset}
         connectionState="connected"
         environmentLabel={null}

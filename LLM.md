@@ -32,6 +32,8 @@ Hanzo Dev has 3 key app surfaces: **web**, **desktop**, and **mobile**.
 
 **Mobile** is a React Native app for both iOS and Android, available on the App Store and Google Play. The mobile app allows for connecting to any Hanzo Dev server to control work remotely.
 
+The mobile app is the one Hanzo app (display name "Hanzo", default icon the Hanzo H). Its phone drawer is hanzo.app's sidebar: New chat, then Chat (default landing), Dev, Design, Library, Tabs, then Recents (cloud chat threads), then the account. Dev holds the thread, pull request, issue, usage and linked Mac lists. Design, Library and Tabs are hanzo.ai routes in a web view (`WorkspaceWebSection`) that receives the active account's tokens in the `hanzo_iam_*` localStorage keys hanzo.app reads (`workspace-web.logic.ts`). Section model: `apps/mobile/src/features/layout/workspace/workspace-section.logic.ts`.
+
 ## Engineering Philosophy
 
 Prefer ambitious ideas, simple systems, and software that feels obvious. Do not preserve complexity just because it already exists. Do not introduce machinery because it looks architecturally impressive. Understand the real constraint, then fight for the smallest model that makes the correct behavior unsurprising.

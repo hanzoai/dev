@@ -7,12 +7,10 @@ import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/ui/AppText";
-import { getComposerDraftSnapshot } from "../../state/use-composer-drafts";
 import { useWorkspaceState } from "../../state/workspace";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import { openSettings } from "../settings/settings-navigation";
 import {
-  CHAT_LANDING_DRAFT_KEY,
   resolveSend,
   sandboxNotice,
   type RunTarget,
@@ -20,7 +18,7 @@ import {
 import { ChatLandingComposer } from "./ChatLandingComposer";
 import { useCloudChat } from "./cloud-chat";
 
-/** What a signed-in phone opens on: a new chat. An environment is asked for only to build. */
+/** What a signed-in phone opens on: a new chat. Where to run (a Mac or the cloud) is picked in the Dev section. */
 export function PhoneChatLanding() {
   const gt = useGT();
   const insets = useSafeAreaInsets();
@@ -134,7 +132,6 @@ export function PhoneChatLanding() {
             chat={cloudChat}
             bottomInset={insets.bottom}
             onSend={(prompt, attachments) => send(prompt, false, attachments)}
-            onBuild={() => send(getComposerDraftSnapshot(CHAT_LANDING_DRAFT_KEY).text, true)}
             onHeightChange={setComposerHeight}
           />
         </View>
