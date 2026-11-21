@@ -1,4 +1,5 @@
 import { T } from "gt-react";
+import { useState } from "react";
 import { CloudIcon, LaptopIcon } from "lucide-react";
 
 import { Button } from "../components/ui/button";
@@ -13,10 +14,17 @@ export function DevStart({
   onLink,
   className,
 }: {
-  onCloud: () => void;
+  /** Leases a cloud session; resolves false when none could be had. */
+  onCloud: () => Promise<boolean | void> | void;
   onLink: () => void;
   className?: string;
 }) {
+  const [cloud, setCloud] = useState<"idle" | "starting" | "unavailable">("idle");
+  const startCloud = async () => {
+    setCloud("starting");
+    const started = await onCloud();
+    setCloud(started === false ? "unavailable" : "idle");
+  };
   return (
     <Empty className={className} data-dev-start="">
       <div className="w-full max-w-lg px-8 py-12">
@@ -29,7 +37,7 @@ export function DevStart({
           </EmptyDescription>
         </EmptyHeader>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
-          <Button onClick={onCloud}>
+          <Button onClick={() => void startCloud()} disabled={cloud === "starting"}>
             <CloudIcon />
             <T>Start a cloud session</T>
           </Button>
@@ -38,6 +46,11 @@ export function DevStart({
             <T>Link my machine</T>
           </Button>
         </div>
+        {cloud === "unavailable" ? (
+          <p role="status" className="mt-4 text-center text-sm text-muted-foreground">
+            <T>Cloud sessions are not available right now. Link your machine instead, or try again shortly.</T>
+          </p>
+        ) : null}
       </div>
     </Empty>
   );

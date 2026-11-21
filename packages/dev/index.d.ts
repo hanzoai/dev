@@ -37,7 +37,7 @@ export function DevWorkspace(props: {
 }): ReactNode;
 
 export function DevStart(props: {
-  onCloud: () => void;
+  onCloud: () => Promise<boolean | void> | void;
   onLink: () => void;
   className?: string;
 }): ReactNode;
