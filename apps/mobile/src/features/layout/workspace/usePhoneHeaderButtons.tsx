@@ -30,14 +30,20 @@ export function usePhoneHeaderButtons() {
   const newChat = usePhoneNewChat();
   return {
     menu: (
-      <Toolbar.Custom>
-        <WorkspaceMenuButton accessibilityLabel={gt("Open menu")} onPress={openWorkspaceDrawer} />
-      </Toolbar.Custom>
+      <Toolbar.Button
+        identifier="phone-menu"
+        accessibilityLabel={gt("Open menu")}
+        icon="line.3.horizontal"
+        onPress={openWorkspaceDrawer}
+      />
     ),
     compose: (
-      <Toolbar.Custom>
-        <WorkspaceComposeButton accessibilityLabel={gt("New chat")} onPress={newChat} />
-      </Toolbar.Custom>
+      <Toolbar.Button
+        identifier="phone-compose"
+        accessibilityLabel={gt("New chat")}
+        icon="square.and.pencil"
+        onPress={newChat}
+      />
     ),
   };
 }

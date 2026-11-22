@@ -44,7 +44,7 @@ if (
 const DEVELOPMENT_ASSETS = {
   appIcon: HANZO_ICON,
   iosIcon: HANZO_ICON,
-  splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
+  splashIcon: HANZO_ICON,
   androidAdaptiveForeground,
   androidAdaptiveBackgroundColor: "#347FF8",
   androidAdaptiveBackgroundImage: "./assets/android-icon-background-dev.png",
@@ -57,7 +57,7 @@ const DEVELOPMENT_ASSETS = {
 const PREVIEW_ASSETS = {
   appIcon: HANZO_ICON,
   iosIcon: HANZO_ICON,
-  splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
+  splashIcon: HANZO_ICON,
   androidAdaptiveForeground,
   androidAdaptiveBackgroundColor: "#111533",
   androidAdaptiveBackgroundImage: "./assets/android-icon-background-nightly.png",
@@ -70,7 +70,7 @@ const PREVIEW_ASSETS = {
 const RELEASE_ASSETS = {
   appIcon: HANZO_ICON,
   iosIcon: HANZO_ICON,
-  splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
+  splashIcon: HANZO_ICON,
   androidAdaptiveForeground,
   androidAdaptiveBackgroundColor: "#000000",
   androidAdaptiveBackgroundImage: undefined,
