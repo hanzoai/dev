@@ -15,7 +15,7 @@ const WIDGET_SWIFT_FILES = [
   "HanzoAppIntents.swift",
   "HanzoControls.swift",
 ];
-const APP_SWIFT_FILES = ["HanzoAppIntents.swift"];
+const APP_SWIFT_FILES = ["Hanzo/HanzoAppIntents.swift"];
 
 function withSwiftSources(config) {
   return withDangerousMod(config, [
@@ -30,7 +30,8 @@ function withSwiftSources(config) {
         fs.copyFileSync(path.join(srcDir, file), path.join(widgetDst, file));
       }
       for (const file of APP_SWIFT_FILES) {
-        fs.copyFileSync(path.join(srcDir, file), path.join(appDst, file));
+        const base = path.basename(file);
+        fs.copyFileSync(path.join(srcDir, base), path.join(appDst, base));
       }
       const indexPath = path.join(widgetDst, "index.swift");
       if (fs.existsSync(indexPath)) {
