@@ -283,10 +283,34 @@ const config: ExpoConfig = {
         NSAllowsArbitraryLoads: true,
       },
       NSLocalNetworkUsageDescription:
-        "Allow Hanzo to connect to Hanzo Dev servers on your local network or tailnet.",
+        "Allow Hanzo AI to connect to local hanzod, ZAP peers, and paired Macs on your network or tailnet.",
       // Built with the iOS 27 SDK, only view controllers can hide or style the status bar.
       UIViewControllerBasedStatusBarAppearance: true,
-      NSPhotoLibraryAddUsageDescription: "Allow Hanzo to save images to your photo library.",
+      // Opt-in Files app, media, sensors, Siri/Shortcuts & personal data access for AI automation.
+      UIFileSharingEnabled: true,
+      LSSupportsOpeningDocumentsInPlace: true,
+      NSDocumentsFolderUsageDescription:
+        "Allow Hanzo AI to read and write files you select in your Documents folder.",
+      NSPhotoLibraryUsageDescription:
+        "Allow Hanzo AI to read photos and screenshots you attach for visual analysis.",
+      NSPhotoLibraryAddUsageDescription:
+        "Allow Hanzo AI to save generated and edited images to your photo library.",
+      NSCameraUsageDescription:
+        "Allow Hanzo AI to use your camera for visual questions, document capture, and QR pairing.",
+      NSMicrophoneUsageDescription:
+        "Allow Hanzo AI to use your microphone for voice chat and hands-free dictation.",
+      NSSpeechRecognitionUsageDescription:
+        "Allow Hanzo AI to transcribe your speech on-device for voice commands and dictation.",
+      NSSiriUsageDescription:
+        "Allow Hanzo AI to answer questions and run automations through Siri, Shortcuts, and Control Center.",
+      NSCalendarsFullAccessUsageDescription:
+        "Allow Hanzo AI to read and create calendar events when you enable Calendar access.",
+      NSRemindersFullAccessUsageDescription:
+        "Allow Hanzo AI to read and manage reminders when you enable Reminders access.",
+      NSContactsUsageDescription:
+        "Allow Hanzo AI to look up contacts when drafting messages or scheduling when you enable Contacts access.",
+      NSLocationWhenInUseUsageDescription:
+        "Allow Hanzo AI to use your current location for local context and automations when enabled.",
       // System picture in picture needs background audio to start and survive outside the app.
       UIBackgroundModes: ["audio"],
       ITSAppUsesNonExemptEncryption: false,

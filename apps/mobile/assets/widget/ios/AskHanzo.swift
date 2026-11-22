@@ -32,6 +32,7 @@ enum AskHanzoAction: String, CaseIterable, AppEnum {
   case models
   case usage
   case environments
+  case permissions
   case settings
 
   static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Quick Action")
@@ -46,6 +47,7 @@ enum AskHanzoAction: String, CaseIterable, AppEnum {
     .models: DisplayRepresentation(title: "Models", image: .init(systemName: "sparkles")),
     .usage: DisplayRepresentation(title: "Usage", image: .init(systemName: "chart.bar")),
     .environments: DisplayRepresentation(title: "Machines", image: .init(systemName: "desktopcomputer")),
+    .permissions: DisplayRepresentation(title: "AI Permissions", image: .init(systemName: "hand.raised")),
     .settings: DisplayRepresentation(title: "Settings", image: .init(systemName: "gearshape")),
   ]
 
@@ -60,6 +62,7 @@ enum AskHanzoAction: String, CaseIterable, AppEnum {
     case .models: return "sparkles"
     case .usage: return "chart.bar"
     case .environments: return "desktopcomputer"
+    case .permissions: return "hand.raised"
     case .settings: return "gearshape"
     }
   }
@@ -75,6 +78,7 @@ enum AskHanzoAction: String, CaseIterable, AppEnum {
     case .models: return "Models"
     case .usage: return "Usage"
     case .environments: return "Machines"
+    case .permissions: return "Permissions"
     case .settings: return "Settings"
     }
   }
@@ -91,6 +95,7 @@ enum AskHanzoAction: String, CaseIterable, AppEnum {
     case .models: raw = "hanzodev://chat/settings"
     case .usage: raw = "hanzodev://settings/usage"
     case .environments: raw = "hanzodev://settings/environments"
+    case .permissions: raw = "hanzodev://settings/permissions"
     case .settings: raw = "hanzodev://settings"
     }
     return URL(string: raw)!

@@ -23,6 +23,7 @@ export const SETTINGS_PAGE_TARGETS = [
   "SettingsClientStorage",
   "SettingsDiagnostics",
   "SettingsOpenSourceLicenses",
+  "SettingsPermissions",
   "SettingsUsage",
 ] as const;
 

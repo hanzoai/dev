@@ -140,6 +140,7 @@ import { UsageLimitAccountScreen } from "./features/usage/UsageLimitsPooled";
 import { UsageRouteScreen } from "./features/usage/UsageRouteScreen";
 import { SettingsAboutRouteScreen } from "./features/settings/SettingsAboutRouteScreen";
 import { SettingsNotificationsRouteScreen } from "./features/settings/SettingsNotificationsRouteScreen";
+import { SettingsPermissionsRouteScreen } from "./features/settings/SettingsPermissionsRouteScreen";
 import { SettingsRouteScreen } from "./features/settings/SettingsRouteScreen";
 import { SettingsLabsRouteScreen } from "./features/settings/ThreadSettingsSections";
 import { SettingsEnvironmentFilterProvider } from "./features/settings/settings-environment-filter";
@@ -178,6 +179,7 @@ const ROUTE_TITLES: Readonly<Record<string, string>> = {
   SettingsProviderAccounts: msg("Providers"),
   SettingsEnvironmentMaintenance: msg("Maintenance"),
   SettingsNotifications: msg("Notifications"),
+  SettingsPermissions: msg("AI Permissions & Automation"),
   SettingsThreads: msg("Threads"),
   SettingsAbout: msg("About"),
   SettingsEnvironmentNew: msg("Add Environment"),
@@ -422,6 +424,11 @@ const SETTINGS_SCREENS = {
   SettingsUsage: createNativeStackScreen({
     screen: UsageRouteScreen,
     linking: "settings/usage",
+    options: settingsPage(),
+  }),
+  SettingsPermissions: createNativeStackScreen({
+    screen: SettingsPermissionsRouteScreen,
+    linking: "settings/permissions",
     options: settingsPage(),
   }),
   SettingsAuth: createNativeStackScreen({

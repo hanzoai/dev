@@ -265,6 +265,7 @@ function useSettingsIndexSections(): SettingsListSection[] {
           : []),
         page("SettingsKeyboard", "keyboard", gt("Keyboard")),
         page("SettingsVoice", "mic", gt("Voice")),
+        page("SettingsPermissions", "hand.raised", gt("AI Permissions & Automation")),
       ],
     },
     {

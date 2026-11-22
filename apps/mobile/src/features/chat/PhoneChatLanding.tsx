@@ -37,7 +37,7 @@ export function PhoneChatLanding() {
     return true;
   };
 
-  const firstName = firstNameOf(activeAccount?.displayName ?? activeAccount?.name);
+  const firstName = firstNameOf(activeAccount?.displayName);
   const hour = new Date().getHours();
   const partOfDay =
     hour < 12 ? gt("Good morning") : hour < 18 ? gt("Good afternoon") : gt("Good evening");
