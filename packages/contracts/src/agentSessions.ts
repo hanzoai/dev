@@ -1,5 +1,12 @@
 import * as Schema from "effect/Schema";
-import { IsoDateTime, NonNegativeInt, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import {
+  IsoDateTime,
+  NonNegativeInt,
+  ProjectId,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from "./baseSchemas.ts";
+import { ModelSelection } from "./modelSelection.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
 export const AgentSessionSource = Schema.Literals(["claudeAgent", "codex", "pi"]);
@@ -87,5 +94,45 @@ export class AgentSessionScanError extends Schema.TaggedError<AgentSessionScanEr
 ) {
   override get message(): string {
     return `Failed to scan agent sessions during ${this.operation}.`;
+  }
+}
+
+/**
+ * A chat-mode thread carried into a Dev server whole: the cloud's chat adapter
+ * holds a person's threads until a request needs a workspace, then upgrades the
+ * session to the Dev server in their cell and brings the threads with it. Each
+ * lands as run-less history, as an imported agent session does, so the first run
+ * in the cell is handed the conversation as context.
+ */
+export const ChatThreadImportMessage = Schema.Struct({
+  role: Schema.Literals(["user", "assistant"]),
+  text: Schema.String,
+  createdAt: IsoDateTime,
+});
+export type ChatThreadImportMessage = typeof ChatThreadImportMessage.Type;
+
+export const ChatThreadImportThread = Schema.Struct({
+  threadId: ThreadId,
+  title: Schema.String,
+  modelSelection: ModelSelection,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  messages: Schema.Array(ChatThreadImportMessage),
+});
+export type ChatThreadImportThread = typeof ChatThreadImportThread.Type;
+
+export const ChatThreadImportInput = Schema.Struct({
+  /** The project the threads land in; the server's one project when omitted. */
+  projectId: Schema.optional(ProjectId),
+  threads: Schema.Array(ChatThreadImportThread),
+});
+export type ChatThreadImportInput = typeof ChatThreadImportInput.Type;
+
+export class ChatThreadImportProjectAmbiguousError extends Schema.TaggedError<ChatThreadImportProjectAmbiguousError>()(
+  "ChatThreadImportProjectAmbiguousError",
+  { projectCount: NonNegativeInt },
+) {
+  override get message(): string {
+    return `This server has ${this.projectCount} projects; name the one the chat threads land in.`;
   }
 }

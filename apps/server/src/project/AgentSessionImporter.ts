@@ -15,6 +15,8 @@ import {
   ThreadId,
   TurnItemId,
   type AgentSessionImportInput,
+  type ChatThreadImportInput,
+  ChatThreadImportProjectAmbiguousError,
   type AgentSessionImportResult,
   type OrchestrationV2AppThread,
   type OrchestrationV2ConversationMessage,
@@ -48,6 +50,7 @@ const isProjectionStoreThreadNotFoundError = Schema.is(
 );
 
 const IMPORT_EVENT_PREFIX = "agent-session-import:v2";
+const CHAT_IMPORT_EVENT_PREFIX = "chat-thread-import:v1";
 const CLAUDE_SESSION_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -596,7 +599,153 @@ const make = Effect.gen(function* () {
     return yield* commit(messages);
   });
 
-  return { importRecentAgentThreads, importNativeHistory };
+  /**
+   * Chat-mode threads carried in from the cloud's chat adapter when a session
+   * moves into its cell. Each lands as run-less history (`v1_import`) under the id
+   * the client already holds, with no provider thread behind it, so the first run
+   * hands the conversation to the provider as context. A thread already here is
+   * left alone: one imported with the same messages counts as imported, anything
+   * else as skipped, so a second upgrade of the same session changes nothing.
+   */
+  const importChatThreads = Effect.fn("importChatThreadsV2")(function* (
+    input: ChatThreadImportInput,
+  ) {
+    const readProjects = Effect.mapError(
+      (cause: unknown) => new AgentSessionScanError({ operation: "read-projects", cause }),
+    );
+    const project =
+      input.projectId === undefined
+        ? yield* projects.snapshot.pipe(
+            readProjects,
+            Effect.flatMap(({ projects: all }) =>
+              all.length === 1
+                ? Effect.succeed(all[0]!)
+                : Effect.fail(
+                    new ChatThreadImportProjectAmbiguousError({ projectCount: all.length }),
+                  ),
+            ),
+          )
+        : yield* projects.getById(input.projectId).pipe(
+            readProjects,
+            Effect.flatMap(
+              Option.match({
+                onNone: () =>
+                  Effect.fail(
+                    new AgentSessionImportProjectNotFoundError({ projectId: input.projectId! }),
+                  ),
+                onSome: Effect.succeed,
+              }),
+            ),
+          );
+    const runtimeMode =
+      ceiling === undefined || !isRuntimeModeAbove(DEFAULT_RUNTIME_MODE, ceiling)
+        ? DEFAULT_RUNTIME_MODE
+        : ceiling;
+    let importedCount = 0;
+    let skippedCount = 0;
+    yield* Effect.forEach(
+      input.threads,
+      (thread) =>
+        threadCommands
+          .withLock(
+            thread.threadId,
+            Effect.gen(function* () {
+              const existing = yield* Effect.option(
+                orchestrator.getThreadRecords(thread.threadId, ["messages"]),
+              );
+              if (Option.isSome(existing)) {
+                const stored = existing.value.messages;
+                const same =
+                  existing.value.thread.historyOrigin === "v1_import" &&
+                  existing.value.thread.projectId === project.id &&
+                  stored.length === thread.messages.length &&
+                  stored.every(
+                    (message, index) =>
+                      message.role === thread.messages[index]?.role &&
+                      message.text === thread.messages[index]?.text,
+                  );
+                if (same) importedCount += 1;
+                else skippedCount += 1;
+                return;
+              }
+              const createdAt = dateTime(thread.createdAt);
+              const updatedAt = dateTime(thread.updatedAt);
+              const appThread: OrchestrationV2AppThread = {
+                createdBy: "user",
+                creationSource: "server",
+                id: thread.threadId,
+                projectId: project.id,
+                title: thread.title.trim() === "" ? "Untitled thread" : thread.title,
+                providerInstanceId: thread.modelSelection.instanceId,
+                modelSelection: thread.modelSelection,
+                runtimeMode,
+                interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+                branch: null,
+                worktreePath: null,
+                linkedPullRequest: null,
+                branchPullRequest: null,
+                activeProviderThreadId: null,
+                historyOrigin: "v1_import",
+                lineage: {
+                  parentThreadId: null,
+                  relationshipToParent: null,
+                  rootThreadId: thread.threadId,
+                },
+                forkedFrom: null,
+                createdAt,
+                updatedAt,
+                archivedAt: null,
+                settledOverride: null,
+                settledAt: null,
+                unsettledAt: null,
+                snoozedUntil: null,
+                snoozedAt: null,
+                pinnedAt: null,
+                pinOrderKey: null,
+                activeOrderKey: null,
+                lastVisitedAt: null,
+                deletedAt: null,
+              };
+              yield* eventSink.write({
+                events: [
+                  {
+                    id: EventId.make(
+                      `${CHAT_IMPORT_EVENT_PREFIX}:thread:${thread.threadId}:created`,
+                    ),
+                    type: "thread.created",
+                    threadId: thread.threadId,
+                    providerInstanceId: thread.modelSelection.instanceId,
+                    occurredAt: createdAt,
+                    payload: appThread,
+                  },
+                  ...thread.messages.flatMap((message, index) =>
+                    messageEvents({ threadId: thread.threadId, index, message }),
+                  ),
+                ],
+              });
+              importedCount += 1;
+            }),
+          )
+          .pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("Could not import a chat thread", {
+                threadId: thread.threadId,
+                cause,
+              }).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    skippedCount += 1;
+                  }),
+                ),
+              ),
+            ),
+          ),
+      { discard: true },
+    );
+    return { importedCount, skippedCount } satisfies AgentSessionImportResult;
+  });
+
+  return { importRecentAgentThreads, importNativeHistory, importChatThreads };
 });
 
 type AgentSessionImporterShape = Effect.Success<typeof make>;
