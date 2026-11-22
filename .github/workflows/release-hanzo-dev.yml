@@ -1,0 +1,265 @@
+name: Release hanzo-dev
+
+# The Dev server packaged for a Hanzo cloud cell (hanzoai/dev#55).
+#
+# hanzo-inc/cloud's POST /v1/dev/sessions starts
+#   HANZO_DEV_ZAP_SOCKET=/tmp/hanzo-dev/zap.sock HANZO_DEV_ZAP_PRINCIPAL=<owner>/<name> \
+#     hanzo-dev serve --host 127.0.0.1 --port 3773 --no-browser
+# in a sandbox cell, and the cell has no `hanzo-dev` until a release names one.
+# The sandbox image (hanzoai/bot Dockerfile.sandbox) installs it from this
+# workflow's assets, one per architecture:
+#
+#   hanzo-dev-linux-amd64.tar.gz  hanzo-dev-linux-amd64.tar.gz.sha256
+#   hanzo-dev-linux-arm64.tar.gz  hanzo-dev-linux-arm64.tar.gz.sha256
+#
+# Each unpacks to ONE directory, hanzo-dev/, and not one file: it is the Linux CLI
+# archive release-desktop.yml already builds and smoke-tests (the Node
+# single-executable resolves node-pty and the other native packages from the
+# node_modules beside it, and carries libatomic, the resource monitor and the web
+# client), renamed, with `hanzo-dev` beside `hanzo` as the name a cell runs.
+#
+# A release is a `hanzo-dev-v<version>` tag. It is a tag of its own so it never
+# starts release.yml's product release (v*.*.*), and its release is never marked
+# latest, so nothing that reads the product's latest release sees it. A pull
+# request that touches this packaging builds and checks both archives and
+# publishes nothing.
+
+on:
+  push:
+    tags:
+      - "hanzo-dev-v*.*.*"
+  pull_request:
+    paths:
+      - .github/workflows/release-hanzo-dev.yml
+      - apps/server/scripts/cli.ts
+      - scripts/build-cli-archive.ts
+      - scripts/smoke-cli-archive.ts
+  workflow_dispatch:
+
+concurrency:
+  group: release-hanzo-dev-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: hanzo-dev linux ${{ matrix.asset_arch }}
+    if: github.repository == 'hanzoai/dev'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x64
+            asset_arch: amd64
+            rust_target: x86_64-unknown-linux-gnu
+            resource_key: linux-x64
+          # node-pty has no Linux prebuild and compiles from source, so arm64 is
+          # built on arm64 hardware, as release.yml does.
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            asset_arch: arm64
+            rust_target: aarch64-unknown-linux-gnu
+            resource_key: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      # Baked into the bundle as release.yml's build_bundle does; a cell reaches
+      # Dev over ZAP and does not use the relay.
+      HANZO_DEV_RELAY_URL: ${{ vars.RELAY_DOMAIN && format('https://{0}', vars.RELAY_DOMAIN) || '' }}
+      HANZO_DEV_TELEMETRY_CHANNEL: ${{ startsWith(github.ref, 'refs/tags/hanzo-dev-v') && 'stable' || 'dev' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/hanzo-dev-v* ]]; then
+            version="${GITHUB_REF#refs/tags/hanzo-dev-v}"
+          else
+            version="$(jq -r .version apps/server/package.json)"
+          fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::not a release version: $version" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=hanzo... --filter=@hanzodev/web... --filter=@hanzodev/scripts...
+
+      - name: Align package versions to the release version
+        run: node scripts/update-release-package-versions.ts "${{ steps.version.outputs.version }}"
+
+      # apps/server/dist: the server bundle and the web client it serves.
+      - name: Build JS bundle
+        run: vp run --filter @hanzodev/web --filter hanzo build
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+          targets: ${{ matrix.rust_target }}
+
+      - name: Add the Rust target to the pinned toolchain
+        run: rustup target add ${{ matrix.rust_target }}
+
+      - name: Build resource monitor
+        run: cargo build --locked --release --manifest-path native/resource-monitor/Cargo.toml --target "${{ matrix.rust_target }}"
+
+      - name: Stage resource monitor
+        shell: bash
+        run: |
+          set -euo pipefail
+          target_dir="$RUNNER_TEMP/cli-resource-monitor/${{ matrix.resource_key }}"
+          mkdir -p "$target_dir"
+          cp "native/resource-monitor/target/${{ matrix.rust_target }}/release/hanzo-resource-monitor" "$target_dir/hanzo-resource-monitor"
+
+      - name: Build CLI single-executable
+        run: node apps/server/scripts/cli.ts build-exe --verbose
+
+      - uses: ./.github/actions/setup-apt-mirrors
+
+      # The Linux archive ships libatomic.so.1 and points hanzo's RUNPATH at it.
+      - name: Install patchelf
+        run: command -v patchelf || { sudo apt-get update && sudo apt-get install -y patchelf; }
+
+      - name: Build CLI archive
+        run: |
+          node scripts/build-cli-archive.ts \
+            --platform linux \
+            --arch "${{ matrix.arch }}" \
+            --version "${{ steps.version.outputs.version }}" \
+            --resource-monitor-dir "$RUNNER_TEMP/cli-resource-monitor" \
+            --output-dir release-cli
+
+      # --version, then `serve --host 127.0.0.1 --port <n> --no-browser` until it answers.
+      - name: Smoke-test CLI archive
+        run: node scripts/smoke-cli-archive.ts --archive release-cli/* --expect-version "${{ steps.version.outputs.version }}"
+
+      - name: Package hanzo-dev
+        id: package
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+          ASSET_ARCH: ${{ matrix.asset_arch }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(release-cli/*.tar.gz)
+          [[ ${#archives[@]} -eq 1 ]] || { echo "::error::expected one CLI archive, found ${#archives[@]}" >&2; exit 1; }
+          work="$RUNNER_TEMP/hanzo-dev-pack"
+          rm -rf "$work" && mkdir -p "$work"
+          tar -xzf "${archives[0]}" -C "$work"
+          stem="hanzo-${VERSION}-linux-${ARCH}"
+          [[ -x "$work/$stem/hanzo" ]] || { echo "::error::$stem/hanzo is missing from the archive" >&2; exit 1; }
+          mv "$work/$stem" "$work/hanzo-dev"
+          # The name a cell runs. The executable resolves its native packages
+          # beside its real path, so a link reaches the same node_modules.
+          ln -s hanzo "$work/hanzo-dev/hanzo-dev"
+          mkdir -p dist
+          asset="hanzo-dev-linux-${ASSET_ARCH}.tar.gz"
+          tar --hard-dereference -czf "dist/$asset" -C "$work" hanzo-dev
+          (cd dist && sha256sum "$asset" > "$asset.sha256")
+          cat "dist/$asset.sha256"
+          echo "dir=$work/hanzo-dev" >> "$GITHUB_OUTPUT"
+
+      # What a cell does, from the packaged layout and through a link elsewhere on
+      # PATH, as the sandbox image installs it: the version, then the server's ZAP
+      # socket appears within cloud's 60 s wait.
+      - name: Check hanzo-dev as a cell runs it
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          DIR: ${{ steps.package.outputs.dir }}
+        run: |
+          set -euo pipefail
+          bin="$RUNNER_TEMP/cell-bin"
+          mkdir -p "$bin"
+          ln -sf "$DIR/hanzo-dev" "$bin/hanzo-dev"
+          export PATH="$bin:$PATH"
+          printed="$(hanzo-dev --version)"
+          echo "hanzo-dev --version: $printed"
+          [[ "$printed" == *"$VERSION"* ]] || { echo "::error::hanzo-dev --version printed '$printed', want $VERSION" >&2; exit 1; }
+          sock="$RUNNER_TEMP/hanzo-dev-cell/zap.sock"
+          mkdir -p "$(dirname "$sock")"
+          HOME="$RUNNER_TEMP/cell-home" HANZO_DEV_ZAP_SOCKET="$sock" HANZO_DEV_ZAP_PRINCIPAL="hanzo/ci" \
+            hanzo-dev serve --host 127.0.0.1 --port 3773 --no-browser > "$RUNNER_TEMP/cell.log" 2>&1 &
+          pid=$!
+          for _ in $(seq 1 60); do
+            [[ -S "$sock" ]] && break
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 1
+          done
+          ok=0
+          [[ -S "$sock" ]] && ok=1
+          kill "$pid" 2>/dev/null || true
+          wait "$pid" 2>/dev/null || true
+          if [[ "$ok" != 1 ]]; then
+            echo "::error::hanzo-dev serve did not open its ZAP socket within 60 s" >&2
+            tail -n 40 "$RUNNER_TEMP/cell.log" >&2
+            exit 1
+          fi
+          echo "ZAP socket opened at $sock"
+
+      - name: Upload hanzo-dev
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hanzo-dev-linux-${{ matrix.asset_arch }}
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  release:
+    name: Publish hanzo-dev release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/hanzo-dev-v') && needs.build.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download hanzo-dev
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: hanzo-dev-linux-*
+          merge-multiple: true
+          path: dist
+
+      - name: Verify checksums
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          ls -l
+          for arch in amd64 arm64; do test -f "hanzo-dev-linux-$arch.tar.gz" && test -f "hanzo-dev-linux-$arch.tar.gz.sha256"; done
+          sha256sum -c ./*.sha256
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#hanzo-dev-v}"
+          {
+            echo "The Dev server for a Hanzo cloud cell, \`hanzo-dev\` $version, built from $GITHUB_SHA."
+            echo
+            echo "Each archive unpacks to \`hanzo-dev/\`; run \`hanzo-dev/hanzo-dev serve\`. SHA-256:"
+            echo
+            echo '```'
+            cat dist/*.sha256
+            echo '```'
+          } > notes.md
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --title "hanzo-dev $version" \
+            --notes-file notes.md --latest=false --verify-tag
