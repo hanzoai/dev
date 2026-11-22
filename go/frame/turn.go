@@ -190,6 +190,10 @@ loop:
 			fail(err)
 			return
 		}
+		// kept is whether the snapshot as of this step is saved. One taken after
+		// the step holds every id it minted, so one save before the first action
+		// that touches a workspace covers the rest.
+		kept := false
 		for _, act := range actions {
 			op := act.Op
 			switch {
@@ -213,13 +217,23 @@ loop:
 					fail(err)
 					return
 				}
+				kept = true
 			case op.Done != nil:
 				if op.Done.Outcome.Cancelled {
 					outcome = "cancelled"
 				}
 				break loop
 			default:
-				out, err := a.cfg.Effects.Perform(ctx, op)
+				// The snapshot is saved before the action is dispatched, so a thread
+				// restored from it does not mint this id again for another action.
+				if !kept {
+					if err := a.save(ctx, th, sess); err != nil {
+						fail(err)
+						return
+					}
+					kept = true
+				}
+				out, err := a.cfg.Effects.Perform(ctx, th.ID, act)
 				if err != nil {
 					var ns *NeedsSandbox
 					if errors.As(err, &ns) || ctx.Err() != nil {

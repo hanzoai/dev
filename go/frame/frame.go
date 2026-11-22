@@ -41,10 +41,17 @@ type Effects interface {
 	// as it arrives goes to delta, so a client sees the text stream; the Reply
 	// is the whole of it.
 	Model(ctx context.Context, ask dev.Ask, delta func(string)) (dev.Reply, error)
-	// Perform runs an Op the loop asked for that touches a workspace: Read,
-	// Write, Patch, Exec, Git or Browse. A chat-mode session answers
+	// Perform runs an Action the loop asked for that touches a workspace:
+	// Read, Write, Patch, Exec, Git or Browse. A chat-mode session answers
 	// *NeedsSandbox, and the session layer leases a cell and runs it there.
-	Perform(ctx context.Context, op dev.Op) (dev.Output, error)
+	//
+	// The action carries the id its thread's loop gave it. Each thread has a
+	// loop of its own, so an id is unique within thread and not across
+	// threads: a ledger claims an action by both. The thread's snapshot is
+	// saved before Perform is asked, so a thread restored from it never mints
+	// again an id it has dispatched, and a ledger that answers a claimed id
+	// from its record answers the action that id was claimed for.
+	Perform(ctx context.Context, thread string, act dev.Action) (dev.Output, error)
 	// Save keeps the Adapter's State, which holds each thread's loop snapshot,
 	// at the place in the sequence the loop asked for it.
 	Save(ctx context.Context, state []byte) error

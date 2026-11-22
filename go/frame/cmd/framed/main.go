@@ -120,7 +120,7 @@ type effects struct {
 	url, model, path string
 }
 
-func (e *effects) Perform(context.Context, dev.Op) (dev.Output, error) {
+func (e *effects) Perform(context.Context, string, dev.Action) (dev.Output, error) {
 	return dev.Output{}, &frame.NeedsSandbox{Method: "workspace action"}
 }
 

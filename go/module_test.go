@@ -52,7 +52,7 @@ func TestTheModuleImportsFourWASICallsAndNothingElse(t *testing.T) {
 
 // The exports are dev.h, lowered to wasm32. This package calls them by
 // position, so a signature that moved is a call that reads the wrong argument.
-func TestTheModuleExportsMemoryAndTheNineCalls(t *testing.T) {
+func TestTheModuleExportsMemoryAndTheTenCalls(t *testing.T) {
 	mod := compiled(t)
 	want := map[string]string{
 		"dev_abi":      "() (i32)",
@@ -60,6 +60,7 @@ func TestTheModuleExportsMemoryAndTheNineCalls(t *testing.T) {
 		"dev_step":     "(i64 i32 i32 i32) (i32)",
 		"dev_snapshot": "(i64 i32) (i32)",
 		"dev_restore":  "(i32 i32 i32) (i32)",
+		"dev_decide":   "(i32 i32 i32 i32 i32) (i32)",
 		"dev_drop":     "(i64) ()",
 		// dev_free(dev_buf buf) takes twelve bytes by value, and the wasm32 C
 		// ABI passes a struct that size as a pointer to a copy of it.
