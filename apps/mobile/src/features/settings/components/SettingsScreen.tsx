@@ -19,7 +19,7 @@ export { SettingsScreenContent };
 export function SettingsScreen(
   props: Pick<
     AppBarProps,
-    "title" | "actions" | "refresh" | "trailing" | "search" | "menus" | "guardBack"
+    "title" | "actions" | "refresh" | "trailing" | "search" | "menus" | "guardBack" | "onClose" | "confirm"
   > & {
     readonly children: ReactNode;
     readonly workspaceRoot?: boolean;
@@ -45,7 +45,9 @@ export function SettingsScreen(
         search={props.search}
         trailing={props.trailing}
         menus={props.menus}
-        onBack={workspaceRoot ? undefined : back}
+        onBack={workspaceRoot || props.onClose ? undefined : back}
+        onClose={props.onClose}
+        confirm={props.confirm}
         guardBack={props.guardBack}
         hideBottomBorder
       />

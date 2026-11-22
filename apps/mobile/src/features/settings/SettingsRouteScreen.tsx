@@ -76,13 +76,17 @@ export function SettingsListScreen(props: {
 }) {
   const gt = useGT();
   const workspace = useWorkspaceTabs();
+  const selectTab = useSelectWorkspaceTab();
   const environmentMenu = useSettingsEnvironmentMenu();
+  const exitSettings = !props.sidebar ? () => selectTab("threads", "chat") : undefined;
   return (
     <SettingsSidebarContext value={props.sidebar ? { selected: props.selected } : null}>
       <View className="flex-1 bg-screen">
         <SettingsScreen
           title={gt("Settings")}
           workspaceRoot={props.sidebar}
+          onClose={exitSettings}
+          confirm={exitSettings ? { label: gt("Done"), onPress: exitSettings } : undefined}
           menus={[environmentMenu]}
           search={
             workspace

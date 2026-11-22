@@ -50,6 +50,7 @@ import { PhoneFloatingHeader } from "./usePhoneHeaderButtons";
 import { WorkspaceDrawer } from "./WorkspaceDrawer";
 import { WorkspaceDrawerMenu } from "./WorkspaceDrawerMenu";
 import { closeWorkspaceDrawer } from "./workspace-drawer-store";
+import { useSelectWorkspaceTab } from "./useSelectWorkspaceTab";
 import { DevMacsList } from "./DevMacsList";
 import { WorkspaceWebSection } from "./WorkspaceWebSection";
 import { useWorkspaceSection } from "./workspace-section-store";
@@ -123,6 +124,7 @@ function WorkspaceRootContent() {
   const gt = useGT();
   const m = useMessages();
   const navigation = useNavigation();
+  const selectTab = useSelectWorkspaceTab();
   const { width: windowWidth } = useWindowDimensions();
   const { layout, startNewTask } = useAdaptiveWorkspaceLayout();
   const primaryColumn = use(NativePrimaryColumnContext);
@@ -219,8 +221,29 @@ function WorkspaceRootContent() {
             contentStyle: undefined,
             ...(enabled.length === 0
               ? { headerSearchBarOptions: undefined, unstable_headerRightItems: () => [] }
-              : {}),
-            unstable_headerLeftItems: () => [],
+              : settingsOpen && !sidebarNavigation
+                ? {
+                    unstable_headerRightItems: () => [
+                      {
+                        type: "button",
+                        label: gt("Done"),
+                        variant: "done",
+                        onPress: () => selectTab("threads", "chat"),
+                      },
+                    ],
+                  }
+                : {}),
+            unstable_headerLeftItems:
+              settingsOpen && !sidebarNavigation
+                ? () => [
+                    {
+                      type: "button",
+                      label: gt("Back"),
+                      icon: { type: "sfSymbol", name: "chevron.left" },
+                      onPress: () => selectTab("threads", "chat"),
+                    },
+                  ]
+                : () => [],
             // Beside a detail column the tab bar names the tab and the detail header the page,
             // so the sidebar keeps the brand.
             headerTitle:
