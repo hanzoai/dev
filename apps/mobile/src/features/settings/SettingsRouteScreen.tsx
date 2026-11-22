@@ -284,7 +284,7 @@ function useSettingsIndexSections(): SettingsListSection[] {
       rows: [
         {
           id: "cloudAi",
-          icon: "sparkles",
+          icon: "brain",
           label: gt("Cloud & Local AI"),
           value: activeModel,
           valuePosition: "trailing",

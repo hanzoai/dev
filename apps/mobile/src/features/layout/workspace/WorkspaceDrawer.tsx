@@ -99,13 +99,16 @@ export function WorkspaceDrawer(props: {
   useEffect(() => {
     const next = open ? reach : 0;
     if (target.value !== next) {
-      target.value = next;
-      at.value = withTiming(next, {
-        duration: DRAWER_DURATION,
-        easing: DRAWER_EASING,
-        reduceMotion: ReduceMotion.System,
-      });
+      target.set(next);
+      at.set(
+        withTiming(next, {
+          duration: DRAWER_DURATION,
+          easing: DRAWER_EASING,
+          reduceMotion: ReduceMotion.System,
+        }),
+      );
     }
+    // oxlint-disable-next-line react/set-state-in-effect -- The tap-to-close scrim and the floating header's touch handling follow the drawer once its slide has started.
     setInteractive(open);
   }, [open, reach, at, target]);
 

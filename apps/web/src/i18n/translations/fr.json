@@ -387,6 +387,7 @@
   "b3120494e215abaf": "Impossible de créer la preuve d’autorisation de l’environnement.",
   "960aa0b106793f99": "Impossible de charger la clé d’autorisation de l’environnement.",
   "facb167869d93774": "Délai dépassé lors du renouvellement des identifiants de l’environnement.",
+  "d277f9cf266c9819": "Auto",
   "0549eeedb2c63c32": "Use the {name} connector to ",
   "f55196e4afe2840c": "Use the {name} design system: ",
   "5f2b771aa73eb6c6": "Keep in mind: {name}",
@@ -1529,11 +1530,11 @@
   "e07c02ee1f862cbc": "Impossible d’ouvrir le stockage des clés DPoP.",
   "be3030ffedc152a6": "Impossible de lire la clé DPoP.",
   "4c858a862b13555c": "Impossible d’écrire la clé DPoP.",
+  "33fdee6fc52c06c6": "Impossible d’importer la clé privée DPoP.",
   "d9824238bbe45384": "Impossible de générer la clé de preuve DPoP.",
   "b2b4d46c60d17570": "Impossible d’exporter la clé privée DPoP.",
   "e7018d0e5c5f7d75": "Impossible d’exporter la clé publique DPoP.",
   "56700638f4a38b40": "La clé publique DPoP générée n’est pas valide.",
-  "33fdee6fc52c06c6": "Impossible d’importer la clé privée DPoP.",
   "87338da304e4dd3e": "Impossible de charger la clé de preuve DPoP.",
   "b2ee6fa8c91540d0": "Impossible de signer la preuve DPoP.",
   "4b4b4cc24d0fd8d4": "Active organization: {org}",
@@ -2834,12 +2835,53 @@
   "7b6319899a2bb9de": "Erreur de suppression IndexedDB inconnue",
   "a0b511c077c861d8": "Erreur de curseur IndexedDB inconnue",
   "5b6a217023d4c958": "Le stockage sécurisé de l’app desktop n’est pas disponible dans ce contexte système.",
+  "ab786f0ad7397b41": "Trouver des idées",
+  "508ddcbe71e05a1a": "Analyser du code",
+  "69841d9be53be569": "Rédiger et peaufiner",
+  "f13a1ce32845434b": "Explorer un sujet",
+  "d9846476cebcdbcf": "Relire le git diff",
+  "c1249e2e0d59a81e": "Corriger les tests en échec",
+  "6194b0f0edd8b9a0": "Développer une fonctionnalité",
+  "398549edfbf1814c": "Refactoriser un module",
+  "082c312da6e254de": "Construisez la suite.",
+  "6cd5800e00aa3c32": "Bonjour, {name}. Que construisons-nous ?",
+  "aa270e0dc753516d": "Bonjour, {name}. Que construisons-nous ?",
+  "7936607bfffc5cfb": "Bonsoir, {name}. Que construisons-nous ?",
+  "5406883f8b854a55": "Et maintenant ?",
+  "a16fb0e86b06d348": "Bonjour, {name}.",
+  "491e8bd53c6361e0": "Bonjour, {name}.",
+  "0249ae895c80f3ca": "Bonsoir, {name}.",
+  "cfb3f269b6b2422c": "Fermer le sélecteur de persona",
+  "6cf1b5f50233d093": "Quitter le mode privé",
+  "085959508fedad72": "Retirer la persona",
+  "094d723edc8a00ab": [
+    "Choisir une persona (",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ")"
+  ],
+  "08268bb17a38c420": "Aucune persona",
+  "d0c2a7992c20c04d": "Connectez-vous pour charger vos personas.",
+  "01d67f2bc91c6eee": "Mode privé · rien n’est sauvegardé ni enregistré",
+  "c4b860aca29ee1c5": [
+    "Impossible de se connecter à ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "a61f491435e2f821": "L’environnement n’a pas répondu. Vérifiez qu’il est en ligne, puis réessayez.",
+  "9bbecec926c3b695": "Réessayer",
   "8c4364bcfd1d8630": "Build what's next.",
   "f4e0f7149b19a94b": "Start a session in the cloud, or link your own machine.",
   "acb100bef9c60d82": "Start a cloud session",
   "065413ea2192e0df": "Link my machine",
   "ad247964ae360dec": "Cloud sessions are not available right now. Link your machine instead, or try again shortly.",
-  "4ffc9bc8998120f5": "Open this document in Hanzo Dev on your computer to preview it.",
+  "4ffc9bc8998120f5": "Ouvrez ce document dans Hanzo Dev sur votre ordinateur pour le prévisualiser.",
   "b6cc9af7a6d5e31b": "Publier",
   "d87b86613f8494c8": "Build {repo} at {ref} and add it to a project as {name}.",
   "7767ca0f466685e4": "Build {id} succeeded. It is live at the project's address.",
@@ -2852,6 +2894,8 @@
   "445511757fcd365a": "Connexion…",
   "0c7f505925487ca5": "End talk mode",
   "217b7b61ba019b2b": "Start talk mode",
+  "e26bcec28db6926d": "Terminer la conversation vocale",
+  "f1e6d769d8a47054": "Conversation vocale",
   "e7651575edb03ae2": "Marked {count, plural, one {{count} thread} other {{count} threads}} done",
   "96f74e61e5e2394a": "{count, plural, one {{count} fil reporté} other {{count} fils reportés}}",
   "158d77e7a872186e": "{count, plural, one {{count} fil désépinglé} other {{count} fils désépinglés}}",
@@ -3319,10 +3363,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "sur l’ordinateur qui a ouvert cette page"
-      ]
+      "c": [" ", "sur l’ordinateur qui a ouvert cette page"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3334,10 +3375,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· quiconque l’exécute obtient cet accès"
-      ]
+      "c": [" ", "· quiconque l’exécute obtient cet accès"]
     }
   ],
   "c54cc9c75db9dc58": "N’approuvez qu’une connexion que vous venez de lancer.",
@@ -3425,6 +3463,8 @@
   "3390f0b2396998c0": "Citer la sélection dans la zone de saisie",
   "e5dc8d61a6d178ed": "Raccourcir la sélection",
   "a5b06aaaba1d742f": "Citer",
+  "c97acc2f249d581a": "Impossible de joindre {project}",
+  "710755372847018d": "Joindre un projet",
   "b1d8a5a24bd684e3": "sous-agent",
   "5a805b37d8940816": "commande",
   "da2da87e78bd6b11": "moniteur",
@@ -3898,7 +3938,6 @@
       "v": "v"
     }
   ],
-  "9bbecec926c3b695": "Réessayer",
   "4fd8927b7afc2a92": "Copier le message",
   "6f8651e48261911a": "Réflexion",
   "07e65dba2b16d3f7": "{count, plural, one {{path} +{count} autre} other {{path} +{count} autres}}",
@@ -3999,7 +4038,9 @@
   "ae0ce3cad2ae99ef": "{label} : limité.",
   "afe27891aab8cf37": "{label} : pas prêt.",
   "2f77cc3105ddd7f8": "Fournisseurs",
+  "e608267bb9696138": "Connecter un compte fournisseur",
   "3b205a1c17c06fbd": "Favoris",
+  "7e8058d028c748ca": "Connecter un fournisseur",
   "a06eb47a82969918": "Sous-agent",
   "d567966a45ff32be": "Travail des sous-agents",
   "4740c38b2edd194d": "Lecture seule. Ces sous-agents ne peuvent pas recevoir de messages.",
@@ -4894,6 +4935,8 @@
   "5ba22a660758e453": "La limite de pièces jointes est atteinte.",
   "181933312b23cb0c": "Le brouillon a refusé cette pièce jointe (doublon ou limite de pièces jointes atteinte).",
   "df02c1d51d158d32": "Changer le modèle de réponse de ce fil",
+  "7f7784a67756f1f6": "Continuer en privé, rien n’est sauvegardé ni enregistré",
+  "649ff7a5e07869ce": "Changer ou retirer la persona active",
   "929781439a221aae": "Poser une question annexe dans une nouvelle discussion annexe",
   "378c3404c430fc05": "Identique à /side",
   "8ce7ee2a95c49bdb": "Démarrer une nouvelle session ; les messages précédents restent visibles",
@@ -5940,6 +5983,7 @@
   "6b962f04ab551bfa": "Prêt : {model}",
   "6e4b9080250290c0": "en ligne",
   "f0cdc6e629fe2c45": "hors ligne",
+  "c03deeb762c15761": "{latency} ms",
   "651cb409bda342a8": "Remove {model}",
   "2288d5e74aedffb5": "Tag du modèle à télécharger, p. ex. llama3.2",
   "c035e78630f52497": "Modèle à télécharger",

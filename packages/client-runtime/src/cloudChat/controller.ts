@@ -73,7 +73,11 @@ export interface CloudChatController {
   loadLocalModels(): Promise<void>;
   selectModel(id: string, effort?: string | null): void;
   /** Attachments ride this request and later ones of the open thread; threads store text only. */
-  send(prompt: string, attachments?: ReadonlyArray<CloudChatAttachment>, turn?: CloudChatTurn): Promise<void>;
+  send(
+    prompt: string,
+    attachments?: ReadonlyArray<CloudChatAttachment>,
+    turn?: CloudChatTurn,
+  ): Promise<void>;
   /** Reads the device copies, then the remote list, into `state.threads`. */
   loadThreads(): Promise<void>;
   openThread(key: string): Promise<void>;
@@ -392,7 +396,9 @@ export function createCloudChatController(input: {
       const key = state.threadKey;
       set({
         ghost: on,
-        ...(on && key !== null ? { threads: state.threads.filter((entry) => entry.key !== key) } : {}),
+        ...(on && key !== null
+          ? { threads: state.threads.filter((entry) => entry.key !== key) }
+          : {}),
       });
     },
     reset() {

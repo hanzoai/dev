@@ -1,4 +1,3 @@
-// @effect-diagnostics-next-line nodeBuiltinImport:off -- The local ZAP stream is a platform socket.
 import * as NodeNet from "node:net";
 import { authScopeResponse, type AuthSessionState } from "@hanzodev/contracts";
 import * as Config from "effect/Config";
@@ -148,7 +147,7 @@ export const layer = (listen: ZapListen) =>
   );
 
 /** ZAP listens only where the environment names a socket or port; the person it serves is named there too. */
-export const ZapListenConfig = Config.all({
+const ZapListenConfig = Config.all({
   socket: Config.String("HANZO_DEV_ZAP_SOCKET").pipe(Config.option),
   port: Config.Int("HANZO_DEV_ZAP_PORT").pipe(Config.option),
   fd: Config.Int("HANZO_DEV_ZAP_FD").pipe(Config.option),

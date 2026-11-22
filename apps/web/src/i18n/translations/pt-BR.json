@@ -387,6 +387,7 @@
   "b3120494e215abaf": "Não foi possível criar a prova de autorização do ambiente.",
   "960aa0b106793f99": "Não foi possível carregar a chave de autorização do ambiente.",
   "facb167869d93774": "Tempo esgotado ao renovar a credencial do ambiente.",
+  "d277f9cf266c9819": "Automático",
   "0549eeedb2c63c32": "Use the {name} connector to ",
   "f55196e4afe2840c": "Use the {name} design system: ",
   "5f2b771aa73eb6c6": "Keep in mind: {name}",
@@ -1529,11 +1530,11 @@
   "e07c02ee1f862cbc": "Não foi possível abrir o armazenamento da chave DPoP.",
   "be3030ffedc152a6": "Não foi possível ler a chave DPoP.",
   "4c858a862b13555c": "Não foi possível gravar a chave DPoP.",
+  "33fdee6fc52c06c6": "Não foi possível importar a chave privada DPoP.",
   "d9824238bbe45384": "Não foi possível gerar a chave de prova DPoP.",
   "b2b4d46c60d17570": "Não foi possível exportar a chave privada DPoP.",
   "e7018d0e5c5f7d75": "Não foi possível exportar a chave pública DPoP.",
   "56700638f4a38b40": "A chave pública DPoP gerada é inválida.",
-  "33fdee6fc52c06c6": "Não foi possível importar a chave privada DPoP.",
   "87338da304e4dd3e": "Não foi possível carregar a chave de prova DPoP.",
   "b2ee6fa8c91540d0": "Não foi possível assinar a prova DPoP.",
   "4b4b4cc24d0fd8d4": "Active organization: {org}",
@@ -2834,12 +2835,53 @@
   "7b6319899a2bb9de": "Erro desconhecido de remoção do IndexedDB",
   "a0b511c077c861d8": "Erro desconhecido de cursor do IndexedDB",
   "5b6a217023d4c958": "O armazenamento seguro do desktop não está disponível neste contexto do sistema.",
+  "ab786f0ad7397b41": "Gerar ideias",
+  "508ddcbe71e05a1a": "Analisar código",
+  "69841d9be53be569": "Rascunhar e refinar",
+  "f13a1ce32845434b": "Pesquisar um tema",
+  "d9846476cebcdbcf": "Revisar o git diff",
+  "c1249e2e0d59a81e": "Corrigir testes com falha",
+  "6194b0f0edd8b9a0": "Criar um recurso",
+  "398549edfbf1814c": "Refatorar módulo",
+  "082c312da6e254de": "Construa o que vem a seguir.",
+  "6cd5800e00aa3c32": "Bom dia, {name}. O que vamos construir?",
+  "aa270e0dc753516d": "Boa tarde, {name}. O que vamos construir?",
+  "7936607bfffc5cfb": "Boa noite, {name}. O que vamos construir?",
+  "5406883f8b854a55": "Qual é o próximo passo?",
+  "a16fb0e86b06d348": "Bom dia, {name}.",
+  "491e8bd53c6361e0": "Boa tarde, {name}.",
+  "0249ae895c80f3ca": "Boa noite, {name}.",
+  "cfb3f269b6b2422c": "Fechar seletor de persona",
+  "6cf1b5f50233d093": "Sair do modo privado",
+  "085959508fedad72": "Limpar persona",
+  "094d723edc8a00ab": [
+    "Selecionar persona (",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ")"
+  ],
+  "08268bb17a38c420": "Nenhuma persona",
+  "d0c2a7992c20c04d": "Entre para carregar suas personas.",
+  "01d67f2bc91c6eee": "Modo privado · nada é salvo nem registrado",
+  "c4b860aca29ee1c5": [
+    "Não foi possível conectar a ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "a61f491435e2f821": "O ambiente não respondeu. Verifique se ele está online e tente novamente.",
+  "9bbecec926c3b695": "Tentar novamente",
   "8c4364bcfd1d8630": "Build what's next.",
   "f4e0f7149b19a94b": "Start a session in the cloud, or link your own machine.",
   "acb100bef9c60d82": "Start a cloud session",
   "065413ea2192e0df": "Link my machine",
   "ad247964ae360dec": "Cloud sessions are not available right now. Link your machine instead, or try again shortly.",
-  "4ffc9bc8998120f5": "Open this document in Hanzo Dev on your computer to preview it.",
+  "4ffc9bc8998120f5": "Abra este documento no Hanzo Dev no seu computador para visualizá-lo.",
   "b6cc9af7a6d5e31b": "Publicar",
   "d87b86613f8494c8": "Build {repo} at {ref} and add it to a project as {name}.",
   "7767ca0f466685e4": "Build {id} succeeded. It is live at the project's address.",
@@ -2852,6 +2894,8 @@
   "445511757fcd365a": "Conectando…",
   "0c7f505925487ca5": "End talk mode",
   "217b7b61ba019b2b": "Start talk mode",
+  "e26bcec28db6926d": "Encerrar conversa por voz",
+  "f1e6d769d8a47054": "Conversa por voz",
   "e7651575edb03ae2": "Marked {count, plural, one {{count} thread} other {{count} threads}} done",
   "96f74e61e5e2394a": "{count, plural, one {{count} thread adiada} other {{count} threads adiadas}}",
   "158d77e7a872186e": "{count, plural, one {{count} thread desafixada} other {{count} threads desafixadas}}",
@@ -3319,10 +3363,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "no computador que abriu esta página"
-      ]
+      "c": [" ", "no computador que abriu esta página"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3334,10 +3375,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· quem executar recebe este acesso"
-      ]
+      "c": [" ", "· quem executar recebe este acesso"]
     }
   ],
   "c54cc9c75db9dc58": "Aprove apenas um login que você acabou de iniciar.",
@@ -3425,6 +3463,8 @@
   "3390f0b2396998c0": "Citar a seleção no editor de mensagens",
   "e5dc8d61a6d178ed": "Encurtar seleção",
   "a5b06aaaba1d742f": "Citar",
+  "c97acc2f249d581a": "Não foi possível anexar {project}",
+  "710755372847018d": "Anexar um projeto",
   "b1d8a5a24bd684e3": "subagente",
   "5a805b37d8940816": "comando",
   "da2da87e78bd6b11": "monitor",
@@ -3898,7 +3938,6 @@
       "v": "v"
     }
   ],
-  "9bbecec926c3b695": "Tentar novamente",
   "4fd8927b7afc2a92": "Copiar mensagem",
   "6f8651e48261911a": "Raciocínio",
   "07e65dba2b16d3f7": "{count, plural, one {{path} e mais {count}} other {{path} e mais {count}}}",
@@ -3999,7 +4038,9 @@
   "ae0ce3cad2ae99ef": "{label}: limitado.",
   "afe27891aab8cf37": "{label}: não está pronto.",
   "2f77cc3105ddd7f8": "Provedores",
+  "e608267bb9696138": "Conectar conta do provedor",
   "3b205a1c17c06fbd": "Favoritos",
+  "7e8058d028c748ca": "Conectar provedor",
   "a06eb47a82969918": "Subagente",
   "d567966a45ff32be": "Trabalho de subagentes",
   "4740c38b2edd194d": "Somente leitura. Estes subagentes não aceitam mensagens.",
@@ -4893,6 +4934,8 @@
   "5ba22a660758e453": "O limite de anexos foi atingido.",
   "181933312b23cb0c": "O rascunho rejeitou este anexo (duplicado ou limite de anexos atingido).",
   "df02c1d51d158d32": "Trocar o modelo de resposta desta thread",
+  "7f7784a67756f1f6": "Continuar em modo privado, sem salvar nem registrar nada",
+  "649ff7a5e07869ce": "Trocar ou limpar a persona ativa",
   "929781439a221aae": "Fazer uma pergunta paralela em um novo chat paralelo",
   "378c3404c430fc05": "Igual a /side",
   "8ce7ee2a95c49bdb": "Iniciar uma nova sessão; as mensagens anteriores continuam visíveis",
@@ -5939,6 +5982,7 @@
   "6b962f04ab551bfa": "Pronto: {model}",
   "6e4b9080250290c0": "online",
   "f0cdc6e629fe2c45": "offline",
+  "c03deeb762c15761": "{latency} ms",
   "651cb409bda342a8": "Remove {model}",
   "2288d5e74aedffb5": "Tag do modelo a baixar, ex.: llama3.2",
   "c035e78630f52497": "Modelo a baixar",

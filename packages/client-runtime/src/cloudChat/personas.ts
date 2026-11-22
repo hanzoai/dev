@@ -1,14 +1,17 @@
 // @effect-diagnostics globalFetch:off -- Cloud chat is a plain promise client shared with React Native and the browser.
 /**
- * Personas: the org's agents, as hanzo.app's Chat picks them. A persona shapes a turn the way the
- * old Chat did: its instructions ride as the turn's system message, and the model it is pinned to
- * answers it.
- *   - roster  GET /v1/agents          -> { agents: [{ id, name, model, description?, emoji?, avatar? }] }
- *   - record  GET /v1/agents/{name}   -> the same, with `instructions`
+ * Personas: the org's agents, as hanzo.app's Chat picks them. A persona's instructions ride as the
+ * turn's system message and the model it is pinned to answers. The roster is `GET /v1/agents`;
+ * `GET /v1/agents/{name}` adds `instructions`.
  */
 import { buildHanzoApiHeaders } from "@hanzodev/shared/hanzoIamAuth";
 
-import { CloudChatError, resolveCloudChatOptions, type CloudChatAuth, type CloudChatOptions } from "./api.ts";
+import {
+  CloudChatError,
+  resolveCloudChatOptions,
+  type CloudChatAuth,
+  type CloudChatOptions,
+} from "./api.ts";
 
 export interface Persona {
   readonly name: string;
@@ -30,7 +33,10 @@ function toPersona(raw: unknown): PersonaRecord | null {
   const row = raw as Record<string, unknown>;
   const name = text(row.name);
   if (name === null) return null;
-  const look = typeof row.appearance === "object" && row.appearance !== null ? (row.appearance as Record<string, unknown>) : {};
+  const look =
+    typeof row.appearance === "object" && row.appearance !== null
+      ? (row.appearance as Record<string, unknown>)
+      : {};
   return {
     name,
     model: text(row.model),
@@ -40,7 +46,11 @@ function toPersona(raw: unknown): PersonaRecord | null {
   };
 }
 
-async function read(auth: CloudChatAuth, path: string, options?: CloudChatOptions): Promise<unknown> {
+async function read(
+  auth: CloudChatAuth,
+  path: string,
+  options?: CloudChatOptions,
+): Promise<unknown> {
   const token = auth.accessToken?.trim();
   if (!token) throw new CloudChatError("signed-out", "Sign in to use personas");
   const { fetch, baseUrl } = resolveCloudChatOptions(options ?? {});
@@ -52,7 +62,10 @@ async function read(auth: CloudChatAuth, path: string, options?: CloudChatOption
 }
 
 /** The org's personas, by name. A refusal or an unreadable answer is an empty roster, never a failed chat. */
-export async function listPersonas(auth: CloudChatAuth, options?: CloudChatOptions): Promise<ReadonlyArray<Persona>> {
+export async function listPersonas(
+  auth: CloudChatAuth,
+  options?: CloudChatOptions,
+): Promise<ReadonlyArray<Persona>> {
   try {
     const body = (await read(auth, "/v1/agents", options)) as { agents?: unknown };
     const rows = Array.isArray(body?.agents) ? body.agents : [];

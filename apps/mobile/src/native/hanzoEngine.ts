@@ -31,7 +31,10 @@ interface HanzoEngineNative {
   remove(id: string): Promise<void>;
   chat(requestId: string, id: string, messages: string, maxTokens: number): Promise<string>;
   cancel(requestId: string): void;
-  addListener(event: "onToken", listener: (e: { requestId: string; text: string }) => void): Subscription;
+  addListener(
+    event: "onToken",
+    listener: (e: { requestId: string; text: string }) => void,
+  ): Subscription;
   addListener(
     event: "onProgress",
     listener: (e: { id: string; done: number; total: number }) => void,

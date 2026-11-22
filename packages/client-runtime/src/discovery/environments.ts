@@ -105,7 +105,9 @@ function normalizeMachineKind(value: unknown): "desktop" | "browser" | null {
   return null;
 }
 
-function normalizeMachineState(value: Record<string, unknown>): "online" | "offline" | "revoked" | null {
+function normalizeMachineState(
+  value: Record<string, unknown>,
+): "online" | "offline" | "revoked" | null {
   const raw = str(value.state) ?? str(value.status);
   if (raw !== null) {
     const lower = raw.trim().toLowerCase();
@@ -171,6 +173,7 @@ function parseSession(value: unknown): CloudSession | null {
   const sandbox = str(value.sandbox);
   return {
     id,
+    // oxlint-disable-next-line hanzo/no-untranslated-copy -- fallback for the server-authored session label
     label: str(value.label) ?? "Cloud",
     zap,
     ...(sandbox === null ? {} : { sandbox }),
@@ -200,6 +203,7 @@ async function listLinkedMachines(
   options: DiscoveryOptions = {},
 ): Promise<{ readonly machines: ReadonlyArray<LinkedMachine>; readonly report: DiscoveryReport }> {
   if (!auth.accessToken)
+    // oxlint-disable-next-line hanzo/no-untranslated-copy -- diagnostic detail; clients render only the report status
     return { machines: [], report: { status: "error", message: "Not signed in" } };
   const { fetch, baseUrl } = resolve(options);
   let response: Response;
@@ -221,10 +225,12 @@ async function listLinkedMachines(
   try {
     body = await response.json();
   } catch {
+    // oxlint-disable-next-line hanzo/no-untranslated-copy -- diagnostic detail; clients render only the report status
     return { machines: [], report: { status: "error", message: "Invalid response" } };
   }
   const machines = parseSources(body);
   if (machines === null)
+    // oxlint-disable-next-line hanzo/no-untranslated-copy -- diagnostic detail; clients render only the report status
     return { machines: [], report: { status: "error", message: "Invalid response" } };
   return { machines, report: { status: "ok" } };
 }
@@ -235,6 +241,7 @@ export async function createCloudSession(
   options: DiscoveryOptions = {},
 ): Promise<{ readonly session: CloudSession | null; readonly report: DiscoveryReport }> {
   if (!auth.accessToken)
+    // oxlint-disable-next-line hanzo/no-untranslated-copy -- diagnostic detail; clients render only the report status
     return { session: null, report: { status: "error", message: "Not signed in" } };
   const { fetch, baseUrl } = resolve(options);
   let response: Response;
@@ -257,11 +264,13 @@ export async function createCloudSession(
   try {
     body = await response.json();
   } catch {
+    // oxlint-disable-next-line hanzo/no-untranslated-copy -- diagnostic detail; clients render only the report status
     return { session: null, report: { status: "error", message: "Invalid response" } };
   }
   const session = parseSession(body);
   return session === null
-    ? { session: null, report: { status: "error", message: "Invalid response" } }
+    ? // oxlint-disable-next-line hanzo/no-untranslated-copy -- diagnostic detail; clients render only the report status
+      { session: null, report: { status: "error", message: "Invalid response" } }
     : { session, report: { status: "ok" } };
 }
 
@@ -285,6 +294,7 @@ export function mergeEnvironments(input: {
     push({ type: "linked", id: machine.id, label: machine.name, machine });
   }
   if (input.cloud === "offer") {
+    // oxlint-disable-next-line hanzo/no-untranslated-copy -- record label; clients render their own translated Cloud row
     push({ type: "cloud", id: "cloud", label: "Cloud", session: null });
   } else if (input.cloud !== null) {
     push({ type: "cloud", id: input.cloud.id, label: input.cloud.label, session: input.cloud });
@@ -333,7 +343,8 @@ export async function discoverEnvironments(
     listLinkedMachines(auth, options),
     accessToken
       ? probeCloud({ ...auth, accessToken }, options)
-      : Promise.resolve<DiscoveryReport>({ status: "error", message: "Not signed in" }),
+      : // oxlint-disable-next-line hanzo/no-untranslated-copy -- diagnostic detail; clients render only the report status
+        Promise.resolve<DiscoveryReport>({ status: "error", message: "Not signed in" }),
   ]);
   return {
     environments: mergeEnvironments({

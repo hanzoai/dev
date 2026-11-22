@@ -15,7 +15,7 @@ import {
   type CloudChatOptions,
 } from "./api.ts";
 
-export const ENHANCE_INSTRUCTION =
+const ENHANCE_INSTRUCTION =
   "Rewrite the person's draft prompt so it is clearer, more specific and better structured for an AI assistant. " +
   "Keep their intent, their language and every fact, name and constraint in it; add nothing they did not mean. " +
   "Answer with the rewritten prompt only: no preface, no quotes, no explanation.";
@@ -57,6 +57,7 @@ export async function enhancePrompt(input: {
   if (!response.ok) throw httpFailure(response.status);
   const body = (await response.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
   const out = body.choices?.[0]?.message?.content;
-  if (typeof out !== "string" || out.trim() === "") throw new CloudChatError("failed", "Empty rewrite");
+  if (typeof out !== "string" || out.trim() === "")
+    throw new CloudChatError("failed", "Empty rewrite");
   return out.trim();
 }

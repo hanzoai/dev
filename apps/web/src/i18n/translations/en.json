@@ -387,6 +387,7 @@
   "b3120494e215abaf": "Could not create the environment authorization proof.",
   "960aa0b106793f99": "Could not load the environment authorization key.",
   "facb167869d93774": "Timed out renewing the environment credential.",
+  "d277f9cf266c9819": "Auto",
   "0549eeedb2c63c32": "Use the {name} connector to ",
   "f55196e4afe2840c": "Use the {name} design system: ",
   "5f2b771aa73eb6c6": "Keep in mind: {name}",
@@ -1529,11 +1530,11 @@
   "e07c02ee1f862cbc": "Could not open DPoP key storage.",
   "be3030ffedc152a6": "Could not read DPoP key.",
   "4c858a862b13555c": "Could not write DPoP key.",
+  "33fdee6fc52c06c6": "Could not import DPoP private key.",
   "d9824238bbe45384": "Could not generate DPoP proof key.",
   "b2b4d46c60d17570": "Could not export DPoP private key.",
   "e7018d0e5c5f7d75": "Could not export DPoP public key.",
   "56700638f4a38b40": "Generated DPoP public key is invalid.",
-  "33fdee6fc52c06c6": "Could not import DPoP private key.",
   "87338da304e4dd3e": "Could not load DPoP proof key.",
   "b2ee6fa8c91540d0": "Could not sign DPoP proof.",
   "4b4b4cc24d0fd8d4": "Active organization: {org}",
@@ -2834,6 +2835,47 @@
   "7b6319899a2bb9de": "Unknown IndexedDB remove error",
   "a0b511c077c861d8": "Unknown IndexedDB cursor error",
   "5b6a217023d4c958": "Desktop secure storage is unavailable in this system context.",
+  "ab786f0ad7397b41": "Brainstorm ideas",
+  "508ddcbe71e05a1a": "Analyze code",
+  "69841d9be53be569": "Draft & refine",
+  "f13a1ce32845434b": "Research a topic",
+  "d9846476cebcdbcf": "Review git diff",
+  "c1249e2e0d59a81e": "Fix failing tests",
+  "6194b0f0edd8b9a0": "Build a feature",
+  "398549edfbf1814c": "Refactor module",
+  "082c312da6e254de": "Build what's next.",
+  "6cd5800e00aa3c32": "Good morning, {name}. What are we building?",
+  "aa270e0dc753516d": "Good afternoon, {name}. What are we building?",
+  "7936607bfffc5cfb": "Good evening, {name}. What are we building?",
+  "5406883f8b854a55": "What's next?",
+  "a16fb0e86b06d348": "Good morning, {name}.",
+  "491e8bd53c6361e0": "Good afternoon, {name}.",
+  "0249ae895c80f3ca": "Good evening, {name}.",
+  "cfb3f269b6b2422c": "Close persona picker",
+  "6cf1b5f50233d093": "Exit private mode",
+  "085959508fedad72": "Clear persona",
+  "094d723edc8a00ab": [
+    "Select persona (",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ")"
+  ],
+  "08268bb17a38c420": "No persona",
+  "d0c2a7992c20c04d": "Sign in to load your personas.",
+  "01d67f2bc91c6eee": "Private mode · nothing saved or recorded",
+  "c4b860aca29ee1c5": [
+    "Could not connect to ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "a61f491435e2f821": "The environment did not answer. Check that it is online, then try again.",
+  "9bbecec926c3b695": "Retry",
   "8c4364bcfd1d8630": "Build what's next.",
   "f4e0f7149b19a94b": "Start a session in the cloud, or link your own machine.",
   "acb100bef9c60d82": "Start a cloud session",
@@ -2852,6 +2894,8 @@
   "445511757fcd365a": "Connecting…",
   "0c7f505925487ca5": "End talk mode",
   "217b7b61ba019b2b": "Start talk mode",
+  "e26bcec28db6926d": "End voice conversation",
+  "f1e6d769d8a47054": "Voice conversation",
   "e7651575edb03ae2": "Marked {count, plural, one {{count} thread} other {{count} threads}} done",
   "96f74e61e5e2394a": "Snoozed {count, plural, one {{count} thread} other {{count} threads}}",
   "158d77e7a872186e": "Unpinned {count, plural, one {{count} thread} other {{count} threads}}",
@@ -3319,10 +3363,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "on the computer that opened this page"
-      ]
+      "c": [" ", "on the computer that opened this page"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3334,10 +3375,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· whoever runs it gets this access"
-      ]
+      "c": [" ", "· whoever runs it gets this access"]
     }
   ],
   "c54cc9c75db9dc58": "Only approve a sign-in you just started.",
@@ -3425,6 +3463,8 @@
   "3390f0b2396998c0": "Cite selection in composer",
   "e5dc8d61a6d178ed": "Shorten selection",
   "a5b06aaaba1d742f": "Cite",
+  "c97acc2f249d581a": "Could not attach {project}",
+  "710755372847018d": "Attach a project",
   "b1d8a5a24bd684e3": "subagent",
   "5a805b37d8940816": "command",
   "da2da87e78bd6b11": "monitor",
@@ -3899,7 +3939,6 @@
       "v": "v"
     }
   ],
-  "9bbecec926c3b695": "Retry",
   "4fd8927b7afc2a92": "Copy message",
   "6f8651e48261911a": "Thought",
   "07e65dba2b16d3f7": "{count, plural, one {{path} +{count} more} other {{path} +{count} more}}",
@@ -4000,7 +4039,9 @@
   "ae0ce3cad2ae99ef": "{label}: Limited.",
   "afe27891aab8cf37": "{label}: Not ready.",
   "2f77cc3105ddd7f8": "Providers",
+  "e608267bb9696138": "Connect provider account",
   "3b205a1c17c06fbd": "Favorites",
+  "7e8058d028c748ca": "Connect provider",
   "a06eb47a82969918": "Subagent",
   "d567966a45ff32be": "Subagent work",
   "4740c38b2edd194d": "Read only. These subagents cannot take messages.",
@@ -4895,6 +4936,8 @@
   "5ba22a660758e453": "The attachment limit has been reached.",
   "181933312b23cb0c": "The draft rejected this attachment (duplicate or attachment limit reached).",
   "df02c1d51d158d32": "Switch response model for this thread",
+  "7f7784a67756f1f6": "Continue privately, nothing saved or recorded",
+  "649ff7a5e07869ce": "Switch or clear the active persona",
   "929781439a221aae": "Ask a side question in a new side chat",
   "378c3404c430fc05": "Same as /side",
   "8ce7ee2a95c49bdb": "Start a fresh session; earlier messages stay visible",
@@ -5941,6 +5984,7 @@
   "6b962f04ab551bfa": "Ready: {model}",
   "6e4b9080250290c0": "online",
   "f0cdc6e629fe2c45": "offline",
+  "c03deeb762c15761": "{latency} ms",
   "651cb409bda342a8": "Remove {model}",
   "2288d5e74aedffb5": "Model tag to pull, e.g. llama3.2",
   "c035e78630f52497": "Model to pull",

@@ -138,7 +138,7 @@ export type PersistedToken = typeof PersistedToken.Type;
  */
 export const MachineIdentityToken = Context.Reference<Effect.Effect<Option.Option<PersistedToken>>>(
   "hanzo/cloud/MachineIdentityToken",
-  { defaultValue: () => Effect.succeed(Option.none()) },
+  { defaultValue: () => Effect.succeedNone },
 );
 
 const PersistedTokenJson = Schema.fromJsonString(PersistedToken);
@@ -656,9 +656,7 @@ export const make = Effect.gen(function* () {
 
   const getExisting = semaphore.withPermits(1)(
     machineIdentity.pipe(
-      Effect.flatMap((machine) =>
-        Option.isSome(machine) ? Effect.succeed(machine) : getExistingNoLock(),
-      ),
+      Effect.filterOrElse(Option.isSome, () => getExistingNoLock()),
       Effect.mapError((cause) =>
         isCloudCliCredentialRefreshError(cause)
           ? cause
@@ -675,7 +673,7 @@ export const make = Effect.gen(function* () {
   );
   const hasCredential = semaphore.withPermits(1)(
     machineIdentity.pipe(
-      Effect.flatMap((machine) => (Option.isSome(machine) ? Effect.succeed(machine) : read())),
+      Effect.filterOrElse(Option.isSome, () => read()),
       Effect.map(Option.isSome),
       Effect.mapError((cause) => new CloudCliCredentialReadError({ cause })),
     ),

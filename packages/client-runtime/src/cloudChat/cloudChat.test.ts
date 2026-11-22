@@ -79,11 +79,20 @@ describe("models", () => {
   });
   it("always offers Auto first, once, and sends its id so the gateway routes", async () => {
     const listed = await listChatModels(auth, {
-      fetch: async () => json(200, { data: [{ id: "enso-auto", outputs: ["text"] }, { id: "enso-flash", outputs: ["text"] }] }),
+      fetch: async () =>
+        json(200, {
+          data: [
+            { id: "enso-auto", outputs: ["text"] },
+            { id: "enso-flash", outputs: ["text"] },
+          ],
+        }),
     });
     expect(listed.map((m) => m.id)).toEqual(["enso-auto", "enso-flash"]);
     expect(listed[0]?.label).toBe("Auto");
-    expect(withAuto([{ id: "zen6-flash", label: "zen6-flash" }]).map((m) => m.id)).toEqual(["enso-auto", "zen6-flash"]);
+    expect(withAuto([{ id: "zen6-flash", label: "zen6-flash" }]).map((m) => m.id)).toEqual([
+      "enso-auto",
+      "zen6-flash",
+    ]);
   });
 });
 
@@ -435,7 +444,9 @@ describe("thread actions", () => {
 describe("private chat", () => {
   const reply = () =>
     new Response(
-      "data: " + JSON.stringify({ choices: [{ delta: { content: "ok" } }] }) + "\n\ndata: [DONE]\n\n",
+      "data: " +
+        JSON.stringify({ choices: [{ delta: { content: "ok" } }] }) +
+        "\n\ndata: [DONE]\n\n",
       { status: 200, headers: { "content-type": "text/event-stream" } },
     );
   it("is never listed, saved or recorded, and a new conversation is normal again", async () => {
@@ -446,7 +457,9 @@ describe("private chat", () => {
       options: {
         fetch: async (url: string) => {
           urls.push(String(url));
-          return String(url).includes("/chat/completions") ? reply() : json(200, { conversationId: "c-1" });
+          return String(url).includes("/chat/completions")
+            ? reply()
+            : json(200, { conversationId: "c-1" });
         },
       },
       store: { load: async () => [], save: async (_o, thread) => void saved.push(thread) },

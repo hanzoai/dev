@@ -13,6 +13,7 @@ export function useSyncExternalStoreWithSelector<Snapshot, Selection>(
 ): Selection {
   const instance = useRef<{ hasValue: boolean; value: Selection | null }>(null);
   if (instance.current === null) instance.current = { hasValue: false, value: null };
+  // oxlint-disable-next-line react/refs -- port of React's own selector shim, which keeps the last selection on an instance ref
   const inst = instance.current;
   const [getSelection, getServerSelection] = useMemo(() => {
     let hasMemo = false;
@@ -20,6 +21,7 @@ export function useSyncExternalStoreWithSelector<Snapshot, Selection>(
     let memoizedSelection: Selection;
     const memoizedSelector = (nextSnapshot: Snapshot): Selection => {
       if (!hasMemo) {
+        // oxlint-disable-next-line react/immutability -- the selector's memo lives in this useMemo closure, as in React's shim
         hasMemo = true;
         memoizedSnapshot = nextSnapshot;
         const nextSelection = selector(nextSnapshot);
@@ -38,6 +40,7 @@ export function useSyncExternalStoreWithSelector<Snapshot, Selection>(
         return prevSelection;
       }
       memoizedSnapshot = nextSnapshot;
+      // oxlint-disable-next-line react/immutability -- the selector's memo lives in this useMemo closure, as in React's shim
       return (memoizedSelection = nextSelection);
     };
     const maybeServer = getServerSnapshot ?? null;

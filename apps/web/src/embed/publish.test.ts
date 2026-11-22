@@ -15,12 +15,21 @@ describe("publish", () => {
         calls.push({ url, init });
         return Response.json({
           build: { id: "b1", status: "queued" },
-          declaration: { live: false, review: "https://git.test/review/1", mode: "branch", ref: "main" },
+          declaration: {
+            live: false,
+            review: "https://git.test/review/1",
+            mode: "branch",
+            ref: "main",
+          },
           notice: "A review was opened.",
         });
       }),
     );
-    const out = await publish(cloud, { repo: "https://github.com/hanzoai/post.git", ref: "main", name: "Post App" });
+    const out = await publish(cloud, {
+      repo: "https://github.com/hanzoai/post.git",
+      ref: "main",
+      name: "Post App",
+    });
     expect(calls[0]!.url).toBe("https://api.test/v1/platform/apps");
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual({
       repo: "https://github.com/hanzoai/post.git",
@@ -44,14 +53,26 @@ describe("publish", () => {
       vi.fn(async () => Response.json({ declaration: { review: "javascript:alert(1)" } })),
     );
     expect((await publish(cloud, { repo: "r", ref: "", name: "x" })).review).toBeNull();
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "No such repository." }, { status: 422 })));
-    await expect(publish(cloud, { repo: "r", ref: "main", name: "x" })).rejects.toThrow("No such repository.");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ error: "No such repository." }, { status: 422 })),
+    );
+    await expect(publish(cloud, { repo: "r", ref: "main", name: "x" })).rejects.toThrow(
+      "No such repository.",
+    );
   });
 
   it("reads one build's status from the builds list", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => Response.json({ builds: [{ id: "a", status: "failed" }, { id: "b1", status: "succeeded" }] })),
+      vi.fn(async () =>
+        Response.json({
+          builds: [
+            { id: "a", status: "failed" },
+            { id: "b1", status: "succeeded" },
+          ],
+        }),
+      ),
     );
     expect(await buildStatus(cloud, "b1")).toBe("succeeded");
     expect(await buildStatus(cloud, "zzz")).toBeNull();

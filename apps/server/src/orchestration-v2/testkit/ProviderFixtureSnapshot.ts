@@ -1,10 +1,11 @@
+// @effect-diagnostics nodeBuiltinImport:off - the fixture files are read synchronously beside the replay.
 import { OrchestrationV2DomainEvent } from "@hanzodev/contracts";
 import * as Effect from "effect/Effect";
-import { readFileSync } from "node:fs";
+import * as NodeFS from "node:fs";
 import * as Schema from "effect/Schema";
-import { expect } from "vitest";
+import { expect } from "vite-plus/test";
 
-import type { OrchestratorV2ScenarioResult } from "../OrchestratorScenario.ts";
+import type { OrchestratorV2ScenarioResult } from "./OrchestratorScenario.ts";
 import type {
   OrchestratorFixtureInput,
   ProviderOrchestratorReplayVariant,
@@ -85,7 +86,7 @@ export const matchProviderFixture = Effect.fn("matchProviderFixture")(function* 
   const driver = input.driver.driver;
   const file = (name: string) =>
     new URL(`${input.fixtureName}/${driver}.${name}`, FIXTURES_ROOT).pathname;
-  const transcript = readFileSync(new URL(input.driver.transcriptFile), "utf8");
+  const transcript = NodeFS.readFileSync(new URL(input.driver.transcriptFile), "utf8");
   const inputJson = json({
     fixture: input.fixtureName,
     driver,

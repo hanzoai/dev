@@ -7,7 +7,7 @@ import { devWasmBytes } from "./devWasmBytes.ts";
  * (`environ_get`, `environ_sizes_get`, `fd_write`, `proc_exit`), so it touches no file, socket or clock.
  */
 interface Exports {
-  readonly memory: WebAssembly.Memory;
+  readonly memory: { readonly buffer: ArrayBuffer };
   readonly dev_alloc: (len: number) => number;
   readonly dev_release: (ptr: number, len: number) => void;
   readonly dev_free: (buf: number) => void;
@@ -20,14 +20,21 @@ interface Exports {
   ) => number;
 }
 
+/** Node's global `WebAssembly`. The server compiles without DOM types, which carry its declarations. */
+const { Instance, Module } = (
+  globalThis as unknown as {
+    readonly WebAssembly: {
+      readonly Instance: new (module: object, imports: object) => { readonly exports: object };
+      readonly Module: new (bytes: Uint8Array) => object;
+    };
+  }
+).WebAssembly;
+
 let loaded: Exports | undefined;
 const engine = (): Exports => {
   if (loaded) return loaded;
   const wasi = new NodeWasi.WASI({ version: "preview1" });
-  const instance = new WebAssembly.Instance(
-    new WebAssembly.Module(devWasmBytes() as BufferSource),
-    wasi.getImportObject() as WebAssembly.Imports,
-  );
+  const instance = new Instance(new Module(devWasmBytes()), wasi.getImportObject());
   wasi.initialize(instance as never);
   loaded = instance.exports as unknown as Exports;
   return loaded;

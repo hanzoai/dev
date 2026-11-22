@@ -2,7 +2,9 @@ import type { ThreadSummary } from "@hanzodev/client-runtime/cloud-chat";
 
 /** Pinned first, then newest: the order every surface lists conversations in. */
 export function orderThreads(threads: ReadonlyArray<ThreadSummary>): ReadonlyArray<ThreadSummary> {
-  return threads.toSorted((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt);
+  return threads.toSorted(
+    (a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt,
+  );
 }
 
 /** The thread a host address names: a remote conversation id or a device key. */

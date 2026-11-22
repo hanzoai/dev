@@ -8,7 +8,7 @@ import {
 import { EnvironmentId, ProjectId, ThreadId, type ModelSelection } from "@hanzodev/contracts";
 import { scopeThreadRef } from "@hanzodev/client-runtime/environment";
 import { useAtomValue } from "@effect/atom-react";
-import { useMemo, useRef, type ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 
 import { ChatComposer, type ChatComposerHandle } from "../components/chat/ChatComposer";
 import { ComposerSurface } from "../components/chat/ComposerSurface";
@@ -18,10 +18,7 @@ import { useTheme } from "../hooks/useTheme";
 import { DraftId, useComposerDraftStore } from "../composerDraftStore";
 import { readAttachments } from "./homeAttachments";
 import { primaryServerKeybindingsAtom } from "../state/server";
-import type {
-  ComposerImageAttachment,
-  ComposerFileAttachment,
-} from "../composerDraftStore";
+import type { ComposerImageAttachment, ComposerFileAttachment } from "../composerDraftStore";
 import type { TerminalContextDraft } from "../lib/terminalContext";
 
 const CLOUD_ENVIRONMENT = EnvironmentId.make("cloud");
@@ -61,14 +58,11 @@ export function HomeComposer(props: {
   const imagesRef = useRef<ComposerImageAttachment[]>([]);
   const filesRef = useRef<ComposerFileAttachment[]>([]);
   const terminalRef = useRef<TerminalContextDraft[]>([]);
-  const providers = useMemo(
-    () => cloudChatProviders(props.models, props.localModels.length > 0 ? props.localModels : undefined),
-    [props.models, props.localModels],
+  const providers = cloudChatProviders(
+    props.models,
+    props.localModels.length > 0 ? props.localModels : undefined,
   );
-  const selection: ModelSelection = useMemo(
-    () => cloudChatSelection(props.models, props.model, props.effort),
-    [props.models, props.model, props.effort],
-  );
+  const selection: ModelSelection = cloudChatSelection(props.models, props.model, props.effort);
   const threadRef = scopeThreadRef(CLOUD_ENVIRONMENT, HOME_THREAD);
   const send = useStableCallback(() => {
     const prompt = promptRef.current.trim();
@@ -194,7 +188,10 @@ export function HomeComposer(props: {
         </ComposerSurface.Host>
       </ComposerSurface.Shell>
       {props.preparing ? (
-        <div className="flex items-center gap-2 px-1 pt-1 text-xs text-muted-foreground" data-testid="composer-extras">
+        <div
+          className="flex items-center gap-2 px-1 pt-1 text-xs text-muted-foreground"
+          data-testid="composer-extras"
+        >
           <span role="status">{props.preparing}</span>
         </div>
       ) : null}

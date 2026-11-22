@@ -1,4 +1,12 @@
-export const BUILT_IN_THEME_IDS = ["zen", "lelouch", "hanzo-chat", "grove", "ocean", "ember", "iris"] as const;
+export const BUILT_IN_THEME_IDS = [
+  "zen",
+  "lelouch",
+  "hanzo-chat",
+  "grove",
+  "ocean",
+  "ember",
+  "iris",
+] as const;
 
 export const MOBILE_DEFAULT_THEME_ID = "hanzo-dev";
 
@@ -910,7 +918,7 @@ export const IRIS_THEME: ThemeDefinition = {
   sidebarArtwork: true,
 };
 
-export const ZEN_THEME: ThemeDefinition = {
+const ZEN_THEME: ThemeDefinition = {
   id: "zen",
   label: "Zen",
   appearance: "light",
@@ -957,7 +965,7 @@ export const ZEN_THEME: ThemeDefinition = {
   },
 };
 
-export const LELOUCH_THEME: ThemeDefinition = {
+const LELOUCH_THEME: ThemeDefinition = {
   id: "lelouch",
   label: "Lelouch",
   appearance: "light",

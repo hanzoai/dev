@@ -32,6 +32,7 @@ async function machine(exp: number) {
   return { home, dir, bin, host: { platform: "linux", home, env: {} } };
 }
 
+// oxlint-disable-next-line hanzo/no-wall-clock-in-tests -- readSharedIdentity judges expiry against the real clock, so fixtures must be relative to it.
 const FRESH_EXP = Math.floor(Date.now() / 1000) + 3600;
 
 describe("machine Hanzo identity", () => {
@@ -43,6 +44,7 @@ describe("machine Hanzo identity", () => {
   });
 
   it("asks the CLI to refresh an expired token and never touches the vault itself", async () => {
+    // oxlint-disable-next-line hanzo/no-wall-clock-in-tests -- readSharedIdentity judges expiry against the real clock, so fixtures must be relative to it.
     const m = await machine(Math.floor(Date.now() / 1000) - 600);
     const before = await NodeFSP.readFile(NodePath.join(m.dir, "credentials"), "utf8");
     const fresh = tokenSet(FRESH_EXP);
@@ -55,11 +57,13 @@ describe("machine Hanzo identity", () => {
     expect(await NodeFSP.readFile(NodePath.join(m.dir, "credentials"), "utf8")).toBe(before);
     expect(await hanzoAccessToken(m.host)).toBe("fresh-token");
     const snapshot = await readFreshSharedIdentity(m.host);
+    // oxlint-disable-next-line hanzo/no-wall-clock-in-tests -- readSharedIdentity judges expiry against the real clock, so fixtures must be relative to it.
     expect(snapshot.accounts[0]?.expiresAt).toBeGreaterThan(Date.now());
     expect(snapshot.accounts[0]?.refreshToken).toBeNull();
   });
 
   it("returns no token when refresh fails, which is when sign-in is asked for", async () => {
+    // oxlint-disable-next-line hanzo/no-wall-clock-in-tests -- readSharedIdentity judges expiry against the real clock, so fixtures must be relative to it.
     const m = await machine(Math.floor(Date.now() / 1000) - 600);
     await NodeFSP.writeFile(NodePath.join(m.bin, "hanzo"), "#!/bin/sh\necho denied >&2\nexit 1\n", {
       mode: 0o755,

@@ -27,7 +27,7 @@ export interface LocalEngineStatus {
 export type LocalEngineAction = "pull" | null;
 
 export const HANZOD_ENGINE_BASE_URL = "http://127.0.0.1:3690/v1/engine";
-export const HANZOD_ENGINE_CATALOG_URL = `${HANZOD_ENGINE_BASE_URL}/catalog`;
+const HANZOD_ENGINE_CATALOG_URL = `${HANZOD_ENGINE_BASE_URL}/catalog`;
 
 /** The picker group every Hanzo Engine model sits under: weights on this machine, nothing sent out. */
 export const LOCAL_PRIVATE_GROUP = "Local · Private";
@@ -88,7 +88,7 @@ export function parseLocalEngines(raw: string | null | undefined): LocalEngine[]
   return engines;
 }
 
-export function isZenModelId(id: string): boolean {
+function isZenModelId(id: string): boolean {
   return /^zen/iu.test(id.trim());
 }
 

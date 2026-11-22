@@ -5,7 +5,7 @@ import {
 } from "./hanzoIamAuth.ts";
 
 /** The machine's Hanzo identity: the credential vault the CLI, hanzod, and the desktop app all use. */
-export const SHARED_IDENTITY_BRAND = "hanzo";
+const SHARED_IDENTITY_BRAND = "hanzo";
 
 export interface SharedIdentitySnapshot {
   readonly activeAccountId: string | null;

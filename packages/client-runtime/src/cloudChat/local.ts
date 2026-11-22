@@ -1,12 +1,9 @@
 // @effect-diagnostics globalFetch:off -- Local chat is a plain promise client shared with React Native and the browser; it has no Effect runtime.
 /**
- * Chat served by the user's linked Mac: Hanzo Engine (hanzod `/v1/engine`), Ollama, LM Studio or a
- * custom OpenAI-compatible endpoint, whichever Dev's Local AI exposes there. The phone never talks
- * to those engines; it asks the Mac's Dev server, over the environment connection it already holds
- * (Hanzo Link relay or direct), which must answer
- *   - models  GET  /v1/local-ai/models  -> {data: [{id, engine?}]}
- *   - replies POST /v1/local-ai/chat    {model, messages, stream: true} (SSE, OpenAI-compatible)
- * A local model never reaches api.hanzo.ai, and a missing Mac is an error, never a cloud reply.
+ * Chat served by the user's linked Mac. The phone never talks to its engines; it asks the Mac's Dev
+ * server over the environment connection it holds: `GET /v1/local-ai/models` and
+ * `POST /v1/local-ai/chat` (SSE). A local model never reaches api.hanzo.ai, and a missing Mac is an
+ * error, never a cloud reply.
  */
 import { buildHanzoApiHeaders } from "@hanzodev/shared/hanzoIamAuth";
 

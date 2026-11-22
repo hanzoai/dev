@@ -387,6 +387,7 @@
   "b3120494e215abaf": "Kunde inte skapa miljöns auktoriseringsbevis.",
   "960aa0b106793f99": "Kunde inte läsa in miljöns auktoriseringsnyckel.",
   "facb167869d93774": "Tidsgränsen nåddes när miljöns autentiseringsuppgift skulle förnyas.",
+  "d277f9cf266c9819": "Auto",
   "0549eeedb2c63c32": "Use the {name} connector to ",
   "f55196e4afe2840c": "Use the {name} design system: ",
   "5f2b771aa73eb6c6": "Keep in mind: {name}",
@@ -1529,11 +1530,11 @@
   "e07c02ee1f862cbc": "Kunde inte öppna lagringen för DPoP-nycklar.",
   "be3030ffedc152a6": "Kunde inte läsa DPoP-nyckeln.",
   "4c858a862b13555c": "Kunde inte skriva DPoP-nyckeln.",
+  "33fdee6fc52c06c6": "Kunde inte importera den privata DPoP-nyckeln.",
   "d9824238bbe45384": "Kunde inte generera DPoP-bevisnyckeln.",
   "b2b4d46c60d17570": "Kunde inte exportera den privata DPoP-nyckeln.",
   "e7018d0e5c5f7d75": "Kunde inte exportera den publika DPoP-nyckeln.",
   "56700638f4a38b40": "Den genererade publika DPoP-nyckeln är ogiltig.",
-  "33fdee6fc52c06c6": "Kunde inte importera den privata DPoP-nyckeln.",
   "87338da304e4dd3e": "Kunde inte läsa in DPoP-bevisnyckeln.",
   "b2ee6fa8c91540d0": "Kunde inte signera DPoP-beviset.",
   "4b4b4cc24d0fd8d4": "Active organization: {org}",
@@ -2834,12 +2835,53 @@
   "7b6319899a2bb9de": "Okänt borttagningsfel i IndexedDB",
   "a0b511c077c861d8": "Okänt markörfel i IndexedDB",
   "5b6a217023d4c958": "Skrivbordsappens säkra lagring är inte tillgänglig i den här systemkontexten.",
+  "ab786f0ad7397b41": "Brainstorma idéer",
+  "508ddcbe71e05a1a": "Analysera kod",
+  "69841d9be53be569": "Skriv utkast och förfina",
+  "f13a1ce32845434b": "Undersök ett ämne",
+  "d9846476cebcdbcf": "Granska git-diff",
+  "c1249e2e0d59a81e": "Åtgärda tester som fallerar",
+  "6194b0f0edd8b9a0": "Bygg en funktion",
+  "398549edfbf1814c": "Refaktorera modul",
+  "082c312da6e254de": "Bygg det som kommer härnäst.",
+  "6cd5800e00aa3c32": "God morgon, {name}. Vad bygger vi?",
+  "aa270e0dc753516d": "God eftermiddag, {name}. Vad bygger vi?",
+  "7936607bfffc5cfb": "God kväll, {name}. Vad bygger vi?",
+  "5406883f8b854a55": "Vad är nästa steg?",
+  "a16fb0e86b06d348": "God morgon, {name}.",
+  "491e8bd53c6361e0": "God eftermiddag, {name}.",
+  "0249ae895c80f3ca": "God kväll, {name}.",
+  "cfb3f269b6b2422c": "Stäng personaväljaren",
+  "6cf1b5f50233d093": "Avsluta privat läge",
+  "085959508fedad72": "Rensa persona",
+  "094d723edc8a00ab": [
+    "Välj persona (",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ")"
+  ],
+  "08268bb17a38c420": "Ingen persona",
+  "d0c2a7992c20c04d": "Logga in för att läsa in dina personor.",
+  "01d67f2bc91c6eee": "Privat läge · inget sparas eller registreras",
+  "c4b860aca29ee1c5": [
+    "Kunde inte ansluta till ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "a61f491435e2f821": "Miljön svarade inte. Kontrollera att den är online och försök sedan igen.",
+  "9bbecec926c3b695": "Försök igen",
   "8c4364bcfd1d8630": "Build what's next.",
   "f4e0f7149b19a94b": "Start a session in the cloud, or link your own machine.",
   "acb100bef9c60d82": "Start a cloud session",
   "065413ea2192e0df": "Link my machine",
   "ad247964ae360dec": "Cloud sessions are not available right now. Link your machine instead, or try again shortly.",
-  "4ffc9bc8998120f5": "Open this document in Hanzo Dev on your computer to preview it.",
+  "4ffc9bc8998120f5": "Öppna dokumentet i Hanzo Dev på din dator för att förhandsgranska det.",
   "b6cc9af7a6d5e31b": "Publicera",
   "d87b86613f8494c8": "Build {repo} at {ref} and add it to a project as {name}.",
   "7767ca0f466685e4": "Build {id} succeeded. It is live at the project's address.",
@@ -2852,6 +2894,8 @@
   "445511757fcd365a": "Ansluter…",
   "0c7f505925487ca5": "End talk mode",
   "217b7b61ba019b2b": "Start talk mode",
+  "e26bcec28db6926d": "Avsluta röstsamtal",
+  "f1e6d769d8a47054": "Röstsamtal",
   "e7651575edb03ae2": "Marked {count, plural, one {{count} thread} other {{count} threads}} done",
   "96f74e61e5e2394a": "Snoozade {count, plural, one {{count} tråd} other {{count} trådar}}",
   "158d77e7a872186e": "Lossade {count, plural, one {{count} tråd} other {{count} trådar}}",
@@ -3319,10 +3363,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "på datorn som öppnade den här sidan"
-      ]
+      "c": [" ", "på datorn som öppnade den här sidan"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3334,10 +3375,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· den som kör den får den här åtkomsten"
-      ]
+      "c": [" ", "· den som kör den får den här åtkomsten"]
     }
   ],
   "c54cc9c75db9dc58": "Godkänn bara en inloggning som du själv precis har startat.",
@@ -3425,6 +3463,8 @@
   "3390f0b2396998c0": "Citera markeringen i inmatningsfältet",
   "e5dc8d61a6d178ed": "Korta ned markeringen",
   "a5b06aaaba1d742f": "Citera",
+  "c97acc2f249d581a": "Kunde inte bifoga {project}",
+  "710755372847018d": "Bifoga ett projekt",
   "b1d8a5a24bd684e3": "subagent",
   "5a805b37d8940816": "kommando",
   "da2da87e78bd6b11": "övervakare",
@@ -3898,7 +3938,6 @@
       "v": "v"
     }
   ],
-  "9bbecec926c3b695": "Försök igen",
   "4fd8927b7afc2a92": "Kopiera meddelande",
   "6f8651e48261911a": "Tanke",
   "07e65dba2b16d3f7": "{count, plural, one {{path} +{count} till} other {{path} +{count} till}}",
@@ -3999,7 +4038,9 @@
   "ae0ce3cad2ae99ef": "{label}: Begränsad.",
   "afe27891aab8cf37": "{label}: Inte redo.",
   "2f77cc3105ddd7f8": "Leverantörer",
+  "e608267bb9696138": "Anslut leverantörskonto",
   "3b205a1c17c06fbd": "Favoriter",
+  "7e8058d028c748ca": "Anslut leverantör",
   "a06eb47a82969918": "Subagent",
   "d567966a45ff32be": "Subagentarbete",
   "4740c38b2edd194d": "Endast läsning. De här subagenterna kan inte ta emot meddelanden.",
@@ -4894,6 +4935,8 @@
   "5ba22a660758e453": "Gränsen för bilagor har nåtts.",
   "181933312b23cb0c": "Utkastet avvisade den här bilagan (dubblett eller gränsen för bilagor nådd).",
   "df02c1d51d158d32": "Byt svarsmodell för den här tråden",
+  "7f7784a67756f1f6": "Fortsätt privat, inget sparas eller registreras",
+  "649ff7a5e07869ce": "Byt eller rensa den aktiva personan",
   "929781439a221aae": "Ställ en sidofråga i en ny sidochatt",
   "378c3404c430fc05": "Samma som /side",
   "8ce7ee2a95c49bdb": "Starta en ny session; tidigare meddelanden förblir synliga",
@@ -5940,6 +5983,7 @@
   "6b962f04ab551bfa": "Klar: {model}",
   "6e4b9080250290c0": "online",
   "f0cdc6e629fe2c45": "offline",
+  "c03deeb762c15761": "{latency} ms",
   "651cb409bda342a8": "Remove {model}",
   "2288d5e74aedffb5": "Modelltagg att hämta, t.ex. llama3.2",
   "c035e78630f52497": "Modell att hämta",

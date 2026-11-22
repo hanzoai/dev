@@ -175,10 +175,9 @@ function makePublicValueConfig(name: string, fallback: string) {
 }
 
 /** Where people sign in and where the sign-in configuration is published. */
-export const loginUrlConfig = makePublicValueConfig(
-  "HANZO_DEV_LOGIN_URL",
-  DEFAULT_HANZO_LOGIN_URL,
-).pipe(Config.mapEffect(validateOriginUrl));
+const loginUrlConfig = makePublicValueConfig("HANZO_DEV_LOGIN_URL", DEFAULT_HANZO_LOGIN_URL).pipe(
+  Config.mapEffect(validateOriginUrl),
+);
 
 export interface CloudCliOAuthConfig {
   readonly authorizationEndpoint: string;

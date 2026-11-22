@@ -25,7 +25,7 @@ const controllers = new Map<
   { controller: CloudChatController; local: LocalChatHost | null; cloud: DevCloud }
 >();
 
-export function controllerFor(cloud: DevCloud) {
+function controllerFor(cloud: DevCloud) {
   let held = controllers.get(cloud.api);
   if (held === undefined) {
     const box: { controller: CloudChatController; local: LocalChatHost | null; cloud: DevCloud } = {
@@ -55,7 +55,9 @@ export function useHomeChat(cloud: DevCloud, machine: DevEnvironment | null) {
     controller.getState,
   );
   const runtime = machine?.runtime ?? null;
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- points the shared controller's local host at the selected Mac's runtime and lists that Mac's models
   useEffect(() => {
+    // oxlint-disable-next-line react/immutability -- `held` is the module-level controller registry entry, not render state; the controller reads `local` on each turn
     held.local = runtime
       ? createLocalChatHost({
           baseUrl: runtime.zap,
@@ -64,13 +66,17 @@ export function useHomeChat(cloud: DevCloud, machine: DevEnvironment | null) {
             const token = await runtime.token();
             return fetch(input, {
               ...init,
-              headers: { ...(init?.headers as Record<string, string>), Authorization: `Bearer ${token}` },
+              headers: {
+                ...(init?.headers as Record<string, string>),
+                Authorization: `Bearer ${token}`,
+              },
             });
           },
         })
       : null;
     void controller.loadLocalModels();
   }, [held, controller, runtime]);
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- loads the account's models and conversations into the shared cloud-chat controller's store
   useEffect(() => {
     void controller.loadModels();
     void controller.loadThreads();
@@ -79,6 +85,7 @@ export function useHomeChat(cloud: DevCloud, machine: DevEnvironment | null) {
   const [personas, setPersonas] = useState<ReadonlyArray<Persona>>([]);
   const [persona, setPersona] = useState<string | null>(null);
   const records = useRef(new Map<string, PersonaRecord | null>());
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- fetches the org's personas for the cloud the host passes, dropping a reply that lands after a change or unmount
   useEffect(() => {
     let live = true;
     void (async () => {
@@ -90,6 +97,7 @@ export function useHomeChat(cloud: DevCloud, machine: DevEnvironment | null) {
       live = false;
     };
   }, [cloud]);
+  // oxlint-disable-next-line hanzo/no-manual-memo -- the React Compiler skips useHomeChat (its effect writes the shared controller entry), so identity is kept by hand.
   const personaRecord = useCallback(async (): Promise<PersonaRecord | null> => {
     if (persona === null) return null;
     if (!records.current.has(persona)) {
@@ -98,6 +106,7 @@ export function useHomeChat(cloud: DevCloud, machine: DevEnvironment | null) {
     }
     return records.current.get(persona) ?? null;
   }, [cloud, persona]);
+  // oxlint-disable-next-line hanzo/no-manual-memo -- the React Compiler skips useHomeChat (its effect writes the shared controller entry), so identity is kept by hand.
   return useMemo(
     () => ({
       state,
@@ -115,7 +124,12 @@ export function useHomeChat(cloud: DevCloud, machine: DevEnvironment | null) {
 /** The account's cloud conversations, newest first (pinned first): the ones hanzo.app Chat lists and the phone shows. */
 export function useCloudThreads(cloud: DevCloud) {
   const { controller } = controllerFor(cloud);
-  const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
+  const state = useSyncExternalStore(
+    controller.subscribe,
+    controller.getState,
+    controller.getState,
+  );
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- loads the account's conversations into the shared cloud-chat controller's store
   useEffect(() => {
     void controller.loadThreads();
   }, [controller]);

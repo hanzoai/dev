@@ -144,6 +144,15 @@
       // These workspace packages are private to this monorepo.
       "includeEntryExports": true,
     },
+    "packages/dev": {
+      // @hanzo/dev-core ships only the apps/web embed build; its dist imports these bare,
+      // and scripts/embed-dist-check.ts requires every such import to be a listed dependency.
+      "ignoreDependencies": [
+        "@tanstack/react-router",
+        "@tanstack/react-store",
+        "use-sync-external-store",
+      ],
+    },
     "packages/effect-acp": {
       "includeEntryExports": true,
       "entry": ["test/fixtures/*.ts"],

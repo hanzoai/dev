@@ -192,7 +192,7 @@ const ANDROID_ICON_BY_SF_SYMBOL = {
   "circle.dashed": IconCircleDashed,
   "circle.inset.filled": IconCircleDot,
   "circle.dashed.inset.filled": IconCircleDot,
-  "calendar": IconCalendarClock,
+  calendar: IconCalendarClock,
   "calendar.badge.clock": IconCalendarClock,
   "checkmark.shield": IconCircleCheck,
   "hand.raised": IconShieldQuestion,

@@ -32,6 +32,7 @@ export function buildWidgetConnectionStatus(input: {
   readonly onlineMachinesCount: number;
   readonly totalMachinesCount: number;
 }): string {
+  /* oxlint-disable hanzo/no-untranslated-copy -- Status line for the native Swift widget, which shows it beside its own English copy and feeds it to its on-device model prompt. */
   if (!input.signedIn) {
     return input.onlineMachinesCount > 0
       ? `${input.onlineMachinesCount} machine${input.onlineMachinesCount === 1 ? "" : "s"} connected`
@@ -44,4 +45,5 @@ export function buildWidgetConnectionStatus(input: {
     return `Hanzo Cloud · ${input.totalMachinesCount} linked`;
   }
   return "Hanzo Cloud · Ready";
+  /* oxlint-enable hanzo/no-untranslated-copy */
 }

@@ -72,11 +72,13 @@ export function useCloudChat(): CloudChat {
   // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- threads are per account: reload the list when the signed-in account changes
   useEffect(() => {
     if (isSignedIn) void chat.loadThreads();
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- A different signed-in account is the reload signal; the controller reads the account from auth itself.
   }, [chat, isSignedIn, userId]);
   const mac = useAtomValue(linkedMacHostAtom);
   // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- the Mac's models are listed when it connects and its offline state is read when it leaves
   useEffect(() => {
     void chat.loadLocalModels();
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- The linked Mac connecting or leaving is the reload signal; the controller reads the host itself.
   }, [chat, mac]);
   const state = useSyncExternalStore(chat.subscribe, chat.getState, chat.getState);
   return useMemo(

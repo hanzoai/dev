@@ -222,9 +222,14 @@ const make = Effect.gen(function* () {
       // A local engine has one set of cores, and a title is a second full agent prompt on it:
       // the turn answers first, the title follows.
       if (isLocalEngineInstanceId(String(settings.textGenerationModelSelection.instanceId))) {
-        yield* threads.getThreadRecords(input.threadId, []).pipe(
+        yield* threads.getThreadRecords(input.threadId, ["runs"], { turnItemTypes: [] }).pipe(
           Effect.flatMap((records) =>
-            records.thread.activeRunId === null ? Effect.void : Effect.fail("running" as const),
+            records.runs.some(
+              (run) =>
+                run.status === "preparing" || run.status === "starting" || run.status === "running",
+            )
+              ? Effect.fail("running" as const)
+              : Effect.void,
           ),
           Effect.retry({
             schedule: Schedule.spaced("1 second"),

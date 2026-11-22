@@ -15,7 +15,7 @@ import {
 } from "@hanzodev/client-runtime/cloud-chat";
 
 /** How long a send waits for a freshly attached file to have passages before it says so. */
-export const READ_WAIT_MS = 30_000;
+const READ_WAIT_MS = 30_000;
 
 export interface PreparedTurn {
   readonly prompt: string;
@@ -23,7 +23,12 @@ export interface PreparedTurn {
   readonly turn: CloudChatTurn;
 }
 
-const refOf = (file: WorkFile): FileRef => ({ id: file.id, name: file.name, type: file.type, size: file.size });
+const refOf = (file: WorkFile): FileRef => ({
+  id: file.id,
+  name: file.name,
+  type: file.type,
+  size: file.size,
+});
 
 const unread = (files: ReadonlyArray<WorkFile>): string =>
   files.some((file) => file.status === "failed")
@@ -48,7 +53,9 @@ export async function prepareTurn(input: {
   const turn: CloudChatTurn = input.persona
     ? { system: input.persona.instructions ?? undefined, model: input.persona.model ?? undefined }
     : {};
-  const documents = input.attachments.filter((a): a is Extract<CloudChatAttachment, { kind: "file" }> => a.kind === "file");
+  const documents = input.attachments.filter(
+    (a): a is Extract<CloudChatAttachment, { kind: "file" }> => a.kind === "file",
+  );
   const inline = input.attachments.filter((a) => a.kind !== "file");
   const reused = carriedIn(input.history);
   if (documents.length === 0 && reused.length === 0)
@@ -70,9 +77,15 @@ export async function prepareTurn(input: {
     const attached = landed.map(refOf);
     const earlier = reused.filter((file) => !attached.some((a) => a.id === file.id));
     const all = [...attached, ...earlier];
-    if (all.length === 0) return { prompt: compose(input.prompt, { attached: [], reused: [] }, null), attachments: inline, turn };
+    if (all.length === 0)
+      return {
+        prompt: compose(input.prompt, { attached: [], reused: [] }, null),
+        attachments: inline,
+        turn,
+      };
     input.say(`Reading ${all.map((f) => f.name).join(", ")}`);
-    const now = landed.length > 0 ? await readableFiles(input.auth, landed, READ_WAIT_MS, input.options) : [];
+    const now =
+      landed.length > 0 ? await readableFiles(input.auth, landed, READ_WAIT_MS, input.options) : [];
     let grounds = null;
     try {
       grounds = await retrieve(
@@ -86,7 +99,11 @@ export async function prepareTurn(input: {
       why = why ?? "the workspace could not be read just now";
     }
     if (!grounds?.passages.length) why = why ?? unread(now);
-    return { prompt: compose(input.prompt, { attached, reused: earlier }, grounds, why), attachments: inline, turn };
+    return {
+      prompt: compose(input.prompt, { attached, reused: earlier }, grounds, why),
+      attachments: inline,
+      turn,
+    };
   } finally {
     input.say(null);
   }

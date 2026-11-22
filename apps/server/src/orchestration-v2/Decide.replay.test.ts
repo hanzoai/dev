@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - the test reads the corpus and dev.wasm files synchronously.
 import * as NodeFS from "node:fs";
 import { assert, it } from "@effect/vitest";
 import { type DecideCase, decideFns } from "./Decide.replay.ts";
@@ -15,9 +16,20 @@ it.each(["dispatch_mode_limit", "model_switch"])("replays the %s corpus", (name)
   }
 });
 
+// Node's global `WebAssembly`. The server compiles without DOM types, which carry its declarations.
+const { Module } = (
+  globalThis as unknown as {
+    readonly WebAssembly: {
+      readonly Module: (new (bytes: Uint8Array) => object) & {
+        readonly imports: (module: object) => ReadonlyArray<{ readonly name: string }>;
+      };
+    };
+  }
+).WebAssembly;
+
 it("dev.wasm imports exactly environ_get, environ_sizes_get, fd_write and proc_exit", () => {
   const bytes = NodeFS.readFileSync(new URL("../../../../go/dev.wasm", import.meta.url));
-  const imports = WebAssembly.Module.imports(new WebAssembly.Module(bytes)).map((i) => i.name);
+  const imports = Module.imports(new Module(bytes)).map((i) => i.name);
   assert.deepStrictEqual(imports.toSorted(), [
     "environ_get",
     "environ_sizes_get",

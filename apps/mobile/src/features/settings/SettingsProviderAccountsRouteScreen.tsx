@@ -73,7 +73,7 @@ export function SettingsProviderAccountsRouteScreen() {
           )}
         >
           <SettingsRow
-            icon="sparkles"
+            icon="brain"
             label={gt("Default Chat Model")}
             value={activeModel}
             valuePosition="trailing"

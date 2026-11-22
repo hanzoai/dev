@@ -11,12 +11,7 @@ import { webViewDecelerationRate } from "../../../lib/webViewDecelerationRate";
 import { useHanzoMobileAccounts } from "../../cloud/hanzoMobileAuth";
 import { useSelectWorkspaceTab } from "./useSelectWorkspaceTab";
 import type { WebSection } from "./workspace-section.logic";
-import {
-  HANZO_APP_ORIGIN,
-  isAppUrl,
-  sessionScript,
-  webSectionUrl,
-} from "./workspace-web.logic";
+import { HANZO_APP_ORIGIN, isAppUrl, sessionScript, webSectionUrl } from "./workspace-web.logic";
 
 function ChromeButton(props: {
   readonly label: string;

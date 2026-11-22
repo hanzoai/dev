@@ -141,7 +141,9 @@ const WINDOW: UsageSummaryInput = {
 const setup = Effect.gen(function* () {
   const home = yield* Effect.promise(() =>
     // macOS keeps /var/folders behind /private; the server reports the real path.
-    NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "usage-service-test-")).then(NodeFSP.realpath),
+    NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "usage-service-test-")).then((path) =>
+      NodeFSP.realpath(path),
+    ),
   );
   yield* Effect.addFinalizer(() =>
     Effect.promise(() => NodeFSP.rm(home, { recursive: true, force: true })),

@@ -26,7 +26,8 @@ export const onDeviceChatHost: LocalChatHost | null = onDeviceEngineAvailable
           .map((model) => ({ id: model.id, engine: ON_DEVICE_ENGINE })),
       stream: async ({ model, messages, onDelta, signal }) => {
         const entry = onDeviceModels().find((m) => m.id === model);
-        if (entry === undefined) throw new CloudChatError("offline", "That model is not on this phone");
+        if (entry === undefined)
+          throw new CloudChatError("offline", "That model is not on this phone");
         if (!entry.installed) {
           try {
             await downloadOnDeviceModel(model);
