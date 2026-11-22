@@ -12,9 +12,9 @@
 
 <p align="center">
   <a href="https://github.com/hanzoai/dev/releases/latest">Download for desktop</a> ·
-  <a href="https://dev.hanzo.ai">Web</a> ·
-  <a href="https://dev.hanzo.ai/ios">iOS (TestFlight, coming soon)</a> ·
-  <a href="./docs/user/install.md">Install guide</a>
+  <a href="https://hanzo.app/dev">Web</a> ·
+  <a href="./docs/user/install.md">Install guide</a> ·
+  <a href="https://hanzo.ai/security">Security</a>
 </p>
 
 > Hanzo Dev v1, the terminal agent, lives at [hanzoai/dev-v1](https://github.com/hanzoai/dev-v1). The command line going forward is `hanzo`.
@@ -28,7 +28,7 @@ It works out-of-the-box with **Hanzo (`hanzo` / `hanzod`)**, **Claude Code**, **
 - **Every agent & account in one place.** Auto-discovers installed agents and logged-in accounts on your computer. Switch models mid-thread or hand tasks across agents.
 - **Local Private AI (`hanzod`) + Cloud (`hanzo.ai`).** Connect directly to your local `hanzod` runtime (`http://127.0.0.1:9630` / `http://127.0.0.1:3690`) or sign in with your `hanzo.ai` account.
 - **One-click "Open in Hanzo IDE".** Jump from any thread or git worktree in Hanzo Dev straight into `/Applications/Hanzo IDE.app` (or Cursor, VS Code, Zed, Ghostty, Xcode).
-- **Real-Time Voice & Dictation.** Integrated voice prompt dictation and works seamlessly with **Hanzo Command** (`~/work/hanzo/command`) in the macOS Menu Bar (`fn` hold to dictate, `fn fn` double-tap for continuous real-time Jarvis voice loop).
+- **Real-Time Voice & Dictation.** Integrated voice prompt dictation with optional hands-free macOS menu bar shortcut support.
 - **Built-in Git Worktrees & Diff Review.** Isolate agent threads in dedicated git worktrees, inspect diffs, and commit/PR in one click.
 
 ## Running Locally
