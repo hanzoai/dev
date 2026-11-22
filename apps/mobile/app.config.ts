@@ -12,6 +12,7 @@ process.env.EXPO_NO_TYPESCRIPT_SETUP = "1";
 
 const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
 const isIosPersonalTeamBuild = repoEnv.HANZO_DEV_IOS_PERSONAL_TEAM === "1";
+const easProjectId = repoEnv.HANZO_DEV_EAS_PROJECT_ID?.trim() || undefined;
 const runtimeVersionPolicy =
   process.env.MOBILE_VERSION_POLICY ??
   (APP_VARIANT === "development" ? "appVersion" : "fingerprint");
@@ -247,19 +248,23 @@ const config: ExpoConfig = {
   orientation: "portrait",
   icon: variant.assets.appIcon,
   userInterfaceStyle: "automatic",
-  updates: {
-    enabled: repoEnv.HANZO_DEV_MOBILE_UPDATES_ENABLED !== "0",
-    url: "https://u.expo.dev/d763fcb8-d37c-41ea-a773-b54a0ab4a454",
-    checkAutomatically: "ON_LOAD",
-    fallbackToCacheTimeout: 0,
-  },
+  updates: easProjectId
+    ? {
+        enabled: repoEnv.HANZO_DEV_MOBILE_UPDATES_ENABLED !== "0",
+        url: `https://u.expo.dev/${easProjectId}`,
+        checkAutomatically: "ON_LOAD",
+        fallbackToCacheTimeout: 0,
+      }
+    : {
+        enabled: false,
+      },
   ios: {
     icon: variant.assets.iosIcon,
     supportsTablet: true,
     requireFullScreen: process.env.HANZO_SHOWCASE_CAPTURE_BUILD === "1",
     bundleIdentifier: iosBundleIdentifier,
     // Avoid Personal Team fallback: it cannot sign App Groups, Apple sign-in or push entitlements.
-    appleTeamId: repoEnv.HANZO_DEV_IOS_TEAM_ID?.trim() || "ARK85ZXQ4Z",
+    appleTeamId: repoEnv.HANZO_DEV_IOS_TEAM_ID?.trim() || "Q7CPG46G4N",
     associatedDomains: [
       `applinks:${variant.relyingParty}`,
       `webcredentials:${variant.relyingParty}`,
@@ -491,7 +496,7 @@ const config: ExpoConfig = {
       tracesToken: repoEnv.EXPO_PUBLIC_OTLP_TRACES_TOKEN ?? null,
     },
     eas: {
-      projectId: "d763fcb8-d37c-41ea-a773-b54a0ab4a454",
+      ...(easProjectId ? { projectId: easProjectId } : {}),
       observe: { endpointUrl: observeEndpointUrl },
     },
   },

@@ -1,4 +1,4 @@
-const PROJECT_ID = "d763fcb8-d37c-41ea-a773-b54a0ab4a454";
+const PROJECT_ID = process.env.HANZO_DEV_EAS_PROJECT_ID || "";
 const APP_SCHEME = "hanzo-dev";
 
 function readState(body) {

@@ -11,7 +11,7 @@ const stores = [
   {
     label: msg("iPhone and iPad"),
     store: "App Store",
-    url: "https://apps.apple.com/us/app/hanzo-dev-remote-claude-more/id6787819824",
+    url: "https://hanzo.ai/download#mobile",
     Icon: AppleIcon,
   },
   {

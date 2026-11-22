@@ -24,7 +24,7 @@ import { RELAY_HTTP_ROUTER_CONFIG } from "../http/Api.ts";
 import * as RelayHttpApi from "../http/Api.ts";
 import * as MobileTelemetry from "./MobileTelemetry.ts";
 
-const PROJECT_ID = "d763fcb8-d37c-41ea-a773-b54a0ab4a454";
+const PROJECT_ID = "11111111-2222-4333-8444-555555555555";
 const UPDATE_ID = "0198e8a4-1111-7000-8000-000000000001";
 const BUILD_ID = "0198e8a4-2222-7000-8000-000000000002";
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));

@@ -93,7 +93,7 @@ test("publishing consolidates platform comments and preserves unrelated comments
       {
         id: 4,
         user: { login: "github-actions[bot]" },
-        body: "<!-- continuous-deploy-fingerprint-projectId:d763fcb8-d37c-41ea-a773-b54a0ab4a454 -->\nOld Expo preview",
+        body: "<!-- continuous-deploy-fingerprint-projectId: -->\nOld Expo preview",
       },
     ],
     [

@@ -3,9 +3,9 @@
     "details": [
       {
         "appIDs": [
-          "ARK85ZXQ4Z.ai.hanzo.dev",
-          "ARK85ZXQ4Z.ai.hanzo.dev.preview",
-          "ARK85ZXQ4Z.ai.hanzo.dev.dev"
+          "Q7CPG46G4N.ai.hanzo.dev",
+          "Q7CPG46G4N.ai.hanzo.dev.preview",
+          "Q7CPG46G4N.ai.hanzo.dev.dev"
         ],
         "components": [{ "/": "/threads/*" }]
       }

@@ -41,7 +41,7 @@ Your agents run wherever Hanzo Dev runs: your desktop, a server, a VPS. You conn
 
 ## How do I use Hanzo Dev on my phone?
 
-Get the [iOS](https://apps.apple.com/us/app/hanzo-dev-remote-claude-more/id6787819824) or [Android](https://play.google.com/store/apps/details?id=ai.hanzo.dev) app, then connect it to your computer with Hanzo Link or a pairing link. The phone is a remote. Your computer does the work and needs to stay on. [Mobile setup](./install.md#mobile-app) · [Remote access](./remote-access.md)
+Get the [iOS](https://hanzo.ai/download#mobile) or [Android](https://play.google.com/store/apps/details?id=ai.hanzo.dev) app, then connect it to your computer with Hanzo Link or a pairing link. The phone is a remote. Your computer does the work and needs to stay on. [Mobile setup](./install.md#mobile-app) · [Remote access](./remote-access.md)
 
 ## Why does Hanzo Link keep disconnecting?
 

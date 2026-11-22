@@ -21,7 +21,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as DeviceService from "./DeviceService.ts";
 import * as EasDeviceHost from "./EasDeviceHost.ts";
 
-const APP_ID = "d763fcb8-d37c-41ea-a773-b54a0ab4a454";
+const APP_ID = "11111111-2222-4333-8444-555555555555";
 
 const config = (overrides: Partial<EasDeviceHostConfig> = {}): EasDeviceHostConfig => ({
   kind: "eas",

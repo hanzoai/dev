@@ -2,7 +2,7 @@
 export const MOBILE_APP_DOWNLOADS = [
   {
     platform: "iOS",
-    url: "https://apps.apple.com/us/app/hanzo-dev-remote-claude-more/id6787819824",
+    url: "https://hanzo.ai/download#mobile",
   },
   { platform: "Android", url: "https://play.google.com/store/apps/details?id=ai.hanzo.dev" },
 ] as const;

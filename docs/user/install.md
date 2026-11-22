@@ -170,7 +170,7 @@ folder paths, so in the web app use **Add project** instead.
 ## Mobile app
 
 Install Hanzo Dev from the
-[App Store](https://apps.apple.com/us/app/hanzo-dev-remote-claude-more/id6787819824) or
+[App Store](https://hanzo.ai/download#mobile) or
 [Google Play](https://play.google.com/store/apps/details?id=ai.hanzo.dev).
 The phone connects to a server on another machine. Follow
 [remote access](./remote-access.md) to link it through Hanzo Link or a pairing URL.

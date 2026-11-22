@@ -213,7 +213,7 @@ function resolveDevProxyTarget(
 const devProxyTarget = process.env.VITEST
   ? undefined
   : resolveDevProxyTarget(
-      process.env.HANZO_DEV_PORT ?? process.env.T3CODE_PORT ?? "13773",
+      process.env.HANZO_DEV_PORT ?? "13773",
       configuredWsUrl,
     );
 

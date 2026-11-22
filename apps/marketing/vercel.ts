@@ -36,7 +36,7 @@ export const config: VercelConfig = {
     {
       source: "/mobile",
       has: [{ type: "header", key: "user-agent", value: ".*(iPhone|iPad|iPod).*" }],
-      destination: "https://apps.apple.com/us/app/hanzo-dev-remote-claude-more/id6787819824",
+      destination: "https://hanzo.ai/download#mobile",
       permanent: false,
     },
     {
