@@ -32,32 +32,36 @@ export function AgentActivityWidget(
   const family = environment.widgetFamily;
   const accessory = family === "accessoryRectangular";
   const small = family === "systemSmall";
+  const large = family === "systemLarge";
   const monochrome =
     environment.widgetRenderingMode === "accented" ||
     environment.widgetRenderingMode === "vibrant" ||
     environment.isLuminanceReduced === true;
-  const isLightScheme = environment.colorScheme === "light";
 
   type Foreground = Parameters<typeof foregroundStyle>[0];
-  const primaryForeground = { type: "hierarchical", style: "primary" } as const;
-  const secondaryForeground = { type: "hierarchical", style: "secondary" } as const;
+  const primaryForeground: Foreground = accessory
+    ? ({ type: "hierarchical", style: "primary" } as const)
+    : "#ffffff";
+  const secondaryForeground: Foreground = accessory
+    ? ({ type: "hierarchical", style: "secondary" } as const)
+    : "#a1a1aa";
   const phaseTint = (phase: AgentActivityPhase): Foreground => {
     if (monochrome) return primaryForeground;
     switch (phase) {
       case "waiting_for_approval":
-        return isLightScheme ? "#d97706" : "#fcd34d";
+        return "#fcd34d";
       case "waiting_for_input":
-        return isLightScheme ? "#4f46e5" : "#a5b4fc";
+        return "#a5b4fc";
       case "failed":
-        return isLightScheme ? "#dc2626" : "#fca5a5";
+        return "#fca5a5";
       case "completed":
-        return isLightScheme ? "#059669" : "#6ee7b7";
+        return "#6ee7b7";
       case "stale":
         return secondaryForeground;
       case "starting":
       case "running":
       default:
-        return isLightScheme ? "#0284c7" : "#7dd3fc";
+        return "#7dd3fc";
     }
   };
   const phasePriority = (phase: AgentActivityPhase): number => {
@@ -71,7 +75,7 @@ export function AgentActivityWidget(
   const rows = [...(props.activities ?? [])].sort(
     (a, b) => phasePriority(a.phase) - phasePriority(b.phase),
   );
-  const shown = rows.slice(0, accessory || small ? 2 : 4);
+  const shown = rows.slice(0, accessory || small ? 2 : large ? 6 : 4);
   const attentionCount = rows.filter(
     (row) => row.phase === "waiting_for_approval" || row.phase === "waiting_for_input",
   ).length;
@@ -94,22 +98,18 @@ export function AgentActivityWidget(
               : "";
   const summaryTint = rows[0] ? phaseTint(rows[0].phase) : secondaryForeground;
   const emptyMessage = loaded
-    ? (props.subtitle ?? text?.noActiveAgents ?? "No active agents")
-    : "Open Hanzo Dev to load agent activity";
+    ? (props.subtitle ?? text?.noActiveAgents ?? "Hanzo Cloud ready · Tap to chat")
+    : "Tap to chat with Hanzo";
 
-  // Widget taps open the containing app, and every build accepts the prod
-  // scheme as a link prefix, so dev and preview builds route this too.
+  // Widget taps open the containing app; every build accepts hanzo:// and hanzodev://.
   const linkRow = rows[0];
   const deepLink =
     linkRow && linkRow.deepLink.startsWith("/") && !linkRow.deepLink.startsWith("//")
-      ? `hanzodev://${linkRow.deepLink.slice(1)}`
-      : null;
+      ? `hanzo://${linkRow.deepLink.slice(1)}`
+      : "hanzo://chat/new";
 
-  const background = accessory ? "clear" : isLightScheme ? "#ffffff" : "#1c1c1e";
-  const rootModifiers = [
-    containerBackground(background, "widget"),
-    ...(deepLink ? [widgetURL(deepLink)] : []),
-  ];
+  const background = accessory ? "clear" : "#000000";
+  const rootModifiers = [containerBackground(background, "widget"), widgetURL(deepLink)];
 
   // The template image ignores frame/foregroundStyle applied to itself; size
   // and tint it through a container the resizable image fills.

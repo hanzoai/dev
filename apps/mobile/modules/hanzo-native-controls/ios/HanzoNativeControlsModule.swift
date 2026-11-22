@@ -4,6 +4,9 @@ import Photos
 import Security
 import UIKit
 import UniformTypeIdentifiers
+#if canImport(WidgetKit)
+import WidgetKit
+#endif
 
 @ExpoModule("HanzoNativeControls")
 public final class HanzoNativeControlsModule: Module {
@@ -160,6 +163,40 @@ public final class HanzoNativeControlsModule: Module {
     AsyncFunction("saveImageToLibrary") { (url: URL, mimeType: String, name: String, promise: Promise) in
       Self.saveImageToLibrary(url: url, mimeType: mimeType, name: name, promise: promise)
     }
+
+    AsyncFunction("syncWidgetSnapshot") { (payloadJson: String) -> Bool in
+      return Self.syncWidgetSnapshot(payloadJson: payloadJson)
+    }
+  }
+
+  private static let widgetSnapshotKey = "hanzo_widget_snapshot_v1"
+  private static let widgetUpdatedAtKey = "hanzo_widget_updated_at"
+
+  private static func resolveWidgetAppGroupId() -> String? {
+    guard let bundleId = Bundle.main.bundleIdentifier, !bundleId.isEmpty else {
+      return nil
+    }
+    return "group.\(bundleId)"
+  }
+
+  private static func syncWidgetSnapshot(payloadJson: String) -> Bool {
+    let now = Date().timeIntervalSince1970
+    var wroteShared = false
+    if let groupId = resolveWidgetAppGroupId(),
+       let sharedDefaults = UserDefaults(suiteName: groupId) {
+      sharedDefaults.set(payloadJson, forKey: widgetSnapshotKey)
+      sharedDefaults.set(now, forKey: widgetUpdatedAtKey)
+      sharedDefaults.synchronize()
+      wroteShared = true
+    }
+    UserDefaults.standard.set(payloadJson, forKey: widgetSnapshotKey)
+    UserDefaults.standard.set(now, forKey: widgetUpdatedAtKey)
+    #if canImport(WidgetKit)
+    if #available(iOS 14.0, *) {
+      WidgetCenter.shared.reloadAllTimelines()
+    }
+    #endif
+    return wroteShared
   }
 
   // UIKit presenters are main-actor isolated rather than run on the JS thread

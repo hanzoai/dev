@@ -202,7 +202,7 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
         description: "Shows the current state of active Hanzo Dev agents.",
         android: null,
         ios: {
-          supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"],
+          supportedFamilies: ["systemSmall", "systemMedium", "systemLarge", "accessoryRectangular"],
           // Embeds the layout so the gallery preview and a new widget render
           // before the app has run once; the app replaces it on publish.
           initialLayout: "./src/widgets/AgentActivityWidget.tsx",
@@ -242,7 +242,7 @@ const config: ExpoConfig = {
   name: variant.appName,
   slug: "hanzo-dev",
   platforms: ["ios", "android"],
-  scheme: variant.scheme,
+  scheme: [variant.scheme, "hanzo"],
   version: repoEnv.HANZO_DEV_MOBILE_VERSION ?? "2.3.0",
   runtimeVersion: {
     // Skip costly fingerprinting on dev launches; preview and production OTAs require matching native projects.

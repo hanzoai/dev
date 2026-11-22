@@ -13,6 +13,7 @@ import {
   type ServerProvider,
 } from "@hanzodev/contracts";
 import { useAtomValue } from "@effect/atom-react";
+import { useNavigation } from "@react-navigation/native";
 import { useRef, useState } from "react";
 import { Linking, Pressable, ScrollView, TextInput, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -31,7 +32,10 @@ import { serverEnvironment } from "../../state/server";
 import { useEnvironmentsWithScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ListActionRow as SettingsActionRow } from "../../components/ui/ListActionRow";
+import { useCloudChat } from "../chat/cloud-chat";
+import { useAuth } from "../cloud/hanzoMobileAuth";
 import { useSettingsEnvironmentMenu } from "./components/SettingsEnvironmentFilterHeader";
+import { SettingsRow } from "./components/SettingsRow";
 import { SettingsScreen } from "./components/SettingsScreen";
 import { SettingsSection } from "./components/SettingsSection";
 import { AddClaudeAccount, ClaudeAccount } from "./ClaudeAccounts";
@@ -40,23 +44,83 @@ import { useSettingsEnvironmentFilter, type SettingsTarget } from "./settings-en
 
 export function SettingsProviderAccountsRouteScreen() {
   const gt = useGT();
+  const navigation = useNavigation();
+  const { isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
+  const cloudChat = useCloudChat();
   const environmentMenu = useSettingsEnvironmentMenu();
   const { selectedTargets } = useSettingsEnvironmentFilter();
   const permittedEnvironments = useEnvironmentsWithScope(selectedTargets, AuthProvidersManageScope);
   const providersByEnvironment = useAtomValue(environmentPresentations.providersByEnvironmentAtom);
   const insets = useSafeAreaInsets();
+  const activeModel =
+    cloudChat.models.find((m) => m.id === cloudChat.state.model)?.label ?? cloudChat.state.model;
+  const providerCount = new Set(
+    cloudChat.models.map((m) => m.provider).filter((p): p is string => Boolean(p)),
+  ).size;
+
   return (
-    <SettingsScreen title={gt("Providers")} menus={[environmentMenu]}>
+    <SettingsScreen title={gt("Models & Providers")} menus={[environmentMenu]}>
       <ScreenScrollView
         className="flex-1"
         contentInsetAdjustmentBehavior="automatic"
         contentContainerClassName="gap-6 px-5 pt-4"
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
       >
+        <SettingsSection
+          title={gt("Hanzo Cloud & Local AI")}
+          footer={gt(
+            "Access Zen, Claude, GPT, Gemini, Grok, and DeepSeek models through Hanzo Cloud, plus local models from your linked Mac or on-device Apple Intelligence.",
+          )}
+        >
+          <SettingsRow
+            icon="sparkles"
+            label={gt("Default Chat Model")}
+            value={activeModel}
+            valuePosition="trailing"
+            onPress={() => navigation.navigate("ChatLandingModelSettings")}
+          />
+          <SettingsRow
+            icon="cloud"
+            label={gt("Hanzo Cloud Gateway")}
+            value={
+              isSignedIn
+                ? gt("{models} models · {providers} providers", {
+                    models: cloudChat.models.length,
+                    providers: Math.max(providerCount, 1),
+                  })
+                : gt("Sign in")
+            }
+            valuePosition="trailing"
+            onPress={() =>
+              navigation.navigate(isSignedIn ? "ChatLandingModelSettings" : "SettingsAuth")
+            }
+          />
+          <SettingsRow
+            icon="laptopcomputer"
+            label={gt("Local & On-Device Models")}
+            value={
+              cloudChat.state.localModels.length > 0
+                ? gt("{count} available", { count: cloudChat.state.localModels.length })
+                : cloudChat.macOnline
+                  ? gt("Mac online")
+                  : gt("On-device / Pair Mac")
+            }
+            valuePosition="trailing"
+            onPress={() => navigation.navigate("ChatLandingModelSettings")}
+          />
+        </SettingsSection>
+
         {selectedTargets.length === 0 ? (
-          <Text className="text-foreground-muted">
-            <T>Select a connected environment.</T>
-          </Text>
+          <SettingsSection title={gt("Desktop Agent Providers")}>
+            <View className="gap-1 p-4">
+              <Text className="text-sm text-foreground-muted">
+                <T>
+                  Connect a desktop environment in Environments & Machines to configure local CLI
+                  agent providers (Claude Code, Codex, Gemini CLI, OpenCode).
+                </T>
+              </Text>
+            </View>
+          </SettingsSection>
         ) : (
           selectedTargets.map((environment) => (
             <SettingsSection key={environment.environmentId} title={environment.label}>

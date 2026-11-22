@@ -83,32 +83,80 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const str = (value: unknown): string | null => (typeof value === "string" ? value : null);
 
+function normalizeMachineKind(value: unknown): "desktop" | "browser" | null {
+  if (value === undefined || value === null || value === "") return "desktop";
+  if (typeof value !== "string") return null;
+  const lower = value.trim().toLowerCase();
+  if (lower === "browser") return "browser";
+  if (
+    lower === "desktop" ||
+    lower === "mac" ||
+    lower === "macos" ||
+    lower === "darwin" ||
+    lower === "linux" ||
+    lower === "windows" ||
+    lower === "daemon" ||
+    lower === "hanzod" ||
+    lower === "local" ||
+    lower === "cli"
+  ) {
+    return "desktop";
+  }
+  return null;
+}
+
+function normalizeMachineState(value: Record<string, unknown>): "online" | "offline" | "revoked" | null {
+  const raw = str(value.state) ?? str(value.status);
+  if (raw !== null) {
+    const lower = raw.trim().toLowerCase();
+    if (lower === "online" || lower === "connected" || lower === "active" || lower === "ready") {
+      return "online";
+    }
+    if (lower === "offline" || lower === "disconnected" || lower === "idle") {
+      return "offline";
+    }
+    if (lower === "revoked" || lower === "deleted" || lower === "removed") {
+      return "revoked";
+    }
+    return null;
+  }
+  if (typeof value.online === "boolean") {
+    return value.online ? "online" : "offline";
+  }
+  return null;
+}
+
 function parseMachine(value: unknown): LinkedMachine | null {
   if (!isRecord(value)) return null;
-  const id = str(value.id);
-  const kind = value.kind;
-  const state = value.state;
+  const id = str(value.id) ?? str(value.source_id) ?? str(value.environmentId);
+  const kind = normalizeMachineKind(value.kind);
+  const state = normalizeMachineState(value);
   if (id === null || id === "") return null;
-  if (kind !== "desktop" && kind !== "browser") return null;
-  if (state !== "online" && state !== "offline" && state !== "revoked") return null;
+  if (kind === null) return null;
+  if (state === null) return null;
   return {
     id,
     kind,
-    name: str(value.name) ?? id,
+    name: str(value.name) ?? str(value.label) ?? str(value.hostname) ?? id,
     os: str(value.os) ?? "",
     arch: str(value.arch) ?? "",
     version: str(value.version) ?? "",
-    zap: str(value.zap) ?? "",
+    zap: str(value.zap) ?? str(value.zap_url) ?? str(value.url) ?? "",
     state,
-    lastSeen: str(value.last_seen),
-    linkedAt: str(value.linked_at) ?? "",
+    lastSeen: str(value.last_seen) ?? str(value.lastSeen),
+    linkedAt: str(value.linked_at) ?? str(value.linkedAt) ?? "",
   };
 }
 
 /** The live machines of a `/v1/sources` response body, or null when the body is not one. */
 export function parseSources(body: unknown): ReadonlyArray<LinkedMachine> | null {
-  const raw =
-    isRecord(body) && Array.isArray(body.sources) ? (body.sources as ReadonlyArray<unknown>) : null;
+  const raw = Array.isArray(body)
+    ? (body as ReadonlyArray<unknown>)
+    : isRecord(body) && Array.isArray(body.sources)
+      ? (body.sources as ReadonlyArray<unknown>)
+      : isRecord(body) && Array.isArray(body.data)
+        ? (body.data as ReadonlyArray<unknown>)
+        : null;
   if (raw === null) return null;
   return raw
     .map(parseMachine)

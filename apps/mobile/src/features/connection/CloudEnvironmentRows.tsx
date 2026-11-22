@@ -102,7 +102,7 @@ function CloudEnvironmentRowsContent(
       {showHeader ? (
         <View className="px-1">
           <Text className="text-sm font-hanzo-bold uppercase text-foreground-muted">
-            Hanzo Link
+            {gt("Linked Desktop Machines")}
           </Text>
         </View>
       ) : null}
@@ -146,10 +146,22 @@ function CloudEnvironmentRowsContent(
           </Text>
         </View>
       ) : controller.relayDiscovery.error ? null : (
-        <View collapsable={false} className="rounded-[24px] bg-grouped-card p-5">
+        <View collapsable={false} className="gap-3 rounded-[24px] bg-grouped-card p-5">
           <Text className="text-sm leading-normal text-foreground-muted">
-            <T>No additional linked cloud environments.</T>
+            <T>
+              No linked desktop machines found yet. Sign in with the same Hanzo account in Hanzo.app
+              or Hanzo Dev on your Mac or PC and it will appear here automatically.
+            </T>
           </Text>
+          {discoveryAvailable ? (
+            <Button
+              label={gt("Refresh machines")}
+              tone="secondary"
+              onPress={() => {
+                void controller.refreshRelayEnvironments();
+              }}
+            />
+          ) : null}
         </View>
       )}
 
@@ -242,6 +254,7 @@ function CloudEnvironmentRow(props: {
   const presentation = availableCloudEnvironmentPresentation(
     {
       isStatusPending: props.environment.availability === "checking",
+      availability: props.environment.availability,
       status: props.environment.status,
       statusError: props.environment.error,
       statusErrorTraceId: props.environment.traceId,

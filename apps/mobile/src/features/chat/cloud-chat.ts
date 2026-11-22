@@ -32,6 +32,7 @@ export interface CloudChat {
   readonly send: (prompt: string, attachments?: readonly CloudChatAttachment[]) => Promise<void>;
   readonly selectModel: (id: string, effort?: string | null) => void;
   readonly openThread: (key: string) => Promise<void>;
+  readonly openRemoteThread: (threadId: string) => Promise<void>;
   readonly newChat: () => void;
   readonly renameThread: (key: string, title: string) => Promise<void>;
   readonly pinThread: (key: string, pinned: boolean) => Promise<void>;
@@ -88,6 +89,7 @@ export function useCloudChat(): CloudChat {
       send: chat.send,
       selectModel: chat.selectModel,
       openThread: chat.openThread,
+      openRemoteThread: chat.open,
       newChat: chat.reset,
       renameThread: chat.renameThread,
       pinThread: chat.pinThread,

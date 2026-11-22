@@ -15,6 +15,8 @@ import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { useAuth, useUser } from "../cloud/hanzoMobileAuth";
+import { useCloudChat } from "../chat/cloud-chat";
+import { useAtomValue } from "@effect/atom-react";
 import { useNavigation, useNavigationState } from "@react-navigation/native";
 import { use, type ComponentProps } from "react";
 import { Platform, View } from "react-native";
@@ -24,6 +26,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { useAdaptiveWorkspaceLayout } from "../layout/adaptive-workspace-context";
+import { relayEnvironmentDiscovery } from "../../state/relay";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection, SettingsSidebarContext } from "./components/SettingsSection";
@@ -119,11 +122,19 @@ function ConfiguredSettingsRouteScreen() {
   const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
   const { user } = useUser();
   const { savedConnectionsById } = useSavedRemoteConnections();
+  const discovery = useAtomValue(relayEnvironmentDiscovery.stateValueAtom);
   const accountLabel = !isLoaded
     ? gt("Checking")
     : !isSignedIn
       ? gt("Sign in")
       : (user?.primaryEmailAddress?.emailAddress ?? gt("Signed in"));
+
+  // Count unique connected/saved environments + discovered /v1/sources machines + Hanzo Cloud when signed in.
+  const uniqueEnvironmentIds = new Set<string>(Object.keys(savedConnectionsById));
+  for (const id of discovery.environments.keys()) {
+    uniqueEnvironmentIds.add(id);
+  }
+  const totalEnvironments = uniqueEnvironmentIds.size + (isSignedIn ? 1 : 0);
 
   return (
     <SettingsList
@@ -136,11 +147,11 @@ function ConfiguredSettingsRouteScreen() {
           disabled: !isLoaded,
           onPress: () => navigation.navigate("SettingsAuth"),
         },
-        environmentsRow(gt("Environments"), Object.keys(savedConnectionsById).length),
+        environmentsRow(gt("Environments & Machines"), totalEnvironments),
         {
           id: "SettingsNotifications",
           icon: "bell.badge",
-          label: gt("Notifications"),
+          label: gt("Notifications & Widgets"),
           target: "SettingsNotifications",
         },
       ]}
@@ -153,7 +164,9 @@ function LocalSettingsRouteScreen() {
   const { savedConnectionsById } = useSavedRemoteConnections();
   return (
     <SettingsList
-      connections={[environmentsRow(gt("Environments"), Object.keys(savedConnectionsById).length)]}
+      connections={[
+        environmentsRow(gt("Environments & Machines"), Object.keys(savedConnectionsById).length),
+      ]}
     />
   );
 }
@@ -186,7 +199,7 @@ function SettingsList(props: { readonly connections: readonly SettingsListRow[] 
   const sections = filterSettingsSections(
     [
       { rows: overflowRows },
-      { title: gt("Connections"), rows: props.connections },
+      { title: gt("Account & Connections"), rows: props.connections },
       ...indexSections,
     ],
     query,
@@ -232,6 +245,8 @@ function SettingsList(props: { readonly connections: readonly SettingsListRow[] 
 
 function useSettingsIndexSections(): SettingsListSection[] {
   const gt = useGT();
+  const navigation = useNavigation();
+  const cloudChat = useCloudChat();
   const { selectedTargets, projectGroups, selectedProjectKey } = useSettingsEnvironmentFilter();
   const noServerTargets = selectedTargets.length === 0;
   const selectedProject = projectGroups.find((group) => group.key === selectedProjectKey);
@@ -253,36 +268,54 @@ function useSettingsIndexSections(): SettingsListSection[] {
     target: SettingsPageTarget,
     icon: SettingsListRow["icon"],
     label: string,
-    extra?: Pick<SettingsListRow, "disabled" | "value">,
+    extra?: Pick<SettingsListRow, "disabled" | "value" | "valuePosition">,
   ): SettingsListRow => ({ id: target, icon, label, target, ...extra });
   const serverPage = (target: SettingsPageTarget, icon: SettingsListRow["icon"], label: string) =>
     page(target, icon, label, { disabled: noServerTargets });
-  // The same pages and groups as Settings on web, minus what mobile has no setting for.
+
+  const activeModel =
+    cloudChat.models.find((m) => m.id === cloudChat.state.model)?.label ?? cloudChat.state.model;
+
+  // Full Settings parity with Hanzo Dev desktop: Account, Environments, AI & Models,
+  // Preferences, Agents & Code, and Advanced.
   return [
     {
+      title: gt("AI & Models"),
+      rows: [
+        {
+          id: "cloudAi",
+          icon: "sparkles",
+          label: gt("Cloud & Local AI"),
+          value: activeModel,
+          valuePosition: "trailing",
+          onPress: () => navigation.navigate("ChatLandingModelSettings"),
+        },
+        page("SettingsProviderAccounts", "person.crop.circle", gt("Models & Providers"), {
+          value: `${cloudChat.models.length}`,
+          valuePosition: "trailing",
+        }),
+        page("SettingsUsage", "chart.bar.xaxis", gt("Usage & Quotas")),
+      ],
+    },
+    {
+      title: gt("Preferences"),
       rows: [
         page("SettingsOrganization", "gearshape", gt("General")),
         page("SettingsAppearance", "paintbrush", gt("Appearance")),
         page("SettingsFollowUp", "bubble.left.and.bubble.right", gt("Chat")),
+        page("SettingsVoice", "mic", gt("Voice")),
+        page("SettingsKeyboard", "keyboard", gt("Keyboard")),
         ...(navigationCustomizationAvailable()
           ? [page("SettingsNavigation", "line.3.horizontal", gt("Navigation tabs"))]
           : []),
-        page("SettingsKeyboard", "keyboard", gt("Keyboard")),
-        page("SettingsVoice", "mic", gt("Voice")),
         page("SettingsPermissions", "hand.raised", gt("AI Permissions & Automation")),
       ],
     },
     {
-      title: gt("Agents"),
+      title: gt("Agents & Code"),
       rows: [
-        serverPage("SettingsProviderAccounts", "person.crop.circle", gt("Providers")),
         serverPage("SettingsThreads", "text.bubble", gt("Threads")),
         page("SettingsScheduledTasks", "clock", gt("Scheduled tasks")),
-      ],
-    },
-    {
-      title: gt("Code"),
-      rows: [
         page(
           "SettingsProjectOverview",
           "folder",
@@ -298,11 +331,14 @@ function useSettingsIndexSections(): SettingsListSection[] {
       ],
     },
     {
+      title: gt("Advanced"),
       rows: [
         serverPage("SettingsEnvironmentMaintenance", "arrow.clockwise", gt("Maintenance")),
+        page("SettingsDiagnostics", "stethoscope", gt("Diagnostics")),
+        page("SettingsClientStorage", "internaldrive", gt("Client Storage")),
         page("SettingsLabs", "flask", gt("Labs")),
-        page("SettingsAbout", "info.circle", gt("About")),
         page("SettingsArchive", "archivebox", gt("Archive")),
+        page("SettingsAbout", "info.circle", gt("About")),
       ],
     },
   ];

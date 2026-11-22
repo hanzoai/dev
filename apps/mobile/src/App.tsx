@@ -79,6 +79,7 @@ import {
 import { useMobileNavigationTheme } from "./lib/useMobileNavigationTheme";
 import { installUiRuntimeMemoryWarningGc } from "./lib/useUiRuntimeMemoryWarningGc";
 import { SubscriptionUsageCoordinator } from "./widgets/SubscriptionUsageCoordinator";
+import { HanzoWidgetSyncCoordinator } from "./widgets/HanzoWidgetSyncCoordinator";
 import { AccountAutoLinkCoordinator } from "./features/connection/AccountAutoLinkCoordinator";
 import { ConnectDeviceApprovalCoordinator } from "./features/connection/ConnectDeviceApprovalCoordinator";
 import { installSubscriptionUsageRefresh } from "./widgets/useSubscriptionUsage";
@@ -111,6 +112,7 @@ import {
   dispatchWidgetQuickAction,
   parseAskWidgetPath,
 } from "./features/chat/widgetQuickAction";
+import { closeWorkspaceDrawer } from "./features/layout/workspace/workspace-drawer-store";
 import { openWorkspaceSection } from "./features/layout/workspace/workspace-section-store";
 import { pruneNewTaskFlowStates } from "./features/threads/new-task-flow-state";
 import { pruneNewTaskBranchCheckouts } from "./features/threads/NewTaskDraftRouteScreen";
@@ -133,6 +135,7 @@ const linkingConfig = {
 function getAppStateFromPath(path: string, options: Parameters<typeof getStateFromPath>[1]) {
   const widgetAsk = parseAskWidgetPath(path);
   if (widgetAsk) {
+    closeWorkspaceDrawer();
     openWorkspaceSection("chat");
     dispatchWidgetQuickAction(widgetAsk);
     return getStateFromPath("", options);
@@ -315,6 +318,7 @@ function AppContent() {
       <SplashScreenCoordinator />
       <QuickActionsLanguage />
       <SubscriptionUsageCoordinator />
+      <HanzoWidgetSyncCoordinator />
       <AccountAutoLinkCoordinator />
       <ConnectDeviceApprovalCoordinator />
       <GestureHandlerRootView className="flex-1">

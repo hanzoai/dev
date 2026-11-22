@@ -60,6 +60,9 @@ import { makePermissionStatusAtom } from "../../lib/permissionStatusAtom";
 import { runtime } from "../../lib/runtime";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
+import { useCloudChat } from "../chat/cloud-chat";
+import { useHanzoMobileAccounts } from "../cloud/hanzoMobileAuth";
+import { buildWidgetConnectionStatus, syncHanzoWidgetSnapshot } from "../../widgets/hanzoWidgetBridge";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
@@ -216,7 +219,10 @@ function ConfiguredSettingsNotificationsRouteScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { getToken, isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
+  const { activeAccount } = useHanzoMobileAccounts();
+  const cloudChat = useCloudChat();
   const { savedConnectionsById } = useSavedRemoteConnections();
+  const [widgetSyncLabel, setWidgetSyncLabel] = useState<string | null>(null);
   const notificationStatus = useAtomValue(notificationStatusAtom);
   const setNotificationStatus = useAtomSet(notificationStatusAtom);
   // A write in progress or a failed one shows its own status until the auth or
@@ -547,8 +553,50 @@ function ConfiguredSettingsNotificationsRouteScreen() {
     liveActivityWriteInFlight.current = false;
   };
 
+  const handleRefreshWidgets = async () => {
+    setWidgetSyncLabel(gt("Syncing…"));
+    const machines = connections.map((conn) => ({
+      id: String(conn.environmentId),
+      name: conn.environmentLabel,
+      online: true,
+      kind: "desktop" as const,
+    }));
+    const ok = await syncHanzoWidgetSnapshot(
+      {
+        signedIn: isSignedIn,
+        accountName: activeAccount?.displayName ?? null,
+        accountEmail: activeAccount?.email ?? null,
+        cloudAvailable: isSignedIn,
+        cloudModel: cloudChat.state.model,
+        connectionStatus: buildWidgetConnectionStatus({
+          signedIn: isSignedIn,
+          onlineMachinesCount: machines.length,
+          totalMachinesCount: machines.length,
+        }),
+        environmentsCount: machines.length + (isSignedIn ? 1 : 0),
+        onlineMachinesCount: machines.length,
+        machines: [
+          ...(isSignedIn
+            ? [{ id: "hanzo-cloud", name: "Hanzo Cloud", online: true, kind: "cloud" as const }]
+            : []),
+          ...machines,
+        ],
+        recentThreads: cloudChat.state.threads.slice(0, 5).map((thread) => ({
+          key: thread.key,
+          title: thread.title,
+          preview: thread.remoteId ? "Synced with Hanzo Cloud" : "Saved on this iPhone",
+          updatedAt: thread.updatedAt,
+          pinned: thread.pinned,
+        })),
+        updatedAt: Date.now(),
+      },
+      true,
+    );
+    setWidgetSyncLabel(ok ? gt("Synced") : gt("Updated"));
+  };
+
   return (
-    <SettingsScreen title={gt("Notifications")}>
+    <SettingsScreen title={gt("Notifications & Widgets")}>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
@@ -623,6 +671,28 @@ function ConfiguredSettingsNotificationsRouteScreen() {
             />
           ) : null}
         </SettingsSection>
+
+        {Platform.OS === "ios" ? (
+          <SettingsSection
+            title={gt("Home Screen Widgets & Control Center")}
+            footer={gt(
+              "Add Ask Hanzo or Hanzo AI Brief to your Home Screen in Small, Medium, or Large size with pure black #000000 styling, live Hanzo Cloud & Mac status, and one-tap Chat & Voice.",
+            )}
+          >
+            <SettingsRow
+              icon="arrow.clockwise"
+              label={gt("Refresh Home Screen Widgets")}
+              value={widgetSyncLabel ?? gt("Sync now")}
+              valuePosition="trailing"
+              onPress={() => void handleRefreshWidgets()}
+            />
+            <SettingsRow
+              icon="wand.and.stars"
+              label={gt("Siri, Shortcuts & Control Center")}
+              target="SettingsPermissions"
+            />
+          </SettingsSection>
+        ) : null}
       </ScrollView>
     </SettingsScreen>
   );

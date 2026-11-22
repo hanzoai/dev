@@ -7,10 +7,12 @@ import {
 import { MessageId, ProjectId, ThreadId } from "@hanzodev/contracts";
 import * as Clipboard from "expo-clipboard";
 import { useGT } from "gt-react-native";
-import { useEffect, useRef } from "react";
+import { useEffect, useEffectEvent } from "react";
 import { useSharedValue } from "react-native-reanimated";
 
 import * as Dialog from "../../components/ui/Dialog";
+import { useGlobalVoiceInput } from "../voice-input/VoiceInputProvider";
+import { createVoiceInputTarget } from "../voice-input/voiceInputSession";
 import {
   consumePendingWidgetQuickAction,
   subscribeWidgetQuickAction,
@@ -62,12 +64,40 @@ export function ChatLandingComposer(props: {
     serverConfig: chat.serverConfig,
     maxFileBytes: CLOUD_CHAT_FILE_BYTES,
   });
-  const handleWidgetActionRef = useRef<(act: WidgetQuickAction) => void>(() => {});
-  handleWidgetActionRef.current = (act) => {
-    if (act.prompt) {
-      setComposerDraftText(CHAT_LANDING_DRAFT_KEY, act.prompt);
+  const globalVoice = useGlobalVoiceInput();
+  const handleWidgetAction = useEffectEvent((act: WidgetQuickAction) => {
+    if (act.threadId) {
+      const targetId = act.threadId;
+      const matched = chat.state.threads.find(
+        (thread) => thread.key === targetId || thread.remoteId === targetId,
+      );
+      if (matched) {
+        void chat.openThread(matched.key);
+      } else {
+        void chat.openRemoteThread(targetId);
+      }
+    } else if (act.action === "new") {
+      chat.newChat();
     }
-    if (act.action === "camera") {
+    if (act.prompt) {
+      if (act.autoSend) {
+        props.onSend(act.prompt, []);
+      } else {
+        setComposerDraftText(CHAT_LANDING_DRAFT_KEY, act.prompt);
+      }
+    }
+    if (act.action === "voice") {
+      const currentText = getComposerDraftSnapshot(CHAT_LANDING_DRAFT_KEY).text;
+      void globalVoice.session.start({
+        ...createVoiceInputTarget(
+          CHAT_LANDING_DRAFT_KEY,
+          () => getComposerDraftSnapshot(CHAT_LANDING_DRAFT_KEY).text,
+          (text) => setComposerDraftText(CHAT_LANDING_DRAFT_KEY, text),
+          { start: currentText.length, end: currentText.length },
+        ),
+        label: gt("Hanzo Chat"),
+      });
+    } else if (act.action === "camera") {
       void attachments.onPickDraftMedia();
     } else if (act.action === "attach") {
       void attachments.onPickDraftFiles();
@@ -81,15 +111,15 @@ export function ChatLandingComposer(props: {
         })
         .catch(() => {});
     }
-  };
+  });
   useEffect(() => {
     const initial = consumePendingWidgetQuickAction();
     if (initial) {
-      handleWidgetActionRef.current(initial);
+      handleWidgetAction(initial);
     }
     return subscribeWidgetQuickAction((act) => {
       consumePendingWidgetQuickAction();
-      handleWidgetActionRef.current(act);
+      handleWidgetAction(act);
     });
   }, []);
   const thread = draftThreadShell({

@@ -109,23 +109,23 @@ export function SettingsPermissionsRouteScreen() {
   }, [notifications, openSystemSettings]);
 
   const grantFilesAccess = useCallback(async () => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        multiple: true,
-        copyToCacheDirectory: true,
-        type: "*/*",
-      });
-      if (!result.canceled && result.assets.length > 0) {
-        setGrantedFilesCount((prev) => prev + result.assets.length);
-        Dialog.alert(
-          gt("Files access ready"),
-          gt(
-            "Selected files are now accessible to Hanzo AI. You can also place files directly in On My iPhone → Hanzo in the iOS Files app.",
-          ),
-        );
-      }
-    } catch {
+    const result = await DocumentPicker.getDocumentAsync({
+      multiple: true,
+      copyToCacheDirectory: true,
+      type: "*/*",
+    }).catch(() => null);
+    if (result === null) {
       openSystemSettings();
+      return;
+    }
+    if (!result.canceled && result.assets.length > 0) {
+      setGrantedFilesCount((prev) => prev + result.assets.length);
+      Dialog.alert(
+        gt("Files access ready"),
+        gt(
+          "Selected files are now accessible to Hanzo AI. You can also place files directly in On My iPhone → Hanzo in the iOS Files app.",
+        ),
+      );
     }
   }, [gt, openSystemSettings]);
 

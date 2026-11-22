@@ -1,5 +1,8 @@
 import AppIntents
 import Foundation
+#if canImport(WidgetKit)
+import WidgetKit
+#endif
 #if canImport(FoundationModels)
 import FoundationModels
 #endif
@@ -71,17 +74,17 @@ enum HanzoQuickAction: String, CaseIterable, AppEnum {
   var url: URL {
     let raw: String
     switch self {
-    case .chat: raw = "hanzodev://ask?action=chat"
-    case .camera: raw = "hanzodev://ask?action=camera"
-    case .voice: raw = "hanzodev://ask?action=voice"
-    case .attach: raw = "hanzodev://ask?action=attach"
-    case .dev: raw = "hanzodev://new"
-    case .clipboard: raw = "hanzodev://ask?action=clipboard"
-    case .models: raw = "hanzodev://chat/settings"
-    case .usage: raw = "hanzodev://settings/usage"
-    case .environments: raw = "hanzodev://settings/environments"
-    case .permissions: raw = "hanzodev://settings/permissions"
-    case .settings: raw = "hanzodev://settings"
+    case .chat: raw = "hanzo://chat/new"
+    case .camera: raw = "hanzo://ask?action=camera"
+    case .voice: raw = "hanzo://chat/voice"
+    case .attach: raw = "hanzo://ask?action=attach"
+    case .dev: raw = "hanzo://new"
+    case .clipboard: raw = "hanzo://ask?action=clipboard"
+    case .models: raw = "hanzo://chat/settings"
+    case .usage: raw = "hanzo://settings/usage"
+    case .environments: raw = "hanzo://settings/environments"
+    case .permissions: raw = "hanzo://settings/permissions"
+    case .settings: raw = "hanzo://settings"
     }
     return URL(string: raw)!
   }
@@ -209,6 +212,24 @@ struct RunHanzoAutomationIntent: AppIntent {
   func perform() async throws -> some IntentResult & ReturnsValue<String> {
     let output = await HanzoNativeAIService.complete(prompt: instruction, context: inputText)
     return .result(value: output)
+  }
+}
+
+@available(iOS 17.0, *)
+struct RefreshHanzoWidgetIntent: AppIntent {
+  static var title: LocalizedStringResource = "Refresh Hanzo Widget"
+  static var description = IntentDescription(
+    "Reloads Hanzo Home Screen widgets with the latest synced chats and environments."
+  )
+  static var openAppWhenRun: Bool = false
+
+  init() {}
+
+  func perform() async throws -> some IntentResult {
+    #if canImport(WidgetKit)
+    WidgetCenter.shared.reloadAllTimelines()
+    #endif
+    return .result()
   }
 }
 

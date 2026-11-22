@@ -27,6 +27,42 @@ const SETTINGS_SEARCH_TERMS = {
     msg("alerts", { $context: "settings search keyword" }),
     msg("live activity", { $context: "settings search keyword" }),
     msg("agent activity", { $context: "settings search keyword" }),
+    msg("widgets", { $context: "settings search keyword" }),
+    msg("home screen", { $context: "settings search keyword" }),
+  ],
+  cloudAi: [
+    msg("models", { $context: "settings search keyword" }),
+    msg("cloud ai", { $context: "settings search keyword" }),
+    msg("local ai", { $context: "settings search keyword" }),
+    msg("enso", { $context: "settings search keyword" }),
+    msg("zen", { $context: "settings search keyword" }),
+    "claude",
+    "gpt",
+    "gemini",
+  ],
+  SettingsUsage: [
+    msg("usage", { $context: "settings search keyword" }),
+    msg("quotas", { $context: "settings search keyword" }),
+    msg("limits", { $context: "settings search keyword" }),
+    msg("credits", { $context: "settings search keyword" }),
+  ],
+  SettingsDiagnostics: [
+    msg("diagnostics", { $context: "settings search keyword" }),
+    msg("logs", { $context: "settings search keyword" }),
+    msg("debug", { $context: "settings search keyword" }),
+    msg("advanced", { $context: "settings search keyword" }),
+  ],
+  SettingsClientStorage: [
+    msg("client storage", { $context: "settings search keyword" }),
+    msg("cache", { $context: "settings search keyword" }),
+    msg("clear cache", { $context: "settings search keyword" }),
+  ],
+  SettingsPermissions: [
+    msg("permissions", { $context: "settings search keyword" }),
+    msg("siri", { $context: "settings search keyword" }),
+    msg("shortcuts", { $context: "settings search keyword" }),
+    msg("control center", { $context: "settings search keyword" }),
+    msg("automation", { $context: "settings search keyword" }),
   ],
   SettingsAppearance: [
     msg("theme", { $context: "settings search keyword" }),
@@ -176,7 +212,7 @@ const SETTINGS_SEARCH_TERMS = {
     msg("terms", { $context: "settings search keyword" }),
     msg("open source licenses", { $context: "settings search keyword" }),
   ],
-} satisfies Partial<Record<SettingsPageTarget | "account", readonly string[]>>;
+} satisfies Partial<Record<SettingsPageTarget | "account" | "cloudAi", readonly string[]>>;
 const termsById: ReadonlyMap<string, readonly string[]> = new Map(
   Object.entries(SETTINGS_SEARCH_TERMS),
 );

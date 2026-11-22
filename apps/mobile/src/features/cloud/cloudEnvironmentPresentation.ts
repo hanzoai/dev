@@ -19,6 +19,7 @@ export interface AvailableCloudEnvironmentPresentation {
 export function availableCloudEnvironmentPresentation(
   input: {
     readonly isStatusPending: boolean;
+    readonly availability?: "checking" | "online" | "offline" | "error";
     readonly status: RelayEnvironmentStatusResponse | null;
     readonly statusError: string | null;
     readonly statusErrorTraceId: string | null;
@@ -38,12 +39,12 @@ export function availableCloudEnvironmentPresentation(
       statusText: message,
     };
   }
-  if (input.status?.status === "online") {
+  if (input.status?.status === "online" || input.availability === "online") {
     return {
       connectionError: null,
       connectionErrorTraceId: null,
       connectionState: "available",
-      statusText: resolve(msg("Available · Relay online")),
+      statusText: resolve(msg("Online · Toggle to connect")),
     };
   }
 
@@ -57,6 +58,15 @@ export function availableCloudEnvironmentPresentation(
       connectionErrorTraceId: input.status.traceId ?? null,
       connectionState: "error",
       statusText: connectionError,
+    };
+  }
+
+  if (input.availability === "offline") {
+    return {
+      connectionError: null,
+      connectionErrorTraceId: null,
+      connectionState: "available",
+      statusText: resolve(msg("Offline · Open Hanzo on this computer to reconnect")),
     };
   }
 

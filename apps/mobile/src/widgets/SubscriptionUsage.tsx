@@ -53,8 +53,9 @@ function SubscriptionUsage(
     !accessory && !monochrome && widgetEnvironment.showsContainerBackground !== false
       ? props.theme?.[appearance]
       : undefined;
-  const primary = palette?.foreground ?? "primary";
-  const secondary = palette?.secondary ?? "secondary";
+  const primary = palette?.foreground ?? (accessory ? "primary" : "#ffffff");
+  const secondary = palette?.secondary ?? (accessory ? "secondary" : "#a1a1aa");
+  const fallbackBackground = accessory ? "clear" : "#000000";
   // English until the app publishes its first snapshot in the UI language.
   const text = props.text ?? {
     refresh: "Open Hanzo to refresh",
@@ -274,13 +275,13 @@ function SubscriptionUsage(
       alignment="leading"
       spacing={accessory || dense ? 2 : 6}
       modifiers={[
-        ...(props.url ? [widgetURL(props.url)] : []),
+        widgetURL(props.url ?? "hanzo://settings/usage"),
         ...(palette
           ? [
               containerBackground(palette.background, "widget"),
               environment("colorScheme", appearance),
             ]
-          : []),
+          : [containerBackground(fallbackBackground, "widget")]),
       ]}
     >
       {providers.length === 0 ? (

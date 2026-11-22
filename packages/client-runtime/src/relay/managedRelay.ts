@@ -581,7 +581,11 @@ function disabledManagedRelayClient(
   });
 }
 
-const SourcesResponse = Schema.Struct({ sources: Schema.Array(Schema.Unknown) });
+const SourcesResponse = Schema.Union([
+  Schema.Struct({ sources: Schema.Array(Schema.Unknown) }),
+  Schema.Struct({ data: Schema.Array(Schema.Unknown) }),
+  Schema.Array(Schema.Unknown),
+]);
 
 const sourceEndpoint = (machine: LinkedMachine): RelayClientEnvironmentRecord["endpoint"] => {
   const httpBaseUrl = machine.zap || hanzoSourceZapUrl(machine.id);
@@ -640,7 +644,11 @@ const sourceOperations = (http: HttpClient.HttpClient) => ({
         Effect.mapError(relayRequestError("connect relay environment")),
         timeoutRelayRequest("Relay environment connection"),
       );
-      const machine = parseSources({ sources: [source] })?.[0];
+      const unwrapped =
+        typeof source === "object" && source !== null && "source" in source
+          ? (source as { source?: unknown }).source
+          : source;
+      const machine = parseSources({ sources: [unwrapped] })?.[0];
       if (machine === undefined || machine.zap === "") {
         return yield* new ManagedRelayRequestFailedError({
           action: "connect relay environment",
