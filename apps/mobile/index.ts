@@ -1,3 +1,5 @@
+// Hermes lacks ES2023 non-mutating Array methods (toSorted, toReversed, toSpliced, with).
+import "./src/lib/es2023-polyfill";
 // Hermes has no crypto global; it must exist before anything generates a PKCE verifier or state.
 import "./src/lib/crypto-polyfill";
 // Must stay first: the render counter and behavior probe wrap the DevTools hook before any React commit.

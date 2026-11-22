@@ -95,8 +95,8 @@ export function mergeThreads(
       };
     }
   }
-  return out
-    .toSorted((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt)
+  return [...out]
+    .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt)
     .slice(0, MAX_STORED_THREADS);
 }
 

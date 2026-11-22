@@ -18,6 +18,7 @@ const runtimeVersionPolicy =
   (APP_VARIANT === "development" ? "appVersion" : "fingerprint");
 
 const personalTeamBundleIdentifier = repoEnv.HANZO_DEV_IOS_PERSONAL_TEAM_BUNDLE_ID?.trim();
+const explicitIosBundleIdentifier = repoEnv.HANZO_DEV_IOS_BUNDLE_ID?.trim();
 const IOS_BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 
 // Compiled into the native project. Without a relay, Observe's native side could dispatch to
@@ -125,7 +126,9 @@ const variant = VARIANT_CONFIG[APP_VARIANT];
 const HOSTED_APP_HOST = "hanzo.bot";
 const iosBundleIdentifier = isIosPersonalTeamBuild
   ? personalTeamBundleIdentifier!
-  : variant.iosBundleIdentifier;
+  : explicitIosBundleIdentifier && IOS_BUNDLE_IDENTIFIER_PATTERN.test(explicitIosBundleIdentifier)
+    ? explicitIosBundleIdentifier
+    : variant.iosBundleIdentifier;
 
 const zenFonts = {
   regular: "@hanzo/font/dist/fonts/zen-sans/Zen-Regular.ttf",

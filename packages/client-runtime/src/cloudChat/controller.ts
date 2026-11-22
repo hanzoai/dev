@@ -197,7 +197,7 @@ export function createCloudChatController(input: {
     set({
       threads: state.threads
         .map((thread) => (thread.key === key ? next : thread))
-        .toSorted((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt),
+        .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt),
     });
     const auth = await input.getAuth().catch(() => ({ accessToken: null }) as CloudChatAuth);
     await save(auth, key, entry, flags);

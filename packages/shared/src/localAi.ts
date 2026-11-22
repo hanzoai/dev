@@ -112,7 +112,7 @@ export function normalizeLocalModels(body: unknown, kind: LocalEngineKind): Loca
     seen.add(id);
     models.push({ id, zen: kind === "hanzo-engine" && isZenModelId(id) });
   }
-  return models.toSorted((a, b) => Number(b.zen) - Number(a.zen));
+  return [...models].sort((a, b) => Number(b.zen) - Number(a.zen));
 }
 
 export type EnginePullState = "idle" | "pulling" | "done" | "failed";

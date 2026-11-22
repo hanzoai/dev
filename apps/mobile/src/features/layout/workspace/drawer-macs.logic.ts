@@ -22,7 +22,7 @@ export function drawerMacs(discovery: EnvironmentDiscovery | null): readonly Dra
       online: environment.machine.state === "online",
     });
   }
-  return macs.toSorted((a, b) => Number(b.online) - Number(a.online));
+  return [...macs].sort((a, b) => Number(b.online) - Number(a.online));
 }
 
 export interface DrawerCloud {
