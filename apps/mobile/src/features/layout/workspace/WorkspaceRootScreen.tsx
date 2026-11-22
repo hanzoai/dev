@@ -209,10 +209,10 @@ function WorkspaceRootContent() {
               : section === "dev" && macs
                 ? gt("Macs")
                 : enabled.length
-                ? m(TAB_TITLES[state.selectedTab])
-                : gt("Navigation", {
-                    $context: "screen title when every navigation tab is hidden",
-                  }),
+                  ? m(TAB_TITLES[state.selectedTab])
+                  : gt("Navigation", {
+                      $context: "screen title when every navigation tab is hidden",
+                    }),
             headerShown,
             headerTransparent: NATIVE_LIQUID_GLASS_SUPPORTED,
             headerStyle: NATIVE_LIQUID_GLASS_SUPPORTED

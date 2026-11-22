@@ -56,7 +56,6 @@ import * as Redacted from "effect/Redacted";
 import * as Jwk from "effect/jose/Jwk";
 import * as Jwt from "effect/jose/Jwt";
 import * as Schema from "effect/Schema";
-// @effect-diagnostics-next-line nodeBuiltinImport:off -- The test client connects to the local ZAP stream.
 import * as NodeNet from "node:net";
 import { buildRequest, parseResponse } from "@zap-proto/zap";
 import { lengthPrefixed, splitMessages, ZAP_FRAME_METHOD } from "@hanzodev/shared/zapFrames";

@@ -1,20 +1,18 @@
 // @effect-diagnostics extendsNativeError:off globalFetch:off -- Cloud chat is a plain promise client shared with React Native and the browser; it has no Effect runtime.
 /**
- * Cloud chat with no environment. Same backend as hanzo.app's Chat:
- *   - replies   POST /v1/chat/completions (SSE, OpenAI-compatible)
- *   - models    GET  /v1/models           (chat-capable only: `writesReplies`)
- *   - threads   POST /v1/agents/chat/conversations {conversationId?, messages[]} -> {conversationId}
- *               (records turns without running a completion; `/v1/agent/chat` is the same route)
- *   - sandbox   POST /v1/dev/sessions     (`createCloudSession`)
- * Thread sync is best effort: a failure degrades to a local thread and never blocks sending.
+ * Cloud chat with no environment, on hanzo.app Chat's backend: `/v1/chat/completions` (SSE),
+ * `/v1/models`, and `/v1/agents/chat/conversations`, which records turns without running a
+ * completion. Thread sync is best effort: a failure degrades to a local thread, never a blocked send.
  */
 import { buildHanzoApiHeaders } from "@hanzodev/shared/hanzoIamAuth";
+import { mFallback, msg } from "gt-i18n";
 
 import { createCloudSession, type DiscoveryFetch } from "../discovery/environments.ts";
 import { writesReplies } from "../replyModels.ts";
 import { createSseParser } from "./sse.ts";
 
 export const CLOUD_CHAT_BASE_URL = "https://api.hanzo.ai";
+/* oxlint-disable hanzo/no-untranslated-copy -- model names, spelled as their makers ship them */
 export const FALLBACK_MODELS: ReadonlyArray<CloudChatModel> = [
   { id: "enso-flash", label: "enso-flash", provider: "hanzo" },
   { id: "enso", label: "enso", provider: "hanzo" },
@@ -32,14 +30,18 @@ export const FALLBACK_MODELS: ReadonlyArray<CloudChatModel> = [
   { id: "grok-4", label: "Grok 4", provider: "xai" },
   { id: "deepseek-r1", label: "DeepSeek R1", provider: "deepseek" },
 ];
+/* oxlint-enable hanzo/no-untranslated-copy */
 export const DEFAULT_MODEL_ID = "enso-flash";
 /** Auto: the model id that lets the gateway route each turn (hanzo.app Chat's `ENSO`). */
-export const AUTO_MODEL_ID = "enso-auto";
+const AUTO_MODEL_ID = "enso-auto";
 
 /** Auto first: it is always offered, whether or not the catalog lists the router. */
 export function withAuto(models: ReadonlyArray<CloudChatModel>): ReadonlyArray<CloudChatModel> {
   return [
-    { id: AUTO_MODEL_ID, label: "Auto" },
+    {
+      id: AUTO_MODEL_ID,
+      label: mFallback(msg("Auto", { $context: "model choice: the gateway picks the model" })),
+    },
     ...models.filter((model) => model.id !== AUTO_MODEL_ID),
   ];
 }
@@ -339,5 +341,6 @@ export async function runInCloud(
   const { session, report } = await createCloudSession(auth, options);
   if (session !== null) return { kind: "started", sessionId: session.id };
   if (report.status === "unavailable") return { kind: "unavailable" };
+  // oxlint-disable-next-line hanzo/no-untranslated-copy -- diagnostic detail; clients render their own copy from `kind`
   return { kind: "failed", message: report.message ?? "Failed" };
 }

@@ -1,12 +1,8 @@
 // @effect-diagnostics globalFetch:off -- Local engines are plain OpenAI-compatible HTTP servers on this machine.
 /**
- * The phone's local chat, served from this machine's engines (the ones Local AI lists: Hanzo Engine
- * through hanzod first, then Ollama and LM Studio).
- *
- *   GET  /v1/local-ai/models  -> {data: [{id, engine}]}
- *   POST /v1/local-ai/chat    {model, messages, stream: true} -> the engine's SSE reply, unchanged
- *
- * Nothing here reaches past loopback: a model that no engine here serves is an error, never a cloud reply.
+ * The phone's local chat from this machine's engines (Hanzo Engine through hanzod, then Ollama and
+ * LM Studio): `GET /v1/local-ai/models` lists them, `POST /v1/local-ai/chat` relays the engine's SSE
+ * reply unchanged. Nothing here reaches past loopback: a model no engine here serves is an error.
  */
 import { AuthOrchestrationOperateScope } from "@hanzodev/contracts";
 import {
@@ -28,11 +24,11 @@ import {
 import { authenticateRawRouteWithScope } from "./http.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
 
-export const LOCAL_AI_MODELS_PATH = "/v1/local-ai/models";
-export const LOCAL_AI_CHAT_PATH = "/v1/local-ai/chat";
+const LOCAL_AI_MODELS_PATH = "/v1/local-ai/models";
+const LOCAL_AI_CHAT_PATH = "/v1/local-ai/chat";
 
 /** Every engine that answers, in Local AI's order, with the models it serves. */
-export const onlineEngines = (): Promise<ReadonlyArray<LocalEngineStatus>> =>
+const onlineEngines = (): Promise<ReadonlyArray<LocalEngineStatus>> =>
   // Hanzo Engine starts on its first request and loads Metal shaders, so give it time.
   probeLocalEngines(BUILT_IN_LOCAL_ENGINES, { timeoutMs: 30_000 }).then((all) =>
     all.filter((s) => s.online),

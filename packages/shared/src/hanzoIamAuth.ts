@@ -55,12 +55,11 @@ const DEFAULT_HANZO_IAM_BRAND: HanzoIamBrandConfig = HANZO_IAM_BRANDS[0]!;
 export const DEFAULT_HANZO_IAM_ISSUER = DEFAULT_HANZO_IAM_BRAND.issuer;
 export const DEFAULT_HANZO_IAM_CLIENT_ID = DEFAULT_HANZO_IAM_BRAND.clientId;
 /** Where a linked machine is reached: ZAP over WebTransport, keyed by its `/v1/sources` id. */
-export const DEFAULT_HANZO_ZAP_URL = "https://zap.hanzo.ai";
+const DEFAULT_HANZO_ZAP_URL = "https://zap.hanzo.ai";
 export const hanzoSourceZapUrl = (sourceId: string): string =>
   `${DEFAULT_HANZO_ZAP_URL}/v1/dev/zap/${encodeURIComponent(sourceId)}`;
 /** Sign-in and billing live here; it publishes the identity provider's discovery document. */
 export const DEFAULT_HANZO_LOGIN_URL = "https://hanzo.ai";
-export const HANZO_LOGIN_PATH = "/login";
 export const DEFAULT_HANZO_API_BASE_URL = "https://api.hanzo.ai";
 export const HANZO_BILLING_PORTAL_URL = "https://billing.hanzo.ai";
 const HANZO_IAM_OAUTH_SCOPES = ["openid", "profile", "email", "offline_access"] as const;

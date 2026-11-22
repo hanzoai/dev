@@ -596,9 +596,11 @@ const sourceEndpoint = (machine: LinkedMachine): RelayClientEnvironmentRecord["e
   };
 };
 
+const decodeRelayClientEnvironmentRecord = Schema.decodeSync(RelayClientEnvironmentRecord);
+
 /** A linked machine of the `/v1/sources` registry as a Hanzo Link environment. */
 const sourceEnvironment = (machine: LinkedMachine): RelayClientEnvironmentRecord =>
-  Schema.decodeSync(RelayClientEnvironmentRecord)({
+  decodeRelayClientEnvironmentRecord({
     environmentId: machine.id,
     label: machine.name,
     endpoint: sourceEndpoint(machine),

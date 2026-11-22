@@ -50,7 +50,9 @@ async function call(cloud: DevCloud, method: "GET" | "POST", path: string, body?
   const json: unknown = text ? JSON.parse(text) : {};
   if (!response.ok) {
     const said = record(json).error ?? record(json).message;
-    throw new Error(typeof said === "string" && said ? said : `The platform answered ${response.status}.`);
+    throw new Error(
+      typeof said === "string" && said ? said : `The platform answered ${response.status}.`,
+    );
   }
   return record(json);
 }
@@ -67,7 +69,8 @@ export async function publish(cloud: DevCloud, source: PublishSource): Promise<D
   const build = record(raw.build);
   const declaration = record(raw.declaration);
   return {
-    build: typeof build.id === "string" ? { id: build.id, status: String(build.status ?? "") } : null,
+    build:
+      typeof build.id === "string" ? { id: build.id, status: String(build.status ?? "") } : null,
     live: declaration.live === true,
     review: https(declaration.review),
     notice: typeof raw.notice === "string" ? raw.notice : null,

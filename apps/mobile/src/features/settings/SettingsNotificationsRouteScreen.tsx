@@ -62,7 +62,10 @@ import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { useCloudChat } from "../chat/cloud-chat";
 import { useHanzoMobileAccounts } from "../cloud/hanzoMobileAuth";
-import { buildWidgetConnectionStatus, syncHanzoWidgetSnapshot } from "../../widgets/hanzoWidgetBridge";
+import {
+  buildWidgetConnectionStatus,
+  syncHanzoWidgetSnapshot,
+} from "../../widgets/hanzoWidgetBridge";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";

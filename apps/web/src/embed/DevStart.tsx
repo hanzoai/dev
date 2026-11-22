@@ -48,7 +48,10 @@ export function DevStart({
         </div>
         {cloud === "unavailable" ? (
           <p role="status" className="mt-4 text-center text-sm text-muted-foreground">
-            <T>Cloud sessions are not available right now. Link your machine instead, or try again shortly.</T>
+            <T>
+              Cloud sessions are not available right now. Link your machine instead, or try again
+              shortly.
+            </T>
           </p>
         ) : null}
       </div>

@@ -133,11 +133,11 @@ function ChatLanding() {
     <>
       <LinkAccountComputers />
       <div
-        className={
+        className={`scrollbar-gutter-both ${
           messages.length > 0
             ? "flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4"
             : "flex min-h-0 flex-1 flex-col items-center justify-center px-6"
-        }
+        }`}
         data-testid="chat-thread"
       >
         {messages.length === 0 ? (
@@ -153,6 +153,7 @@ function ChatLanding() {
                   : "mr-auto max-w-[95%] whitespace-pre-wrap px-1 py-1 text-sm"
               }
               data-role={message.role}
+              // oxlint-disable-next-line react/no-array-index-key -- chat messages carry no id, and these text rows hold no state
               key={index}
             >
               {message.content === "" && sending ? "…" : message.content}

@@ -212,10 +212,7 @@ function resolveDevProxyTarget(
 
 const devProxyTarget = process.env.VITEST
   ? undefined
-  : resolveDevProxyTarget(
-      process.env.HANZO_DEV_PORT ?? "13773",
-      configuredWsUrl,
-    );
+  : resolveDevProxyTarget(process.env.HANZO_DEV_PORT ?? "13773", configuredWsUrl);
 
 // Brotli quality 5 encodes in hundreds of ms; default quality 11 would replace transfer stalls with encode stalls.
 function devCompressionPlugin(): Plugin {

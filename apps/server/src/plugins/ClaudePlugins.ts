@@ -157,8 +157,11 @@ const spawnClaude = Effect.fn("ClaudePlugins.spawn")(function* (args: ReadonlyAr
   );
 });
 
-/** The `claude` on this machine's PATH, run with the server's environment. */
-export const runClaudePluginCommand: RunPluginCommand = (args) =>
+/**
+ * The `claude` on this machine's PATH, run with the server's environment. The caller provides the
+ * process spawner, so this is not itself a `RunPluginCommand`.
+ */
+export const runClaudePluginCommand = (args: ReadonlyArray<string>) =>
   spawnClaude(args).pipe(
     Effect.mapError(
       (cause) =>

@@ -25,14 +25,18 @@ export function PublishDialog(props: {
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
 
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- the host keeps this dialog mounted (a null `source` hides it), so a new source starts over at the ask phase; only the host could key it
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- clears the previous source's phase, result, build status and error
     setPhase("ask");
     setOut(null);
     setStatus("");
     setError("");
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `source` is the reset trigger, not a value the reset reads
   }, [source]);
 
   const id = out?.build?.id;
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- polls the platform every 5 s for the declared build's status while the dialog shows it
   useEffect(() => {
     if (!id || phase !== "declared") return;
     let live = true;

@@ -78,12 +78,10 @@ export interface DevCloud {
 }
 
 /**
- * The composer-first surface for /dev and /chat: "Build what's next." with Dev's composer (model
- * picker, "+" menu, voice, environment chip), runnable with NO environment. A turn in Cloud is a
- * chat completion on the person's account, persisted to their cloud conversations; a turn aimed at a
- * machine is handed to the host (`onHandoff`), which mounts that runtime's `DevProvider` and opens
- * the thread with the prompt. Dev-only controls (environment chip, code tools) show when
- * `mode === "dev"` or once the thread has a workspace; `mode="chat"` hides them.
+ * The composer-first surface for /dev and /chat, runnable with no environment. A Cloud turn is a
+ * chat completion saved to the person's cloud conversations; a turn for a machine goes to
+ * `onHandoff`, whose host mounts that runtime's `DevProvider`. Dev-only controls (environment chip,
+ * code tools) show in `mode="dev"` or once the thread has a workspace.
  */
 export function DevHome(props: {
   cloud: DevCloud;
@@ -104,7 +102,11 @@ export function DevHome(props: {
 
 /** Every model that writes replies (text outputs only; decision models are never listed). */
 export function useReplyModels(cloud: DevCloud): {
-  readonly models: ReadonlyArray<{ readonly id: string; readonly label: string; readonly family?: string }>;
+  readonly models: ReadonlyArray<{
+    readonly id: string;
+    readonly label: string;
+    readonly family?: string;
+  }>;
   readonly error: string | null;
 };
 

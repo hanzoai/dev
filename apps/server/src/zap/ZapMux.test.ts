@@ -1,6 +1,7 @@
+// @effect-diagnostics nodeBuiltinImport:off - the test spawns the Go peer as a child process.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeURL from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 const record = (session: number, kind: number, payload: Uint8Array) => {
   const out = new Uint8Array(9 + payload.byteLength);

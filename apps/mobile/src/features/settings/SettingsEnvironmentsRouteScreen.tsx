@@ -85,6 +85,7 @@ export function SettingsEnvironmentsRouteScreen() {
     if (relaySession && !discovery.listed && !discovery.refreshing) {
       void refreshCloudEnvironments();
     }
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Discovery state is the trigger; refreshCloudEnvironments is rebuilt each render and guards against overlapping runs itself.
   }, [relaySession, discovery.listed, discovery.refreshing]);
 
   const openCloudChat = () => {
@@ -95,12 +96,10 @@ export function SettingsEnvironmentsRouteScreen() {
   const launchCloudSandbox = () => {
     if (launchingSandbox) return;
     setLaunchingSandbox(true);
-    void chat
-      .runInCloud()
-      .finally(() => {
-        setLaunchingSandbox(false);
-        openCloudChat();
-      });
+    void chat.runInCloud().finally(() => {
+      setLaunchingSandbox(false);
+      openCloudChat();
+    });
   };
 
   const openEnvironment = (environmentId: EnvironmentId) => {

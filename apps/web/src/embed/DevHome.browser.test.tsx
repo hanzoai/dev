@@ -21,10 +21,12 @@ describe("DevHome", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) =>
-        String(url).includes("/v1/models") ? Response.json(models) : new Response("{}", { status: 404 }),
+        String(url).includes("/v1/models")
+          ? Response.json(models)
+          : new Response("{}", { status: 404 }),
       ),
     );
-    await using screen = await render(
+    await using _screen = await render(
       <DevHome
         cloud={{ api: "https://api.test", token: async () => "t" }}
         mode="dev"
@@ -46,7 +48,10 @@ describe("DevHome", () => {
       vi.fn(async (url: string, init?: RequestInit) => {
         const u = String(url);
         if (u.includes("/v1/models")) return Response.json(models);
-        if (u.endsWith("/v1/agents")) return Response.json({ agents: [{ id: "a1", name: "dev", model: "enso", description: "Builds" }] });
+        if (u.endsWith("/v1/agents"))
+          return Response.json({
+            agents: [{ id: "a1", name: "dev", model: "enso", description: "Builds" }],
+          });
         if (u.endsWith("/v1/chat/completions")) {
           completions.push(JSON.parse(String(init?.body)));
           return Response.json({ choices: [{ message: { content: "A clearer prompt." } }] });
@@ -54,7 +59,7 @@ describe("DevHome", () => {
         return new Response("{}", { status: 404 });
       }),
     );
-    await using screen = await render(
+    await using _screen = await render(
       <DevHome
         cloud={{ api: "https://api.test", token: async () => "t" }}
         mode="chat"
@@ -77,10 +82,12 @@ describe("DevHome", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) =>
-        String(url).includes("/v1/models") ? Response.json(models) : new Response("{}", { status: 404 }),
+        String(url).includes("/v1/models")
+          ? Response.json(models)
+          : new Response("{}", { status: 404 }),
       ),
     );
-    await using screen = await render(
+    await using _screen = await render(
       <DevHome
         cloud={{ api: "https://api.test", token: async () => "t" }}
         mode="chat"
@@ -108,15 +115,22 @@ describe("DevHome", () => {
         if (u.includes("/v1/models")) return Response.json(models);
         if (u.endsWith("/v1/chat/completions")) {
           const headers = new Headers(init?.headers as HeadersInit);
-          posts.push({ url: u, auth: headers.get("authorization"), body: JSON.parse(String(init?.body)) });
-          return new Response('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n', {
-            headers: { "content-type": "text/event-stream" },
+          posts.push({
+            url: u,
+            auth: headers.get("authorization"),
+            body: JSON.parse(String(init?.body)),
           });
+          return new Response(
+            'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+            {
+              headers: { "content-type": "text/event-stream" },
+            },
+          );
         }
         return new Response("{}", { status: 404 });
       }),
     );
-    await using screen = await render(
+    await using _screen = await render(
       <DevHome
         cloud={{ api: "https://api.test", token: async () => "iam-token" }}
         mode="chat"
@@ -145,15 +159,22 @@ describe("DevHome", () => {
         if (u.includes("/v1/models")) return Response.json(models);
         if (u.endsWith("/v1/chat/completions")) {
           const headers = new Headers(init?.headers as HeadersInit);
-          posts.push({ url: u, auth: headers.get("authorization"), body: JSON.parse(String(init?.body)) });
-          return new Response('data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n', {
-            headers: { "content-type": "text/event-stream" },
+          posts.push({
+            url: u,
+            auth: headers.get("authorization"),
+            body: JSON.parse(String(init?.body)),
           });
+          return new Response(
+            'data: {"choices":[{"delta":{"content":"ok"}}]}\n\ndata: [DONE]\n\n',
+            {
+              headers: { "content-type": "text/event-stream" },
+            },
+          );
         }
         return new Response("{}", { status: 404 });
       }),
     );
-    await using screen = await render(
+    await using _screen = await render(
       <DevHome
         cloud={{ api: "https://api.test", token: async () => "iam-token" }}
         mode="chat"

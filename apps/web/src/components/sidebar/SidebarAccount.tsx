@@ -50,11 +50,11 @@ const initials = (name: string): string =>
     .map((word) => word.charAt(0).toUpperCase())
     .join("") || "?";
 
-export const accountName = (account: HanzoIamAccount): string =>
+const accountName = (account: HanzoIamAccount): string =>
   account.subject || account.displayName || account.email || account.id;
 
 /** SuperAdmin shows "Admin"; everyone else shows their plan, when billing has answered. */
-export const accountBadge = (
+const accountBadge = (
   account: HanzoIamAccount,
   planName: string | null,
   adminLabel: string,
@@ -66,7 +66,7 @@ function Face({ account, size }: { readonly account: HanzoIamAccount; readonly s
   return (
     <span
       aria-hidden="true"
-      className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-[10px] font-semibold text-foreground"
+      className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-3xs font-semibold text-foreground"
       style={{ width: size, height: size }}
     >
       {src ? (
@@ -105,7 +105,6 @@ export const SidebarAccount = memo(function SidebarAccount({
           render={
             <SidebarMenuButton
               aria-label={gt("Account: {name}", { name })}
-              className="gap-2"
               data-testid="sidebar-account"
             />
           }

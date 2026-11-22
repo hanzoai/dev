@@ -20,9 +20,9 @@ import type { AuthenticatedSession } from "../auth/EnvironmentAuth.ts";
 import { ZapAuth } from "./ZapAuth.ts";
 
 /** The largest ZAP message a client may send: bounds what a stream can make the server buffer. */
-export const ZAP_MAX_MESSAGE_BYTES = 32 * 1024 * 1024;
+const ZAP_MAX_MESSAGE_BYTES = 32 * 1024 * 1024;
 /** How long a new stream has to present its bearer. */
-export const ZAP_AUTH_TIMEOUT = Duration.seconds(10);
+const ZAP_AUTH_TIMEOUT = Duration.seconds(10);
 
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
@@ -119,6 +119,7 @@ export const serveZapStream = Effect.fn("ZapSession.serve")(function* <E, R>(
     if (call.method === ZAP_SESSION_METHOD)
       return yield* calls.session(caller).pipe(Effect.flatMap(json));
     if (call.method === ZAP_SHELL_METHOD) {
+      // @effect-diagnostics-next-line globalJsonInEffect:off - a malformed query is a client bug; it stays a defect.
       const query = JSON.parse(decoder.decode(call.payload) || "{}") as Record<string, unknown>;
       return yield* calls.shell(caller, query).pipe(
         Effect.flatMap(json),
@@ -136,7 +137,7 @@ export const serveZapStream = Effect.fn("ZapSession.serve")(function* <E, R>(
       const verified = yield* auth.authenticate(decoder.decode(call.cap)).pipe(Effect.option);
       if (verified._tag === "None") {
         yield* refuse(Status.Unauthorized, call.promiseID);
-        return yield* Effect.fail(closed());
+        return yield* closed();
       }
       session = verified.value;
       yield* Deferred.succeed(authenticated, session);
@@ -144,7 +145,7 @@ export const serveZapStream = Effect.fn("ZapSession.serve")(function* <E, R>(
     if (call.method !== ZAP_FRAME_METHOD) return yield* answer(call, session);
     if (session === null) {
       yield* refuse(Status.Unauthorized, call.promiseID);
-      return yield* Effect.fail(closed());
+      return yield* closed();
     }
     // A full queue stalls the reader, which stalls the stream's flow control.
     yield* Queue.offer(frames, decoder.decode(call.payload));

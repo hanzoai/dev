@@ -66,7 +66,9 @@ function NavRow(props: {
 }) {
   const { colors } = useControlTheme();
   const tint = props.indent ? colors["--color-foreground-muted"] : colors["--color-foreground"];
-  const base = props.indent ? "h-10 flex-row items-center gap-3 rounded-xl pl-9 pr-3" : "h-11 flex-row items-center gap-3 rounded-xl px-3";
+  const base = props.indent
+    ? "h-10 flex-row items-center gap-3 rounded-xl pl-9 pr-3"
+    : "h-11 flex-row items-center gap-3 rounded-xl px-3";
   return (
     <Pressable
       accessibilityRole="button"

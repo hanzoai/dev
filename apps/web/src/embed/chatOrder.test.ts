@@ -16,7 +16,11 @@ const t = (key: string, over: Partial<ThreadSummary> = {}): ThreadSummary => ({
 
 describe("cloud chat list", () => {
   it("lists pinned first, then newest", () => {
-    const order = orderThreads([t("old", { updatedAt: 1 }), t("new", { updatedAt: 9 }), t("pin", { pinned: true })]);
+    const order = orderThreads([
+      t("old", { updatedAt: 1 }),
+      t("new", { updatedAt: 9 }),
+      t("pin", { pinned: true }),
+    ]);
     expect(order.map((x) => x.key)).toEqual(["pin", "new", "old"]);
   });
   it("addresses a thread by its remote id, else its device key, and finds it by either", () => {

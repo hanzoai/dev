@@ -387,6 +387,7 @@
   "b3120494e215abaf": "无法创建环境授权证明。",
   "960aa0b106793f99": "无法加载环境授权密钥。",
   "facb167869d93774": "续期环境凭据超时。",
+  "d277f9cf266c9819": "自动",
   "0549eeedb2c63c32": "Use the {name} connector to ",
   "f55196e4afe2840c": "Use the {name} design system: ",
   "5f2b771aa73eb6c6": "Keep in mind: {name}",
@@ -1529,11 +1530,11 @@
   "e07c02ee1f862cbc": "无法打开 DPoP 密钥存储。",
   "be3030ffedc152a6": "无法读取 DPoP 密钥。",
   "4c858a862b13555c": "无法写入 DPoP 密钥。",
+  "33fdee6fc52c06c6": "无法导入 DPoP 私钥。",
   "d9824238bbe45384": "无法生成 DPoP 证明密钥。",
   "b2b4d46c60d17570": "无法导出 DPoP 私钥。",
   "e7018d0e5c5f7d75": "无法导出 DPoP 公钥。",
   "56700638f4a38b40": "生成的 DPoP 公钥无效。",
-  "33fdee6fc52c06c6": "无法导入 DPoP 私钥。",
   "87338da304e4dd3e": "无法加载 DPoP 证明密钥。",
   "b2ee6fa8c91540d0": "无法签署 DPoP 证明。",
   "4b4b4cc24d0fd8d4": "Active organization: {org}",
@@ -2838,12 +2839,53 @@
   "7b6319899a2bb9de": "未知的 IndexedDB 移除错误",
   "a0b511c077c861d8": "未知的 IndexedDB 游标错误",
   "5b6a217023d4c958": "此系统环境下无法使用桌面安全存储。",
+  "ab786f0ad7397b41": "头脑风暴",
+  "508ddcbe71e05a1a": "分析代码",
+  "69841d9be53be569": "起草与润色",
+  "f13a1ce32845434b": "研究一个主题",
+  "d9846476cebcdbcf": "审查 git diff",
+  "c1249e2e0d59a81e": "修复失败的测试",
+  "6194b0f0edd8b9a0": "构建功能",
+  "398549edfbf1814c": "重构模块",
+  "082c312da6e254de": "构建下一个作品。",
+  "6cd5800e00aa3c32": "早上好，{name}。我们要构建什么？",
+  "aa270e0dc753516d": "下午好，{name}。我们要构建什么？",
+  "7936607bfffc5cfb": "晚上好，{name}。我们要构建什么？",
+  "5406883f8b854a55": "接下来做什么？",
+  "a16fb0e86b06d348": "早上好，{name}。",
+  "491e8bd53c6361e0": "下午好，{name}。",
+  "0249ae895c80f3ca": "晚上好，{name}。",
+  "cfb3f269b6b2422c": "关闭人设选择器",
+  "6cf1b5f50233d093": "退出隐私模式",
+  "085959508fedad72": "清除人设",
+  "094d723edc8a00ab": [
+    "选择人设 (",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ")"
+  ],
+  "08268bb17a38c420": "无人设",
+  "d0c2a7992c20c04d": "登录以加载你的人设。",
+  "01d67f2bc91c6eee": "隐私模式 · 不保存也不记录任何内容",
+  "c4b860aca29ee1c5": [
+    "无法连接到 ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "a61f491435e2f821": "环境没有响应。请确认它在线，然后重试。",
+  "9bbecec926c3b695": "重试",
   "8c4364bcfd1d8630": "Build what's next.",
   "f4e0f7149b19a94b": "Start a session in the cloud, or link your own machine.",
   "acb100bef9c60d82": "Start a cloud session",
   "065413ea2192e0df": "Link my machine",
   "ad247964ae360dec": "Cloud sessions are not available right now. Link your machine instead, or try again shortly.",
-  "4ffc9bc8998120f5": "Open this document in Hanzo Dev on your computer to preview it.",
+  "4ffc9bc8998120f5": "请在电脑上的 Hanzo Dev 中打开此文档以预览。",
   "b6cc9af7a6d5e31b": "发布",
   "d87b86613f8494c8": "Build {repo} at {ref} and add it to a project as {name}.",
   "7767ca0f466685e4": "Build {id} succeeded. It is live at the project's address.",
@@ -2856,6 +2898,8 @@
   "445511757fcd365a": "正在连接…",
   "0c7f505925487ca5": "End talk mode",
   "217b7b61ba019b2b": "Start talk mode",
+  "e26bcec28db6926d": "结束语音对话",
+  "f1e6d769d8a47054": "语音对话",
   "e7651575edb03ae2": "Marked {count, plural, one {{count} thread} other {{count} threads}} done",
   "96f74e61e5e2394a": "已暂缓 {count, plural, other {{count} 个会话}}",
   "158d77e7a872186e": "已取消置顶 {count, plural, other {{count} 个会话}}",
@@ -3323,10 +3367,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "位于打开此页面的计算机上"
-      ]
+      "c": [" ", "位于打开此页面的计算机上"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3338,10 +3379,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· 运行它的任何人都会获得此访问权限"
-      ]
+      "c": [" ", "· 运行它的任何人都会获得此访问权限"]
     }
   ],
   "c54cc9c75db9dc58": "请只批准你刚刚发起的登录。",
@@ -3429,6 +3467,8 @@
   "3390f0b2396998c0": "在输入框中引用选中内容",
   "e5dc8d61a6d178ed": "请缩短选中内容",
   "a5b06aaaba1d742f": "引用",
+  "c97acc2f249d581a": "无法附加 {project}",
+  "710755372847018d": "附加项目",
   "b1d8a5a24bd684e3": "子智能体",
   "5a805b37d8940816": "命令",
   "da2da87e78bd6b11": "监控",
@@ -3901,7 +3941,6 @@
       "v": "v"
     }
   ],
-  "9bbecec926c3b695": "重试",
   "4fd8927b7afc2a92": "复制消息",
   "6f8651e48261911a": "已思考",
   "07e65dba2b16d3f7": "{count, plural, other {{path}，另有 {count} 个}}",
@@ -4002,7 +4041,9 @@
   "ae0ce3cad2ae99ef": "{label}：受限。",
   "afe27891aab8cf37": "{label}：未就绪。",
   "2f77cc3105ddd7f8": "智能体提供方",
+  "e608267bb9696138": "连接提供方账户",
   "3b205a1c17c06fbd": "收藏",
+  "7e8058d028c748ca": "连接提供方",
   "a06eb47a82969918": "子智能体",
   "d567966a45ff32be": "子智能体工作",
   "4740c38b2edd194d": "只读。这些子智能体无法接收消息。",
@@ -4899,6 +4940,8 @@
   "5ba22a660758e453": "已达到附件数量上限。",
   "181933312b23cb0c": "草稿拒绝了这个附件（重复或已达到附件上限）。",
   "df02c1d51d158d32": "切换这个会话使用的回复模型",
+  "7f7784a67756f1f6": "以隐私模式继续，不保存也不记录任何内容",
+  "649ff7a5e07869ce": "切换或清除当前人设",
   "929781439a221aae": "在新的侧聊中问一个旁支问题",
   "378c3404c430fc05": "与 /side 相同",
   "8ce7ee2a95c49bdb": "以全新的上下文重新开始，之前的消息仍会显示",
@@ -5945,6 +5988,7 @@
   "6b962f04ab551bfa": "就绪：{model}",
   "6e4b9080250290c0": "在线",
   "f0cdc6e629fe2c45": "离线",
+  "c03deeb762c15761": "{latency} 毫秒",
   "651cb409bda342a8": "Remove {model}",
   "2288d5e74aedffb5": "要拉取的模型标签，例如 llama3.2",
   "c035e78630f52497": "要拉取的模型",

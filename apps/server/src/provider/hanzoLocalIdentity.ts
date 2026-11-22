@@ -1,5 +1,6 @@
 import type { ServerProvider, ServerProviderModel } from "@hanzodev/contracts";
 import { HANZO_REASONING_CAPABILITIES } from "@hanzodev/shared/model";
+import type { SharedIdentitySnapshot } from "@hanzodev/shared/hanzoSharedIdentity";
 import * as HostProcess from "@hanzodev/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";

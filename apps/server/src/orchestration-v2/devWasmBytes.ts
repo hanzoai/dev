@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - read once at load; the pack build inlines the bytes instead.
 import * as NodeFS from "node:fs";
 
 /**

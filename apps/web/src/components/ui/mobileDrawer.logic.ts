@@ -1,19 +1,19 @@
 // The numbers of the Hanzo phone drawer (hanzo.app slide.ts, Dev iOS), in CSS px.
 /** Pane left in sight at the trailing edge while the drawer is open. */
-export const DRAWER_STRIP = 64;
+const DRAWER_STRIP = 64;
 /** The drawer's widest. */
-export const DRAWER_REACH = 360;
+const DRAWER_REACH = 360;
 /** px a finger moves before a drag is a drag. */
-export const DRAWER_SLOP = 8;
+const DRAWER_SLOP = 8;
 /** A flick, px per ms: faster than this decides by its direction, whatever the distance. */
 export const DRAWER_FLICK = 0.4;
 /** The slide and the dim run on one clock. */
 export const DRAWER_DURATION_MS = 260;
 export const DRAWER_EASING = "cubic-bezier(.2,.8,.2,1)";
 /** Where a drag may begin when the drawer is closed, px from the leading edge. */
-export const DRAWER_EDGE = 24;
+const DRAWER_EDGE = 24;
 /** Dim over the content at full open. */
-export const DRAWER_DIM = 0.45;
+const DRAWER_DIM = 0.45;
 
 export function drawerReach(windowWidth: number): number {
   return Math.min(Math.max(0, windowWidth - DRAWER_STRIP), DRAWER_REACH);

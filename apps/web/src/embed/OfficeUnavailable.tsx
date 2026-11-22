@@ -11,6 +11,7 @@ import { msg } from "gt-react";
  */
 export default function OfficeUnavailable(props: { onError: (cause: unknown) => void }) {
   const { onError } = props;
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- stands in for an Office engine, which reports a failed load to the file viewer through onError once mounted
   useEffect(() => {
     onError(new Error(m(msg("Open this document in Hanzo Dev on your computer to preview it."))));
   }, [onError]);

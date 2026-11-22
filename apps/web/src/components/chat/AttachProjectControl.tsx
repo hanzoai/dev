@@ -21,12 +21,15 @@ export function AttachProjectControl(props: {
 }) {
   const gt = useGT();
   const projects = attachableProjects(useProjects(), props);
-  const setProject = useOrchestrationCommand(threadEnvironment.setProject, { reportFailure: false });
+  const setProject = useOrchestrationCommand(threadEnvironment.setProject, {
+    reportFailure: false,
+  });
   if (projects.length === 0) return null;
   return (
     <Menu>
       <MenuTrigger
         data-testid="attach-project"
+        // oxlint-disable-next-line shadcn/no-restyle -- MenuTrigger renders no look of its own; this inline link-style trigger belongs to the composer row
         className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
       >
         <FolderGitIcon className="size-3.5" />

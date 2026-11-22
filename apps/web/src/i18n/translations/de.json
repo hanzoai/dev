@@ -387,6 +387,7 @@
   "b3120494e215abaf": "Der Autorisierungsnachweis für die Umgebung konnte nicht erstellt werden.",
   "960aa0b106793f99": "Der Autorisierungsschlüssel der Umgebung konnte nicht geladen werden.",
   "facb167869d93774": "Zeitüberschreitung beim Erneuern der Zugangsdaten der Umgebung.",
+  "d277f9cf266c9819": "Auto",
   "0549eeedb2c63c32": "Use the {name} connector to ",
   "f55196e4afe2840c": "Use the {name} design system: ",
   "5f2b771aa73eb6c6": "Keep in mind: {name}",
@@ -1529,11 +1530,11 @@
   "e07c02ee1f862cbc": "Der DPoP-Schlüsselspeicher konnte nicht geöffnet werden.",
   "be3030ffedc152a6": "Der DPoP-Schlüssel konnte nicht gelesen werden.",
   "4c858a862b13555c": "Der DPoP-Schlüssel konnte nicht geschrieben werden.",
+  "33fdee6fc52c06c6": "Der private DPoP-Schlüssel konnte nicht importiert werden.",
   "d9824238bbe45384": "Der DPoP-Nachweisschlüssel konnte nicht erzeugt werden.",
   "b2b4d46c60d17570": "Der private DPoP-Schlüssel konnte nicht exportiert werden.",
   "e7018d0e5c5f7d75": "Der öffentliche DPoP-Schlüssel konnte nicht exportiert werden.",
   "56700638f4a38b40": "Der erzeugte öffentliche DPoP-Schlüssel ist ungültig.",
-  "33fdee6fc52c06c6": "Der private DPoP-Schlüssel konnte nicht importiert werden.",
   "87338da304e4dd3e": "Der DPoP-Nachweisschlüssel konnte nicht geladen werden.",
   "b2ee6fa8c91540d0": "Der DPoP-Nachweis konnte nicht signiert werden.",
   "4b4b4cc24d0fd8d4": "Active organization: {org}",
@@ -2835,12 +2836,53 @@
   "7b6319899a2bb9de": "Unbekannter IndexedDB-Fehler beim Entfernen",
   "a0b511c077c861d8": "Unbekannter IndexedDB-Cursorfehler",
   "5b6a217023d4c958": "Der sichere Desktop-Speicher ist in diesem Systemkontext nicht verfügbar.",
+  "ab786f0ad7397b41": "Ideen sammeln",
+  "508ddcbe71e05a1a": "Code analysieren",
+  "69841d9be53be569": "Entwerfen & überarbeiten",
+  "f13a1ce32845434b": "Ein Thema recherchieren",
+  "d9846476cebcdbcf": "Git-Diff prüfen",
+  "c1249e2e0d59a81e": "Fehlschlagende Tests beheben",
+  "6194b0f0edd8b9a0": "Ein Feature bauen",
+  "398549edfbf1814c": "Modul refaktorisieren",
+  "082c312da6e254de": "Bau, was als Nächstes kommt.",
+  "6cd5800e00aa3c32": "Guten Morgen, {name}. Was bauen wir?",
+  "aa270e0dc753516d": "Guten Tag, {name}. Was bauen wir?",
+  "7936607bfffc5cfb": "Guten Abend, {name}. Was bauen wir?",
+  "5406883f8b854a55": "Was kommt als Nächstes?",
+  "a16fb0e86b06d348": "Guten Morgen, {name}.",
+  "491e8bd53c6361e0": "Guten Tag, {name}.",
+  "0249ae895c80f3ca": "Guten Abend, {name}.",
+  "cfb3f269b6b2422c": "Persona-Auswahl schließen",
+  "6cf1b5f50233d093": "Privatmodus beenden",
+  "085959508fedad72": "Persona entfernen",
+  "094d723edc8a00ab": [
+    "Persona auswählen (",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ")"
+  ],
+  "08268bb17a38c420": "Keine Persona",
+  "d0c2a7992c20c04d": "Melde dich an, um deine Personas zu laden.",
+  "01d67f2bc91c6eee": "Privatmodus · nichts wird gespeichert oder aufgezeichnet",
+  "c4b860aca29ee1c5": [
+    "Keine Verbindung zu ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "a61f491435e2f821": "Die Umgebung hat nicht geantwortet. Prüfe, ob sie online ist, und versuche es dann erneut.",
+  "9bbecec926c3b695": "Wiederholen",
   "8c4364bcfd1d8630": "Build what's next.",
   "f4e0f7149b19a94b": "Start a session in the cloud, or link your own machine.",
   "acb100bef9c60d82": "Start a cloud session",
   "065413ea2192e0df": "Link my machine",
   "ad247964ae360dec": "Cloud sessions are not available right now. Link your machine instead, or try again shortly.",
-  "4ffc9bc8998120f5": "Open this document in Hanzo Dev on your computer to preview it.",
+  "4ffc9bc8998120f5": "Öffne dieses Dokument in Hanzo Dev auf deinem Computer, um eine Vorschau anzuzeigen.",
   "b6cc9af7a6d5e31b": "Veröffentlichen",
   "d87b86613f8494c8": "Build {repo} at {ref} and add it to a project as {name}.",
   "7767ca0f466685e4": "Build {id} succeeded. It is live at the project's address.",
@@ -2853,6 +2895,8 @@
   "445511757fcd365a": "Verbinde…",
   "0c7f505925487ca5": "End talk mode",
   "217b7b61ba019b2b": "Start talk mode",
+  "e26bcec28db6926d": "Sprachunterhaltung beenden",
+  "f1e6d769d8a47054": "Sprachunterhaltung",
   "e7651575edb03ae2": "Marked {count, plural, one {{count} thread} other {{count} threads}} done",
   "96f74e61e5e2394a": "{count, plural, one {{count} Thread} other {{count} Threads}} zurückgestellt",
   "158d77e7a872186e": "{count, plural, one {{count} Thread} other {{count} Threads}} losgelöst",
@@ -3319,10 +3363,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "auf dem Computer, der diese Seite geöffnet hat"
-      ]
+      "c": [" ", "auf dem Computer, der diese Seite geöffnet hat"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3334,10 +3375,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· wer es ausführt, erhält diesen Zugriff"
-      ]
+      "c": [" ", "· wer es ausführt, erhält diesen Zugriff"]
     }
   ],
   "c54cc9c75db9dc58": "Genehmige nur eine Anmeldung, die du gerade selbst gestartet hast.",
@@ -3425,6 +3463,8 @@
   "3390f0b2396998c0": "Auswahl im Eingabefeld zitieren",
   "e5dc8d61a6d178ed": "Auswahl kürzen",
   "a5b06aaaba1d742f": "Zitieren",
+  "c97acc2f249d581a": "{project} konnte nicht angehängt werden",
+  "710755372847018d": "Projekt anhängen",
   "b1d8a5a24bd684e3": "Subagent",
   "5a805b37d8940816": "Befehl",
   "da2da87e78bd6b11": "Monitor",
@@ -3899,7 +3939,6 @@
       "v": "v"
     }
   ],
-  "9bbecec926c3b695": "Wiederholen",
   "4fd8927b7afc2a92": "Nachricht kopieren",
   "6f8651e48261911a": "Gedanke",
   "07e65dba2b16d3f7": "{count, plural, one {{path} +{count} weitere} other {{path} +{count} weitere}}",
@@ -4000,7 +4039,9 @@
   "ae0ce3cad2ae99ef": "{label}: Eingeschränkt.",
   "afe27891aab8cf37": "{label}: Nicht bereit.",
   "2f77cc3105ddd7f8": "Anbieter",
+  "e608267bb9696138": "Anbieterkonto verbinden",
   "3b205a1c17c06fbd": "Favoriten",
+  "7e8058d028c748ca": "Anbieter verbinden",
   "a06eb47a82969918": "Subagent",
   "d567966a45ff32be": "Arbeit der Subagenten",
   "4740c38b2edd194d": "Nur lesen. Diese Subagenten können keine Nachrichten annehmen.",
@@ -4895,6 +4936,8 @@
   "5ba22a660758e453": "Das Limit für Anhänge ist erreicht.",
   "181933312b23cb0c": "Der Entwurf hat diesen Anhang abgelehnt (Duplikat oder Limit für Anhänge erreicht).",
   "df02c1d51d158d32": "Antwortmodell für diesen Thread wechseln",
+  "7f7784a67756f1f6": "Privat fortfahren, nichts wird gespeichert oder aufgezeichnet",
+  "649ff7a5e07869ce": "Aktive Persona wechseln oder entfernen",
   "929781439a221aae": "Eine Nebenfrage in einem neuen Nebenchat stellen",
   "378c3404c430fc05": "Wie /side",
   "8ce7ee2a95c49bdb": "Eine neue Sitzung starten; frühere Nachrichten bleiben sichtbar",
@@ -5940,6 +5983,7 @@
   "6b962f04ab551bfa": "Bereit: {model}",
   "6e4b9080250290c0": "online",
   "f0cdc6e629fe2c45": "offline",
+  "c03deeb762c15761": "{latency} ms",
   "651cb409bda342a8": "Remove {model}",
   "2288d5e74aedffb5": "Zu ladendes Modell-Tag, z. B. llama3.2",
   "c035e78630f52497": "Zu ladendes Modell",

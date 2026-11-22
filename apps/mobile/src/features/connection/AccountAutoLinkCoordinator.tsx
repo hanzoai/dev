@@ -82,8 +82,7 @@ export function AccountAutoLinkCoordinator() {
     const attempted = attemptedByAccountRef.current.ids;
     for (const entry of discovery.environments.values()) {
       const envId = entry.environment.environmentId;
-      const isOnline =
-        entry.availability === "online" || entry.environment.state === "online";
+      const isOnline = entry.availability === "online" || entry.environment.state === "online";
       if (!isOnline) {
         // Allow re-attempting automatically if this machine comes back online later.
         attempted.delete(envId);

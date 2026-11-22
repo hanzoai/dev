@@ -28,9 +28,6 @@ export function resolveSend(input: {
   return input.hasReadyEnvironment ? { kind: "machine" } : { kind: "choose-target" };
 }
 
-/** The targets the run prompt offers, in order. */
-export const RUN_TARGETS: readonly RunTarget[] = ["mac", "cloud"];
-
 /** What a signed-out visitor to the hosted app sees: the sign-in and nothing else. */
 export function hostedLanding(input: {
   readonly isLoaded: boolean;

@@ -1178,7 +1178,7 @@ const RelayTokenGroup = HttpApiGroup.make("token")
   .add(RelayExchangeDpopAccessTokenEndpoint)
   .annotate(OpenApi.Description, "OAuth token exchange for DPoP-bound client access.");
 
-export const RelayConnectEnvironmentEndpoint = HttpApiEndpoint.post(
+const RelayConnectEnvironmentEndpoint = HttpApiEndpoint.post(
   "connectEnvironment",
   "/v1/environments/:environmentId/connect",
   {

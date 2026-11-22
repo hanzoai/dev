@@ -84,6 +84,7 @@ export function HanzoWidgetSyncCoordinator() {
 
     const recentThreads: HanzoWidgetThread[] = chat.state.threads.slice(0, 5).map((thread) => ({
       key: thread.key,
+      // oxlint-disable-next-line hanzo/no-untranslated-copy -- Thread title fallback for the native Swift widget, whose surrounding copy is English.
       title: thread.title.trim() || "New chat",
       preview:
         activeThreadKey === thread.key && activePreview
@@ -110,6 +111,7 @@ export function HanzoWidgetSyncCoordinator() {
       onlineMachinesCount,
       machines,
       recentThreads,
+      // oxlint-disable-next-line react/purity -- Stamps when the widget payload was built; it changes only with the memo inputs, and the bridge zeroes it before deduping.
       updatedAt: Date.now(),
     };
   }, [

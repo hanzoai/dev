@@ -181,12 +181,9 @@ if (NodeFS.existsSync(monitorReleaseBin)) {
   }
 }
 
-// 5. Stage the runtimes the app does not ask the machine for.
-//
-// The server runs on a Node the app owns (Dev desktop starts with no Node on PATH), and
-// `hanzod` runs it. Both are fetched from a release by version and checked against a sha256 in
-// scripts/runtimes.json before they are staged; a floating tag or an unpinned target is
-// refused. The Node runtime goes away when the last provider adapter has moved to Rust.
+// 5. Stage the runtimes the app does not ask the machine for: the Node the server runs on (Dev
+// desktop starts with no Node on PATH) and `hanzod`. Both are fetched by version and checked
+// against a sha256 in scripts/runtimes.json; a floating tag or an unpinned target is refused.
 const runtimes = JSON.parse(
   NodeFS.readFileSync(NodePath.join(desktopDir, "scripts", "runtimes.json"), "utf8"),
 );
@@ -208,10 +205,9 @@ function unpack(bytes, name, into) {
   const archive = NodePath.join(into, name);
   NodeFS.writeFileSync(archive, bytes);
   // Windows' own bsdtar reads zip and drive-letter paths; Git's GNU tar, first on a CI PATH, does neither.
-  const tar =
-    process.platform === "win32"
-      ? NodePath.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe")
-      : "tar";
+  const tar = isWindows
+    ? NodePath.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe")
+    : "tar";
   NodeChildProcess.execFileSync(tar, ["-xf", archive, "-C", into], { stdio: "inherit" });
   NodeFS.rmSync(archive);
 }

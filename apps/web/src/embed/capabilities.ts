@@ -6,7 +6,7 @@ import { useEnvironments } from "../state/environments";
 import { useProject, useThreadShell } from "../state/entities";
 
 /** `<environmentId>/<threadId>` as the core's address for a thread. */
-export function threadRefOf(ref: string | null): ScopedThreadRef | null {
+function threadRefOf(ref: string | null): ScopedThreadRef | null {
   if (ref === null) return null;
   const at = ref.indexOf("/");
   return at < 1

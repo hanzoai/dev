@@ -825,7 +825,9 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
             borderRadius: isExpanded ? (usesLargeControls ? 28 : 26) : usesLargeControls ? 32 : 30,
             borderCurve: "continuous",
             overflow: "hidden",
-            paddingVertical: usesLargeControls ? surfacePaddingVertical : Math.max(surfacePaddingVertical, 6),
+            paddingVertical: usesLargeControls
+              ? surfacePaddingVertical
+              : Math.max(surfacePaddingVertical, 6),
             paddingHorizontal: 4,
           }}
         >

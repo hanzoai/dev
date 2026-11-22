@@ -108,10 +108,7 @@ import {
   linkToRootPath,
   rootNavigationRef,
 } from "./lib/rootNavigation";
-import {
-  dispatchWidgetQuickAction,
-  parseAskWidgetPath,
-} from "./features/chat/widgetQuickAction";
+import { dispatchWidgetQuickAction, parseAskWidgetPath } from "./features/chat/widgetQuickAction";
 import { closeWorkspaceDrawer } from "./features/layout/workspace/workspace-drawer-store";
 import { openWorkspaceSection } from "./features/layout/workspace/workspace-section-store";
 import { pruneNewTaskFlowStates } from "./features/threads/new-task-flow-state";

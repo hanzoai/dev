@@ -54,7 +54,9 @@ export function SettingsPermissionsRouteScreen() {
       AudioModule.getRecordingPermissionsAsync().catch(() => null),
       Notifications.getPermissionsAsync().catch(() => null),
     ]);
-    setCamera(camRes?.granted ? "granted" : camRes?.canAskAgain === false ? "denied" : "undetermined");
+    setCamera(
+      camRes?.granted ? "granted" : camRes?.canAskAgain === false ? "denied" : "undetermined",
+    );
     setPhotos(
       photoRes?.granted ? "granted" : photoRes?.canAskAgain === false ? "denied" : "undetermined",
     );
@@ -64,7 +66,9 @@ export function SettingsPermissionsRouteScreen() {
     );
   }, []);
 
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- reads the current OS permission grants from the native permission modules when the screen opens
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- refresh sets the grants only after the native permission queries resolve.
     void refresh();
   }, [refresh]);
 
@@ -267,7 +271,7 @@ export function SettingsPermissionsRouteScreen() {
               onPress={openShortcutsApp}
             />
             <SettingsRow
-              icon="sparkles"
+              icon="mic"
               label={gt("Siri Voice Triggers")}
               value={gt("“Ask Hanzo”")}
               valuePosition="trailing"

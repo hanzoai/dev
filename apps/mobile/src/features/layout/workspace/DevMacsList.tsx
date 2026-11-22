@@ -34,7 +34,10 @@ export function DevMacsList() {
   );
 
   // Merge discovered Macs, relay environments, and locally connected machines so nothing is missed.
-  const mergedById = new Map<string, { readonly id: string; readonly name: string; readonly online: boolean }>();
+  const mergedById = new Map<
+    string,
+    { readonly id: string; readonly name: string; readonly online: boolean }
+  >();
   for (const env of connection.connectedEnvironments) {
     const id = String(env.environmentId);
     mergedById.set(id, {
@@ -46,8 +49,7 @@ export function DevMacsList() {
   for (const entry of connection.relayEnvironments) {
     const id = String(entry.environment.environmentId);
     const existing = mergedById.get(id);
-    const online =
-      entry.availability === "online" || entry.environment.state === "online";
+    const online = entry.availability === "online" || entry.environment.state === "online";
     mergedById.set(id, {
       id,
       name: existing?.name || entry.environment.label,

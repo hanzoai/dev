@@ -24,7 +24,6 @@ import {
   getComposerDraftSnapshot,
   removeComposerDraftAttachment,
   setComposerDraftText,
-  useComposerDraft,
 } from "../../state/use-composer-drafts";
 import { ComposerPopoverHost } from "../threads/ComposerPopoverHost";
 import { ThreadComposer } from "../threads/ThreadComposer";
@@ -57,7 +56,6 @@ export function ChatLandingComposer(props: {
 }) {
   const gt = useGT();
   const popoverHeight = useSharedValue(0);
-  const draft = useComposerDraft(CHAT_LANDING_DRAFT_KEY);
   const { chat } = props;
   const attachments = useComposerAttachmentActions({
     draftKey: CHAT_LANDING_DRAFT_KEY,
@@ -112,6 +110,7 @@ export function ChatLandingComposer(props: {
         .catch(() => {});
     }
   });
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- listens for Home Screen widget quick actions (deep links) while the landing composer is mounted
   useEffect(() => {
     const initial = consumePendingWidgetQuickAction();
     if (initial) {

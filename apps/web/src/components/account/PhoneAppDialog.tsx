@@ -38,6 +38,7 @@ export function PhoneAppDialog({
             {MOBILE_APP_DOWNLOADS.map((download) => (
               <figure className="m-0 flex flex-col items-center gap-2" key={download.platform}>
                 <QRCodeSvg
+                  // oxlint-disable-next-line shadcn/no-restyle -- the radius clips only the white quiet zone (marginSize 2), never a module
                   className="rounded-md"
                   marginSize={2}
                   size={132}

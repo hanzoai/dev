@@ -253,7 +253,7 @@ describe("HanzoWebAuthController IAM, Org Switcher & Local AI guard", () => {
       owner: "admin",
       accessToken: "tok_machine",
       refreshToken: "ref_machine",
-      expiresAt: Date.now() - 1_000,
+      expiresAt: 1_000,
     });
     const requests: string[] = [];
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -276,7 +276,7 @@ describe("HanzoWebAuthController IAM, Org Switcher & Local AI guard", () => {
     expect(controller.activeAccount?.id).toBe("admin/z");
     expect(controller.accounts.map((account) => account.id)).toEqual(["admin/z"]);
     expect(globalThis.window.localStorage.getItem(HANZO_IAM_VAULT_STORAGE_KEY)).toBeNull();
-    expect(JSON.stringify([...Object.entries(globalThis.window.localStorage)])).not.toContain(
+    expect(JSON.stringify(Object.entries(globalThis.window.localStorage))).not.toContain(
       "tok_machine",
     );
 

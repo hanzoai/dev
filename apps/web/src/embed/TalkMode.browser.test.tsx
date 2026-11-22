@@ -30,7 +30,9 @@ describe("TalkMode", () => {
     screen.rerender(<TalkMode cloud={cloud} />);
     state.open = true;
     screen.rerender(<TalkMode cloud={{ ...cloud }} />);
-    await expect.element(page.getByText("Listening. Speak, and Hanzo answers aloud.")).toBeVisible();
+    await expect
+      .element(page.getByText("Listening. Speak, and Hanzo answers aloud."))
+      .toBeVisible();
     await expect.element(page.getByTestId("talk-mode")).toHaveAttribute("aria-pressed", "true");
   });
 });

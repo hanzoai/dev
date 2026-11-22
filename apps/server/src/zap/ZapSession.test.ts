@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - the fake socket waits on Node timers.
 import { AuthSessionId } from "@hanzodev/contracts";
 import {
   lengthPrefixed,
@@ -8,7 +9,7 @@ import {
   ZAP_SESSION_METHOD,
   ZAP_SHELL_METHOD,
 } from "@hanzodev/shared/zapFrames";
-import { setTimeout as scheduler } from "node:timers/promises";
+import * as NodeTimersPromises from "node:timers/promises";
 import { assert, it } from "@effect/vitest";
 import { buildRequest, parseResponse, Status } from "@zap-proto/zap";
 import * as Deferred from "effect/Deferred";
@@ -77,7 +78,10 @@ const fakeStream = () => {
   };
   const until = (count: number) =>
     Effect.promise(async () => {
-      for (let i = 0; i < 200 && written.length < count; i++) await scheduler(5);
+      for (let i = 0; i < 200 && written.length < count; i++) {
+        // oxlint-disable-next-line hanzo/no-real-time-wait-in-tests -- the fake socket's writes land from the session fiber; no event marks them.
+        await NodeTimersPromises.setTimeout(5);
+      }
     });
   return { stream, feed, written, until };
 };

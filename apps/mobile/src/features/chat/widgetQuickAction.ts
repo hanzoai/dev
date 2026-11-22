@@ -51,7 +51,10 @@ export function parseAskWidgetPath(path: string): ParsedWidgetQuickAction | null
   const routePath = clean.slice(0, pathEnd).replace(/\/+$/, "");
   const querySlice =
     queryStart >= 0
-      ? clean.slice(queryStart + 1, hashStart >= 0 && hashStart > queryStart ? hashStart : undefined)
+      ? clean.slice(
+          queryStart + 1,
+          hashStart >= 0 && hashStart > queryStart ? hashStart : undefined,
+        )
       : "";
   const params = new URLSearchParams(querySlice);
   const prompt = params.get("prompt")?.trim() || undefined;
@@ -140,7 +143,9 @@ export function consumePendingWidgetQuickAction(): WidgetQuickAction | null {
   return current;
 }
 
-export function subscribeWidgetQuickAction(listener: (action: WidgetQuickAction) => void): () => void {
+export function subscribeWidgetQuickAction(
+  listener: (action: WidgetQuickAction) => void,
+): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);

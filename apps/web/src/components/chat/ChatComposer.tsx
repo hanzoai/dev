@@ -69,6 +69,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { msg, T, useGT, useMessages, Var } from "gt-react";
 import { flushSync } from "react-dom";

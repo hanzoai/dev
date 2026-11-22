@@ -75,11 +75,7 @@ function addFilesToTarget(project, targetName, files) {
   );
   const targetUuid = targetEntry ? targetEntry[0] : null;
   for (const file of files) {
-    project.addSourceFile(
-      file,
-      targetUuid ? { target: targetUuid } : undefined,
-      groupKey,
-    );
+    project.addSourceFile(file, targetUuid ? { target: targetUuid } : undefined, groupKey);
   }
 }
 

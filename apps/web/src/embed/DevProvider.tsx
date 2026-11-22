@@ -1,5 +1,6 @@
 import "./embedded";
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
+import { T, Var } from "gt-react";
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
@@ -49,16 +50,20 @@ function Failure({ runtime, retry }: { runtime: DevRuntime; retry: () => void })
       role="alert"
       className="flex min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center"
     >
-      <h2 className="text-lg font-medium text-foreground">Could not connect to {runtime.label}</h2>
+      <h2 className="text-lg font-medium text-foreground">
+        <T>
+          Could not connect to <Var>{runtime.label}</Var>
+        </T>
+      </h2>
       <p className="max-w-sm text-sm text-muted-foreground">
-        The environment did not answer. Check that it is online, then try again.
+        <T>The environment did not answer. Check that it is online, then try again.</T>
       </p>
       <button
         type="button"
         onClick={retry}
         className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-accent"
       >
-        Retry
+        <T>Retry</T>
       </button>
     </div>
   );
@@ -83,6 +88,7 @@ function Pair({
   useEffect(() => {
     if (paired.has(runtime.id)) return;
     let live = true;
+    // oxlint-disable-next-line react/set-state-in-effect -- a Retry re-runs the pairing, which first clears the last attempt's failure
     setFailed(false);
     void (async () => {
       const result = await pair({
@@ -97,13 +103,13 @@ function Pair({
         setReady(true);
       } else {
         setFailed(true);
+        // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `onFail` is the host's, read when the pairing fails; `attempt` re-runs the pairing on Retry.
         onFail?.(runtime);
       }
     })();
     return () => {
       live = false;
     };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `onFail` is the host's, read when the pairing fails.
   }, [pair, runtime, attempt]);
   if (failed) return <Failure runtime={runtime} retry={() => setAttempt((n) => n + 1)} />;
   return ready ? <>{children}</> : null;
