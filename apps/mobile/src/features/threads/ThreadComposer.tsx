@@ -754,7 +754,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
   return (
     <Animated.View
       onLayout={(event) => props.onHeightChange?.(event.nativeEvent.layout.height)}
-      className="px-[12px]"
+      className="px-[16px]"
       style={{
         paddingTop: 6,
         paddingBottom: (props.bottomInset ?? 0) + THREAD_COMPOSER_BOTTOM_GUTTER,
@@ -822,10 +822,11 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
         <ComposerSurface
           animateLayout={false}
           style={{
-            borderRadius: usesLargeControls ? 31 : 27,
-            borderCurve: "circular",
+            borderRadius: isExpanded ? (usesLargeControls ? 28 : 26) : usesLargeControls ? 32 : 30,
+            borderCurve: "continuous",
             overflow: "hidden",
-            paddingVertical: surfacePaddingVertical,
+            paddingVertical: usesLargeControls ? surfacePaddingVertical : Math.max(surfacePaddingVertical, 6),
+            paddingHorizontal: 4,
           }}
         >
           <ComposerDictationError

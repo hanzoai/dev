@@ -15,9 +15,10 @@ function CircleButton(props: {
     <GlassSurface
       chrome="none"
       style={{
-        width: 44,
-        height: 44,
-        borderRadius: 22,
+        width: 46,
+        height: 46,
+        borderRadius: 23,
+        borderCurve: "circular",
         alignItems: "center",
         justifyContent: "center",
       }}
@@ -28,8 +29,8 @@ function CircleButton(props: {
         onPress={props.onPress}
         hitSlop={4}
         style={{
-          width: 44,
-          height: 44,
+          width: 46,
+          height: 46,
           alignItems: "center",
           justifyContent: "center",
         }}
@@ -46,14 +47,14 @@ export function WorkspaceMenuButton(props: {
 }) {
   const { colors } = useControlTheme();
   const line = {
-    width: 18,
-    height: 2,
-    borderRadius: 1,
+    width: 21,
+    height: 2.25,
+    borderRadius: 1.125,
     backgroundColor: colors["--color-foreground"],
   };
   return (
     <CircleButton {...props}>
-      <View style={{ alignItems: "center", justifyContent: "center", gap: 5 }}>
+      <View style={{ alignItems: "center", justifyContent: "center", gap: 6 }}>
         <View style={line} />
         <View style={line} />
       </View>
@@ -70,10 +71,11 @@ export function WorkspaceComposeButton(props: {
     <CircleButton {...props}>
       <SymbolView
         name="square.and.pencil"
-        size={19}
+        size={22}
+        weight="medium"
         resizeMode="scaleAspectFit"
         tintColor={colors["--color-foreground"]}
-        style={{ width: 19, height: 19 }}
+        style={{ width: 22, height: 22, transform: [{ translateX: 1 }, { translateY: -0.5 }] }}
       />
     </CircleButton>
   );
