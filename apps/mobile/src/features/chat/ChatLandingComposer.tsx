@@ -5,10 +5,17 @@ import {
   type CloudChatAttachment,
 } from "@hanzodev/client-runtime/cloud-chat";
 import { MessageId, ProjectId, ThreadId } from "@hanzodev/contracts";
+import * as Clipboard from "expo-clipboard";
 import { useGT } from "gt-react-native";
+import { useEffect, useRef } from "react";
 import { useSharedValue } from "react-native-reanimated";
 
 import * as Dialog from "../../components/ui/Dialog";
+import {
+  consumePendingWidgetQuickAction,
+  subscribeWidgetQuickAction,
+  type WidgetQuickAction,
+} from "./widgetQuickAction";
 import { useComposerAttachmentActions } from "../../state/use-composer-attachment-actions";
 import {
   clearComposerDraftContent,
@@ -55,6 +62,36 @@ export function ChatLandingComposer(props: {
     serverConfig: chat.serverConfig,
     maxFileBytes: CLOUD_CHAT_FILE_BYTES,
   });
+  const handleWidgetActionRef = useRef<(act: WidgetQuickAction) => void>(() => {});
+  handleWidgetActionRef.current = (act) => {
+    if (act.prompt) {
+      setComposerDraftText(CHAT_LANDING_DRAFT_KEY, act.prompt);
+    }
+    if (act.action === "camera") {
+      void attachments.onPickDraftMedia();
+    } else if (act.action === "attach") {
+      void attachments.onPickDraftFiles();
+    } else if (act.action === "clipboard") {
+      void Clipboard.getStringAsync()
+        .then((clip) => {
+          const text = clip.trim();
+          if (text) {
+            setComposerDraftText(CHAT_LANDING_DRAFT_KEY, text);
+          }
+        })
+        .catch(() => {});
+    }
+  };
+  useEffect(() => {
+    const initial = consumePendingWidgetQuickAction();
+    if (initial) {
+      handleWidgetActionRef.current(initial);
+    }
+    return subscribeWidgetQuickAction((act) => {
+      consumePendingWidgetQuickAction();
+      handleWidgetActionRef.current(act);
+    });
+  }, []);
   const thread = draftThreadShell({
     environmentId: CLOUD_ENVIRONMENT,
     threadId: CLOUD_THREAD,

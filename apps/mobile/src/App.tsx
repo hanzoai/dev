@@ -106,6 +106,11 @@ import {
   linkToRootPath,
   rootNavigationRef,
 } from "./lib/rootNavigation";
+import {
+  dispatchWidgetQuickAction,
+  parseAskWidgetPath,
+} from "./features/chat/widgetQuickAction";
+import { openWorkspaceSection } from "./features/layout/workspace/workspace-section-store";
 import { pruneNewTaskFlowStates } from "./features/threads/new-task-flow-state";
 import { pruneNewTaskBranchCheckouts } from "./features/threads/NewTaskDraftRouteScreen";
 import { installAppUpdateChecks } from "./features/updates/app-updates";
@@ -125,6 +130,12 @@ const linkingConfig = {
 } as const;
 
 function getAppStateFromPath(path: string, options: Parameters<typeof getStateFromPath>[1]) {
+  const widgetAsk = parseAskWidgetPath(path);
+  if (widgetAsk) {
+    openWorkspaceSection("chat");
+    dispatchWidgetQuickAction(widgetAsk);
+    return getStateFromPath("", options);
+  }
   return pipe(
     getStateFromPath(path, options),
     (state) => restoreDraftLinkState(state, path),
