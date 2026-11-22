@@ -3,6 +3,7 @@ package frame
 import (
 	"bufio"
 	"context"
+	json "encoding/json/v2"
 	"errors"
 	"flag"
 	"fmt"
@@ -22,18 +23,26 @@ import (
 var corpus = flag.String("corpus", "", "write the frames TestChat sends and receives to this file")
 
 // fx is a model that answers in two increments, and a ledger that keeps the
-// last state it was handed.
+// last state it was handed. With calls set, an ask it answers with calls gets
+// those and no text; with perform set, a workspace action is done by it.
 type fx struct {
-	mu    sync.Mutex
-	asks  []dev.Ask
-	saved [][]byte
-	reply func(dev.Ask) (string, error)
+	mu      sync.Mutex
+	asks    []dev.Ask
+	saved   [][]byte
+	reply   func(dev.Ask) (string, error)
+	calls   func(dev.Ask) []dev.Call
+	perform func(thread string, act dev.Action, saved [][]byte) dev.Output
 }
 
 func (f *fx) Model(_ context.Context, ask dev.Ask, delta func(string)) (dev.Reply, error) {
 	f.mu.Lock()
 	f.asks = append(f.asks, ask)
 	f.mu.Unlock()
+	if f.calls != nil {
+		if c := f.calls(ask); len(c) > 0 {
+			return dev.Reply{Calls: c}, nil
+		}
+	}
 	text, err := f.reply(ask)
 	if err != nil {
 		return dev.Reply{}, err
@@ -45,8 +54,14 @@ func (f *fx) Model(_ context.Context, ask dev.Ask, delta func(string)) (dev.Repl
 	return dev.Reply{Text: &text}, nil
 }
 
-func (f *fx) Perform(context.Context, dev.Op) (dev.Output, error) {
-	return dev.Output{}, &NeedsSandbox{Method: "exec"}
+func (f *fx) Perform(_ context.Context, thread string, act dev.Action) (dev.Output, error) {
+	if f.perform == nil {
+		return dev.Output{}, &NeedsSandbox{Method: "exec"}
+	}
+	f.mu.Lock()
+	saved := slices.Clone(f.saved)
+	f.mu.Unlock()
+	return f.perform(thread, act, saved), nil
 }
 
 func (f *fx) Save(_ context.Context, state []byte) error {
@@ -439,5 +454,79 @@ func TestRestore(t *testing.T) {
 	last := r2.fx.asks[len(r2.fx.asks)-1]
 	if len(last.Messages) < 3 {
 		t.Fatalf("a restored session forgot the first turn: %d messages", len(last.Messages))
+	}
+}
+
+// A workspace action reaches Effects under the thread whose loop asked for it
+// and the id that loop gave it, after the thread's snapshot is saved: a loop
+// restored from what was saved is the one waiting on that id, so it never
+// mints the id again for another action.
+func TestAWorkspaceActionIsPerformedUnderItsThreadAndIdAfterTheSnapshot(t *testing.T) {
+	r := newRig(t, "")
+	r.fx.calls = func(ask dev.Ask) []dev.Call {
+		last := ask.Messages[len(ask.Messages)-1]
+		if ask.Prelude != nil && strings.HasPrefix(*ask.Prelude, "Reply with a title") || last.User == nil {
+			return nil
+		}
+		return []dev.Call{{Exec: &dev.Exec{Argv: []string{"echo", "hi"}}}}
+	}
+	type performed struct {
+		thread string
+		act    dev.Action
+		saved  [][]byte
+	}
+	var got []performed
+	r.fx.perform = func(thread string, act dev.Action, saved [][]byte) dev.Output {
+		got = append(got, performed{thread, act, saved})
+		return dev.Output{Text: "hi"}
+	}
+	thread := r.chat()
+
+	if len(got) != 1 {
+		t.Fatalf("%d actions performed, want the one exec", len(got))
+	}
+	p := got[0]
+	if p.thread != thread || p.act.Op.Exec == nil || p.act.ID == 0 {
+		t.Fatalf("performed %q %+v, want the exec under thread %q and its id", p.thread, p.act, thread)
+	}
+	if len(p.saved) == 0 {
+		t.Fatal("nothing was saved before the action was performed")
+	}
+	var st state
+	if err := json.Unmarshal(p.saved[len(p.saved)-1], &st); err != nil {
+		t.Fatal(err)
+	}
+	var snap []byte
+	for _, th := range st.Threads {
+		if th.ID == thread {
+			snap = th.Core
+		}
+	}
+	if len(snap) == 0 {
+		t.Fatal("the state saved before the action holds no snapshot of the thread's loop")
+	}
+	ctx := context.Background()
+	core, err := dev.Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer core.Close(ctx)
+	sess, err := core.Restore(ctx, snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close(ctx)
+	next, err := sess.Step(ctx, dev.Event{Exec: &dev.Output{ID: p.act.ID, Text: "hi"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(next) == 0 || next[0].Op.Model == nil {
+		t.Fatalf("the restored loop answered %+v to the exec's output, want the next ask: it was not waiting on id %d", next, p.act.ID)
+	}
+
+	// The output went back to the loop, which finished the turn on it.
+	th := r.a.st.threads[thread]
+	if m := find(th.Messages, replyMsgID(runID(thread, 1), 1)); m == nil || m.Str("text") != "Hello" {
+		t.Fatalf("reply after the exec: %v", m)
 	}
 }
