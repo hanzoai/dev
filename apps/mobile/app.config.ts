@@ -81,7 +81,7 @@ const RELEASE_ASSETS = {
 
 const VARIANT_CONFIG = {
   development: {
-    appName: "Hanzo (Dev)",
+    appName: "Hanzo",
     scheme: "hanzo-dev",
     iosBundleIdentifier: "ai.hanzo.dev.dev",
     androidPackage: "ai.hanzo.dev.dev",
@@ -89,7 +89,7 @@ const VARIANT_CONFIG = {
     assets: DEVELOPMENT_ASSETS,
   },
   preview: {
-    appName: "Hanzo Preview",
+    appName: "Hanzo",
     scheme: "hanzo-preview",
     iosBundleIdentifier: "ai.hanzo.dev.preview",
     androidPackage: "ai.hanzo.dev.preview",
