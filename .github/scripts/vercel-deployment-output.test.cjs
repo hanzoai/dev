@@ -5,18 +5,14 @@ const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { test } = require("node:test");
 
-const release = readFileSync(join(__dirname, "../workflows/release.yml"), "utf8");
 const preview = readFileSync(join(__dirname, "../workflows/web-preview.yml"), "utf8");
 const stepPattern =
   /        name: (?:Build staged deployment|Deploy preview)\n        shell: bash\n        run: \|\n((?:          .*\n|\n)+)/g;
-const steps = [
-  ...Array.from(release.matchAll(stepPattern), (match, index) => [
-    index === 0 ? "hosted web" : "marketing",
-    match[1],
-  ]),
-  ...Array.from(preview.matchAll(stepPattern), (match) => ["web preview", match[1]]),
-];
-assert.equal(steps.length, 3, "Expected both release steps and the preview step");
+// Commit 18c287811 dropped the Vercel web/marketing jobs from release.yml ("hosting
+// moves to Hanzo"). The only remaining step using this helper is web-preview's
+// "Deploy preview". Keep this test's invariant in sync with the workflows.
+const steps = Array.from(preview.matchAll(stepPattern), (match) => ["web preview", match[1]]);
+assert.equal(steps.length, 1, "Expected the web-preview Deploy preview step");
 
 const url = "https://hanzodev-fixture-pinglabs.vercel.app";
 const warning = 'Error while parsing config file: "/runner/hanzo/pnpm-lock.yaml"';
