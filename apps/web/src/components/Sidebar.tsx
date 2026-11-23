@@ -2990,6 +2990,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         fixedHeader={
           <SidebarGroup className="z-[1]">
             <SidebarThreadHeader
+              showNewThread={!isMobile}
               hasProjects={projectGroups.length > 0}
               projectScope={
                 <Combobox

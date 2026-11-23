@@ -13,7 +13,7 @@ import {
 } from "@hanzodev/contracts";
 import { isMacPlatform } from "@hanzodev/shared/keybindings";
 import { describe, expect, it, vi } from "vite-plus/test";
-import { userEvent } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 
 import { act, fakeTimers, render } from "../../test/render";
 import { openCommandPalette } from "../commandPaletteBus";
@@ -78,6 +78,13 @@ function project(id: string): Project {
   };
 }
 
+// The browser project's default viewport is phone-sized, where the drawer has no new-thread button.
+async function useViewport(width: number, height: number): Promise<AsyncDisposable> {
+  const previous = { width: window.innerWidth, height: window.innerHeight };
+  await page.viewport(width, height);
+  return { [Symbol.asyncDispose]: () => page.viewport(previous.width, previous.height) };
+}
+
 describe("sidebar header new thread", () => {
   it.each([
     { mode: "normal", count: 2, shift: false, picker: true },
@@ -85,6 +92,7 @@ describe("sidebar header new thread", () => {
     { mode: "boring", count: 2, shift: true, picker: false },
     { mode: "boring", count: 1, shift: false, picker: false },
   ] as const)("$mode sidebar, $count projects, shift=$shift: picker=$picker", async (scenario) => {
+    await using _viewport = await useViewport(1280, 800);
     using stack = new DisposableStack();
     const previousSettings = getClientSettings();
     stack.defer(() => __setClientSettingsForTests(previousSettings));
@@ -126,6 +134,21 @@ describe("sidebar header new thread", () => {
       expect(openCommandPalette).not.toHaveBeenCalled();
       expect(startThread).toHaveBeenCalledExactlyOnceWith(currentProjectRef);
     }
+  });
+});
+
+describe("sidebar header on a phone", () => {
+  it("leaves new chat to the phone header's round button", async () => {
+    await using _viewport = await useViewport(390, 844);
+    vi.mocked(useProjects).mockReturnValue([project("active")]);
+    await using screen = await render(
+      <SidebarProvider>
+        <Sidebar routeReveal={{ observedKey: null, pendingKey: null }} />
+      </SidebarProvider>,
+    );
+
+    await expect.element(screen.getByRole("button", { name: "Add project" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "New thread", exact: true }).query()).toBeNull();
   });
 });
 
