@@ -1,0 +1,15 @@
+*** Begin Patch
+*** Update File: apps/web/src/embed/homeChat.ts
+@@ export function useHomeChat(cloud: DevCloud, machine: DevEnvironment | null) {
+-  const held = controllerFor(cloud);
+   const controller = held.controller;
++  const controller = controllerFor(cloud).controller;
+   const state: CloudChatState = useSyncExternalStore(
+     controller.subscribe,
+     controller.getState,
+@@ -oxlint-disable-next-line react/immutability -- `held` is the module-level controller registry entry, not render state; the controller reads `local` on each turn
+   useEffect(() => {
+-    // oxlint-disable-next-line react/immutability -- `held` is the module-level controller registry entry, not render state; the controller reads `local` on each turn
++    const held = controllerFor(cloud);
+     held.local = runtime
+*** End Patch
