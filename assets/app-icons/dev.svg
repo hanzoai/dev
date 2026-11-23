@@ -1,1 +1,50 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><rect width="1024" height="1024" fill="#000"/><g fill="#fff" stroke="none"><g stroke="#fff" stroke-width="66.0" stroke-linecap="square" fill="none"><line x1="347.0" y1="336.0" x2="193.0" y2="512.0"/><line x1="193.0" y1="512.0" x2="347.0" y2="688.0"/><line x1="567.0" y1="292.0" x2="435.0" y2="732.0"/><line x1="655.0" y1="336.0" x2="809.0" y2="512.0"/><line x1="809.0" y1="512.0" x2="655.0" y2="688.0"/></g></g></svg>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#19191b"/>
+      <stop offset="28%" stop-color="#09090a"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </linearGradient>
+    <radialGradient id="topGlow" cx="50%" cy="6%" r="65%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.14"/>
+      <stop offset="45%" stop-color="#ffffff" stop-opacity="0.03"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rimGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.34"/>
+      <stop offset="22%" stop-color="#ffffff" stop-opacity="0.12"/>
+      <stop offset="75%" stop-color="#ffffff" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.10"/>
+    </linearGradient>
+    <linearGradient id="glyphWhite" gradientUnits="userSpaceOnUse" x1="0" y1="220" x2="0" y2="800">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="75%" stop-color="#f4f4f7"/>
+      <stop offset="100%" stop-color="#d8d8e0"/>
+    </linearGradient>
+    <linearGradient id="glyphShade" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="65%" stop-color="#ececf0"/>
+      <stop offset="100%" stop-color="#d2d2da"/>
+    </linearGradient>
+    <clipPath id="shellClip">
+      <path d="M 248.00,24.00 L 776.00,24.00 C 905.92,24.00 1000.00,118.08 1000.00,248.00 L 1000.00,776.00 C 1000.00,905.92 905.92,1000.00 776.00,1000.00 L 248.00,1000.00 C 118.08,1000.00 24.00,905.92 24.00,776.00 L 24.00,248.00 C 24.00,118.08 118.08,24.00 248.00,24.00 Z"/>
+    </clipPath>
+    
+  </defs>
+
+  <!-- Uniform Obsidian Glass Squircle Shell -->
+  <path d="M 248.00,24.00 L 776.00,24.00 C 905.92,24.00 1000.00,118.08 1000.00,248.00 L 1000.00,776.00 C 1000.00,905.92 905.92,1000.00 776.00,1000.00 L 248.00,1000.00 C 118.08,1000.00 24.00,905.92 24.00,776.00 L 24.00,248.00 C 24.00,118.08 118.08,24.00 248.00,24.00 Z" fill="url(#bg)"/>
+  <path d="M 248.00,24.00 L 776.00,24.00 C 905.92,24.00 1000.00,118.08 1000.00,248.00 L 1000.00,776.00 C 1000.00,905.92 905.92,1000.00 776.00,1000.00 L 248.00,1000.00 C 118.08,1000.00 24.00,905.92 24.00,776.00 L 24.00,248.00 C 24.00,118.08 118.08,24.00 248.00,24.00 Z" fill="url(#topGlow)"/>
+  <path d="M 249.00,31.00 L 775.00,31.00 C 901.44,31.00 993.00,122.56 993.00,249.00 L 993.00,775.00 C 993.00,901.44 901.44,993.00 775.00,993.00 L 249.00,993.00 C 122.56,993.00 31.00,901.44 31.00,775.00 L 31.00,249.00 C 31.00,122.56 122.56,31.00 249.00,31.00 Z" fill="none" stroke="url(#rimGrad)" stroke-width="10"/>
+
+  <!-- Centered Icon Glyph -->
+  <g clip-path="url(#shellClip)">
+    
+    <path d="M 224 344 L 448 512 L 224 680"
+          fill="none" stroke="url(#glyphWhite)" stroke-width="92"
+          stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="504" y="628" width="296" height="92" rx="46" fill="url(#glyphWhite)"/>
+    
+  </g>
+</svg>
