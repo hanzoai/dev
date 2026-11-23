@@ -1,16 +1,12 @@
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
-const { mkdtempSync, readFileSync, rmSync, existsSync } = require("node:fs");
+const { mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { test } = require("node:test");
 
-const workflow = readFileSync(join(__dirname, "../workflows/release.yml"), "utf8");
-const step = workflow.match(
-  /- name: Read production relay tracing config\n[\s\S]*?        run: \|\n((?:          .*\n|\n)+)/,
-);
-assert.ok(step, "Could not find the relay state workflow step");
-const script = step[1].replace(/^          /gm, "");
+const script = join(__dirname, "relay-state-output.cjs");
+
 const config = {
   clientTracingUrl: "https://example.invalid/traces",
   clientTracingDataset: "fixture-dataset",
@@ -20,20 +16,23 @@ const json = JSON.stringify(config, null, 2);
 
 function runStep(stdout, exitCode = 0) {
   const runnerTemp = mkdtempSync(join(tmpdir(), "hanzo-relay-state-test-"));
+  const binDir = mkdtempSync(join(tmpdir(), "hanzo-relay-state-bin-"));
   try {
-    const result = spawnSync(
-      "bash",
-      ["-c", 'npx() { printf "%s\\n" "$FIXTURE_STDOUT"; return "$FIXTURE_EXIT"; }\n' + script],
-      {
-        encoding: "utf8",
-        env: {
-          PATH: process.env.PATH,
-          RUNNER_TEMP: runnerTemp,
-          FIXTURE_STDOUT: stdout,
-          FIXTURE_EXIT: String(exitCode),
-        },
-      },
+    // Fake `npx` on PATH that prints FIXTURE_STDOUT and exits FIXTURE_EXIT.
+    writeFileSync(
+      join(binDir, "npx"),
+      `#!/bin/sh\nprintf '%s\\n' "$FIXTURE_STDOUT"\nexit "$FIXTURE_EXIT"\n`,
+      { mode: 0o755 },
     );
+    const result = spawnSync(process.execPath, [script, runnerTemp], {
+      encoding: "utf8",
+      env: {
+        PATH: `${binDir}:${process.env.PATH}`,
+        RUNNER_TEMP: runnerTemp,
+        FIXTURE_STDOUT: stdout,
+        FIXTURE_EXIT: String(exitCode),
+      },
+    });
     assert.ifError(result.error);
     const envPath = join(runnerTemp, "relay-client-tracing.env");
     return {
@@ -42,6 +41,7 @@ function runStep(stdout, exitCode = 0) {
     };
   } finally {
     rmSync(runnerTemp, { recursive: true, force: true });
+    rmSync(binDir, { recursive: true, force: true });
   }
 }
 
