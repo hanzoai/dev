@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
-const { mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
+const { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { test } = require("node:test");
