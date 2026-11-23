@@ -1,9 +1,50 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Hanzo dev Dock icon">
-<defs><filter id="hanzo-dev-edgeglow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="12"/></filter><linearGradient id="hanzo-dev-tile" x1="0" y1="0" x2="0.18" y2="1"><stop offset="0" stop-color="#434343"/><stop offset="0.08" stop-color="#292929"/><stop offset="0.27" stop-color="#141414"/><stop offset="0.67" stop-color="#090909"/><stop offset="1" stop-color="#020202"/></linearGradient><linearGradient id="hanzo-dev-outline" x1="0" y1="0" x2="0.26" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.85"/><stop offset=".28" stop-color="#bcbcbc" stop-opacity=".65"/><stop offset="0.58" stop-color="#6d6d6d" stop-opacity=".30"/><stop offset="1" stop-color="#f7f7f7" stop-opacity=".035"/></linearGradient><linearGradient id="hanzo-dev-metal" x1="0.05" y1="0" x2=".83" y2="1"><stop offset="0" stop-color="#fff"/><stop offset=".38" stop-color="#f9f9f9"/><stop offset=".83" stop-color="#ededed"/><stop offset="1" stop-color="#bcbcbc"/></linearGradient><linearGradient id="hanzo-dev-highlight" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset=".65" stop-color="#fff" stop-opacity="0"/></linearGradient><filter id="hanzo-dev-glyphshadow" x="-20%" y="-20%" width="150%" height="155%"><feDropShadow dx="0" dy="7" stdDeviation="4.5" flood-color="#000" flood-opacity=".60"/></filter><clipPath id="hanzo-dev-bounds"><rect x="8" y="8" width="1008" height="1008" rx="232"/></clipPath></defs>
-<rect x="8" y="8" width="1008" height="1008" rx="232" fill="url(#hanzo-dev-tile)"/>
-<g clip-path="url(#hanzo-dev-bounds)"><ellipse cx="502" cy="-230" rx="740" ry="550" fill="url(#hanzo-dev-highlight)" opacity="0.18"/></g>
-<path d="M239 14 C114 14 14 114 14 238 M239 14 H785 C909 14 1010 115 1010 238" fill="none" stroke="#fff" stroke-width="18" opacity=".28" filter="url(#hanzo-dev-edgeglow)"/>
-<path d="M240 13 H784 C912 13 1010 111 1010 241" fill="none" stroke="#fff" stroke-width="6" opacity=".29"/>
-<rect x="11" y="11" width="1002" height="1002" rx="229" fill="none" stroke="url(#hanzo-dev-outline)" stroke-width="4"/>
-<g transform="translate(512 0) scale(1.17 1) translate(-512 0)" fill="none" stroke="url(#hanzo-dev-metal)" stroke-width="90" stroke-linecap="round" stroke-linejoin="round" filter="url(#hanzo-dev-glyphshadow)"><path d="M430 286L240 490L430 694"/><path d="M594 286L784 490L594 694"/></g><g transform="translate(745 760) scale(2.31)" filter="url(#hanzo-dev-glyphshadow)"><path d="M22.21 67V44.6369H0V67H22.21Z" fill="url(#hanzo-dev-metal)"/><path d="M66.7038 22.3184H22.2534L0.0878906 44.6367H44.4634L66.7038 22.3184Z" fill="url(#hanzo-dev-metal)"/><path d="M22.21 0H0V22.3184H22.21V0Z" fill="url(#hanzo-dev-metal)"/><path d="M66.7198 0H44.5098V22.3184H66.7198V0Z" fill="url(#hanzo-dev-metal)"/><path d="M66.7198 67V44.6369H44.5098V67H66.7198Z" fill="url(#hanzo-dev-metal)"/><path d="M0 44.6369L22.21 46.8285V44.6369H0Z" fill="#dddddd" opacity=".48"/><path d="M66.6753 22.3185L44.5098 20.0822V22.3185H66.6753Z" fill="#dddddd" opacity=".48"/></g>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#19191b"/>
+      <stop offset="28%" stop-color="#09090a"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </linearGradient>
+    <radialGradient id="topGlow" cx="50%" cy="6%" r="65%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.14"/>
+      <stop offset="45%" stop-color="#ffffff" stop-opacity="0.03"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rimGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.34"/>
+      <stop offset="22%" stop-color="#ffffff" stop-opacity="0.12"/>
+      <stop offset="75%" stop-color="#ffffff" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.10"/>
+    </linearGradient>
+    <linearGradient id="glyphWhite" gradientUnits="userSpaceOnUse" x1="0" y1="220" x2="0" y2="800">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="75%" stop-color="#f4f4f7"/>
+      <stop offset="100%" stop-color="#d8d8e0"/>
+    </linearGradient>
+    <linearGradient id="glyphShade" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="65%" stop-color="#ececf0"/>
+      <stop offset="100%" stop-color="#d2d2da"/>
+    </linearGradient>
+    <clipPath id="shellClip">
+      <path d="M 248.00,24.00 L 776.00,24.00 C 905.92,24.00 1000.00,118.08 1000.00,248.00 L 1000.00,776.00 C 1000.00,905.92 905.92,1000.00 776.00,1000.00 L 248.00,1000.00 C 118.08,1000.00 24.00,905.92 24.00,776.00 L 24.00,248.00 C 24.00,118.08 118.08,24.00 248.00,24.00 Z"/>
+    </clipPath>
+    
+  </defs>
+
+  <!-- Uniform Obsidian Glass Squircle Shell -->
+  <path d="M 248.00,24.00 L 776.00,24.00 C 905.92,24.00 1000.00,118.08 1000.00,248.00 L 1000.00,776.00 C 1000.00,905.92 905.92,1000.00 776.00,1000.00 L 248.00,1000.00 C 118.08,1000.00 24.00,905.92 24.00,776.00 L 24.00,248.00 C 24.00,118.08 118.08,24.00 248.00,24.00 Z" fill="url(#bg)"/>
+  <path d="M 248.00,24.00 L 776.00,24.00 C 905.92,24.00 1000.00,118.08 1000.00,248.00 L 1000.00,776.00 C 1000.00,905.92 905.92,1000.00 776.00,1000.00 L 248.00,1000.00 C 118.08,1000.00 24.00,905.92 24.00,776.00 L 24.00,248.00 C 24.00,118.08 118.08,24.00 248.00,24.00 Z" fill="url(#topGlow)"/>
+  <path d="M 249.00,31.00 L 775.00,31.00 C 901.44,31.00 993.00,122.56 993.00,249.00 L 993.00,775.00 C 993.00,901.44 901.44,993.00 775.00,993.00 L 249.00,993.00 C 122.56,993.00 31.00,901.44 31.00,775.00 L 31.00,249.00 C 31.00,122.56 122.56,31.00 249.00,31.00 Z" fill="none" stroke="url(#rimGrad)" stroke-width="10"/>
+
+  <!-- Centered Icon Glyph -->
+  <g clip-path="url(#shellClip)">
+    
+    <path d="M 224 344 L 448 512 L 224 680"
+          fill="none" stroke="url(#glyphWhite)" stroke-width="92"
+          stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="504" y="628" width="296" height="92" rx="46" fill="url(#glyphWhite)"/>
+    
+  </g>
 </svg>
