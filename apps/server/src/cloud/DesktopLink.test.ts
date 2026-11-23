@@ -98,85 +98,98 @@ const usageSummary: UsageSummary = {
   ],
 };
 
-const harness = Effect.gen(function* () {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const stateDir = yield* fileSystem.makeTempDirectoryScoped();
-  const requests = yield* Queue.unbounded<Recorded>();
-  const secrets = new Map<string, Uint8Array>();
-  const replies = { heartbeat: 200, link: 201, usage: 200 };
-  const layer = Layer.mergeAll(DesktopLink.layer, ProviderAccounts.layer).pipe(
-    Layer.provide(
-      Layer.mergeAll(
-        Layer.mock(ServerSecretStore.ServerSecretStore)({
-          get: (name) => Effect.sync(() => Option.fromNullishOr(secrets.get(name))),
-          set: (name, value) => Effect.sync(() => void secrets.set(name, value)),
-          remove: (name) => Effect.sync(() => void secrets.delete(name)),
-        }),
-        Layer.mock(CliTokenManager.CloudCliTokenManager)({
-          getExisting: Effect.succeedSome({
-            accessToken: SECRET_TOKEN,
-            refreshToken: "refresh-token-secret",
-            expiresAtEpochMs: 9_999_999_999_999,
-            identity: SECRET_EMAIL,
+const STORED_TOKEN = {
+  accessToken: SECRET_TOKEN,
+  refreshToken: "refresh-token-secret",
+  expiresAtEpochMs: 9_999_999_999_999,
+  identity: SECRET_EMAIL,
+};
+
+const makeHarness = (options: { readonly signedIn?: boolean } = {}) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const stateDir = yield* fileSystem.makeTempDirectoryScoped();
+    const requests = yield* Queue.unbounded<Recorded>();
+    const secrets = new Map<string, Uint8Array>();
+    const replies = { heartbeat: 200, link: 201, usage: 200 };
+    const layer = Layer.mergeAll(DesktopLink.layer, ProviderAccounts.layer).pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(ServerSecretStore.ServerSecretStore)({
+            get: (name) => Effect.sync(() => Option.fromNullishOr(secrets.get(name))),
+            set: (name, value) => Effect.sync(() => void secrets.set(name, value)),
+            remove: (name) => Effect.sync(() => void secrets.delete(name)),
           }),
-        }),
-        NodeServices.layer,
-        Layer.mock(ServerConfig.ServerConfig)({ stateDir } as ServerConfig.ServerConfig["Service"]),
-        Layer.mock(SourceUsageSummary.SourceUsageSummary)({ read: Effect.succeed(usageSummary) }),
-        Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed(providers) }),
-        Layer.succeed(
-          HttpClient.HttpClient,
-          HttpClient.make((request) =>
-            Effect.gen(function* () {
-              const url = new URL(request.url);
-              const body =
-                request.body._tag === "Uint8Array"
-                  ? new TextDecoder().decode(request.body.body)
-                  : "";
-              yield* Queue.offer(requests, {
-                method: request.method,
-                path: url.pathname,
-                headers: request.headers as Readonly<Record<string, string>>,
-                body,
-              });
-              const heartbeat = url.pathname.endsWith("/heartbeat");
-              const usage = url.pathname.endsWith("/usage");
-              if (url.pathname.startsWith("/v1/sources/accounts")) {
-                const account = {
-                  id: "acc_1",
-                  provider: "anthropic",
-                  kind: "key",
-                  label: "work",
-                  fingerprint: "deadbeef",
-                  created: "2026-11-20T10:00:00Z",
-                  route: "key",
-                };
+          Layer.mock(CliTokenManager.CloudCliTokenManager)({
+            getExisting: Effect.succeedSome(STORED_TOKEN),
+          }),
+          // The machine's Hanzo sign-in, which the server reads from the CLI's credential vault.
+          options.signedIn === true
+            ? Layer.succeed(CliTokenManager.MachineIdentityToken, Effect.succeedSome(STORED_TOKEN))
+            : Layer.empty,
+          NodeServices.layer,
+          Layer.mock(ServerConfig.ServerConfig)({
+            stateDir,
+          } as ServerConfig.ServerConfig["Service"]),
+          Layer.mock(SourceUsageSummary.SourceUsageSummary)({ read: Effect.succeed(usageSummary) }),
+          Layer.mock(ProviderRegistry.ProviderRegistry)({
+            getProviders: Effect.succeed(providers),
+          }),
+          Layer.succeed(
+            HttpClient.HttpClient,
+            HttpClient.make((request) =>
+              Effect.gen(function* () {
+                const url = new URL(request.url);
+                const body =
+                  request.body._tag === "Uint8Array"
+                    ? new TextDecoder().decode(request.body.body)
+                    : "";
+                yield* Queue.offer(requests, {
+                  method: request.method,
+                  path: url.pathname,
+                  headers: request.headers as Readonly<Record<string, string>>,
+                  body,
+                });
+                const heartbeat = url.pathname.endsWith("/heartbeat");
+                const usage = url.pathname.endsWith("/usage");
+                if (url.pathname.startsWith("/v1/sources/accounts")) {
+                  const account = {
+                    id: "acc_1",
+                    provider: "anthropic",
+                    kind: "key",
+                    label: "work",
+                    fingerprint: "deadbeef",
+                    created: "2026-11-20T10:00:00Z",
+                    route: "key",
+                  };
+                  return HttpClientResponse.fromWeb(
+                    request,
+                    new Response(
+                      JSON.stringify(request.method === "GET" ? { accounts: [account] } : account),
+                      { status: request.method === "POST" ? 201 : 200 },
+                    ),
+                  );
+                }
+                const status = heartbeat ? replies.heartbeat : usage ? replies.usage : replies.link;
+                const reply = heartbeat
+                  ? { interval: 30, level: "metadata", revoked: false }
+                  : usage
+                    ? { accepted: 2 }
+                    : { id: "src_1", interval: 30, level: "metadata" };
                 return HttpClientResponse.fromWeb(
                   request,
-                  new Response(
-                    JSON.stringify(request.method === "GET" ? { accounts: [account] } : account),
-                    { status: request.method === "POST" ? 201 : 200 },
-                  ),
+                  new Response(status === 410 ? "" : JSON.stringify(reply), { status }),
                 );
-              }
-              const status = heartbeat ? replies.heartbeat : usage ? replies.usage : replies.link;
-              const reply = heartbeat
-                ? { interval: 30, level: "metadata", revoked: false }
-                : usage
-                  ? { accepted: 2 }
-                  : { id: "src_1", interval: 30, level: "metadata" };
-              return HttpClientResponse.fromWeb(
-                request,
-                new Response(status === 410 ? "" : JSON.stringify(reply), { status }),
-              );
-            }),
+              }),
+            ),
           ),
         ),
       ),
-    ),
-  );
-  return { requests, secrets, replies, layer, stateDir, fileSystem };
-});
+    );
+    return { requests, secrets, replies, layer, stateDir, fileSystem };
+  });
+
+const harness = makeHarness();
 
 it.effect("relinking the same install keeps one device key and one id", () =>
   Effect.gen(function* () {
@@ -320,6 +333,48 @@ it.effect("unlinking revokes the desktop at Hanzo and forgets the link", () =>
       assert.deepInclude(revoke, { method: "DELETE", path: "/v1/sources/src_1" });
       assert.equal(status.desktop, null);
       assert.equal(secrets.has("desktop-link"), false);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("a signed-in desktop links itself on start", () =>
+  Effect.gen(function* () {
+    const { requests, secrets, layer } = yield* makeHarness({ signedIn: true });
+    yield* Effect.gen(function* () {
+      const desktopLink = yield* DesktopLink.DesktopLink;
+      const register = yield* Queue.take(requests);
+      assert.deepInclude(register, { method: "POST", path: "/v1/sources" });
+      const heartbeat = yield* Queue.take(requests);
+      assert.equal(heartbeat.path, "/v1/sources/src_1/heartbeat");
+      const status = yield* desktopLink.status;
+      assert.equal(status.desktop?.id, "src_1");
+      assert.equal(secrets.has("desktop-link"), true);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("a desktop unlinked on purpose stays unlinked while signed in", () =>
+  Effect.gen(function* () {
+    const { requests, secrets, layer } = yield* makeHarness({ signedIn: true });
+    yield* Effect.gen(function* () {
+      const desktopLink = yield* DesktopLink.DesktopLink;
+      assert.equal((yield* Queue.take(requests)).path, "/v1/sources");
+      assert.equal((yield* Queue.take(requests)).path, "/v1/sources/src_1/heartbeat");
+      yield* desktopLink.unlink;
+      assert.deepInclude(yield* Queue.take(requests), {
+        method: "DELETE",
+        path: "/v1/sources/src_1",
+      });
+      assert.equal(secrets.has("desktop-link-declined"), true);
+      // The next passes of the loop find the declined marker and do not register again.
+      yield* TestClock.adjust("30 seconds");
+      yield* TestClock.adjust("30 seconds");
+      const later = yield* Queue.clear(requests);
+      assert.isFalse(later.some((request) => request.path === "/v1/sources"));
+      assert.equal((yield* desktopLink.status).desktop, null);
+      // Linking again by hand clears the marker.
+      yield* desktopLink.link({});
+      assert.equal(secrets.has("desktop-link-declined"), false);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.provide(NodeServices.layer)),
 );
