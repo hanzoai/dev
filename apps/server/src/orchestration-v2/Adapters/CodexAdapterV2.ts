@@ -385,12 +385,34 @@ function isCodexActiveWriterError(error: unknown): boolean {
   );
 }
 
-function isCodexThreadNotFoundError(error: unknown): boolean {
+function isCodexThreadGoneMessage(message: string): boolean {
   return (
-    isCodexAppServerRequestError(error) &&
-    error.code === -32600 &&
-    error.errorMessage.startsWith("thread not found:")
+    /\bthread\b[^\n]*\b(?:not found|is gone|gone)\b/i.test(message) ||
+    /\bno rollout found\b/i.test(message) ||
+    /\bsession\b[^\n]*\b(?:not found|is gone|gone)\b/i.test(message)
   );
+}
+
+function isCodexRolloutRecordMessage(message: string): boolean {
+  return (
+    /\bfailed to record rollout\b/i.test(message) ||
+    /\brollout recorder\b/i.test(message) ||
+    /\brollout\b[^\n]*\b(?:failed to (?:record|write|flush|persist)|channel closed|disconnected)\b/i.test(
+      message,
+    )
+  );
+}
+
+function isCodexThreadNotFoundError(error: unknown): boolean {
+  return isCodexAppServerRequestError(error) && isCodexThreadGoneMessage(error.errorMessage);
+}
+
+function isCodexRolloutRecordError(error: unknown): boolean {
+  return isCodexAppServerRequestError(error) && isCodexRolloutRecordMessage(error.errorMessage);
+}
+
+function isCodexRecoverableThreadError(error: unknown): boolean {
+  return isCodexThreadNotFoundError(error) || isCodexRolloutRecordError(error);
 }
 
 function codexTimestamp(seconds: number | null | undefined): DateTime.Utc {
@@ -5197,6 +5219,19 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             }
             const notificationCode = codexErrorInfoCode(payload.error.codexErrorInfo);
             if (!payload.willRetry) {
+              // Transient or teardown rollout-recording errors must not poison or crash an active coding turn.
+              if (
+                isCodexRolloutRecordMessage(payload.error.message) ||
+                (payload.error.additionalDetails != null &&
+                  isCodexRolloutRecordMessage(payload.error.additionalDetails))
+              ) {
+                yield* Effect.logWarning("orchestration-v2.codex-rollout-record-error-ignored", {
+                  threadId: payload.threadId,
+                  turnId: payload.turnId,
+                  message: payload.error.message,
+                });
+                return;
+              }
               context.latestProviderFailure = {
                 nativeMessage: payload.error.message,
                 nativeCode: notificationCode,
@@ -5333,13 +5368,20 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           });
         });
 
+        const resolveThreadClosing = (nativeThreadId: string) =>
+          Effect.suspend(() => {
+            const closing = threadClosings.get(nativeThreadId);
+            threadClosings.delete(nativeThreadId);
+            return closing === undefined
+              ? Effect.void
+              : Deferred.succeed(closing, undefined).pipe(Effect.asVoid);
+          });
+
         // Unloading an idle thread kills its terminals without completing
         // their command items, while the shared provider session stays alive.
         yield* client.handleServerNotification("thread/closed", (payload) =>
           Effect.gen(function* () {
-            const closing = threadClosings.get(payload.threadId);
-            threadClosings.delete(payload.threadId);
-            if (closing !== undefined) yield* Deferred.succeed(closing, undefined);
+            yield* resolveThreadClosing(payload.threadId);
             const completedAt = yield* DateTime.now;
             for (const context of (yield* Ref.get(settledTurns)).values()) {
               if (context.providerThread.nativeThreadRef?.nativeId !== payload.threadId) continue;
@@ -7335,17 +7377,34 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               return;
             }
             const nativeStatus = mapCodexTurnStatus(payload.turn.status);
-            const status =
+            const rawStatus =
               nativeStatus === "completed" &&
               (yield* Ref.get(interruptingNativeTurns)).has(payload.turn.id)
                 ? "interrupted"
                 : nativeStatus;
+            const rolloutFailureMessage = payload.turn.error?.message;
+            const hasCompletedWork =
+              context.itemPositions.size > 0 ||
+              (yield* Ref.get(completedFinalAnswerTextsByTurn)).has(payload.turn.id);
+            const recoveredRolloutFailure =
+              rawStatus === "failed" &&
+              rolloutFailureMessage !== undefined &&
+              isCodexRolloutRecordMessage(rolloutFailureMessage) &&
+              hasCompletedWork;
+            if (recoveredRolloutFailure) {
+              yield* Effect.logWarning("orchestration-v2.codex-rollout-record-failure-recovered", {
+                threadId: payload.threadId,
+                turnId: payload.turn.id,
+                message: rolloutFailureMessage,
+              });
+            }
+            const status = recoveredRolloutFailure ? "completed" : rawStatus;
             const terminal = {
               context,
               nativeTurnId: payload.turn.id,
               status,
               completedAt: codexTimestamp(payload.turn.completedAt),
-              ...(payload.turn.error?.message === undefined
+              ...(recoveredRolloutFailure || payload.turn.error?.message === undefined
                 ? {}
                 : {
                     failureMessage: payload.turn.error.message,
@@ -7555,12 +7614,43 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           );
         });
 
-        const startNativeTurn = Effect.fn("CodexAdapterV2.startNativeTurn")(
-          function* (
-            turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
-            codexInput: ReadonlyArray<CodexSchema.V2TurnStartParams__UserInput>,
-          ) {
-            const threadId = yield* getNativeThreadId(turnInput.providerThread);
+        const startFreshNativeThread = Effect.fn("CodexAdapterV2.startFreshNativeThread")(
+          function* (params: {
+            readonly threadId: ThreadId;
+            readonly mcpSession: Parameters<typeof codexThreadRuntimeParams>[0]["mcpSession"];
+            readonly modelSelection: ModelSelection;
+            readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
+          }) {
+            return yield* client.request("thread/start", {
+              ...codexThreadRuntimeParams({
+                threadId: params.threadId,
+                mcpSession: params.mcpSession,
+                modelSelection: params.modelSelection,
+                runtimePolicy: params.runtimePolicy,
+              }),
+              // Codex tags the child's MCP calls with thread_source "subagent".
+              ...(IdAllocator.isDelegatedTaskThread(params.threadId)
+                ? { threadSource: "subagent" }
+                : {}),
+            });
+          },
+        );
+
+        const startNativeTurn = Effect.fn("CodexAdapterV2.startNativeTurn")(function* (
+          turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
+          codexInput: ReadonlyArray<CodexSchema.V2TurnStartParams__UserInput>,
+        ) {
+          const initialThreadId = yield* getNativeThreadId(turnInput.providerThread);
+          let activeThreadId = initialThreadId;
+          let activeTurnInput = turnInput;
+          const cleanupPending = (targetThreadId: string, targetInput: typeof turnInput) =>
+            Ref.update(pendingRootTurns, (current) => {
+              if (current.get(targetThreadId) !== targetInput) return current;
+              const updated = new Map(current);
+              updated.delete(targetThreadId);
+              return updated;
+            });
+          return yield* Effect.gen(function* () {
             const mcpSession = yield* mcpSessions.read(turnInput.threadId);
             const models = adapterOptions.models === undefined ? [] : yield* adapterOptions.models;
             const configuredReasoningSummary = yield* client
@@ -7573,7 +7663,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               );
             const turnStartParams = yield* buildCodexTurnStartParams({
               cyberAccess: codexCyberAccess(models, turnInput.modelSelection.model),
-              nativeThreadId: threadId,
+              nativeThreadId: activeThreadId,
               codexInput,
               runtimePolicy: turnInput.runtimePolicy,
               modelSelection: turnInput.modelSelection,
@@ -7584,30 +7674,114 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               ...(turnInput.appContext === undefined ? {} : { appContext: turnInput.appContext }),
               ...(configuredReasoningSummary === undefined ? {} : { configuredReasoningSummary }),
             });
-            yield* Ref.update(pendingRootTurns, (current) => {
-              const updated = new Map(current);
-              updated.set(threadId, turnInput);
-              return updated;
+            const registerPendingThread = Effect.fnUntraced(function* (
+              targetThreadId: string,
+              targetInput: typeof turnInput,
+              previousThreadId?: string,
+            ) {
+              yield* Ref.update(pendingRootTurns, (current) => {
+                const updated = new Map(current);
+                if (
+                  previousThreadId !== undefined &&
+                  updated.get(previousThreadId) === activeTurnInput
+                ) {
+                  updated.delete(previousThreadId);
+                }
+                updated.set(targetThreadId, targetInput);
+                return updated;
+              });
+              yield* Ref.update(additionalContextByThread, (current) => {
+                const next = new Map(current);
+                if (previousThreadId !== undefined) next.delete(previousThreadId);
+                if (turnStartParams.additionalContext)
+                  next.set(targetThreadId, turnStartParams.additionalContext);
+                else next.delete(targetThreadId);
+                return next;
+              });
             });
-            yield* Ref.update(additionalContextByThread, (current) => {
-              const next = new Map(current);
-              if (turnStartParams.additionalContext)
-                next.set(threadId, turnStartParams.additionalContext);
-              else next.delete(threadId);
-              return next;
-            });
+            yield* registerPendingThread(activeThreadId, activeTurnInput);
             // Completion can remove the old context while turn/start is in flight.
             const previousTurns = new Map([
               ...(yield* Ref.get(settledTurns)),
               ...(yield* Ref.get(activeTurns)),
             ]);
-            const started = yield* client.request("turn/start", turnStartParams);
+            const recoverTurnStart = Effect.fnUntraced(function* (cause: unknown) {
+              yield* Effect.logWarning("orchestration-v2.codex-turn-start-recovering-thread", {
+                threadId: turnInput.threadId,
+                nativeThreadId: activeThreadId,
+                cause,
+              });
+              // Step 1: Try resuming the unloaded native thread in-place.
+              const resumed = yield* Effect.result(
+                resumeNativeThread(activeThreadId, {
+                  excludeTurns: true,
+                  ...codexThreadRuntimeParams({
+                    threadId: turnInput.threadId,
+                    mcpSession,
+                    modelSelection: turnInput.modelSelection,
+                    runtimePolicy: turnInput.runtimePolicy,
+                  }),
+                }).pipe(Effect.andThen(client.request("turn/start", turnStartParams))),
+              );
+              if (resumed._tag === "Success") {
+                return resumed.success;
+              }
+              if (!isCodexRecoverableThreadError(resumed.failure)) {
+                return yield* resumed.failure;
+              }
+              // Step 2: The native thread is gone on disk or its rollout is dead.
+              // Start a fresh native thread on the same workspace so uncommitted edits survive.
+              yield* Effect.logWarning("orchestration-v2.codex-thread-gone-recovering-fresh", {
+                threadId: turnInput.threadId,
+                previousNativeThreadId: activeThreadId,
+                cause: resumed.failure,
+              });
+              const fresh = yield* startFreshNativeThread({
+                threadId: turnInput.threadId,
+                mcpSession,
+                modelSelection: turnInput.modelSelection,
+                runtimePolicy: turnInput.runtimePolicy,
+              });
+              const previousThreadId = activeThreadId;
+              const recoveredProviderThread: OrchestrationV2ProviderThread = {
+                ...turnInput.providerThread,
+                providerSessionId: input.providerSessionId,
+                providerInstanceId: adapterOptions.instanceId,
+                nativeThreadRef: {
+                  driver: CODEX_PROVIDER,
+                  nativeId: fresh.thread.id,
+                  strength: "strong",
+                },
+                updatedAt: codexTimestamp(fresh.thread.updatedAt),
+              };
+              const recoveredTurnInput: ProviderAdapter.ProviderAdapterV2TurnInput = {
+                ...turnInput,
+                providerThread: recoveredProviderThread,
+              };
+              yield* registerPendingThread(fresh.thread.id, recoveredTurnInput, previousThreadId);
+              activeThreadId = fresh.thread.id;
+              activeTurnInput = recoveredTurnInput;
+              rootProviderThreads.delete(previousThreadId);
+              rootProviderThreads.set(activeThreadId, recoveredProviderThread);
+              yield* emitProviderEvent({
+                type: "provider_thread.updated",
+                driver: CODEX_PROVIDER,
+                providerThread: recoveredProviderThread,
+              });
+              return yield* client.request("turn/start", {
+                ...turnStartParams,
+                threadId: activeThreadId,
+              });
+            });
+            const started = yield* client
+              .request("turn/start", turnStartParams)
+              .pipe(Effect.catchIf(isCodexRecoverableThreadError, recoverTurnStart));
             const previousTurn =
               previousTurns.get(started.turn.id) ??
               (yield* Ref.get(activeTurns)).get(started.turn.id);
             if (
               previousTurn !== undefined &&
-              previousTurn.input.attemptId !== turnInput.attemptId
+              previousTurn.input.attemptId !== activeTurnInput.attemptId
             ) {
               return yield* new ProviderAdapter.ProviderAdapterProtocolError({
                 driver: CODEX_PROVIDER,
@@ -7616,28 +7790,22 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               });
             }
             // A turn/started notification may have registered and completed this turn already.
-            if ((yield* Ref.get(pendingRootTurns)).get(threadId) !== turnInput) return;
+            if ((yield* Ref.get(pendingRootTurns)).get(activeThreadId) !== activeTurnInput) return;
             yield* registerRootTurn({
-              turnInput,
+              turnInput: activeTurnInput,
               nativeTurnId: started.turn.id,
               startedAt: codexTimestamp(started.turn.startedAt),
               waitForNativeStart: started.turn.startedAt === null,
             });
-          },
-          (effect, turnInput) =>
-            effect.pipe(
-              Effect.ensuring(
-                Effect.flatMap(getNativeThreadId(turnInput.providerThread), (threadId) =>
-                  Ref.update(pendingRootTurns, (current) => {
-                    if (current.get(threadId) !== turnInput) return current;
-                    const updated = new Map(current);
-                    updated.delete(threadId);
-                    return updated;
-                  }),
-                ).pipe(Effect.ignore),
+          }).pipe(
+            Effect.ensuring(
+              cleanupPending(activeThreadId, activeTurnInput).pipe(
+                Effect.andThen(cleanupPending(initialThreadId, turnInput)),
+                Effect.ignore,
               ),
             ),
-        );
+          );
+        });
 
         /** Starts a turn and then activates its paused goal; Stop cancels activation. */
         const activateGoal = Effect.fnUntraced(function* (
@@ -7963,17 +8131,11 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             ensureInitialized.pipe(
               Effect.andThen(mcpSessions.read(threadInput.threadId)),
               Effect.flatMap((mcpSession) =>
-                client.request("thread/start", {
-                  ...codexThreadRuntimeParams({
-                    threadId: threadInput.threadId,
-                    mcpSession,
-                    modelSelection: threadInput.modelSelection,
-                    runtimePolicy: threadInput.runtimePolicy,
-                  }),
-                  // Codex tags the child's MCP calls with thread_source "subagent".
-                  ...(IdAllocator.isDelegatedTaskThread(threadInput.threadId)
-                    ? { threadSource: "subagent" }
-                    : {}),
+                startFreshNativeThread({
+                  threadId: threadInput.threadId,
+                  mcpSession,
+                  modelSelection: threadInput.modelSelection,
+                  runtimePolicy: threadInput.runtimePolicy,
                 }),
               ),
               Effect.map((response): OrchestrationV2ProviderThread =>
@@ -8227,14 +8389,36 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               sessionApprovals.delete(nativeThreadId);
               // Archive also unloads, inline and without thread/closed; resumeNativeThread
               // unarchives it on the next turn.
+              // Already-gone threads and teardown rollout-recording errors must not crash unload
+              // or leave threadClosings stranded.
               if (unloadInput.archive === true) {
-                yield* client.request("thread/archive", { threadId: nativeThreadId });
+                yield* client.request("thread/archive", { threadId: nativeThreadId }).pipe(
+                  Effect.catchIf(isCodexRecoverableThreadError, (cause) =>
+                    Effect.logWarning("orchestration-v2.codex-unload-ignored-recoverable-error", {
+                      nativeThreadId,
+                      operation: "archive",
+                      cause,
+                    }).pipe(Effect.andThen(resolveThreadClosing(nativeThreadId))),
+                  ),
+                );
               } else {
                 // A resume may already wait on the pending entry; replacing it would strand that wait.
-                if (!threadClosings.has(nativeThreadId)) {
+                const createdClosing = !threadClosings.has(nativeThreadId);
+                if (createdClosing) {
                   threadClosings.set(nativeThreadId, yield* Deferred.make<void>());
                 }
-                yield* client.request("thread/unsubscribe", { threadId: nativeThreadId });
+                yield* client.request("thread/unsubscribe", { threadId: nativeThreadId }).pipe(
+                  Effect.catchIf(isCodexRecoverableThreadError, (cause) =>
+                    Effect.logWarning("orchestration-v2.codex-unload-ignored-recoverable-error", {
+                      nativeThreadId,
+                      operation: "unsubscribe",
+                      cause,
+                    }).pipe(Effect.andThen(resolveThreadClosing(nativeThreadId))),
+                  ),
+                  Effect.onError(() =>
+                    createdClosing ? resolveThreadClosing(nativeThreadId) : Effect.void,
+                  ),
+                );
               }
               // No turn/completed arrives for an unloaded thread, so a Stop Codex never
               // confirmed would otherwise keep its turn open for the life of the session.
