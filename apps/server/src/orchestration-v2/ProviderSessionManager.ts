@@ -405,6 +405,18 @@ function providerThreadLoadKey(input: {
   });
 }
 
+function isProviderThreadLoadKeyForRuntimeKey(
+  cachedKey: string | undefined,
+  providerThread: Parameters<
+    ProviderAdapter.ProviderAdapterV2SessionRuntime["resumeThread"]
+  >[0]["providerThread"],
+): boolean {
+  if (cachedKey === undefined) return false;
+  return cachedKey.includes(
+    `"providerThread":${JSON.stringify(providerThreadRuntimeKey(providerThread))}`,
+  );
+}
+
 export const layerWithOptions = (
   options: ProviderSessionManagerV2LayerOptions = {},
 ): Layer.Layer<
@@ -1638,6 +1650,16 @@ export const layerWithOptions = (
           }),
         );
 
+      const withoutLoadedThread = (
+        loaded: ReadonlyMap<ThreadId, string>,
+        threadId: ThreadId,
+      ): ReadonlyMap<ThreadId, string> => {
+        if (!loaded.has(threadId)) return loaded;
+        const next = new Map(loaded);
+        next.delete(threadId);
+        return next;
+      };
+
       const removeThreadAttachment = (input: {
         readonly providerSessionId: ProviderSessionId;
         readonly threadId: ThreadId;
@@ -1655,8 +1677,10 @@ export const layerWithOptions = (
           }
           const attachedThreadIds = new Set(entry.attachedThreadIds);
           attachedThreadIds.delete(input.threadId);
-          const loadedProviderThreadKeyByThread = new Map(entry.loadedProviderThreadKeyByThread);
-          loadedProviderThreadKeyByThread.delete(input.threadId);
+          const loadedProviderThreadKeyByThread = withoutLoadedThread(
+            entry.loadedProviderThreadKeyByThread,
+            input.threadId,
+          );
           const linkedEnvironmentsByThread = new Map(entry.linkedEnvironmentsByThread);
           linkedEnvironmentsByThread.delete(input.threadId);
           const updated = new Map(current);
@@ -1697,9 +1721,13 @@ export const layerWithOptions = (
           ) {
             return current;
           }
-          const loadedProviderThreadKeyByThread = new Map(entry.loadedProviderThreadKeyByThread);
-          loadedProviderThreadKeyByThread.delete(input.threadId);
-          return new Map(current).set(key, { ...entry, loadedProviderThreadKeyByThread });
+          return new Map(current).set(key, {
+            ...entry,
+            loadedProviderThreadKeyByThread: withoutLoadedThread(
+              entry.loadedProviderThreadKeyByThread,
+              input.threadId,
+            ),
+          });
         });
 
       /** Pass the setting read before a native load; cache hits keep the earlier record. */
@@ -2050,10 +2078,10 @@ export const layerWithOptions = (
                 ) {
                   return [false, current] as const;
                 }
-                const loadedProviderThreadKeyByThread = new Map(
+                const loadedProviderThreadKeyByThread = withoutLoadedThread(
                   latest.loadedProviderThreadKeyByThread,
+                  input.threadId,
                 );
-                loadedProviderThreadKeyByThread.delete(input.threadId);
                 const idleThreadUnloads = new Map(latest.idleThreadUnloads);
                 idleThreadUnloads.delete(input.threadId);
                 const updated = new Map(current);
@@ -2158,10 +2186,10 @@ export const layerWithOptions = (
               ) {
                 return [false, current] as const;
               }
-              const loadedProviderThreadKeyByThread = new Map(
+              const loadedProviderThreadKeyByThread = withoutLoadedThread(
                 latest.loadedProviderThreadKeyByThread,
+                input.threadId,
               );
-              loadedProviderThreadKeyByThread.delete(input.threadId);
               return [
                 true,
                 new Map(current).set(key, { ...latest, loadedProviderThreadKeyByThread }),
@@ -2840,24 +2868,23 @@ export const layerWithOptions = (
               ),
               Effect.andThen(
                 Effect.gen(function* () {
-                  if (
-                    event.type === "provider_thread.updated" &&
-                    event.providerThread.status === "error"
-                  ) {
+                  if (event.type === "provider_thread.updated") {
                     const threadId = event.providerThread.appThreadId;
-                    yield* Ref.update(sessions, (sessions) => {
-                      const key = sessionKey(entry.runtime.providerSessionId);
-                      const latest = sessions.get(key);
-                      if (latest?.runtime !== entry.runtime || threadId === null) return sessions;
-                      const loadedProviderThreadKeyByThread = new Map(
-                        latest.loadedProviderThreadKeyByThread,
-                      );
-                      loadedProviderThreadKeyByThread.delete(threadId);
-                      return new Map(sessions).set(key, {
-                        ...latest,
-                        loadedProviderThreadKeyByThread,
-                      });
-                    });
+                    if (threadId !== null) {
+                      const cachedKey = (yield* Ref.get(sessions))
+                        .get(sessionKey(entry.runtime.providerSessionId))
+                        ?.loadedProviderThreadKeyByThread.get(threadId);
+                      const nativeIdentityChanged =
+                        cachedKey !== undefined &&
+                        !isProviderThreadLoadKeyForRuntimeKey(cachedKey, event.providerThread);
+                      if (event.providerThread.status === "error" || nativeIdentityChanged) {
+                        yield* forgetProviderThreadLoaded({
+                          providerSessionId: entry.runtime.providerSessionId,
+                          threadId,
+                          runtime: entry.runtime,
+                        });
+                      }
+                    }
                   }
                   // Requests and recovered background commands can arrive before a run subscribes.
                   const threadId = sessionScopedArtifactThreadId(event);
@@ -3333,10 +3360,10 @@ export const layerWithOptions = (
               }
               const attachedThreadIds = new Set(entry.attachedThreadIds);
               attachedThreadIds.delete(input.threadId);
-              const loadedProviderThreadKeyByThread = new Map(
+              const loadedProviderThreadKeyByThread = withoutLoadedThread(
                 entry.loadedProviderThreadKeyByThread,
+                input.threadId,
               );
-              loadedProviderThreadKeyByThread.delete(input.threadId);
               const linkedEnvironmentsByThread = new Map(entry.linkedEnvironmentsByThread);
               linkedEnvironmentsByThread.delete(input.threadId);
               const mcpCredentialIdByThread =

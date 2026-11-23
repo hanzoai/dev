@@ -808,6 +808,16 @@ function codexReplayPreamble(input: {
 function withConfigReadBeforeTurnStart(
   entries: ReadonlyArray<CodexReplay.CodexAppServerReplayEntry>,
 ): Array<CodexReplay.CodexAppServerReplayEntry> {
+  if (
+    entries.some(
+      (entry) =>
+        entry.type === "expect_outbound" &&
+        Predicate.isObject(entry.frame) &&
+        entry.frame.method === "config/read",
+    )
+  ) {
+    return [...entries];
+  }
   const result: Array<CodexReplay.CodexAppServerReplayEntry> = [];
   let offset = 0;
   let clientIds = new Map<number, number>();
@@ -12217,6 +12227,493 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           ),
         ),
       ),
+    );
+  });
+
+  describe("Codex thread-gone and rollout-record resilience", () => {
+    const makeFreshThreadResult = (threadId: string) => ({
+      thread: {
+        id: threadId,
+        sessionId: threadId,
+        projectId: null,
+        forkedFromId: null,
+        preview: "",
+        ephemeral: false,
+        modelProvider: "openai",
+        createdAt: 1782622450,
+        updatedAt: 1782622450,
+        status: { type: "idle" as const },
+        path: `/tmp/${threadId}.jsonl`,
+        cwd: CODEX_TEST_RUNTIME_POLICY.cwd,
+        cliVersion: "0.144.0",
+        source: "vscode",
+        threadSource: null,
+        agentNickname: null,
+        agentRole: null,
+        gitInfo: null,
+        name: null,
+        turns: [],
+      },
+      model: CODEX_TEST_MODEL_SELECTION.model,
+      modelProvider: "openai",
+      serviceTier: null,
+      cwd: CODEX_TEST_RUNTIME_POLICY.cwd,
+      instructionSources: [],
+      approvalPolicy: "on-request",
+      approvalsReviewer: "user",
+      sandbox: { type: "workspaceWrite" as const, writableRoots: [], networkAccess: false },
+      reasoningEffort: "medium",
+    });
+
+    it.effect("resumes an unloaded native thread when turn/start reports thread not found", () =>
+      Effect.gen(function* () {
+        const nativeThreadId = "unloaded-turn-thread";
+        const nativeTurnId = "resumed-turn-1";
+        const prompt = "Continue working on the existing edits.";
+        const preamble = codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt });
+        const turnStartFrame = preamble[5]!;
+        const turnStartParams =
+          turnStartFrame.type === "expect_outbound" && Predicate.isObject(turnStartFrame.frame)
+            ? turnStartFrame.frame.params
+            : undefined;
+        const transcript = makeCodexReplayTranscript({
+          scenario: "start-turn-recovers-unloaded-thread",
+          entries: [
+            ...preamble.slice(0, 5),
+            {
+              type: "expect_outbound",
+              label: "config/read",
+              frame: {
+                id: 3,
+                method: "config/read",
+                params: { cwd: CODEX_TEST_RUNTIME_POLICY.cwd, includeLayers: false },
+              },
+            },
+            {
+              type: "emit_inbound",
+              label: "config/read",
+              frame: { id: 3, result: { config: {}, origins: {} } },
+            },
+            {
+              type: "expect_outbound",
+              label: "initial turn/start hits unloaded thread",
+              frame: { id: 4, method: "turn/start", params: turnStartParams },
+            },
+            {
+              type: "emit_inbound",
+              label: "thread not found on turn/start",
+              frame: {
+                id: 4,
+                error: { code: -32600, message: `thread not found: ${nativeThreadId}` },
+              },
+            },
+            {
+              type: "expect_outbound",
+              label: "resume unloaded thread",
+              frame: {
+                id: 5,
+                method: "thread/resume",
+                params: {
+                  threadId: nativeThreadId,
+                  excludeTurns: true,
+                  cwd: CODEX_TEST_RUNTIME_POLICY.cwd,
+                  model: CODEX_TEST_MODEL_SELECTION.model,
+                  config: CodexAdapterV2.CODEX_THREAD_CONFIG,
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              label: "thread resumed",
+              frame: {
+                id: 5,
+                result: { thread: { id: nativeThreadId, updatedAt: 1782622450 } },
+              },
+            },
+            {
+              type: "expect_outbound",
+              label: "retry turn/start on resumed thread",
+              frame: { id: 6, method: "turn/start", params: turnStartParams },
+            },
+            {
+              type: "emit_inbound",
+              label: "retried turn/start accepted",
+              frame: {
+                id: 6,
+                result: { turn: makeCodexReplayTurn({ id: nativeTurnId, status: "inProgress" }) },
+              },
+            },
+            {
+              type: "emit_inbound",
+              label: "turn completed",
+              frame: {
+                method: "turn/completed",
+                params: {
+                  threadId: nativeThreadId,
+                  turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
+                },
+              },
+            },
+          ],
+        });
+
+        const harness = yield* makeCodexReplayHarness(transcript);
+        yield* harness.runtime.startTurn(
+          makeCodexTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("attempt-unloaded"),
+            text: prompt,
+          }),
+        );
+        yield* harness.firstTerminal;
+        assert.deepEqual(
+          harness.terminalEvents().map((event) => event.status),
+          ["completed"],
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+    );
+
+    it.effect(
+      "starts a fresh native thread on the same workspace when a thread is gone on disk",
+      () =>
+        Effect.gen(function* () {
+          const staleThreadId = "gone-native-thread";
+          const freshThreadId = "fresh-recovered-thread";
+          const nativeTurnId = "recovered-turn-1";
+          const prompt = "Verify and commit the uncommitted edits.";
+          const preamble = codexReplayPreamble({
+            nativeThreadId: staleThreadId,
+            nativeTurnId,
+            prompt,
+          });
+          const turnStartFrame = preamble[5]!;
+          const staleTurnStartParams =
+            turnStartFrame.type === "expect_outbound" &&
+            Predicate.isObject(turnStartFrame.frame) &&
+            Predicate.isObject(turnStartFrame.frame.params)
+              ? turnStartFrame.frame.params
+              : {};
+          const freshTurnStartParams = { ...staleTurnStartParams, threadId: freshThreadId };
+          const transcript = makeCodexReplayTranscript({
+            scenario: "start-turn-recovers-gone-thread-fresh",
+            entries: [
+              ...preamble.slice(0, 5),
+              {
+                type: "expect_outbound",
+                label: "config/read",
+                frame: {
+                  id: 3,
+                  method: "config/read",
+                  params: { cwd: CODEX_TEST_RUNTIME_POLICY.cwd, includeLayers: false },
+                },
+              },
+              {
+                type: "emit_inbound",
+                label: "config/read",
+                frame: { id: 3, result: { config: {}, origins: {} } },
+              },
+              {
+                type: "expect_outbound",
+                label: "initial turn/start hits gone thread",
+                frame: { id: 4, method: "turn/start", params: staleTurnStartParams },
+              },
+              {
+                type: "emit_inbound",
+                label: "thread is gone on turn/start",
+                frame: {
+                  id: 4,
+                  error: { code: -32600, message: `thread ${staleThreadId} is gone` },
+                },
+              },
+              {
+                type: "expect_outbound",
+                label: "attempt resume before fresh fallback",
+                frame: {
+                  id: 5,
+                  method: "thread/resume",
+                  params: {
+                    threadId: staleThreadId,
+                    excludeTurns: true,
+                    cwd: CODEX_TEST_RUNTIME_POLICY.cwd,
+                    model: CODEX_TEST_MODEL_SELECTION.model,
+                    config: CodexAdapterV2.CODEX_THREAD_CONFIG,
+                  },
+                },
+              },
+              {
+                type: "emit_inbound",
+                label: "rollout missing on disk",
+                frame: {
+                  id: 5,
+                  error: { code: -32600, message: `no rollout found for thread ${staleThreadId}` },
+                },
+              },
+              {
+                type: "expect_outbound",
+                label: "start fresh native thread on same workspace",
+                frame: {
+                  id: 6,
+                  method: "thread/start",
+                  params: {
+                    cwd: CODEX_TEST_RUNTIME_POLICY.cwd,
+                    model: CODEX_TEST_MODEL_SELECTION.model,
+                    config: CodexAdapterV2.CODEX_THREAD_CONFIG,
+                  },
+                },
+              },
+              {
+                type: "emit_inbound",
+                label: "fresh native thread created",
+                frame: {
+                  id: 6,
+                  result: makeFreshThreadResult(freshThreadId),
+                },
+              },
+              {
+                type: "expect_outbound",
+                label: "retry turn/start on fresh native thread",
+                frame: { id: 7, method: "turn/start", params: freshTurnStartParams },
+              },
+              {
+                type: "emit_inbound",
+                label: "fresh turn/start accepted",
+                frame: {
+                  id: 7,
+                  result: { turn: makeCodexReplayTurn({ id: nativeTurnId, status: "inProgress" }) },
+                },
+              },
+              {
+                type: "emit_inbound",
+                label: "turn completed on fresh thread",
+                frame: {
+                  method: "turn/completed",
+                  params: {
+                    threadId: freshThreadId,
+                    turn: makeCodexReplayTurn({ id: nativeTurnId, status: "completed" }),
+                  },
+                },
+              },
+            ],
+          });
+
+          const harness = yield* makeCodexReplayHarness(transcript);
+          yield* harness.runtime.startTurn(
+            makeCodexTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now: yield* DateTime.now,
+              attemptId: RunAttemptId.make("attempt-gone-fresh"),
+              text: prompt,
+            }),
+          );
+          yield* harness.firstTerminal;
+
+          assert.deepEqual(
+            harness.terminalEvents().map((event) => event.status),
+            ["completed"],
+          );
+          const updatedThreads = harness.events.filter(
+            (event): event is Extract<typeof event, { readonly type: "provider_thread.updated" }> =>
+              event.type === "provider_thread.updated",
+          );
+          assert.isTrue(
+            updatedThreads.some(
+              (event) =>
+                event.providerThread.id === harness.providerThread.id &&
+                event.providerThread.nativeThreadRef?.nativeId === freshThreadId,
+            ),
+            "expected provider_thread.updated with fresh native thread id",
+          );
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(
+            Layer.mergeAll(
+              IdAllocator.layer,
+              McpProviderSessions.layer,
+              NodeServices.layer,
+              NodeCrypto.layer,
+            ),
+          ),
+        ),
+    );
+
+    it.effect(
+      "ignores non-fatal rollout-record errors and completes a turn that already finished work",
+      () =>
+        Effect.gen(function* () {
+          const nativeThreadId = "rollout-error-thread";
+          const nativeTurnId = "rollout-error-turn";
+          const prompt = "Edit the file and report back.";
+          const transcript = makeCodexReplayTranscript({
+            scenario: "rollout-record-error-does-not-crash-turn",
+            entries: [
+              ...codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt }),
+              {
+                type: "emit_inbound",
+                label: "agent message completed",
+                frame: {
+                  method: "item/completed",
+                  params: {
+                    threadId: nativeThreadId,
+                    turnId: nativeTurnId,
+                    completedAtMs: 2,
+                    item: {
+                      type: "agentMessage",
+                      id: "msg-1",
+                      text: "Applied the fix and verified tests.",
+                      phase: "final_answer",
+                      memoryCitation: null,
+                    },
+                  },
+                },
+              },
+              {
+                type: "emit_inbound",
+                label: "non-fatal rollout error notification",
+                frame: {
+                  method: "error",
+                  params: {
+                    threadId: nativeThreadId,
+                    turnId: nativeTurnId,
+                    willRetry: false,
+                    error: {
+                      message: "failed to record rollout items: rollout recorder channel closed",
+                    },
+                  },
+                },
+              },
+              {
+                type: "emit_inbound",
+                label: "turn/completed reports only rollout-record failure after work",
+                frame: {
+                  method: "turn/completed",
+                  params: {
+                    threadId: nativeThreadId,
+                    turn: {
+                      ...makeCodexReplayTurn({
+                        id: nativeTurnId,
+                        status: "failed",
+                      }),
+                      error: {
+                        message: "failed to record rollout items: channel closed",
+                        codexErrorInfo: null,
+                        additionalDetails: null,
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          });
+
+          const harness = yield* makeCodexReplayHarness(transcript);
+          yield* harness.runtime.startTurn(
+            makeCodexTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now: yield* DateTime.now,
+              attemptId: RunAttemptId.make("attempt-rollout-nonfatal"),
+              text: prompt,
+            }),
+          );
+          yield* harness.firstTerminal;
+          assert.deepEqual(
+            harness.terminalEvents().map((event) => event.status),
+            ["completed"],
+          );
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(
+            Layer.mergeAll(
+              IdAllocator.layer,
+              McpProviderSessions.layer,
+              NodeServices.layer,
+              NodeCrypto.layer,
+            ),
+          ),
+        ),
+    );
+
+    it.effect(
+      "treats thread-gone and rollout-record errors during unloadThread as clean teardown",
+      () =>
+        Effect.gen(function* () {
+          const nativeThreadId = "teardown-gone-thread";
+          const transcript = makeCodexReplayTranscript({
+            scenario: "unload-thread-ignores-gone-and-rollout",
+            entries: [
+              ...codexReplayPreamble({
+                nativeThreadId,
+                nativeTurnId: "unused",
+                prompt: "unused",
+              }).slice(0, 5),
+              {
+                type: "expect_outbound",
+                label: "unsubscribe hits thread not found",
+                frame: {
+                  id: 3,
+                  method: "thread/unsubscribe",
+                  params: { threadId: nativeThreadId },
+                },
+              },
+              {
+                type: "emit_inbound",
+                label: "thread already gone",
+                frame: {
+                  id: 3,
+                  error: { code: -32600, message: `thread not found: ${nativeThreadId}` },
+                },
+              },
+              {
+                type: "expect_outbound",
+                label: "archive hits rollout record failure",
+                frame: {
+                  id: 4,
+                  method: "thread/archive",
+                  params: { threadId: nativeThreadId },
+                },
+              },
+              {
+                type: "emit_inbound",
+                label: "rollout record failure on archive",
+                frame: {
+                  id: 4,
+                  error: { code: -32600, message: "failed to record rollout on archive" },
+                },
+              },
+            ],
+          });
+
+          const harness = yield* makeCodexReplayHarness(transcript);
+          assert.ok(harness.runtime.unloadThread, "Codex runtime should expose unloadThread");
+          yield* harness.runtime.unloadThread({ providerThread: harness.providerThread });
+          yield* harness.runtime.unloadThread({
+            providerThread: harness.providerThread,
+            archive: true,
+          });
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(
+            Layer.mergeAll(
+              IdAllocator.layer,
+              McpProviderSessions.layer,
+              NodeServices.layer,
+              NodeCrypto.layer,
+            ),
+          ),
+        ),
     );
   });
 });
