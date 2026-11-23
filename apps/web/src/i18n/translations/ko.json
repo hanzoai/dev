@@ -6210,7 +6210,7 @@
     " 설정 중."
   ],
   "e769515d5fa4d383": "What Hanzo Dev controls & progressive permissions",
-  "cd18dbdd335b38ef": "Hanzo Dev orchestrates local workspaces, Git worktrees, terminal commands, browser previews, and Local AI engines. Microphone, OS Keychain, folder access, and Hanzo Link tunnels are requested only when you first use each capability.",
+  "cd18dbdd335b38ef": "Hanzo Dev는 로컬 작업 공간, Git 워크트리, 터미널 명령, 브라우저 미리보기, 로컬 AI 엔진을 조율합니다. 마이크, OS 키체인, 폴더 접근, Hanzo Link 터널은 각 기능을 처음 사용할 때만 요청합니다.",
   "216ab7514aea1d61": "에이전트 없이 시작",
   "501ce2d99da8bfd1": "시작하려면 에이전트를 하나 설정하세요.",
   "e4f1c541b948dd09": [

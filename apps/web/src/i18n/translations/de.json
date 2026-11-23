@@ -6231,7 +6231,7 @@
     " wird eingerichtet."
   ],
   "e769515d5fa4d383": "What Hanzo Dev controls & progressive permissions",
-  "cd18dbdd335b38ef": "Hanzo Dev orchestrates local workspaces, Git worktrees, terminal commands, browser previews, and Local AI engines. Microphone, OS Keychain, folder access, and Hanzo Link tunnels are requested only when you first use each capability.",
+  "cd18dbdd335b38ef": "Hanzo Dev steuert lokale Arbeitsbereiche, Git-Worktrees, Terminalbefehle, Browser-Vorschauen und lokale KI-Engines. Mikrofon, OS-Schlüsselbund, Ordnerzugriff und Hanzo-Link-Tunnel werden erst angefragt, wenn du die jeweilige Funktion zum ersten Mal nutzt.",
   "216ab7514aea1d61": "Ohne Agenten starten",
   "501ce2d99da8bfd1": "Richte einen Agenten ein, um zu starten.",
   "e4f1c541b948dd09": [
