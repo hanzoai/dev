@@ -3,7 +3,15 @@ import * as Tracer from "effect/Tracer";
 import * as Effect from "effect/Effect";
 
 import { materializeReplayTranscriptWorkspace } from "@hanzodev/provider-testing/replayTranscript";
-import { CodexOrchestratorReplayHarness } from "../Adapters/CodexAdapterV2.testkit.ts";
+import {
+  HANZO_DRIVER_KIND,
+  HANZO_GEN_DRIVER_KIND,
+  defaultInstanceIdForDriver,
+} from "@hanzodev/contracts";
+import {
+  CodexOrchestratorReplayHarness,
+  makeCodexOrchestratorReplayHarness,
+} from "../Adapters/CodexAdapterV2.testkit.ts";
 import {
   findReplayFixture,
   itRunsReplayFixtures,
@@ -56,3 +64,54 @@ it.effect(
       assert.isTrue(writes.every((count) => count <= 3));
     }),
 );
+
+/** Every value stored under a `driver` key anywhere in `value`. */
+function driverFields(value: unknown, seen = new Set<unknown>()): ReadonlyArray<unknown> {
+  if (value === null || typeof value !== "object" || seen.has(value)) return [];
+  seen.add(value);
+  if (value instanceof Map) return driverFields([...value.values()], seen);
+  if (Array.isArray(value)) return value.flatMap((entry) => driverFields(entry, seen));
+  return Object.entries(value).flatMap(([key, nested]) => [
+    ...(key === "driver" ? [nested] : []),
+    ...driverFields(nested, seen),
+  ]);
+}
+
+// regression: #5 Hanzo and Hanzo Gen wrap the Codex adapter, and their sessions, threads and
+// items reported driver codex.
+describe("Hanzo drivers on the Codex adapter", () => {
+  it.effect.each([HANZO_DRIVER_KIND, HANZO_GEN_DRIVER_KIND])(
+    "%s replays report only their own driver",
+    (driverKind) =>
+      Effect.gen(function* () {
+        const fixture = findReplayFixture("multi_turn")!;
+        const codex = fixture.providers.find((provider) => provider.driver === "codex")!;
+        const result = yield* runReplayFixture({
+          fixtureName: fixture.name,
+          buildInput: fixture.buildInput,
+          driver: {
+            ...codex,
+            driver: driverKind,
+            modelSelection: {
+              ...codex.modelSelection,
+              instanceId: defaultInstanceIdForDriver(driverKind),
+            },
+            // The fixture's checks expect the transcript to name the replayed provider instance.
+            assertOutput: (output, transcript) =>
+              codex.assertOutput(output, { ...transcript, provider: driverKind }),
+          },
+          harness: makeCodexOrchestratorReplayHarness(driverKind),
+          materializeWorkspace: (transcript, workspace) =>
+            Effect.succeed(materializeReplayTranscriptWorkspace(transcript, workspace)),
+        });
+        const drivers = driverFields([
+          result.storedEvents,
+          result.domainEvents,
+          result.projections,
+          result.shellSnapshot,
+        ]);
+        assert.isNotEmpty(drivers);
+        assert.deepEqual([...new Set(drivers)], [driverKind]);
+      }),
+  );
+});

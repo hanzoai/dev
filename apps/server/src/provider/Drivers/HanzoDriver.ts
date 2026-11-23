@@ -14,7 +14,7 @@ import * as Stream from "effect/Stream";
 import type * as CodexUsageHistory from "../../usage/CodexUsageHistory.ts";
 import type { ProviderDriver, ProviderInstance } from "@hanzodev/provider-core/server/driver";
 import type { ProviderUsageReader } from "@hanzodev/provider-core/server/usage";
-import { CodexDriver, type CodexDriverEnv } from "./CodexDriver.ts";
+import { createCodexProviderInstance, type CodexDriverEnv } from "./CodexDriver.ts";
 import { codexUsageReader } from "./codexUsage.ts";
 import {
   CURATED_HANZO_MODELS,
@@ -149,19 +149,22 @@ export const HanzoDriver: ProviderDriver<
       Effect.provideService(HostProcess.HomeDirectory, home),
     );
 
-    const baseInstance = yield* CodexDriver.create({
-      instanceId,
-      displayName: displayName ?? "Hanzo",
-      accentColor,
-      environment: [
-        ...(environment ?? []),
-        ...(hanzoCliBinary
-          ? [{ name: "HANZO_BINARY", value: hanzoCliBinary, sensitive: false }]
-          : []),
-      ],
-      enabled,
-      config: codexCompatibleConfig,
-    });
+    const baseInstance = yield* createCodexProviderInstance(
+      {
+        instanceId,
+        displayName: displayName ?? "Hanzo",
+        accentColor,
+        environment: [
+          ...(environment ?? []),
+          ...(hanzoCliBinary
+            ? [{ name: "HANZO_BINARY", value: hanzoCliBinary, sensitive: false }]
+            : []),
+        ],
+        enabled,
+        config: codexCompatibleConfig,
+      },
+      { adapterDriver: HANZO_DRIVER_KIND },
+    );
 
     const wrapSnapshotEffect = (eff: Effect.Effect<ServerProvider>) =>
       eff.pipe(Effect.map((snap) => enrichHanzoSnapshot(snap, resolvedAuth)));
@@ -180,10 +183,6 @@ export const HanzoDriver: ProviderDriver<
       driverKind: HANZO_DRIVER_KIND,
       displayName: displayName ?? "Hanzo",
       snapshot: wrappedSnapshot,
-      orchestrationAdapter: {
-        ...baseInstance.orchestrationAdapter,
-        driver: HANZO_DRIVER_KIND,
-      },
       snapshotForCwd: (_cwd: string) => wrappedSnapshot.getSnapshot,
     } satisfies ProviderInstance;
   }),
