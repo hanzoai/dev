@@ -137,7 +137,10 @@ pub fn apply_mode<R: Runtime>(_app: &AppHandle<R>, _mode: DockIconMode) -> Resul
 pub fn apply_saved_mode_on_startup<R: Runtime>(app: &AppHandle<R>) -> DockIconMode {
     let mode = load_mode(app);
     if let Err(err) = apply_mode(app, mode) {
-        log::warn!("Failed to apply saved Dock icon mode ({}): {err}", mode.as_str());
+        log::warn!(
+            "Failed to apply saved Dock icon mode ({}): {err}",
+            mode.as_str()
+        );
     }
     crate::menu::sync_dock_icon_menu(app, mode);
     mode

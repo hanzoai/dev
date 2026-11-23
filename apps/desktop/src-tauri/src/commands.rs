@@ -975,7 +975,9 @@ pub async fn desktop_request_snapshot_permissions(
 /// window is captured (never the screen, so nothing of another app is in it);
 /// `None` where the platform has no window capture, and the page draws itself.
 #[tauri::command]
-pub async fn desktop_capture_window(window: tauri::WebviewWindow) -> Result<Option<String>, String> {
+pub async fn desktop_capture_window(
+    window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
     #[cfg(target_os = "macos")]
     {
         use base64::Engine as _;
@@ -983,7 +985,8 @@ pub async fn desktop_capture_window(window: tauri::WebviewWindow) -> Result<Opti
         let ptr = window.ns_window().map_err(|e| e.to_string())?;
         // SAFETY: Tauri hands back the live NSWindow of this webview window.
         let id = unsafe { &*(ptr as *const NSWindow) }.windowNumber();
-        let dest = std::env::temp_dir().join(format!("hanzo-report-{}.png", generate_random_hex(8)));
+        let dest =
+            std::env::temp_dir().join(format!("hanzo-report-{}.png", generate_random_hex(8)));
         let status = tokio::process::Command::new("screencapture")
             .args(["-x", "-o", "-l", &id.to_string()])
             .arg(&dest)
@@ -1096,7 +1099,11 @@ pub async fn desktop_discover_lan_engines() -> Result<Vec<DiscoveredLanEngine>, 
         for (name, host, port) in nodes {
             let base_url = format!("http://{host}:{port}{path}");
             if out.iter().all(|e| e.base_url != base_url) {
-                out.push(DiscoveredLanEngine { name, kind, base_url });
+                out.push(DiscoveredLanEngine {
+                    name,
+                    kind,
+                    base_url,
+                });
             }
         }
     }
@@ -1755,26 +1762,37 @@ mod tests {
         let slot = tokio::sync::Mutex::new(None);
 
         // Startup purge removes pre-existing plaintext vault file
-        fs::write(&legacy_file, r#"{"accounts":[{"id":"legacy","accessToken":"secret"}]}"#)
-            .expect("seed legacy iam-vault.json");
+        fs::write(
+            &legacy_file,
+            r#"{"accounts":[{"id":"legacy","accessToken":"secret"}]}"#,
+        )
+        .expect("seed legacy iam-vault.json");
         assert!(legacy_file.exists());
         purge_legacy_iam_vault_file(&state_dir);
         assert!(!legacy_file.exists());
 
         // Get purges any re-introduced legacy file and never returns its plaintext contents
-        fs::write(&legacy_file, r#"{"accounts":[{"id":"legacy","accessToken":"secret"}]}"#)
-            .expect("seed legacy iam-vault.json for get");
+        fs::write(
+            &legacy_file,
+            r#"{"accounts":[{"id":"legacy","accessToken":"secret"}]}"#,
+        )
+        .expect("seed legacy iam-vault.json for get");
         assert_eq!(get_iam_vault_internal(&slot, &state_dir, None).await, None);
         assert!(!legacy_file.exists());
 
         // Set purges any legacy file and never writes a new file
-        fs::write(&legacy_file, r#"{"accounts":[{"id":"legacy","accessToken":"secret"}]}"#)
-            .expect("seed legacy iam-vault.json for set");
+        fs::write(
+            &legacy_file,
+            r#"{"accounts":[{"id":"legacy","accessToken":"secret"}]}"#,
+        )
+        .expect("seed legacy iam-vault.json for set");
         let payload = r#"{"activeAccountId":"hanzo/z","accounts":[{"id":"hanzo/z","accessToken":"tok_abc","owner":"hanzo"}]}"#;
         let _ = set_iam_vault_internal(&slot, &state_dir, Some(payload.to_string()), None).await;
         assert!(!legacy_file.exists());
         assert_eq!(
-            get_iam_vault_internal(&slot, &state_dir, None).await.as_deref(),
+            get_iam_vault_internal(&slot, &state_dir, None)
+                .await
+                .as_deref(),
             Some(payload)
         );
 
@@ -1830,14 +1848,15 @@ mod tests {
 
         let captured_req = server_task.await.expect("join mock kms server");
         assert!(captured_req.starts_with("PUT /v1/kms/secrets/hanzo-dev-iam-vault "));
-        assert!(captured_req.contains("authorization: Bearer tok_kms_bearer_123")
-            || captured_req.contains("Authorization: Bearer tok_kms_bearer_123"));
+        assert!(
+            captured_req.contains("authorization: Bearer tok_kms_bearer_123")
+                || captured_req.contains("Authorization: Bearer tok_kms_bearer_123")
+        );
         assert!(captured_req.contains("x-org-id: lux") || captured_req.contains("X-Org-Id: lux"));
 
         // When KMS is unreachable, get/set fall back safely to in-memory without writing to disk
         let dead_kms_url = format!("http://{addr}{HANZO_KMS_IAM_VAULT_SECRET_PATH}");
-        let fallback_loaded =
-            get_iam_vault_internal(&slot, &state_dir, Some(&dead_kms_url)).await;
+        let fallback_loaded = get_iam_vault_internal(&slot, &state_dir, Some(&dead_kms_url)).await;
         assert_eq!(fallback_loaded.as_deref(), Some(payload.as_str()));
         assert!(!legacy_file.exists());
 
