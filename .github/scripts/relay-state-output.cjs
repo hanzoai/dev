@@ -9,9 +9,8 @@ const { mkdtempSync, rmSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 
-const argv = process.argv.slice(2);
-const runnerTemp = argv[0] || process.env.RUNNER_TEMP || mkdtempSync(join(tmpdir(), "hanzo-relay-state-"));
-const ownRunnerTemp = argv.length === 0;
+const runnerTemp = process.argv[2] || process.env.RUNNER_TEMP || mkdtempSync(join(tmpdir(), "hanzo-relay-state-"));
+const ownRunnerTemp = process.argv.length < 3;
 
 function fail(message) {
   console.error(message);
@@ -19,19 +18,21 @@ function fail(message) {
   process.exit(1);
 }
 
-// Client tracing is optional: with no deployed relay stack the build ships
-// without it. But when we do run the CLI, we must fail closed on a failure
-// or missing/incomplete JSON rather than writing a broken config.
+// Client tracing is optional at the workflow level (no deployed stack → skip),
+// but when we do run the CLI we must fail closed: a failed CLI or
+// incomplete JSON never produces a config file.
 const output = spawnSync("npx", ["alchemy", "state", "read", "HanzoDevRelay/prod/output", "--backend", "cloudflare", "--log-level", "error", "--no-input"], {
   encoding: "utf8",
   cwd: "infra/relay",
   env: process.env,
 });
 
-if (output.status !== 0 || !output.stdout || output.stdout.trim() === "") {
-  console.warn("::warning::No production relay stack state; building without relay client tracing.");
-  if (ownRunnerTemp) rmSync(runnerTemp, { recursive: true, force: true });
-  process.exit(0);
+if (output.status !== 0) {
+  fail("Relay state CLI failed");
+}
+
+if (!output.stdout || output.stdout.trim() === "") {
+  fail("Relay stack output is empty");
 }
 
 // Vercel/Alchemy can print progress lines before the JSON. Strip everything
