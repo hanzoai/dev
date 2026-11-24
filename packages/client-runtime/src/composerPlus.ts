@@ -41,8 +41,10 @@ export type PlusEffect =
   | { readonly kind: "skills" }
   /** Shows the browser beside the conversation. */
   | { readonly kind: "browser" }
-  /** A list to read and choose from: the plugins, and the cloud's connectors, design systems and memories. */
-  | { readonly kind: "shelf"; readonly shelf: "plugins" | "connectors" | "design" | "memory" };
+  /** A list to read and choose from: the plugins, and the cloud's connectors and design systems. */
+  | { readonly kind: "shelf"; readonly shelf: "plugins" | "connectors" | "design" }
+  /** A persisted per-thread toggle (Memory injects GET /v1/ai/memory/list into every turn). */
+  | { readonly kind: "toggle"; readonly setting: "memory" };
 
 export type PlusGroup = "make" | "bring" | "keep";
 
@@ -181,7 +183,7 @@ const SOURCES: ReadonlyArray<Source> = [
     group: "keep",
     label: msg("Memory"),
     note: msg("Remember context across chats"),
-    effect: { kind: "shelf", shelf: "memory" },
+    effect: { kind: "toggle", setting: "memory" },
   },
 ];
 

@@ -2200,10 +2200,14 @@ export const layer: Layer.Layer<
           }),
         );
         yield* touchMcpCredential;
-        const appContext = yield* McpAppModelContext.forProvider(
+        const mcpContext = yield* McpAppModelContext.forProvider(
           mcpAppModelContext,
           input.run.threadId,
         );
+        const appContext =
+          input.message.systemContext === undefined
+            ? mcpContext
+            : [...mcpContext, { key: "system_context", text: input.message.systemContext }];
         const turnInput = {
           appThread: input.appThread,
           threadId: input.run.threadId,

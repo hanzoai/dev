@@ -3,7 +3,6 @@ import {
   CloudChatError,
   listConnectors,
   listDesignSystems,
-  listMemories,
   shelfDraftText,
   type CloudShelfRow,
 } from "@hanzodev/client-runtime/cloud-chat";
@@ -20,7 +19,7 @@ import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { composerFloatingLayerProps } from "./composerEventScope";
 
-export type ComposerShelf = "plugins" | "connectors" | "design" | "memory";
+export type ComposerShelf = "plugins" | "connectors" | "design";
 
 const failureText = (cause: unknown, fallback: string): string =>
   cause instanceof CloudChatError && cause.kind === "signed-out"
@@ -187,7 +186,7 @@ function PluginsShelf({ environmentId }: { readonly environmentId: EnvironmentId
   );
 }
 
-/** Connectors, design systems and memories: the cloud's lists, as hanzo.app reads them. */
+/** Connectors and design systems: the cloud's lists, as hanzo.app reads them. */
 function CloudShelf({
   shelf,
   onChoose,
@@ -207,12 +206,7 @@ function CloudShelf({
     void (async () => {
       try {
         const credentials = { accessToken: await auth.getToken(), orgId: auth.activeOrgId };
-        const read =
-          shelf === "connectors"
-            ? listConnectors
-            : shelf === "design"
-              ? listDesignSystems
-              : listMemories;
+        const read = shelf === "connectors" ? listConnectors : listDesignSystems;
         const next = await read(credentials);
         if (live) setRows(next);
       } catch (cause) {
@@ -230,12 +224,7 @@ function CloudShelf({
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `gt` and `m` only word the result
   }, [shelf]);
 
-  const empty =
-    shelf === "connectors"
-      ? gt("No connectors yet")
-      : shelf === "design"
-        ? gt("No design systems yet")
-        : gt("Nothing remembered yet");
+  const empty = shelf === "connectors" ? gt("No connectors yet") : gt("No design systems yet");
   return (
     <DialogPanel>
       <div data-testid={`${shelf}-list`}>
@@ -282,9 +271,7 @@ export function ComposerShelfDialog({
       ? gt("Plugins")
       : shelf === "connectors"
         ? gt("Connectors")
-        : shelf === "design"
-          ? gt("Design system")
-          : gt("Memory");
+        : gt("Design system");
   return (
     <Dialog open={shelf !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogPopup

@@ -32,6 +32,7 @@ import {
   ProviderInteractionMode,
   RuntimeMode,
 } from "@hanzodev/contracts";
+import { loadMemoriesSystemContext } from "@hanzodev/client-runtime/cloud-chat";
 import { deriveThreadTitleSeed } from "@hanzodev/client-runtime/operations";
 import { wasBootstrapThreadDeleted } from "@hanzodev/client-runtime/errors";
 import {
@@ -61,6 +62,8 @@ import {
   type ComposerSubmissionIntent,
   collapseExpandedComposerCursor,
 } from "../../composer-logic";
+import { getHanzoWebAuthController } from "../../cloud/hanzoWebAuth";
+import { useMemorySwitchStore } from "../../memorySwitchStore";
 import { type ChatMessage, DEFAULT_INTERACTION_MODE } from "../../types";
 import { recordPromptSent } from "../GitHubStarPrompt";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -1477,6 +1480,23 @@ export function useComposerSend(input: ComposerSendInput) {
           )
         : null;
       if (backgroundThreadRef) beginBackgroundDraftSubmissionByRef(backgroundThreadRef);
+      const memoryStore = useMemorySwitchStore.getState();
+      const memoryEnabled = memoryStore.isMemoryEnabled(composerDraftTarget);
+      if (memoryEnabled && isLocalDraftThread) {
+        memoryStore.transferMemorySetting(
+          composerDraftTarget,
+          scopeThreadRef(environmentId, threadIdForSend),
+        );
+      }
+      const systemContext = memoryEnabled
+        ? await (async () => {
+            const auth = getHanzoWebAuthController();
+            return loadMemoriesSystemContext({
+              accessToken: await auth.getToken(),
+              orgId: auth.activeOrgId,
+            });
+          })()
+        : undefined;
       const startPromise = startThreadTurn({
         environmentId,
         input: {
@@ -1491,6 +1511,7 @@ export function useComposerSend(input: ComposerSendInput) {
                 boundAttachmentIds(turnAttachmentsResult.value, composerAttachmentsSnapshot),
               ),
             }),
+            ...(systemContext === undefined ? {} : { systemContext }),
           },
           modelSelection: ctxSelectedModelSelection,
           titleSeed: title,

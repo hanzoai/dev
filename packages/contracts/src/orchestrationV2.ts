@@ -1395,6 +1395,10 @@ export type OrchestrationV2Notification = typeof OrchestrationV2Notification.Typ
 export const OrchestrationV2IdleCompaction = Schema.Literals(["beforeCacheExpires", "onReturn"]);
 export type OrchestrationV2IdleCompaction = typeof OrchestrationV2IdleCompaction.Type;
 
+/** Per-turn system context supplied by the client (e.g. Hanzo Memory) alongside a user message. */
+export const OrchestrationV2SystemContext = TrimmedNonEmptyString.check(Schema.isMaxLength(32_768));
+export type OrchestrationV2SystemContext = typeof OrchestrationV2SystemContext.Type;
+
 export const OrchestrationV2ConversationMessage = Schema.Struct({
   notification: Schema.optional(OrchestrationV2Notification),
   ...OrchestrationV2CreationFields,
@@ -1404,6 +1408,7 @@ export const OrchestrationV2ConversationMessage = Schema.Struct({
   senderThreadId: Schema.optional(ThreadId),
   linkedSender: Schema.optional(OrchestrationV2LinkedSender),
   idleCompaction: Schema.optional(OrchestrationV2IdleCompaction),
+  systemContext: Schema.optional(OrchestrationV2SystemContext),
   /**
    * The message is the script a provider-native workflow run executes, not prose. Clients show
    * the workflow's opening instead and keep the script behind a disclosure.
@@ -3136,6 +3141,7 @@ export const OrchestrationV2Command = Schema.Union([
         text: Schema.String,
         attachments: Schema.Array(ChatAttachment),
         context: Schema.optional(OrchestrationMessageContext),
+        systemContext: Schema.optional(OrchestrationV2SystemContext),
         titleSeed: Schema.optional(TrimmedNonEmptyString),
         scheduledTaskId: Schema.optional(ScheduledTaskId),
         senderThreadId: Schema.optional(ThreadId),
@@ -3408,6 +3414,7 @@ export const OrchestrationV2Command = Schema.Union([
     messageId: MessageId,
     text: Schema.String,
     context: Schema.optional(OrchestrationMessageContext),
+    systemContext: Schema.optional(OrchestrationV2SystemContext),
     attachments: Schema.Array(ChatAttachment),
     titleSeed: Schema.optional(TrimmedNonEmptyString),
     modelSelection: Schema.optional(ModelSelection),
@@ -3950,6 +3957,7 @@ export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
       messageId: Schema.optional(MessageId),
       text: Schema.String,
       context: Schema.optional(OrchestrationMessageContext),
+      systemContext: Schema.optional(OrchestrationV2SystemContext),
       attachments: Schema.Array(ChatAttachment),
     }),
   ),

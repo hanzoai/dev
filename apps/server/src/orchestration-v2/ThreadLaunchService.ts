@@ -86,6 +86,7 @@ export interface ThreadLaunchInitialMessage {
   readonly text: string;
   readonly attachments: ReadonlyArray<ChatAttachment>;
   readonly context?: import("@hanzodev/contracts").OrchestrationMessageContext | undefined;
+  readonly systemContext?: import("@hanzodev/contracts").OrchestrationV2SystemContext | undefined;
 }
 
 export interface ThreadLaunchInput {
@@ -1354,6 +1355,9 @@ const make = Effect.gen(function* () {
                   : { senderThreadId: input.initialMessage.senderThreadId }),
                 attachments: input.initialMessage.attachments,
                 ...(input.initialMessage.context ? { context: input.initialMessage.context } : {}),
+                ...(input.initialMessage.systemContext === undefined
+                  ? {}
+                  : { systemContext: input.initialMessage.systemContext }),
                 ...(input.generateTitle === true ? { titleSeed: input.title } : {}),
               };
         const claimDispatch =

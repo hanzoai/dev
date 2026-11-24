@@ -116,16 +116,49 @@ export async function listMemories(auth: CloudChatAuth, options: CloudChatOption
   return parseMemories(await read(`/v1/ai/memory/list?limit=${MEMORY_LIMIT}`, auth, options));
 }
 
+const MEMORY_CONTEXT_MAX_CHARS = 30_000;
+
+/** Formats memories from `GET /v1/ai/memory/list` into a system context block, or `undefined` if none. */
+export function formatMemoriesSystemContext(
+  memories: ReadonlyArray<CloudShelfRow>,
+): string | undefined {
+  const lines = memories.map((row) => row.name.trim()).filter(Boolean);
+  if (lines.length === 0) return undefined;
+  const header = "User memories:\n";
+  let result = header;
+  for (const line of lines) {
+    const bullet = `- ${line}\n`;
+    if (result.length + bullet.length > MEMORY_CONTEXT_MAX_CHARS) break;
+    result += bullet;
+  }
+  const trimmed = result.trimEnd();
+  return trimmed.length > header.trimEnd().length ? trimmed : undefined;
+}
+
+/**
+ * Fetches the user's Hanzo memories and formats them as system context.
+ * Returns `undefined` when signed out, empty, or unreachable so sending is never blocked.
+ */
+export async function loadMemoriesSystemContext(
+  auth: CloudChatAuth,
+  options: CloudChatOptions = {},
+): Promise<string | undefined> {
+  if (!auth.accessToken?.trim()) return undefined;
+  try {
+    return formatMemoriesSystemContext(await listMemories(auth, options));
+  } catch {
+    return undefined;
+  }
+}
+
 /** What choosing `row` on `shelf` writes at the end of the draft, in `resolve`'s language. */
 export function shelfDraftText(
-  shelf: "connectors" | "design" | "memory",
+  shelf: "connectors" | "design",
   row: CloudShelfRow,
   resolve: MFunctionType = mFallback,
 ): string {
   const name = row.name;
   return shelf === "connectors"
     ? resolve(msg("Use the {name} connector to ", { name }))
-    : shelf === "design"
-      ? resolve(msg("Use the {name} design system: ", { name }))
-      : `${resolve(msg("Keep in mind: {name}", { name }))}\n`;
+    : resolve(msg("Use the {name} design system: ", { name }));
 }

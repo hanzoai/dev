@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  formatMemoriesSystemContext,
   listConnectors,
   listDesignSystems,
+  loadMemoriesSystemContext,
   parseConnectors,
   parseDesignSystems,
   parseMemories,
@@ -47,7 +49,29 @@ describe("cloud shelves", () => {
     const row = { id: "x", name: "Stripe", note: "" };
     expect(shelfDraftText("connectors", row)).toBe("Use the Stripe connector to ");
     expect(shelfDraftText("design", row)).toBe("Use the Stripe design system: ");
-    expect(shelfDraftText("memory", row)).toBe("Keep in mind: Stripe\n");
+  });
+
+  it("formats and loads memories as system context without blocking on errors", async () => {
+    expect(formatMemoriesSystemContext([])).toBeUndefined();
+    expect(
+      formatMemoriesSystemContext([
+        { id: "m1", name: "Prefers Go", note: "" },
+        { id: "m2", name: "Lives in SF", note: "" },
+      ]),
+    ).toBe("User memories:\n- Prefers Go\n- Lives in SF");
+
+    const okFetch = async () =>
+      new Response(JSON.stringify([{ id: "m1", content: "Prefers Go" }]), { status: 200 });
+    expect(await loadMemoriesSystemContext({ accessToken: "tok" }, { fetch: okFetch })).toBe(
+      "User memories:\n- Prefers Go",
+    );
+    expect(await loadMemoriesSystemContext({ accessToken: null }, { fetch: okFetch })).toBe(
+      undefined,
+    );
+    const failFetch = async () => new Response("", { status: 500 });
+    expect(await loadMemoriesSystemContext({ accessToken: "tok" }, { fetch: failFetch })).toBe(
+      undefined,
+    );
   });
 
   it("asks api.hanzo.ai with the person's token and says why it cannot", async () => {

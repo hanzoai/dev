@@ -447,10 +447,14 @@ export const layer: Layer.Layer<
               cause: "The persisted steering message or target run is missing.",
             });
           }
-          const appContext = yield* McpAppModelContext.forProvider(
+          const mcpContext = yield* McpAppModelContext.forProvider(
             mcpAppModelContext,
             input.threadId,
           );
+          const appContext =
+            message.systemContext === undefined
+              ? mcpContext
+              : [...mcpContext, { key: "system_context", text: message.systemContext }];
           yield* loaded.session.value
             .steerTurn({
               threadId: input.threadId,
@@ -476,6 +480,9 @@ export const layer: Layer.Layer<
                 ...(message.senderThreadId === undefined
                   ? {}
                   : { senderThreadId: message.senderThreadId }),
+                ...(message.systemContext === undefined
+                  ? {}
+                  : { systemContext: message.systemContext }),
               },
             })
             .pipe(

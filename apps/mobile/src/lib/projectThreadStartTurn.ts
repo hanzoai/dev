@@ -28,6 +28,7 @@ export interface ProjectThreadStartTurnSpec {
   readonly text: string;
   readonly titleText?: string;
   readonly context?: OrchestrationMessageContext;
+  readonly systemContext?: string;
   readonly uploadedAttachments: ReadonlyArray<UploadedMobileAttachment | ChatAttachment>;
   readonly modelSelection: ModelSelection;
   readonly runtimeMode: RuntimeMode;
@@ -54,6 +55,7 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
       role: "user" as const,
       text: spec.text,
       ...(spec.context ? { context: spec.context } : {}),
+      ...(spec.systemContext ? { systemContext: spec.systemContext } : {}),
       attachments: spec.uploadedAttachments,
     },
     modelSelection: spec.modelSelection,

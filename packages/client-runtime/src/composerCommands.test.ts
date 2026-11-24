@@ -68,10 +68,15 @@ describe("the + menu", () => {
     expect(entries).toHaveLength(PLUS_ENTRY_IDS.length - 2);
   });
 
-  it("words every entry", () => {
-    for (const entry of plusEntries()) {
+  it("words every entry and exposes Memory as a toggle", () => {
+    const entries = plusEntries();
+    for (const entry of entries) {
       expect(entry.label.length).toBeGreaterThan(0);
       expect(entry.note.length).toBeGreaterThan(0);
     }
+    expect(entries.find((entry) => entry.id === "memory")?.effect).toEqual({
+      kind: "toggle",
+      setting: "memory",
+    });
   });
 });
