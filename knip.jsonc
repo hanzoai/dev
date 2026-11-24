@@ -79,7 +79,7 @@
     "apps/web": {
       // Worktree setup (scripts/setup-worktree.ts) runs this directly, and evidence
       // fixtures run under node.
-      // `@hanzo/dev-core` is built from the embed config (build:embed, publish-dev-core).
+      // `@hanzo/dev` is built from the embed config (build:embed, publish-dev-core).
       "entry": [
         "scripts/warm-dep-cache.ts",
         "test/fixtures/**/*.mjs",
@@ -145,7 +145,7 @@
       "includeEntryExports": true,
     },
     "packages/dev": {
-      // @hanzo/dev-core ships only the apps/web embed build; its dist imports these bare,
+      // @hanzo/dev ships only the apps/web embed build; its dist imports these bare,
       // and scripts/embed-dist-check.ts requires every such import to be a listed dependency.
       "ignoreDependencies": [
         "@tanstack/react-router",
