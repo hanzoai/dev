@@ -390,7 +390,6 @@
   "d277f9cf266c9819": "Auto",
   "0549eeedb2c63c32": "Use the {name} connector to ",
   "f55196e4afe2840c": "Use the {name} design system: ",
-  "5f2b771aa73eb6c6": "Keep in mind: {name}",
   "5f68899450a25421": "This client is not supported by this server. Update your app or use a compatible release to connect to {host}.",
   "0dc649e828db5ee1": "This client requires a newer server. Update Hanzo Dev on {host} to connect.",
   "b7554d48eece78bf": "This device is offline",
@@ -2854,6 +2853,11 @@
   "cfb3f269b6b2422c": "Close persona picker",
   "6cf1b5f50233d093": "Exit private mode",
   "085959508fedad72": "Clear persona",
+  "8b70216a0e7275bc": "Web search: On for every message",
+  "85064e30da80bbae": "Web search: Auto (click to always search)",
+  "4fd8927b7afc2a92": "Copy message",
+  "6aa69394ec8e9be1": "Edit message",
+  "7d51c8144c8c277e": "Regenerate reply",
   "094d723edc8a00ab": [
     "Select persona (",
     {
@@ -2866,6 +2870,7 @@
   "08268bb17a38c420": "No persona",
   "d0c2a7992c20c04d": "Sign in to load your personas.",
   "01d67f2bc91c6eee": "Private mode · nothing saved or recorded",
+  "22aa580bd4c48e62": "Save & send",
   "c4b860aca29ee1c5": [
     "Could not connect to ",
     {
@@ -3363,7 +3368,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "on the computer that opened this page"]
+      "c": [
+        " ",
+        "on the computer that opened this page"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3375,7 +3383,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· whoever runs it gets this access"]
+      "c": [
+        " ",
+        "· whoever runs it gets this access"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Only approve a sign-in you just started.",
@@ -3705,7 +3716,7 @@
   "ab6720311ff3140d": "Next send compacts {tokens} tokens first.",
   "1486a422ba77a084": "Click to compact first",
   "b971f881c5dc4fca": "Click to keep full history",
-  "2e614197574aadd9": "Plugins could not be read. Is Claude Code installed on this machine?",
+  "e2b89b7d0d89beb5": "Plugins could not be read. No supported agent CLI was found on this machine.",
   "4f3d24b01fc07868": "{name} could not be changed.",
   "09b739f584a09a2b": "Search plugins",
   "8368b0500372fa16": "Reading plugins",
@@ -3719,7 +3730,6 @@
   "361ea0d216079cc1": "Sign in to Hanzo to use this.",
   "7bf03bd919185339": "No connectors yet",
   "21c75717bc385bb7": "No design systems yet",
-  "e882f98c10c5852f": "Nothing remembered yet",
   "ff545ba23dc2c350": "Reading",
   "b7a3723bd5ce6686": "Drawing pad",
   "5d0c71caa8f328b0": "Clear",
@@ -3939,7 +3949,6 @@
       "v": "v"
     }
   ],
-  "4fd8927b7afc2a92": "Copy message",
   "6f8651e48261911a": "Thought",
   "07e65dba2b16d3f7": "{count, plural, one {{path} +{count} more} other {{path} +{count} more}}",
   "4d4981a1c5bd9728": "Running command",
@@ -4023,6 +4032,9 @@
   "cb2476679502d798": "Model: {name}",
   "1889823ac6b01f7b": "{provider} is unavailable in this thread. Start a new thread to switch providers.",
   "071b1cfc4d0d10d9": "Search models...",
+  "a553be36e93303cd": "Ready",
+  "4ba692b01a327ce3": "Offline",
+  "6fffd817251576ba": "Limited",
   "ffea432e08602f9c": "Show less",
   "04b2f5e7a86fd8db": "Show more",
   "316d2cea8d8145ea": "Unavailable",
@@ -5112,7 +5124,6 @@
   "830103d02a9ac4e2": "Relay offline",
   "0b2dd2fe0a45c628": "Checking relay status…",
   "6280ea23e2192d27": "Relay status unavailable",
-  "4ba692b01a327ce3": "Offline",
   "81ca8a49acedf36d": "Checking…",
   "363b49d2880a5109": "Checking relay status",
   "548f9db69b69ff04": "Adding…",
@@ -7839,7 +7850,6 @@
   "3916007360d4cf63": "Install the Hanzo extension in a browser and sign in. It joins this computer by itself.",
   "6948433092727396": "on {browser}",
   "7ce808b7103eeec9": "No signed-in AI products reported.",
-  "a553be36e93303cd": "Ready",
   "159e05bacc582a55": "Needs login",
   "d3b0a2fdb2fb90d8": "View only. Logins stay in the browser and are never routed to.",
   "570567bbea004eac": "View only",

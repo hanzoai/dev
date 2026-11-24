@@ -390,7 +390,6 @@
   "d277f9cf266c9819": "자동",
   "0549eeedb2c63c32": "Use the {name} connector to ",
   "f55196e4afe2840c": "Use the {name} design system: ",
-  "5f2b771aa73eb6c6": "Keep in mind: {name}",
   "5f68899450a25421": "이 서버는 이 클라이언트를 지원하지 않습니다. {host}에 연결하려면 앱을 업데이트하거나 호환되는 릴리스를 사용하세요.",
   "0dc649e828db5ee1": "이 클라이언트에는 더 최신 서버가 필요합니다. 연결하려면 {host}의 Hanzo Dev를 업데이트하세요.",
   "b7554d48eece78bf": "이 기기는 오프라인입니다",
@@ -2853,6 +2852,11 @@
   "cfb3f269b6b2422c": "페르소나 선택 닫기",
   "6cf1b5f50233d093": "비공개 모드 종료",
   "085959508fedad72": "페르소나 해제",
+  "8b70216a0e7275bc": "Web search: On for every message",
+  "85064e30da80bbae": "Web search: Auto (click to always search)",
+  "4fd8927b7afc2a92": "메시지 복사",
+  "6aa69394ec8e9be1": "Edit message",
+  "7d51c8144c8c277e": "Regenerate reply",
   "094d723edc8a00ab": [
     "페르소나 선택 (",
     {
@@ -2865,6 +2869,7 @@
   "08268bb17a38c420": "페르소나 없음",
   "d0c2a7992c20c04d": "페르소나를 불러오려면 로그인하세요.",
   "01d67f2bc91c6eee": "비공개 모드 · 아무것도 저장하거나 기록하지 않음",
+  "22aa580bd4c48e62": "Save & send",
   "c4b860aca29ee1c5": [
     {
       "i": 1,
@@ -3359,7 +3364,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "(이 페이지를 연 컴퓨터)"]
+      "c": [
+        " ",
+        "(이 페이지를 연 컴퓨터)"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3371,7 +3379,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· 실행하는 사람이 이 액세스 권한을 얻습니다"]
+      "c": [
+        " ",
+        "· 실행하는 사람이 이 액세스 권한을 얻습니다"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "방금 시작한 로그인만 승인하세요.",
@@ -3698,7 +3709,7 @@
   "ab6720311ff3140d": "다음 전송 시 먼저 토큰 {tokens}개를 압축합니다.",
   "1486a422ba77a084": "클릭하면 먼저 압축",
   "b971f881c5dc4fca": "클릭하면 전체 기록 유지",
-  "2e614197574aadd9": "Plugins could not be read. Is Claude Code installed on this machine?",
+  "e2b89b7d0d89beb5": "Plugins could not be read. No supported agent CLI was found on this machine.",
   "4f3d24b01fc07868": "{name} could not be changed.",
   "09b739f584a09a2b": "Search plugins",
   "8368b0500372fa16": "Reading plugins",
@@ -3712,7 +3723,6 @@
   "361ea0d216079cc1": "Sign in to Hanzo to use this.",
   "7bf03bd919185339": "No connectors yet",
   "21c75717bc385bb7": "No design systems yet",
-  "e882f98c10c5852f": "Nothing remembered yet",
   "ff545ba23dc2c350": "Reading",
   "b7a3723bd5ce6686": "Drawing pad",
   "5d0c71caa8f328b0": "Clear",
@@ -3928,7 +3938,6 @@
       "v": "v"
     }
   ],
-  "4fd8927b7afc2a92": "메시지 복사",
   "6f8651e48261911a": "생각",
   "07e65dba2b16d3f7": "{count, plural, other {{path} 외 {count}개}}",
   "4d4981a1c5bd9728": "명령 실행 중",
@@ -4010,6 +4019,9 @@
   "cb2476679502d798": "모델: {name}",
   "1889823ac6b01f7b": "이 스레드에서는 {provider}을(를) 사용할 수 없습니다. 제공자를 바꾸려면 새 스레드를 시작하세요.",
   "071b1cfc4d0d10d9": "모델 검색...",
+  "a553be36e93303cd": "준비됨",
+  "4ba692b01a327ce3": "오프라인",
+  "6fffd817251576ba": "Limited",
   "ffea432e08602f9c": "간략히 보기",
   "04b2f5e7a86fd8db": "더 보기",
   "316d2cea8d8145ea": "Unavailable",
@@ -5094,7 +5106,6 @@
   "830103d02a9ac4e2": "릴레이 오프라인",
   "0b2dd2fe0a45c628": "릴레이 상태 확인 중…",
   "6280ea23e2192d27": "릴레이 상태를 알 수 없음",
-  "4ba692b01a327ce3": "오프라인",
   "81ca8a49acedf36d": "확인 중…",
   "363b49d2880a5109": "릴레이 상태 확인 중",
   "548f9db69b69ff04": "추가하는 중…",
@@ -7797,7 +7808,6 @@
   "3916007360d4cf63": "브라우저에 Hanzo 확장 프로그램을 설치하고 로그인하세요. 이 컴퓨터에는 자동으로 연결됩니다.",
   "6948433092727396": "{browser}에서",
   "7ce808b7103eeec9": "로그인된 AI 제품이 보고되지 않았습니다.",
-  "a553be36e93303cd": "준비됨",
   "159e05bacc582a55": "로그인 필요",
   "d3b0a2fdb2fb90d8": "보기 전용. 로그인은 브라우저에 남으며 이곳으로 라우팅되지 않습니다.",
   "570567bbea004eac": "보기 전용",

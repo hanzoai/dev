@@ -390,7 +390,6 @@
   "d277f9cf266c9819": "自动",
   "0549eeedb2c63c32": "Use the {name} connector to ",
   "f55196e4afe2840c": "Use the {name} design system: ",
-  "5f2b771aa73eb6c6": "Keep in mind: {name}",
   "5f68899450a25421": "此服务器不支持这个客户端。请更新应用或使用兼容的版本以连接到 {host}。",
   "0dc649e828db5ee1": "此客户端需要更新的服务器。请更新 {host} 上的 Hanzo Dev 后再连接。",
   "b7554d48eece78bf": "此设备离线",
@@ -2858,6 +2857,11 @@
   "cfb3f269b6b2422c": "关闭人设选择器",
   "6cf1b5f50233d093": "退出隐私模式",
   "085959508fedad72": "清除人设",
+  "8b70216a0e7275bc": "Web search: On for every message",
+  "85064e30da80bbae": "Web search: Auto (click to always search)",
+  "4fd8927b7afc2a92": "复制消息",
+  "6aa69394ec8e9be1": "Edit message",
+  "7d51c8144c8c277e": "Regenerate reply",
   "094d723edc8a00ab": [
     "选择人设 (",
     {
@@ -2870,6 +2874,7 @@
   "08268bb17a38c420": "无人设",
   "d0c2a7992c20c04d": "登录以加载你的人设。",
   "01d67f2bc91c6eee": "隐私模式 · 不保存也不记录任何内容",
+  "22aa580bd4c48e62": "Save & send",
   "c4b860aca29ee1c5": [
     "无法连接到 ",
     {
@@ -3367,7 +3372,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "位于打开此页面的计算机上"]
+      "c": [
+        " ",
+        "位于打开此页面的计算机上"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3379,7 +3387,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· 运行它的任何人都会获得此访问权限"]
+      "c": [
+        " ",
+        "· 运行它的任何人都会获得此访问权限"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "请只批准你刚刚发起的登录。",
@@ -3709,7 +3720,7 @@
   "ab6720311ff3140d": "下次发送前先压缩 {tokens} token。",
   "1486a422ba77a084": "点击以先压缩历史记录",
   "b971f881c5dc4fca": "点击以保留完整历史记录",
-  "2e614197574aadd9": "Plugins could not be read. Is Claude Code installed on this machine?",
+  "e2b89b7d0d89beb5": "Plugins could not be read. No supported agent CLI was found on this machine.",
   "4f3d24b01fc07868": "{name} could not be changed.",
   "09b739f584a09a2b": "Search plugins",
   "8368b0500372fa16": "Reading plugins",
@@ -3723,7 +3734,6 @@
   "361ea0d216079cc1": "Sign in to Hanzo to use this.",
   "7bf03bd919185339": "No connectors yet",
   "21c75717bc385bb7": "No design systems yet",
-  "e882f98c10c5852f": "Nothing remembered yet",
   "ff545ba23dc2c350": "Reading",
   "b7a3723bd5ce6686": "Drawing pad",
   "5d0c71caa8f328b0": "Clear",
@@ -3941,7 +3951,6 @@
       "v": "v"
     }
   ],
-  "4fd8927b7afc2a92": "复制消息",
   "6f8651e48261911a": "已思考",
   "07e65dba2b16d3f7": "{count, plural, other {{path}，另有 {count} 个}}",
   "4d4981a1c5bd9728": "正在运行命令",
@@ -4025,6 +4034,9 @@
   "cb2476679502d798": "模型：{name}",
   "1889823ac6b01f7b": "{provider} 在此会话中不可用。请新建会话以切换提供方。",
   "071b1cfc4d0d10d9": "搜索模型…",
+  "a553be36e93303cd": "就绪",
+  "4ba692b01a327ce3": "离线",
+  "6fffd817251576ba": "Limited",
   "ffea432e08602f9c": "收起",
   "04b2f5e7a86fd8db": "显示更多",
   "316d2cea8d8145ea": "Unavailable",
@@ -5116,7 +5128,6 @@
   "830103d02a9ac4e2": "中继离线",
   "0b2dd2fe0a45c628": "正在检查中继状态…",
   "6280ea23e2192d27": "中继状态不可用",
-  "4ba692b01a327ce3": "离线",
   "81ca8a49acedf36d": "正在检查…",
   "363b49d2880a5109": "正在检查中继状态",
   "548f9db69b69ff04": "正在添加…",
@@ -7848,7 +7859,6 @@
   "3916007360d4cf63": "在浏览器中安装 Hanzo 扩展并登录，它会自动连接到此电脑。",
   "6948433092727396": "在 {browser} 上",
   "7ce808b7103eeec9": "未报告已登录的 AI 产品。",
-  "a553be36e93303cd": "就绪",
   "159e05bacc582a55": "需要登录",
   "d3b0a2fdb2fb90d8": "仅供查看。登录信息保留在浏览器中，不会被用于路由。",
   "570567bbea004eac": "仅供查看",
