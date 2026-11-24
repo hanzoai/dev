@@ -14,6 +14,7 @@ import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Base64 from "effect/encoding/Base64";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import { ChildProcessSpawner } from "effect/process";
@@ -278,7 +279,14 @@ import { isNetworkPath } from "@hanzodev/shared/path";
 import * as RelayClient from "@hanzodev/shared/relayClient";
 import * as BrowserSources from "./browser/BrowserSources.ts";
 import * as DesktopLink from "./cloud/DesktopLink.ts";
-import { commandProviderTarget, isRoutedSession } from "./cloud/routedRun.ts";
+import {
+  commandProviderTarget,
+  createRoutedRunLeaseRegistry,
+  isActiveRunStatus,
+  isRoutedSession,
+  isRunStartingCommand,
+  type RoutedRunLeaseRegistry,
+} from "./cloud/routedRun.ts";
 import * as ProviderAccounts from "./cloud/ProviderAccounts.ts";
 import {
   SOCKET_FRAME_PARTS_QUERY_PARAM,
@@ -1441,24 +1449,37 @@ export const layerWsRpc = (
   serverBrowser: ServerBrowser.ServerBrowser["Service"],
   reportProfiles: ServerBrowser.ProfileReporter,
   settingsClient: { readonly secretReferences: boolean },
+  routedRunLeases: RoutedRunLeaseRegistry = createRoutedRunLeaseRegistry(),
 ) =>
   Layer.effectContext(
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
       const sql = yield* SqlClient.SqlClient;
       const threadManagement = yield* ThreadManagementService.ThreadManagementService;
-      // Another surface's run on a login runs only where the user shared that login.
+      // Another surface's run on a login runs only where the user shared that login,
+      // and at most one routed run may be active per login instance at a time.
       const assertRoutedCommand = Effect.fn("ws.assertRoutedCommand")(
         function* (command: OrchestrationV2Command) {
-          if (!isRoutedSession(currentSession)) return;
+          if (!isRoutedSession(currentSession)) return undefined;
           const target = commandProviderTarget(command);
-          if (target === null) return;
+          if (target === null) return undefined;
           const instanceId =
             target._tag === "instance"
               ? target.instanceId
               : (yield* threadManagement.getThreadProjection(target.threadId)).thread
                   .providerInstanceId;
           yield* desktopLink.assertRoutedRun(instanceId);
+          if (!isRunStartingCommand(command)) return undefined;
+          yield* routedRunLeases.tryAcquire(instanceId, command.commandId, (threadId, runId) =>
+            threadManagement.getThreadProjection(threadId).pipe(
+              Effect.map((projection) => {
+                const run = projection.runs.find((candidate) => candidate.id === runId);
+                return run !== undefined && isActiveRunStatus(run.status);
+              }),
+              Effect.orElseSucceed(() => false),
+            ),
+          );
+          return instanceId;
         },
         (effect, command) =>
           Effect.mapError(
@@ -1468,7 +1489,7 @@ export const layerWsRpc = (
                 commandId: command.commandId,
                 commandType: command.type,
                 message:
-                  cause._tag === "DesktopLinkError"
+                  cause._tag === "DesktopLinkError" || cause._tag === "RoutedRunBusyError"
                     ? cause.message
                     : "Could not check whether this run may start on this computer.",
               }),
@@ -2051,37 +2072,61 @@ export const layerWsRpc = (
               ? { "orchestration_v2.source_thread_id": command.sourceThreadId }
               : {}),
           }).pipe(
-            Effect.andThen(assertRoutedCommand(command)),
             Effect.andThen(
-              startup
-                .enqueueCommand(
-                  (command.type === "prepared-run.retry"
-                    ? threadLaunch.retryPreparation(command)
-                    : ThreadMessageIntake.dispatchCommand(
-                        ThreadManagementService.withCreationProvenance(command, {
-                          createdBy: "user",
-                          creationSource:
-                            "creationSource" in command ? command.creationSource : "web",
-                        }),
-                      )
-                  ).pipe(Effect.provide(intakeContext)),
-                )
-                .pipe(
-                  Effect.tap((result) =>
-                    result.replayed ? Effect.void : recordClientCommandAnalytics(command),
-                  ),
-                  Effect.map((result) => ({ sequence: result.sequence })),
-                  Effect.mapError((cause) => {
-                    const detail = userFacingDispatchErrorMessage(cause);
-                    return new OrchestrationV2DispatchCommandError({
-                      commandId: command.commandId,
-                      commandType: command.type,
-                      message: detail ?? "Failed to dispatch orchestration V2 command",
-                      ...(detail === undefined ? {} : { detail }),
-                      cause,
-                    });
-                  }),
+              assertRoutedCommand(command).pipe(
+                Effect.flatMap((leasedInstanceId) =>
+                  startup
+                    .enqueueCommand(
+                      (command.type === "prepared-run.retry"
+                        ? threadLaunch.retryPreparation(command)
+                        : ThreadMessageIntake.dispatchCommand(
+                            ThreadManagementService.withCreationProvenance(command, {
+                              createdBy: "user",
+                              creationSource:
+                                "creationSource" in command ? command.creationSource : "web",
+                            }),
+                          )
+                      ).pipe(Effect.provide(intakeContext)),
+                    )
+                    .pipe(
+                      Effect.tap((result) =>
+                        Effect.all([
+                          leasedInstanceId === undefined
+                            ? Effect.void
+                            : Effect.sync(() =>
+                                routedRunLeases.bindEvents(
+                                  leasedInstanceId,
+                                  command.commandId,
+                                  result.storedEvents,
+                                ),
+                              ),
+                          result.replayed ? Effect.void : recordClientCommandAnalytics(command),
+                        ]),
+                      ),
+                      Effect.onExit((exit) =>
+                        Exit.isFailure(exit) && leasedInstanceId !== undefined
+                          ? Effect.sync(() =>
+                              routedRunLeases.releaseIfStarting(
+                                leasedInstanceId,
+                                command.commandId,
+                              ),
+                            )
+                          : Effect.void,
+                      ),
+                      Effect.map((result) => ({ sequence: result.sequence })),
+                      Effect.mapError((cause) => {
+                        const detail = userFacingDispatchErrorMessage(cause);
+                        return new OrchestrationV2DispatchCommandError({
+                          commandId: command.commandId,
+                          commandType: command.type,
+                          message: detail ?? "Failed to dispatch orchestration V2 command",
+                          ...(detail === undefined ? {} : { detail }),
+                          cause,
+                        });
+                      }),
+                    ),
                 ),
+              ),
             ),
           ),
         [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: (input) => threadManagement.stopWorkflow(input),
@@ -3699,6 +3744,13 @@ export const layer = Layer.unwrap(
     const peerLinks = yield* PeerLinks.PeerLinks;
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
     const sql = yield* SqlClient.SqlClient;
+    const orchestrationEngine = yield* Orchestrator.OrchestratorV2;
+    const routedRunLeases = createRoutedRunLeaseRegistry();
+    yield* orchestrationEngine.streamDomainEvents.pipe(
+      Stream.runForEach((event) => Effect.sync(() => routedRunLeases.onDomainEvent(event))),
+      Effect.ignore,
+      Effect.forkScoped,
+    );
     // One RPC server per client session, whatever carries it: the WebSocket route attaches
     // the protocol to an upgraded request, ZAP to a socket server.
     const serveRpc = Effect.fnUntraced(function* <A, R>(input: {
@@ -3749,6 +3801,7 @@ export const layer = Layer.unwrap(
             serverBrowser,
             reportProfiles,
             input.settingsClient,
+            routedRunLeases,
           ).pipe(
             Layer.provideMerge(RpcSerialization.layerJson),
             // Handler-context reporters see only request defects, not server-wide defects.
