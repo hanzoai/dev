@@ -291,7 +291,7 @@ export function webSearchQueryFor(prompt: string): string {
 }
 
 /** Runs live web search against the gateway's `/v1/websearch` endpoint. */
-export async function searchWeb(
+async function searchWeb(
   auth: CloudChatAuth,
   query: string,
   options: CloudChatOptions & { readonly signal?: AbortSignal | undefined } = {},

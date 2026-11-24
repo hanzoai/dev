@@ -18,14 +18,9 @@ import {
 export const GUEST_SHARE_TTL_MS = 24 * 60 * 60 * 1000;
 export const GUEST_MESSAGE_MAX_LENGTH = 4_000;
 export const GUEST_NAME_MAX_LENGTH = 40;
-export const GUEST_PENDING_MESSAGE_LIMIT = 3;
-/** Resolved messages kept so the guest can see what happened to what they sent. */
-export const GUEST_RESOLVED_MESSAGE_LIMIT = 20;
 /** Files a guest can attach to one message, and their total size. */
 export const GUEST_MESSAGE_MAX_ATTACHMENTS = 4;
 export const GUEST_MESSAGE_MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
-/** Total size of the files in a share's waiting messages, so a guest cannot fill the disk. */
-export const GUEST_PENDING_ATTACHMENT_BYTES_LIMIT = 20 * 1024 * 1024;
 
 export const ThreadGuestMessageStatus = Schema.Literals(["pending", "sent", "dismissed"]);
 export type ThreadGuestMessageStatus = typeof ThreadGuestMessageStatus.Type;

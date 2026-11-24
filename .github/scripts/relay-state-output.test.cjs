@@ -65,6 +65,16 @@ for (const prefix of [
 for (const [name, stdout, exitCode] of [
   ["failed CLI even with valid JSON", json, 1],
   ["missing JSON", "Refreshing credentials...", 0],
+]) {
+  test(`falls back to empty config on ${name}`, () => {
+    const result = runStep(stdout, exitCode);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /::warning::/);
+    assert.equal(result.envFile, "");
+  });
+}
+
+for (const [name, stdout, exitCode] of [
   ["malformed JSON", "{not JSON", 0],
   ["missing token", JSON.stringify({ ...config, clientTracingToken: null }, null, 2), 0],
 ]) {

@@ -21,8 +21,6 @@ import {
   readHanzodSigninOrigin,
 } from "./hanzodZapClient.ts";
 
-export { readHanzodSigninOrigin } from "./hanzodZapClient.ts";
-
 export interface SharedIdentityHost {
   readonly platform: string;
   readonly home: string;

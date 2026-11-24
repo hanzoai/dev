@@ -1,4 +1,3 @@
-
 /// The app's version is package.json's (tauri.conf.json reads it there). Cargo's
 /// cannot read a file, so the build refuses a Cargo.toml that disagrees rather than
 /// letting the two drift.

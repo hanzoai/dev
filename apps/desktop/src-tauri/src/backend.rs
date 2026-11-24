@@ -358,16 +358,32 @@ mod hanzod {
     }
 
     fn installed(program: &str) -> PathBuf {
-        let name = if cfg!(windows) { format!("{program}.exe") } else { program.to_string() };
-        dirs::home_dir().unwrap_or_default().join(".hanzo").join("bin").join(name)
+        let name = if cfg!(windows) {
+            format!("{program}.exe")
+        } else {
+            program.to_string()
+        };
+        dirs::home_dir()
+            .unwrap_or_default()
+            .join(".hanzo")
+            .join("bin")
+            .join(name)
     }
 
     /// A program the app ships, beside the server in its resources.
     fn bundled(program: &str) -> Option<PathBuf> {
-        let name = if cfg!(windows) { format!("{program}.exe") } else { program.to_string() };
+        let name = if cfg!(windows) {
+            format!("{program}.exe")
+        } else {
+            program.to_string()
+        };
         let exe = env::current_exe().ok()?;
         let dir = exe.parent()?;
-        for root in [dir.to_path_buf(), dir.join("Resources"), dir.join("../Resources")] {
+        for root in [
+            dir.to_path_buf(),
+            dir.join("Resources"),
+            dir.join("../Resources"),
+        ] {
             for prefix in [root.join("resources"), root] {
                 let found = prefix.join(&name);
                 if found.is_file() {
@@ -379,7 +395,10 @@ mod hanzod {
     }
 
     fn version_of(bin: &Path) -> Option<(u64, u64, u64)> {
-        let out = std::process::Command::new(bin).arg("--version").output().ok()?;
+        let out = std::process::Command::new(bin)
+            .arg("--version")
+            .output()
+            .ok()?;
         let text = String::from_utf8_lossy(&out.stdout);
         let v = text.split_whitespace().nth(1)?;
         let mut it = v.split('.').map(|p| p.parse::<u64>().ok());
@@ -416,7 +435,9 @@ mod hanzod {
     /// digest is the one pinned, so it is copied byte for byte and replaced when the digest differs.
     fn install_engine() {
         let target = installed("hanzo-engine");
-        let Some(bundle) = bundled("hanzo-engine") else { return };
+        let Some(bundle) = bundled("hanzo-engine") else {
+            return;
+        };
         if sha256_of(&bundle).ok() == sha256_of(&target).ok() {
             return;
         }
@@ -444,13 +465,16 @@ mod hanzod {
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "hanzod is not installed".to_string())?;
         let mut cmd = std::process::Command::new(&bin);
-        cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
             cmd.process_group(0);
         }
-        cmd.spawn().map_err(|e| format!("starting {}: {e}", bin.display()))?;
+        cmd.spawn()
+            .map_err(|e| format!("starting {}: {e}", bin.display()))?;
         for _ in 0..100 {
             if healthy().await {
                 return Ok(());
@@ -470,10 +494,15 @@ mod hanzod {
     /// Register the worker and have hanzod start it; returns its pid.
     pub async fn register(spec: serde_json::Value) -> Result<u32, String> {
         let body = serde_json::to_vec(&spec).map_err(|e| e.to_string())?;
-        let reply = call("POST", "/v1/dev/session", body).await.map_err(|e| e.to_string())?;
+        let reply = call("POST", "/v1/dev/session", body)
+            .await
+            .map_err(|e| e.to_string())?;
         let value: serde_json::Value = serde_json::from_slice(&reply.body).unwrap_or_default();
         if reply.status != 200 {
-            return Err(value["error"].as_str().unwrap_or("hanzod refused the Dev worker").to_string());
+            return Err(value["error"]
+                .as_str()
+                .unwrap_or("hanzod refused the Dev worker")
+                .to_string());
         }
         Ok(value["pid"].as_u64().unwrap_or(0) as u32)
     }
@@ -545,7 +574,10 @@ impl BackendSupervisor {
                     // The worker's whole environment: hanzod clears the rest.
                     let env = serde_json::json!([
                         ["PATH", augmented_path()],
-                        ["HOME", dirs::home_dir().unwrap_or_default().to_string_lossy()],
+                        [
+                            "HOME",
+                            dirs::home_dir().unwrap_or_default().to_string_lossy()
+                        ],
                         ["HANZO_DEV_DESKTOP_HOST_SCOPE", cfg.host_scope],
                     ]);
 
@@ -576,7 +608,9 @@ impl BackendSupervisor {
                         }
                         Err(err) => {
                             // Without hanzod the app runs the backend itself, as before.
-                            eprintln!("[hanzo-tauri] hanzod: {err}; running the Dev backend directly");
+                            eprintln!(
+                                "[hanzo-tauri] hanzod: {err}; running the Dev backend directly"
+                            );
                             daemon_flag.store(false, Ordering::SeqCst);
                             let Ok(bootstrap_json) = serde_json::to_vec(&bootstrap) else {
                                 break;
