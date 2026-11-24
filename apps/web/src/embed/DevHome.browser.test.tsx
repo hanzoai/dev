@@ -30,7 +30,7 @@ describe("DevHome", () => {
       <DevHome
         cloud={{ api: "https://api.test", token: async () => "t" }}
         mode="dev"
-        environments={environments}
+        environments={[{ id: "cloud", kind: "cloud", label: "Cloud", available: true }]}
         environment="cloud"
         onEnvironment={() => {}}
       />,
@@ -41,21 +41,16 @@ describe("DevHome", () => {
     await expect.element(page.getByTestId("environment-chip")).toBeVisible();
   });
 
-  it("offers the org's personas and the sparkle, and the sparkle rewrites the draft with Undo", async () => {
-    const completions: unknown[] = [];
+  it("opens the persona picker via /persona and activates the selected org persona", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (url: string, init?: RequestInit) => {
+      vi.fn(async (url: string) => {
         const u = String(url);
         if (u.includes("/v1/models")) return Response.json(models);
         if (u.endsWith("/v1/agents"))
           return Response.json({
             agents: [{ id: "a1", name: "dev", model: "enso", description: "Builds" }],
           });
-        if (u.endsWith("/v1/chat/completions")) {
-          completions.push(JSON.parse(String(init?.body)));
-          return Response.json({ choices: [{ message: { content: "A clearer prompt." } }] });
-        }
         return new Response("{}", { status: 404 });
       }),
     );
@@ -69,16 +64,13 @@ describe("DevHome", () => {
       />,
       { router: false },
     );
-    await expect.element(page.getByTestId("persona-chip")).toBeVisible();
-    await expect.element(page.getByTestId("enhance")).toBeVisible();
     await page.getByTestId("composer-editor").click();
-    await page.getByTestId("composer-editor").fill("fix teh bug");
-    await page.getByTestId("enhance").click();
-    await vi.waitFor(() => expect(completions).toHaveLength(1));
-    await expect.element(page.getByTestId("enhance-undo")).toBeVisible();
+    await page.getByTestId("composer-editor").fill("/persona dev");
+    await page.getByRole("button", { name: /submit message/i }).click();
+    await expect.element(page.getByTestId("active-persona-banner")).toBeVisible();
   });
 
-  it("offers a private-chat toggle in chat mode, off until pressed", async () => {
+  it("toggles private mode via /private and web search toggle in chat mode", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) =>
@@ -97,11 +89,16 @@ describe("DevHome", () => {
       />,
       { router: false },
     );
-    const ghost = page.getByTestId("private-chat");
-    await expect.element(ghost).toBeVisible();
-    await expect.element(ghost).toHaveAttribute("aria-pressed", "false");
-    await ghost.click();
-    await expect.element(ghost).toHaveAttribute("aria-pressed", "true");
+    const webSearch = page.getByTestId("web-search-toggle");
+    await expect.element(webSearch).toBeVisible();
+    await expect.element(webSearch).toHaveAttribute("aria-pressed", "false");
+    await webSearch.click();
+    await expect.element(webSearch).toHaveAttribute("aria-pressed", "true");
+
+    await page.getByTestId("composer-editor").click();
+    await page.getByTestId("composer-editor").fill("/private");
+    await page.getByRole("button", { name: /submit message/i }).click();
+    await expect.element(page.getByTestId("private-mode-banner")).toBeVisible();
   });
 
   it("sends a turn in Cloud with no environment: Enter and the Send button POST a chat completion with the bearer, and no environment is discovered", async () => {

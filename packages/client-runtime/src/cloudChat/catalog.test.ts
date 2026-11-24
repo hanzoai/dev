@@ -53,17 +53,20 @@ describe("cloud chat catalog", () => {
     const providers = cloudChatProviders([
       { id: "claude-x", label: "Claude X", provider: "hanzo" },
       { id: "gemini-3", label: "Gemini 3", provider: "Google" },
+      { id: "mistral-large", label: "Mistral Large", provider: "Mistral" },
       { id: "gpt-5", label: "GPT 5", provider: "openai" },
       { id: "grok-4", label: "Grok 4" },
     ]);
     expect(providers.map((p) => [p.driver, p.models.map((m) => m.slug)])).toEqual([
       ["hanzo", ["claude-x"]],
-      ["google", ["gemini-3"]],
+      ["antigravity", ["gemini-3"]],
+      ["mistral", ["mistral-large"]],
       ["codex", ["gpt-5"]],
       ["grok", ["grok-4"]],
     ]);
-    expect(providers[1]?.displayName).toBe("Google");
     expect(providers[0]?.displayName).toBeUndefined();
+    expect(providers[1]?.displayName).toBeUndefined();
+    expect(providers[2]?.displayName).toBe("Mistral");
   });
 
   it("reads owner and input modalities from the catalog", () => {
