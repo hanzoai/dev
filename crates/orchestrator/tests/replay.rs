@@ -46,3 +46,8 @@ fn guest_share() -> Result<(), Box<dyn std::error::Error>> {
 fn command_policy() -> Result<(), Box<dyn std::error::Error>> {
     replay(include_str!("../corpus/command_policy.jsonl"), 1000)
 }
+
+#[test]
+fn queued_run() -> Result<(), Box<dyn std::error::Error>> {
+    replay(include_str!("../corpus/queued_run.jsonl"), 1000)
+}
