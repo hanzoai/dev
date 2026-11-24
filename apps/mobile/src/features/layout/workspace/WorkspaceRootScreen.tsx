@@ -52,6 +52,7 @@ import { WorkspaceDrawerMenu } from "./WorkspaceDrawerMenu";
 import { closeWorkspaceDrawer } from "./workspace-drawer-store";
 import { useSelectWorkspaceTab } from "./useSelectWorkspaceTab";
 import { DevMacsList } from "./DevMacsList";
+import { DevProjectsList } from "./DevProjectsList";
 import { WorkspaceWebSection } from "./WorkspaceWebSection";
 import { useWorkspaceSection } from "./workspace-section-store";
 import { isWebSection } from "./workspace-section.logic";
@@ -66,16 +67,18 @@ function WorkspaceRootTitle(props: {
   const gt = useGT();
   const m = useMessages();
   const { state, settingsOpen } = useWorkspaceTabs()!;
-  const { section, macs } = useWorkspaceSection();
+  const { section, projects, macs } = useWorkspaceSection();
   const maxWidth = Math.max(0, props.columnWidth - (use(HeaderItemsWidthContext) ?? 160));
   const enabled = useEnabledNavigationTabs();
   const tabTitle = settingsOpen
     ? gt("Settings")
-    : section === "dev" && macs
-      ? gt("Macs")
-      : enabled.length
-        ? m(TAB_TITLES[state.selectedTab])
-        : gt("Navigation", { $context: "screen title when every navigation tab is hidden" });
+    : section === "dev" && projects
+      ? gt("Projects")
+      : section === "dev" && macs
+        ? gt("Macs")
+        : enabled.length
+          ? m(TAB_TITLES[state.selectedTab])
+          : gt("Navigation", { $context: "screen title when every navigation tab is hidden" });
   return (
     <View style={{ width: maxWidth, minHeight: 32, justifyContent: "center" }}>
       <WorkspaceConnectionTitle
@@ -150,7 +153,7 @@ function WorkspaceRootContent() {
   // Settings is a workspace tab too; its list takes the place of the selected tab's.
   const settingsOpen = workspace.settingsOpen;
   const headerOnly = use(NativeWorkspaceTabActivityContext)?.headerOnly === true;
-  const { section, macs } = useWorkspaceSection();
+  const { section, projects, macs } = useWorkspaceSection();
   const headerMode = phoneHeaderMode({
     drawer: drawer && !headerOnly,
     settingsOpen,
@@ -201,18 +204,21 @@ function WorkspaceRootContent() {
             enabled.length,
             headerShown,
             section,
+            projects,
             macs,
           ]}
           options={{
             title: settingsOpen
               ? gt("Settings")
-              : section === "dev" && macs
-                ? gt("Macs")
-                : enabled.length
-                  ? m(TAB_TITLES[state.selectedTab])
-                  : gt("Navigation", {
-                      $context: "screen title when every navigation tab is hidden",
-                    }),
+              : section === "dev" && projects
+                ? gt("Projects")
+                : section === "dev" && macs
+                  ? gt("Macs")
+                  : enabled.length
+                    ? m(TAB_TITLES[state.selectedTab])
+                    : gt("Navigation", {
+                        $context: "screen title when every navigation tab is hidden",
+                      }),
             headerShown,
             headerTransparent: NATIVE_LIQUID_GLASS_SUPPORTED,
             headerStyle: NATIVE_LIQUID_GLASS_SUPPORTED
@@ -263,6 +269,8 @@ function WorkspaceRootContent() {
               <WorkspaceWebSection section={section} />
             ) : drawer && section === "chat" ? (
               <PhoneChatLanding />
+            ) : drawer && section === "dev" && projects ? (
+              <DevProjectsList />
             ) : drawer && section === "dev" && macs ? (
               <DevMacsList />
             ) : enabled.length === 0 ? (

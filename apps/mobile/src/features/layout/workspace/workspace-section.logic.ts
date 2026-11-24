@@ -30,16 +30,16 @@ export function isWebSection(section: WorkspaceSection): section is WebSection {
 
 /**
  * What Dev holds: every list the app had before sections. Threads and Pulls/Issues are the
- * workspace tabs; Macs are the linked machines from discovery.
+ * workspace tabs; Projects lists the connected workspaces; Macs are the linked machines.
  */
-export type DevContent = NavigationTab | "macs";
+export type DevContent = NavigationTab | "projects" | "macs";
 
-/** The Dev section's own switcher, in order: the user's tab order, Macs after the lists. */
+/** The Dev section's own switcher, in order: the user's tab order, then Projects and Macs. */
 export function devContents(
   order: readonly unknown[] | undefined,
   hidden: readonly unknown[] | undefined,
 ): readonly DevContent[] {
-  return [...enabledNavigationTabs(order, hidden), "macs"];
+  return [...enabledNavigationTabs(order, hidden), "projects", "macs"];
 }
 
 /**
@@ -53,21 +53,46 @@ export function sectionOfTab(tab: NavigationTab, requested: WorkspaceSection): W
 
 export interface SectionState {
   readonly section: WorkspaceSection;
+  /** Whether Dev shows the projects list instead of a workspace list. */
+  readonly projects: boolean;
   /** Whether Dev shows the linked Macs instead of a workspace list. */
   readonly macs: boolean;
 }
 
-export const INITIAL_SECTION_STATE: SectionState = { section: DEFAULT_SECTION, macs: false };
+export const INITIAL_SECTION_STATE: SectionState = {
+  section: DEFAULT_SECTION,
+  projects: false,
+  macs: false,
+};
 
 export function sectionReducer(
   state: SectionState,
   action:
     | { readonly type: "open"; readonly section: WorkspaceSection }
+    | { readonly type: "projects"; readonly projects: boolean }
     | { readonly type: "macs"; readonly macs: boolean },
 ): SectionState {
   const next =
     action.type === "open"
-      ? { section: action.section, macs: action.section === "dev" ? state.macs : false }
-      : { section: state.section, macs: action.macs };
-  return next.section === state.section && next.macs === state.macs ? state : next;
+      ? {
+          section: action.section,
+          projects: action.section === "dev" ? state.projects : false,
+          macs: action.section === "dev" ? state.macs : false,
+        }
+      : action.type === "projects"
+        ? {
+            section: state.section,
+            projects: action.projects,
+            macs: action.projects ? false : state.macs,
+          }
+        : {
+            section: state.section,
+            projects: action.macs ? false : state.projects,
+            macs: action.macs,
+          };
+  return next.section === state.section &&
+    next.projects === state.projects &&
+    next.macs === state.macs
+    ? state
+    : next;
 }
