@@ -13,6 +13,8 @@ export type PluginId = typeof PluginId.Type;
 export const Plugin = Schema.Struct({
   id: PluginId,
   name: TrimmedNonEmptyString,
+  /** Provider that owns this plugin (e.g. "claude", "codex", "antigravity"). */
+  provider: Schema.optionalKey(TrimmedNonEmptyString),
   marketplace: Schema.NullOr(TrimmedNonEmptyString),
   version: Schema.NullOr(TrimmedString),
   description: Schema.NullOr(TrimmedString),
