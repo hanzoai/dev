@@ -1517,7 +1517,6 @@
   "30c3acfa1f5a1f4e": "Cole sua chave de API",
   "91db467ba740171f": "Chave de API da Hanzo",
   "a658cdcd4c5c220d": "Entre na Hanzo",
-  "a6b213aed0a5ac01": "Entre para conversar e controlar o Hanzo Dev no seu Mac pelo celular.",
   "7fcc196f346d07a8": "Continuar com a Hanzo",
   "d902c58ac1103551": "Ocultar chave de API",
   "79c9acda7b68c762": "Usar uma chave de API",
@@ -12491,5 +12490,7 @@
   "27d76249d09eb69f": "Guia de revisão pronto",
   "faa3bb26abb39c93": "O guia de revisão falhou",
   "b7df38b7d8792d78": "Abrir guia",
-  "9e91e9a77b664e4e": "Não foi possível iniciar um guia de revisão"
+  "9e91e9a77b664e4e": "Não foi possível iniciar um guia de revisão",
+  "8f6bfaad6d4285fc": "Entrar no Hanzo Dev",
+  "a04b8d1db28e305b": "Agentes de programação na nuvem, espaços de trabalho locais e computadores conectados."
 }

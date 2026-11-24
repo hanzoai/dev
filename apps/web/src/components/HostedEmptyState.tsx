@@ -1,4 +1,5 @@
 import { useCloudChat } from "../cloud/cloudChat";
+import { HanzoDevAppIcon, HanzoLoginFooter, HanzoLoginMasthead } from "../cloud/HanzoSignInPanel";
 import { useAuth } from "../cloud/hanzoWebAuth";
 import type { EnvironmentId } from "@hanzodev/contracts";
 import { Link, useRouter } from "@tanstack/react-router";
@@ -10,6 +11,7 @@ import { APP_DISPLAY_NAME } from "~/branding";
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { useEnvironmentDiscovery } from "~/cloud/environmentDiscovery";
 import { isElectron } from "../env";
+import { isMacPlatform } from "../lib/utils";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { useRelayEnvironmentDiscovery } from "../state/environments";
 import { useHanzoConnectAuthPrompt } from "./account/useHanzoConnectAuthPrompt";
@@ -25,6 +27,21 @@ import { WorkspacePageHeader } from "./WorkspacePageHeader";
 export function HostedEmptyState() {
   const localEnvironmentOff = isLocalEnvironmentDisabled();
   const cloudEnabled = hasCloudPublicConfig();
+  const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
+
+  if (!localEnvironmentOff && cloudEnabled) {
+    const landing = hostedLanding({ isLoaded, isSignedIn });
+    if (landing === "loading") {
+      return (
+        <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
+          <div className="flex-1 bg-black" />
+        </SidebarInset>
+      );
+    }
+    if (landing === "sign-in") {
+      return <SignInLanding />;
+    }
+  }
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none">
@@ -55,7 +72,7 @@ export function HostedEmptyState() {
             </Button>
           </Empty>
         ) : cloudEnabled ? (
-          <HostedCloudLanding />
+          <ChatLanding />
         ) : (
           <Empty className="flex-1">
             <EmptyHeader>
@@ -76,21 +93,57 @@ export function HostedEmptyState() {
   );
 }
 
-function HostedCloudLanding() {
-  const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
-  const landing = hostedLanding({ isLoaded, isSignedIn });
-  if (landing === "loading") return null;
-  return landing === "sign-in" ? <SignInLanding /> : <ChatLanding />;
-}
-
 function SignInLanding() {
   const { openAuthPrompt } = useHanzoConnectAuthPrompt();
+  const macDesktop =
+    isElectron && typeof navigator !== "undefined" && isMacPlatform(navigator.platform);
+
   return (
-    <Empty className="flex-1">
-      <Button size="lg" onClick={openAuthPrompt}>
-        <T>Sign in to Hanzo</T>
-      </Button>
-    </Empty>
+    <SidebarInset className="h-dvh min-h-0 overflow-y-auto overscroll-y-none">
+      <div
+        data-testid="hanzo-dev-signin-landing"
+        style={{
+          flex: 1,
+          minHeight: "100dvh",
+          width: "100%",
+          backgroundColor: "#000000",
+          color: "#fafafa",
+          padding: "0 0 20px",
+          boxSizing: "border-box",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <HanzoLoginMasthead desktop={isElectron} macDesktop={macDesktop} />
+
+        <main
+          className="my-auto flex w-full flex-col items-center gap-5 px-5 py-6 text-center"
+          style={{ maxWidth: 420 }}
+        >
+          <HanzoDevAppIcon size={64} />
+          <div className="space-y-2">
+            <h1 className="text-2xl font-semibold tracking-tight" style={{ color: "#fafafa" }}>
+              <T>Sign in to Hanzo Dev</T>
+            </h1>
+            <p className="text-sm" style={{ color: "#a1a1aa" }}>
+              <T>Cloud coding agents, local workspaces, and connected computers.</T>
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={openAuthPrompt}
+            className="inline-flex h-11 w-full cursor-pointer items-center justify-center rounded-full bg-white px-6 text-sm font-semibold text-black transition-colors hover:bg-white/90"
+            style={{ maxWidth: 360 }}
+          >
+            <T>Continue with Hanzo</T>
+          </button>
+        </main>
+
+        <HanzoLoginFooter />
+      </div>
+    </SidebarInset>
   );
 }
 

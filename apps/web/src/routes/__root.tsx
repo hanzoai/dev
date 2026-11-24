@@ -15,6 +15,8 @@ import { CheckIcon, CopyIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { APP_DISPLAY_NAME, APP_VERSION } from "../branding";
+import { useAuth } from "../cloud/hanzoWebAuth";
+import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
 import { CustomSnoozeDialogHost } from "../components/CustomSnoozeDialog";
@@ -61,6 +63,7 @@ import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { useAtomValue } from "@effect/atom-react";
 import { primaryServerConfigAtom, primaryServerWelcomeAtom } from "../state/server";
 import { readProject } from "../state/entities";
+import { useEnvironments } from "../state/environments";
 
 import { getDesktopSnapShotBridge } from "../lib/desktopSnapShot";
 import { isChunkLoadError } from "../lib/chunkReloadGuard";
@@ -170,6 +173,15 @@ function RootRouteBranch() {
   const hostedPromptLinkLanding = useHostedPromptLinkLanding(
     authGateState.status === "hosted-static",
   );
+  const { isSignedIn: isCloudSignedIn } = useAuth({ treatPendingAsSignedOut: false });
+  const { environments } = useEnvironments();
+  const isHostedSignedOutLanding =
+    authGateState.status === "hosted-static" &&
+    pathname === "/" &&
+    !localEnvironmentDisabled &&
+    hasCloudPublicConfig() &&
+    environments.length === 0 &&
+    !isCloudSignedIn;
 
   if (embed)
     return (
@@ -228,8 +240,8 @@ function RootRouteBranch() {
   );
   const appShell = (
     <CommandPalette>
-      {/* Setup starts with an empty workspace, so the Welcome page has no thread list. */}
-      <AppSidebarLayout showSidebar={!isWelcome}>
+      {/* Setup and the signed-out hosted login page have no thread list. */}
+      <AppSidebarLayout showSidebar={!isWelcome && !isHostedSignedOutLanding}>
         <Outlet />
       </AppSidebarLayout>
     </CommandPalette>

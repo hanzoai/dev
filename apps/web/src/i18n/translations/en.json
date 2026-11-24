@@ -1517,7 +1517,6 @@
   "30c3acfa1f5a1f4e": "Paste your API key",
   "91db467ba740171f": "Hanzo API key",
   "a658cdcd4c5c220d": "Sign in to Hanzo",
-  "a6b213aed0a5ac01": "Sign in to chat, and to control Hanzo Dev on your Mac from your phone.",
   "7fcc196f346d07a8": "Continue with Hanzo",
   "d902c58ac1103551": "Hide API key",
   "79c9acda7b68c762": "Use an API key",
@@ -12501,5 +12500,7 @@
   "27d76249d09eb69f": "Review guide ready",
   "faa3bb26abb39c93": "Review guide failed",
   "b7df38b7d8792d78": "Open guide",
-  "9e91e9a77b664e4e": "Could not start a review guide"
+  "9e91e9a77b664e4e": "Could not start a review guide",
+  "8f6bfaad6d4285fc": "Sign in to Hanzo Dev",
+  "a04b8d1db28e305b": "Cloud coding agents, local workspaces, and connected computers."
 }

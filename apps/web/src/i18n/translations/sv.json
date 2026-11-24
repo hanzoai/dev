@@ -1517,7 +1517,6 @@
   "30c3acfa1f5a1f4e": "Klistra in din API-nyckel",
   "91db467ba740171f": "Hanzo API-nyckel",
   "a658cdcd4c5c220d": "Logga in på Hanzo",
-  "a6b213aed0a5ac01": "Logga in för att chatta och styra Hanzo Dev på din Mac från telefonen.",
   "7fcc196f346d07a8": "Fortsätt med Hanzo",
   "d902c58ac1103551": "Dölj API-nyckel",
   "79c9acda7b68c762": "Använd en API-nyckel",
@@ -12499,5 +12498,7 @@
   "27d76249d09eb69f": "Granskningsguiden är klar",
   "faa3bb26abb39c93": "Granskningsguiden misslyckades",
   "b7df38b7d8792d78": "Öppna guiden",
-  "9e91e9a77b664e4e": "Kunde inte starta en granskningsguide"
+  "9e91e9a77b664e4e": "Kunde inte starta en granskningsguide",
+  "8f6bfaad6d4285fc": "Logga in på Hanzo Dev",
+  "a04b8d1db28e305b": "Kodningsagenter i molnet, lokala arbetsytor och anslutna datorer."
 }
