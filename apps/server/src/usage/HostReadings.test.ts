@@ -1,7 +1,12 @@
 import { assert, describe, it } from "@effect/vitest";
-import type { ServerProvider, UsageBucket } from "@hanzodev/contracts";
+import {
+  SecretProviderId,
+  type ServerProvider,
+  type ServerSettings,
+  type UsageBucket,
+} from "@hanzodev/contracts";
 
-import { catalogId, costDays, snapshotOf } from "./HostReadings.ts";
+import { catalogId, collectUsageEnvFromSettings, costDays, snapshotOf } from "./HostReadings.ts";
 
 const provider = (driver: string, windows: unknown[], unavailable?: unknown) =>
   ({
@@ -72,5 +77,37 @@ describe("HostReadings", () => {
       [days[0]!.day, days[0]!.outputTokens, days[0]!.cacheTokens, days[0]!.costUsd],
       ["2026-11-19", 12, 10, 0.75],
     );
+  });
+  it("extracts usage API keys and secret references from enabled provider instance environments", () => {
+    const ref = {
+      provider: SecretProviderId.make("onepassword"),
+      reference: "op://vault/deepseek/credential",
+    };
+    const settings = {
+      providerInstances: {
+        disabled: {
+          driver: "codex",
+          enabled: false,
+          environment: [{ name: "OPENROUTER_API_KEY", value: "sk-disabled", sensitive: true }],
+        },
+        work: {
+          driver: "codex",
+          enabled: true,
+          environment: [
+            { name: "OPENROUTER_API_KEY", value: "  sk-or-secret  ", sensitive: true },
+            { name: "ZAI_API_KEY", value: "sk-zai", sensitive: true },
+            { name: "DEEPSEEK_API_KEY", value: ref, sensitive: true },
+            { name: "UNRELATED_SECRET", value: "should-not-leak", sensitive: true },
+          ],
+        },
+      },
+    } as unknown as ServerSettings;
+
+    const { env, secretRefs } = collectUsageEnvFromSettings(settings);
+    assert.deepStrictEqual(env, {
+      OPENROUTER_API_KEY: "sk-or-secret",
+      ZAI_API_KEY: "sk-zai",
+    });
+    assert.deepStrictEqual(secretRefs, [{ name: "DEEPSEEK_API_KEY", reference: ref }]);
   });
 });

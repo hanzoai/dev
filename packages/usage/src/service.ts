@@ -25,6 +25,8 @@ export interface HostReadings {
   readonly instances: ReadonlyArray<Instance & { readonly provider: string }>;
   readonly local: ReadonlyArray<ProviderSnapshot>;
   readonly cost: ReadonlyArray<CostDay>;
+  /** Provider API keys resolved from configured instance environments and secrets. */
+  readonly env?: Readonly<Record<string, string | undefined>>;
 }
 
 const failure = (env: UsageEnv, provider: string, error: string): ProviderSnapshot => ({
@@ -116,10 +118,21 @@ export const createUsageService = (
   let notified: NotifyState = new Map();
   let cost: ReadonlyArray<CostDay> = [];
 
+  const withExtraEnv = (
+    extra: Readonly<Record<string, string | undefined>> | undefined,
+  ): UsageEnv => {
+    if (!extra) return env;
+    const entries = Object.entries(extra).filter(([, v]) => typeof v === "string" && v.trim());
+    return entries.length > 0
+      ? { ...env, env: { ...env.env, ...Object.fromEntries(entries) } }
+      : env;
+  };
+
   const refresh = async (
     host: HostReadings,
   ): Promise<{ summary: UsageSummary; alerts: LimitAlert[] }> => {
     const settings = getSettings();
+    const refreshEnv = withExtraEnv(host.env);
     const ids = CATALOG.map((p) => p.id).filter((id) =>
       isEnabled(
         settings,
@@ -131,7 +144,7 @@ export const createUsageService = (
       ids.map((id) =>
         budgeted(id, () =>
           refreshOne(
-            env,
+            refreshEnv,
             id,
             host.local.filter((s) => s.provider === id),
             host.instances.filter((i) => i.provider === id),
@@ -167,12 +180,14 @@ export const createUsageService = (
   const connect = async (
     id: string,
     instances: ReadonlyArray<Instance>,
+    extraEnv?: Readonly<Record<string, string | undefined>>,
   ): Promise<ProviderSnapshot[]> => {
     const connector = CONNECTORS[id];
     if (!connector) return [failure(env, id, "This provider has no connect step.")];
+    const connectEnv = withExtraEnv(extraEnv);
     return [
-      ...(await connector(env, instances).catch((e: unknown) => [
-        failure(env, id, e instanceof Error ? e.message : String(e)),
+      ...(await connector(connectEnv, instances).catch((e: unknown) => [
+        failure(connectEnv, id, e instanceof Error ? e.message : String(e)),
       ])),
     ];
   };

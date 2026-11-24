@@ -101,9 +101,10 @@ export const createUsageRuntime = (stateDir: string, host: HostFacts) => {
     summary: current,
     refresh,
     connect: async (provider: string, host: () => Promise<HostReadings>): Promise<UsageSummary> => {
-      const instances = (await host()).instances.filter((i) => i.provider === provider);
-      const readings = await service.connect(provider, instances);
-      const good = readings.filter((s) => s.windows.length > 0);
+      const readings = await host();
+      const instances = readings.instances.filter((i) => i.provider === provider);
+      const result = await service.connect(provider, instances, readings.env);
+      const good = result.filter((s) => s.windows.length > 0);
       const store = await loadConnected();
       if (good.length > 0) {
         connected = { ...store, [provider]: good };
@@ -113,7 +114,7 @@ export const createUsageRuntime = (stateDir: string, host: HostFacts) => {
       summary = undefined;
       const next = await refresh(host);
       // Why a connect failed is told once, in the row the user is looking at.
-      const failure = good.length === 0 ? readings.find((s) => s.error) : undefined;
+      const failure = good.length === 0 ? result.find((s) => s.error) : undefined;
       return failure
         ? {
             ...next,
