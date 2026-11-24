@@ -61,7 +61,7 @@ export async function readSharedIdentity(
             clientId: "hanzo-app",
             accessToken: zapToken.accessToken,
             refreshToken: existing?.refreshToken ?? null,
-            idToken: existing?.idToken ?? null,
+            idToken: null,
             userinfo: {
               sub: zapIdentity.name,
               owner: zapIdentity.owner,

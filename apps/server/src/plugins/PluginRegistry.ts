@@ -64,7 +64,7 @@ export const listPlugins = Effect.fn("PluginRegistry.list")(function* (
 
   // Only surface Claude's error if no other provider contributed any plugins.
   if (claudeResult._tag === "Failure" && installed.length === 0 && offered.length === 0) {
-    return yield* Effect.fail(claudeResult.failure);
+    return yield* claudeResult.failure;
   }
 
   return {
