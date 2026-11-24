@@ -53,6 +53,19 @@ const readManifest = async (
 export const isAntigravityPluginId = (id: string): boolean =>
   id.endsWith(`@${ANTIGRAVITY_PLUGIN_MARKETPLACE}`);
 
+function parseJsonObject(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return isRecord(parsed) ? { ...parsed } : {};
+  } catch {
+    return null;
+  }
+}
+
+function serializeJsonObject(value: Record<string, unknown>): string {
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
 export const listAntigravityPlugins = Effect.fn("AntigravityPlugins.list")(function* (
   geminiHome: string,
   query: string | undefined,
@@ -67,17 +80,9 @@ export const listAntigravityPlugins = Effect.fn("AntigravityPlugins.list")(funct
     if (dirs.length === 0) return { plugins: [], more: 0 };
 
     const configRaw = await readText(NodePath.join(geminiHome, "config", "config.json"));
-    let pluginPrefs: Record<string, unknown> = {};
-    if (configRaw) {
-      try {
-        const parsed = JSON.parse(configRaw) as unknown;
-        if (isRecord(parsed) && isRecord(parsed.plugins)) {
-          pluginPrefs = parsed.plugins;
-        }
-      } catch {
-        // Treat unreadable config.json as defaults (all enabled).
-      }
-    }
+    const parsedConfig = configRaw ? parseJsonObject(configRaw) : null;
+    const pluginPrefs: Record<string, unknown> =
+      parsedConfig && isRecord(parsedConfig.plugins) ? parsedConfig.plugins : {};
 
     const needle = query?.trim().toLowerCase() ?? "";
     const plugins: Plugin[] = [];
@@ -121,12 +126,11 @@ export const setAntigravityPluginEnabled = Effect.fn("AntigravityPlugins.setEnab
   const raw = yield* Effect.promise(() => readText(configPath));
   let root: Record<string, unknown> = {};
   if (raw?.trim()) {
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (isRecord(parsed)) root = { ...parsed };
-    } catch {
+    const parsed = parseJsonObject(raw);
+    if (parsed === null) {
       return yield* failed("Antigravity config.json is not valid JSON");
     }
+    root = parsed;
   }
   const existingPlugins = isRecord(root.plugins) ? { ...root.plugins } : {};
   const existingEntry = isRecord(existingPlugins[name]) ? { ...existingPlugins[name] } : {};
@@ -136,7 +140,7 @@ export const setAntigravityPluginEnabled = Effect.fn("AntigravityPlugins.setEnab
   yield* Effect.tryPromise({
     try: async () => {
       await NodeFSP.mkdir(configDir, { recursive: true });
-      await NodeFSP.writeFile(configPath, `${JSON.stringify(root, null, 2)}\n`, "utf8");
+      await NodeFSP.writeFile(configPath, serializeJsonObject(root), "utf8");
     },
     catch: (cause) =>
       failed(cause instanceof Error ? cause.message : "could not update Antigravity config.json"),

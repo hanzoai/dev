@@ -103,7 +103,7 @@ describe("ZAP-HTTP framing", () => {
     expect(decodedReq.method).toBe("GET");
     expect(decodedReq.target).toBe("/v1/identity/token");
     expect(decodedReq.headers).toEqual([["Content-Type", "application/json"]]);
-    expect(decodedReq.body?.toString("utf8")).toBe("{}");
+    expect(Buffer.from(decodedReq.body ?? []).toString("utf8")).toBe("{}");
 
     const res = jsonResponse(200, { access_token: "tok-123" });
     const decodedRes = decodeZapHttpResponse(encodeZapHttpResponse(res));
