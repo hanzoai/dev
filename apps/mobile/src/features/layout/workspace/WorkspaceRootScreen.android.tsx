@@ -147,17 +147,13 @@ function WorkspaceRoot() {
     <WorkspaceTabsContext value={context}>
       <View className={layout.usesSplitView ? "flex-1 bg-screen" : "flex-1 bg-header"}>
         {drawer ? <NativeStackScreenOptions options={{ headerShown: false }} /> : null}
-        {drawer ? (
-          <WorkspaceDrawer
-            enabled={focused}
-            menu={<WorkspaceDrawerMenu />}
-            floating={<PhoneFloatingHeader top={insets.top + 4} />}
-          >
-            {content}
-          </WorkspaceDrawer>
-        ) : (
-          content
-        )}
+        <WorkspaceDrawer
+          enabled={drawer && focused}
+          menu={<WorkspaceDrawerMenu />}
+          floating={drawer ? <PhoneFloatingHeader top={insets.top + 4} /> : null}
+        >
+          {content}
+        </WorkspaceDrawer>
       </View>
     </WorkspaceTabsContext>
   );

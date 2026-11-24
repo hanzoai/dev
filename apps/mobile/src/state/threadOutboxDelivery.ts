@@ -51,8 +51,15 @@ import {
   retainAcknowledgedThreadMessage,
   forgetAcknowledgedThreadMessage,
 } from "./acknowledged-thread-messages";
-import { hanzoMobileAuthStore } from "../features/cloud/hanzoMobileAuth";
 import { isThreadMemoryEnabled, transferThreadMemorySetting } from "./memory-switch";
+
+async function loadMobileMemoriesSystemContext(): Promise<string | undefined> {
+  const { hanzoMobileAuthStore } = await import("../features/cloud/hanzoMobileAuth");
+  return loadMemoriesSystemContext({
+    accessToken: await hanzoMobileAuthStore.getToken(),
+    orgId: hanzoMobileAuthStore.getSnapshot().activeOrgId,
+  });
+}
 import { appAtomRegistry } from "./atom-registry";
 import { newTaskDraftKey, restoredNewTaskDraftKey } from "./new-task-draft-key";
 import {
@@ -991,12 +998,7 @@ export function createThreadOutboxDelivery(): {
     if (!hasAccess()) return;
     const threadKey = scopedThreadKey(queuedMessage.environmentId, queuedMessage.threadId);
     const systemContext = isThreadMemoryEnabled(threadKey)
-      ? yield* Effect.promise(async () =>
-          loadMemoriesSystemContext({
-            accessToken: await hanzoMobileAuthStore.getToken(),
-            orgId: hanzoMobileAuthStore.getSnapshot().activeOrgId,
-          }),
-        )
+      ? yield* Effect.promise(async () => loadMobileMemoriesSystemContext())
       : undefined;
     const deliveryResult = yield* deliveryCommand(threadEnvironment.startTurn, {
       environmentId: queuedMessage.environmentId,
@@ -1185,12 +1187,7 @@ export function createThreadOutboxDelivery(): {
       transferThreadMemorySetting(projectDraftKey, threadKey);
     }
     const systemContext = isThreadMemoryEnabled(threadKey)
-      ? yield* Effect.promise(async () =>
-          loadMemoriesSystemContext({
-            accessToken: await hanzoMobileAuthStore.getToken(),
-            orgId: hanzoMobileAuthStore.getSnapshot().activeOrgId,
-          }),
-        )
+      ? yield* Effect.promise(async () => loadMobileMemoriesSystemContext())
       : undefined;
     const deliveryResult = yield* deliveryCommand(threadEnvironment.startTurn, {
       environmentId: queuedMessage.environmentId,
