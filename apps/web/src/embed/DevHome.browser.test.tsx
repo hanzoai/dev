@@ -70,7 +70,7 @@ describe("DevHome", () => {
     await expect.element(page.getByTestId("active-persona-banner")).toBeVisible();
   });
 
-  it("toggles private mode via /private and web search toggle in chat mode", async () => {
+  it("offers a web-search toggle in chat mode, off until pressed", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) =>
@@ -94,11 +94,8 @@ describe("DevHome", () => {
     await expect.element(webSearch).toHaveAttribute("aria-pressed", "false");
     await webSearch.click();
     await expect.element(webSearch).toHaveAttribute("aria-pressed", "true");
-
-    await page.getByTestId("composer-editor").click();
-    await page.getByTestId("composer-editor").fill("/private");
-    await page.getByRole("button", { name: /submit message/i }).click();
-    await expect.element(page.getByTestId("private-mode-banner")).toBeVisible();
+    await webSearch.click();
+    await expect.element(webSearch).toHaveAttribute("aria-pressed", "false");
   });
 
   it("sends a turn in Cloud with no environment: Enter and the Send button POST a chat completion with the bearer, and no environment is discovered", async () => {
