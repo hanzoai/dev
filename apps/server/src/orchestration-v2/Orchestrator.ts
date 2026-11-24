@@ -156,6 +156,11 @@ import {
   decideGuestShareCommand,
   type GuestShareCommand,
 } from "./GuestShareDecider.ts";
+import {
+  decideQueuedRunCancel,
+  decideQueuedRunEdit,
+  decideQueuedRunReorder,
+} from "./QueuedRunDecider.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
 import { withCommandMetrics } from "../observability/Metrics.ts";
 import type { OrchestrationEffectRequestV2, PendingOrchestrationEffectV2 } from "./EffectOutbox.ts";
@@ -11736,67 +11741,31 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       messageRoles: ["user"],
     });
     const queuedRuns = queuedRunsInDeliveryOrder(projection);
-    const moving = queuedRuns.find((run) => run.id === command.runId);
-    if (moving === undefined) {
+    const decision = decideQueuedRunReorder({
+      queuedRuns: queuedRuns.map((run) => ({
+        id: run.id,
+        queuePosition: run.queuePosition ?? null,
+        isAutomaticCompletion: isAutomaticCompletionRun(projection, run),
+      })),
+      runId: command.runId,
+      beforeRunId: command.beforeRunId,
+    });
+    if (Result.isFailure(decision)) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
         commandType: command.type,
-        cause: `Run ${command.runId} is not queued.`,
+        cause: decision.failure,
       });
     }
-    const movingMessage = projection.messages.find(
-      (candidate) => candidate.id === moving.userMessageId,
-    );
-    if (
-      movingMessage?.delegatedCompletion !== undefined ||
-      movingMessage?.notification !== undefined
-    ) {
-      return yield* new OrchestratorDispatchError({
-        commandId: command.commandId,
-        commandType: command.type,
-        cause: "Automatic completion deliveries cannot be reordered.",
-      });
-    }
-    const automaticRuns = queuedRuns.filter((run) => isAutomaticCompletionRun(projection, run));
-    if (
-      command.beforeRunId !== null &&
-      automaticRuns.some((run) => run.id === command.beforeRunId)
-    ) {
-      return yield* new OrchestratorDispatchError({
-        commandId: command.commandId,
-        commandType: command.type,
-        cause: "Queued messages cannot be reordered ahead of automatic completion delivery.",
-      });
-    }
-    const reorderableRuns = queuedRuns.filter((run) => !isAutomaticCompletionRun(projection, run));
-    const withoutMoving = reorderableRuns.filter((run) => run.id !== command.runId);
-    const beforeIndex =
-      command.beforeRunId === null
-        ? withoutMoving.length
-        : withoutMoving.findIndex((run) => run.id === command.beforeRunId);
-    if (beforeIndex === -1) {
-      return yield* new OrchestratorDispatchError({
-        commandId: command.commandId,
-        commandType: command.type,
-        cause: `Queue target ${command.beforeRunId} is not queued.`,
-      });
-    }
-    const reordered = [
-      ...automaticRuns,
-      ...withoutMoving.slice(0, beforeIndex),
-      moving,
-      ...withoutMoving.slice(beforeIndex),
-    ];
+    const runsById = new Map(queuedRuns.map((run) => [run.id, run] as const));
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
     yield* Effect.forEach(
-      reordered,
-      (run, index) =>
+      decision.success,
+      ({ runId, queuePosition }) =>
         Effect.gen(function* () {
-          const queuePosition = index + 1;
-          if (run.queuePosition === queuePosition) {
-            return;
-          }
+          const run = runsById.get(runId);
+          if (run === undefined) return;
           yield* emitEvent({
             type: "run.updated",
             threadId: command.threadId,
@@ -11832,11 +11801,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       },
     );
     const queuedRun = projection.runs.find((candidate) => candidate.id === command.runId);
-    if (queuedRun === undefined || queuedRun.status !== "queued") {
+    const cancelDecision = decideQueuedRunCancel({
+      runId: command.runId,
+      run: queuedRun === undefined ? null : { id: queuedRun.id, status: queuedRun.status },
+    });
+    if (Result.isFailure(cancelDecision) || queuedRun === undefined) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
         commandType: command.type,
-        cause: `Run ${command.runId} is not queued.`,
+        cause: Result.isFailure(cancelDecision)
+          ? cancelDecision.failure
+          : `Run ${command.runId} is not queued.`,
       });
     }
     const queuedMessage = projection.messages.find(
@@ -11880,10 +11855,20 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     effects: Ref.Ref<Array<PendingOrchestrationEffectV2>>,
   ) {
     if (command.text.trim().length === 0) {
+      const emptyDecision = decideQueuedRunEdit({
+        runId: command.runId,
+        text: command.text,
+        run: null,
+        hasMessage: false,
+        isAutomaticCompletion: false,
+        isGuest: false,
+      });
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
         commandType: command.type,
-        cause: `Queued run ${command.runId} cannot be edited to an empty message.`,
+        cause: Result.isFailure(emptyDecision)
+          ? emptyDecision.failure
+          : `Queued run ${command.runId} cannot be edited to an empty message.`,
       });
     }
     const projection = yield* loadProjectionForCommand(command, ["runs", "messages", "turnItems"], {
@@ -11891,39 +11876,27 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       messageRoles: ["user"],
     });
     const queuedRun = projection.runs.find((candidate) => candidate.id === command.runId);
-    if (queuedRun === undefined || queuedRun.status !== "queued") {
+    const queuedMessage =
+      queuedRun === undefined
+        ? undefined
+        : projection.messages.find((candidate) => candidate.id === queuedRun.userMessageId);
+    const editDecision = decideQueuedRunEdit({
+      runId: command.runId,
+      text: command.text,
+      run: queuedRun === undefined ? null : { id: queuedRun.id, status: queuedRun.status },
+      hasMessage: queuedMessage !== undefined,
+      isAutomaticCompletion:
+        queuedMessage?.delegatedCompletion !== undefined ||
+        queuedMessage?.notification !== undefined,
+      isGuest: queuedMessage?.context?.guest !== undefined,
+    });
+    if (Result.isFailure(editDecision) || queuedRun === undefined || queuedMessage === undefined) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
         commandType: command.type,
-        cause: `Run ${command.runId} is not queued.`,
-      });
-    }
-    const queuedMessage = projection.messages.find(
-      (candidate) => candidate.id === queuedRun.userMessageId,
-    );
-    if (queuedMessage === undefined) {
-      return yield* new OrchestratorDispatchError({
-        commandId: command.commandId,
-        commandType: command.type,
-        cause: `Queued run ${queuedRun.id} has no user message.`,
-      });
-    }
-    if (
-      queuedMessage.delegatedCompletion !== undefined ||
-      queuedMessage.notification !== undefined
-    ) {
-      return yield* new OrchestratorDispatchError({
-        commandId: command.commandId,
-        commandType: command.type,
-        cause: "Automatic completion deliveries cannot be edited.",
-      });
-    }
-    // The agent text and the shown text of a guest message must stay the guest's words.
-    if (queuedMessage.context?.guest !== undefined) {
-      return yield* new OrchestratorDispatchError({
-        commandId: command.commandId,
-        commandType: command.type,
-        cause: "A guest's message cannot be edited. Cancel it instead.",
+        cause: Result.isFailure(editDecision)
+          ? editDecision.failure
+          : `Run ${command.runId} is not queued.`,
       });
     }
     yield* ensureGoalCommandSupported(
