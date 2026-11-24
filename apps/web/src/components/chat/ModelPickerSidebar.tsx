@@ -1,5 +1,6 @@
 import { Toolbar } from "@base-ui/react/toolbar";
 import { type ProviderInstanceId } from "@hanzodev/contracts";
+import { isLocalEngineInstanceId } from "@hanzodev/shared/localAi";
 import { Fragment, memo, useLayoutEffect, useRef, useState } from "react";
 import { msg, T, useMessages } from "gt-react";
 import { PlusIcon, StarIcon } from "lucide-react";
@@ -13,6 +14,16 @@ import {
   shouldShowInstanceBadge,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
+
+export type LocalEngineHealth = "ready" | "error" | "warning";
+
+/** Health dot state for a local AI engine instance in the composer model picker. */
+export function localEngineHealthStatus(entry: ProviderInstanceEntry): LocalEngineHealth | null {
+  if (!isLocalEngineInstanceId(entry.instanceId)) return null;
+  if (entry.status === "ready" && entry.isAvailable) return "ready";
+  if (entry.status === "error" || !entry.isAvailable) return "error";
+  return "warning";
+}
 
 function describeUnavailableInstance(
   entry: ProviderInstanceEntry,
@@ -171,6 +182,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                 ? (props.getDisabledInstanceTooltip?.(entry) ?? entry.displayName)
                 : entry.displayName;
 
+            const engineHealth = localEngineHealthStatus(entry);
             const button = (
               <Toolbar.Button
                 className={cn(
@@ -178,6 +190,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                   isDisabled && "opacity-50 cursor-not-allowed hover:bg-transparent",
                 )}
                 data-provider-accent-color={entry.accentColor}
+                {...(engineHealth ? { "data-engine-health": engineHealth } : {})}
                 onClick={() => !isDisabled && handleSelect(entry.instanceId)}
                 onMouseEnter={() => setHoveredInstanceId(entry.instanceId)}
                 onMouseLeave={() =>
@@ -211,6 +224,21 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                   }
                   {...(entry.accentColor ? { badgeClassName: "h-3 min-w-3 px-0.5 text-5xs" } : {})}
                 />
+                {engineHealth !== null ? (
+                  <span
+                    aria-hidden="true"
+                    data-testid={`local-engine-health-${entry.instanceId}`}
+                    data-engine-health={engineHealth}
+                    className={cn(
+                      "pointer-events-none absolute right-1 bottom-1 z-40 size-2 rounded-full ring-2 ring-background",
+                      engineHealth === "ready"
+                        ? "bg-success"
+                        : engineHealth === "error"
+                          ? "bg-destructive"
+                          : "bg-warning",
+                    )}
+                  />
+                ) : null}
               </Toolbar.Button>
             );
 
