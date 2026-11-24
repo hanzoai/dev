@@ -72,6 +72,7 @@ export function parsePluginListing(stdout: string, query: string | undefined): P
     installed.push({
       id,
       name,
+      provider: "claude",
       marketplace,
       version: text(item.version),
       description: null,
@@ -89,6 +90,7 @@ export function parsePluginListing(stdout: string, query: string | undefined): P
     offers.push({
       id,
       name,
+      provider: "claude",
       marketplace: text(item.marketplaceName),
       version: text(item.version),
       description: text(item.description),

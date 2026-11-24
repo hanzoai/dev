@@ -217,6 +217,7 @@ import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import { readWorkflowScript } from "./orchestration-v2/workflowScriptQuery.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as ClaudePlugins from "./plugins/ClaudePlugins.ts";
+import * as PluginRegistry from "./plugins/PluginRegistry.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
@@ -1601,11 +1602,17 @@ export const layerWsRpc = (
       const acpRegistrySessions = yield* AcpRegistrySessions.AcpRegistrySessions;
       const pluginSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const pluginEnvironment = yield* HostProcess.Environment;
+      const pluginHomes = yield* PluginRegistry.defaultPluginRegistryHomes;
       const runPluginCommand: ClaudePlugins.RunPluginCommand = (args) =>
         ClaudePlugins.runClaudePluginCommand(args).pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, pluginSpawner),
           Effect.provideService(HostProcess.Environment, pluginEnvironment),
         );
+      const pluginRegistryDeps: PluginRegistry.PluginRegistryDeps = {
+        runClaudeCommand: runPluginCommand,
+        codexHome: pluginHomes.codexHome,
+        geminiHome: pluginHomes.geminiHome,
+      };
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const providerAuth = yield* ProviderAuthService.ProviderAuthService;
       const providerInstallation = yield* ProviderInstallation.ProviderInstallation;
@@ -2508,11 +2515,11 @@ export const layerWsRpc = (
             "project.id": input.projectId,
           }).pipe(Effect.andThen(listAcpRegistryProviders(input))),
         [WS_METHODS.serverListPlugins]: (input) =>
-          ClaudePlugins.listPlugins(runPluginCommand, input.query),
+          PluginRegistry.listPlugins(pluginRegistryDeps, input.query),
         [WS_METHODS.serverSetPluginEnabled]: (input) =>
-          ClaudePlugins.setPluginEnabled(runPluginCommand, input.id, input.enabled),
+          PluginRegistry.setPluginEnabled(pluginRegistryDeps, input.id, input.enabled),
         [WS_METHODS.serverInstallPlugin]: (input) =>
-          ClaudePlugins.installPlugin(runPluginCommand, input.id),
+          PluginRegistry.installPlugin(pluginRegistryDeps, input.id),
         [WS_METHODS.serverSetAcpRegistryProvider]: (input) =>
           Effect.annotateCurrentSpan({
             "provider.instance_id": input.instanceId,

@@ -78,7 +78,9 @@ function PluginsShelf({ environmentId }: { readonly environmentId: EnvironmentId
               setMore(result.value.more);
               setError(null);
             } else {
-              setError(gt("Plugins could not be read. Is Claude Code installed on this machine?"));
+              setError(
+                gt("Plugins could not be read. No supported agent CLI was found on this machine."),
+              );
             }
           },
         );
@@ -144,7 +146,13 @@ function PluginsShelf({ environmentId }: { readonly environmentId: EnvironmentId
             <Row
               key={plugin.id}
               title={plugin.name}
-              note={[plugin.marketplace, plugin.version].filter(Boolean).join(" · ")}
+              note={[
+                plugin.provider && plugin.provider !== plugin.marketplace ? plugin.provider : null,
+                plugin.marketplace,
+                plugin.version,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             >
               <Switch
                 checked={plugin.enabled}

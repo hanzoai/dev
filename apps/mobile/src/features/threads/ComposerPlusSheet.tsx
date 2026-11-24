@@ -175,7 +175,9 @@ function PluginsPage(props: { readonly environmentId: EnvironmentId }) {
             setPlugins(result.value.plugins);
             setError(null);
           } else
-            setError(gt("Plugins could not be read. Is Claude Code installed on this machine?"));
+            setError(
+              gt("Plugins could not be read. No supported agent CLI was found on this machine."),
+            );
         });
       },
       query ? 200 : 0,
@@ -235,7 +237,13 @@ function PluginsPage(props: { readonly environmentId: EnvironmentId }) {
               {plugin.name}
             </Text>
             <Text textRole="caption" className="text-foreground-muted" numberOfLines={1}>
-              {[plugin.marketplace, plugin.version].filter(Boolean).join(" · ")}
+              {[
+                plugin.provider && plugin.provider !== plugin.marketplace ? plugin.provider : null,
+                plugin.marketplace,
+                plugin.version,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </Text>
           </View>
           <Switch
