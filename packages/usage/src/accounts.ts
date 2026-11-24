@@ -346,9 +346,15 @@ const hanzoIssuer = async (env: UsageEnv): Promise<string | undefined> => {
 
 export const hanzo: Fetcher = async (env) => {
   const key = firstEnv(env, ["HANZO_API_KEY"]);
-  const identities = await hanzoIdentities(env);
-  if (!key && identities.length === 0) throw new NotConfigured("Sign in to Hanzo.");
-  const issuer = identities.length ? await hanzoIssuer(env).catch(() => undefined) : undefined;
+  const [identities, hanzodToken] = await Promise.all([
+    hanzoIdentities(env),
+    env.readHanzoToken ? env.readHanzoToken().catch(() => undefined) : Promise.resolve(undefined),
+  ]);
+  if (!key && !hanzodToken && identities.length === 0) throw new NotConfigured("Sign in to Hanzo.");
+  const issuer =
+    identities.length > 0 || hanzodToken
+      ? await hanzoIssuer(env).catch(() => undefined)
+      : undefined;
   const read = async (
     who: Identity,
     token: string,
@@ -371,17 +377,35 @@ export const hanzo: Fetcher = async (env) => {
   };
   const out: ProviderSnapshot[] = [];
   if (key) out.push(await read({ instance: "api-key", label: "API key" }, key, "api"));
+  let usedHanzodToken = false;
   for (const id of identities) {
-    const claims = jwtClaims(id.token);
+    const token = id.active && hanzodToken ? hanzodToken : id.token;
+    if (id.active && hanzodToken) usedHanzodToken = true;
+    const claims = jwtClaims(token);
     const who: Identity = {
       instance: id.key,
       label: `${id.key.split("/").slice(1).join("/")}${id.active ? " · active" : ""}`,
       ...(str(claims.email) ? { account: str(claims.email)! } : {}),
     };
-    if (expired(env, id.token)) out.push(failed(env, "hanzo", who, SIGN_IN_AGAIN));
-    else if (issuer && claims.iss !== issuer)
+    if (expired(env, token)) out.push(failed(env, "hanzo", who, SIGN_IN_AGAIN));
+    else if (issuer && claims.iss && claims.iss !== issuer)
       out.push(failed(env, "hanzo", who, "This sign-in was not issued by Hanzo; sign in again."));
-    else out.push(await read(who, id.token, "oauth"));
+    else out.push(await read(who, token, "oauth"));
+  }
+  if (hanzodToken && !usedHanzodToken) {
+    const claims = jwtClaims(hanzodToken);
+    const owner = str(claims.owner);
+    const name = str(claims.name);
+    const slug = owner && name ? `${owner}/${name}` : "hanzod";
+    const who: Identity = {
+      instance: `hanzo/${slug}`,
+      label: `${slug} · active`,
+      ...(str(claims.email) ? { account: str(claims.email)! } : {}),
+    };
+    if (expired(env, hanzodToken)) out.push(failed(env, "hanzo", who, SIGN_IN_AGAIN));
+    else if (issuer && claims.iss && claims.iss !== issuer)
+      out.push(failed(env, "hanzo", who, "This sign-in was not issued by Hanzo; sign in again."));
+    else out.push(await read(who, hanzodToken, "oauth"));
   }
   return out;
 };

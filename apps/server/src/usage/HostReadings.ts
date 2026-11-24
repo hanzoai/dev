@@ -19,6 +19,8 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import { sharedIdentityHost } from "../provider/hanzoLocalIdentity.ts";
+import { hanzoAccessToken } from "../provider/hanzoSharedIdentityNode.ts";
 import { ProviderRegistry } from "../provider/ProviderRegistry.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as UsageService from "./UsageService.ts";
@@ -66,9 +68,13 @@ export const collectUsageEnvFromSettings = (
   return { env, secretRefs };
 };
 
-/** The catalog id for a provider driver: `claudeAgent` and `claude` are both Claude. */
-export const catalogId = (driver: string): string =>
-  driver.toLowerCase().startsWith("claude") ? "claude" : driver.toLowerCase();
+/** The catalog id for a provider driver: `claudeAgent` -> `claude`, `hanzoGen` -> `hanzo`. */
+export const catalogId = (driver: string): string => {
+  const lower = driver.toLowerCase();
+  if (lower.startsWith("claude")) return "claude";
+  if (lower.startsWith("hanzo")) return "hanzo";
+  return lower;
+};
 
 const who = (p: ServerProvider) => ({
   instance: p.instanceId,
@@ -151,6 +157,7 @@ export const readHostReadings = Effect.gen(function* () {
       }
     }
   }
+  const identityHost = yield* sharedIdentityHost();
   const now = new Date();
   const summary = yield* usage
     .readSummary({
@@ -186,5 +193,6 @@ export const readHostReadings = Effect.gen(function* () {
     }),
     cost: summary ? costDays(summary.buckets) : [],
     ...(Object.keys(env).length > 0 ? { env } : {}),
+    hanzoToken: () => hanzoAccessToken(identityHost),
   } satisfies HostReadings;
 });
