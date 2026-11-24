@@ -600,12 +600,8 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * Chat-mode threads carried in from the cloud's chat adapter when a session
-   * moves into its cell. Each lands as run-less history (`v1_import`) under the id
-   * the client already holds, with no provider thread behind it, so the first run
-   * hands the conversation to the provider as context. A thread already here is
-   * left alone: one imported with the same messages counts as imported, anything
-   * else as skipped, so a second upgrade of the same session changes nothing.
+   * Imports chat-mode threads as run-less `v1_import` history under their existing IDs so the
+   * first run hands them to the provider as context; existing threads are left untouched.
    */
   const importChatThreads = Effect.fn("importChatThreadsV2")(function* (
     input: ChatThreadImportInput,
