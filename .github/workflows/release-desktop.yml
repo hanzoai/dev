@@ -666,6 +666,10 @@ jobs:
 
       - name: Collect release assets
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_PLATFORM: ${{ inputs.platform }}
+          RELEASE_ARCH: ${{ inputs.arch }}
         run: |
           set -euo pipefail
           mkdir -p release-publish
@@ -683,6 +687,26 @@ jobs:
             for file in $pattern; do
               cp "$file" release-publish/
             done
+          done
+
+          # Hyphenated aliases matching apps/marketing download.astro data-asset suffixes.
+          for dmg in release-publish/*.dmg; do
+            cp -n "$dmg" "release-publish/Hanzo-Dev-${RELEASE_VERSION}-${RELEASE_ARCH}.dmg" || true
+          done
+          for exe in release-publish/*setup.exe release-publish/*.exe; do
+            [[ -f "$exe" ]] || continue
+            cp -n "$exe" "release-publish/Hanzo-Dev-${RELEASE_VERSION}-${RELEASE_ARCH}.exe" || true
+            break
+          done
+          for deb in release-publish/*.deb; do
+            deb_arch="$RELEASE_ARCH"
+            [[ "$deb_arch" == "x64" ]] && deb_arch="amd64"
+            cp -n "$deb" "release-publish/Hanzo-Dev-${RELEASE_VERSION}-${deb_arch}.deb" || true
+          done
+          for appimg in release-publish/*.AppImage; do
+            appimg_arch="$RELEASE_ARCH"
+            [[ "$appimg_arch" == "x64" ]] && appimg_arch="x86_64"
+            cp -n "$appimg" "release-publish/Hanzo-Dev-${RELEASE_VERSION}-${appimg_arch}.AppImage" || true
           done
 
       - name: Collect resource monitor
