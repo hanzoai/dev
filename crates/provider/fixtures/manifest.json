@@ -4,6 +4,7 @@
   "input.json": "The user steps that drive the replay, with the model selection and runtime modes.",
   "events.json": "The domain events a replay must produce, in order, as JSON.",
   "unpinned_events": [
+    "queued_cancelled_while_active/codex",
     "claude_background_subagent_lifecycle/claudeAgent",
     "claude_background_wake_before_queued_prompt/claudeAgent",
     "claude_background_wake_before_queued_prompt_no_echo/claudeAgent",

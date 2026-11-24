@@ -1488,7 +1488,55 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Akiro%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:43>",
+    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Akiro_supervised_write%3Aapprove-runtime-request-1%3A<uuid:7>:<uuid:43>",
+    "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Akiro%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Akiro%253Anative-turn%253Aprovider-instance%25253Akiro%25253Asess_00000000-0000-4000-8000-000000000001%25253Aturn%25253A1%3Anative-request%3Aturn_approval_1792442850111_1792442850111_845lqoed%3A<uuid:38>",
+    "driver": "kiro",
+    "providerInstanceId": "kiro",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:runtime-request:runtime-request%3Aprovider%3Akiro%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Akiro%253Anative-turn%253Aprovider-instance%25253Akiro%25253Asess_00000000-0000-4000-8000-000000000001%25253Aturn%25253A1%3Anative-request%3Aturn_approval_1792442850111_1792442850111_845lqoed%3A<uuid:38>",
+      "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Akiro%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Akiro%253Anative-turn%253Aprovider-instance%25253Akiro%25253Asess_00000000-0000-4000-8000-000000000001%25253Aturn%25253A1%3Anative-request%3Aturn_approval_1792442850111_1792442850111_845lqoed%3A<uuid:38>",
+      "providerThreadId": "provider-thread:provider:kiro:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:kiro:native-turn:provider-instance%3Akiro%3Asess_00000000-0000-4000-8000-000000000001%3Aturn%3A1",
+      "nativeItemRef": {
+        "driver": "kiro",
+        "nativeId": "turn_approval_1792442850111_1792442850111_845lqoed",
+        "strength": "weak"
+      },
+      "parentItemId": null,
+      "ordinal": 1000004,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "approval_request",
+      "requestId": "runtime-request:provider:kiro:provider-turn:provider-turn%3Aprovider%3Akiro%3Anative-turn%3Aprovider-instance%253Akiro%253Asess_00000000-0000-4000-8000-000000000001%253Aturn%253A1:native-request:turn_approval_1792442850111_1792442850111_845lqoed:<uuid:38>",
+      "requestKind": "command",
+      "prompt": "Review changes",
+      "options": [
+        {
+          "decision": "accept",
+          "label": "Allow once"
+        },
+        {
+          "decision": "decline",
+          "label": "Deny"
+        },
+        {
+          "decision": "cancel",
+          "label": "Cancel"
+        }
+      ]
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Akiro%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:44>",
     "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -1526,7 +1574,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Akiro%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:44>",
+    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Akiro%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:45>",
     "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:provider:kiro:native-item:provider-instance%3Akiro%3Asess_00000000-0000-4000-8000-000000000001%3Atool%3Atooluse_mx8qFNt29VcYMEFvVuNoHz",
@@ -1557,7 +1605,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Akiro%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:45>",
+    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Akiro%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:46>",
     "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:provider:kiro:native-item:provider-instance%3Akiro%3Asess_00000000-0000-4000-8000-000000000001%3Atool%3Atooluse_mx8qFNt29VcYMEFvVuNoHz",
@@ -1587,44 +1635,6 @@
       "type": "file_change",
       "fileName": "<workspace>/kiro-permission-probe.txt",
       "diffStr": "--- file://<workspace>/kiro-permission-probe.txt\n+++ file://<workspace>/kiro-permission-probe.txt\n@@ -0,0 +1,1 @@\n+kiro permission probe\n\\ No newline at end of file\n"
-    }
-  },
-  {
-    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Akiro%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:46>",
-    "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
-    "runId": "run:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
-    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
-    "driver": "kiro",
-    "providerInstanceId": "kiro",
-    "occurredAt": "<time>",
-    "type": "provider-thread.updated",
-    "payload": {
-      "id": "provider-thread:provider:kiro:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
-      "driver": "kiro",
-      "providerInstanceId": "kiro",
-      "providerSessionId": "provider-session:provider-instance:kiro:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
-      "appThreadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
-      "ownerNodeId": null,
-      "nativeThreadRef": {
-        "driver": "kiro",
-        "nativeId": "sess_00000000-0000-4000-8000-000000000001",
-        "strength": "strong"
-      },
-      "nativeConversationHeadRef": null,
-      "status": "active",
-      "firstRunOrdinal": 1,
-      "lastRunOrdinal": 1,
-      "handoffIds": [],
-      "forkedFrom": null,
-      "pendingBackgroundTasks": [],
-      "contextUsage": null,
-      "nativeMetadata": {
-        "title": "Create Permission Probe File",
-        "itemIdentityVersion": 2
-      },
-      "goal": null,
-      "createdAt": "<time>",
-      "updatedAt": "<time>"
     }
   },
   {
@@ -1821,6 +1831,44 @@
     "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Akiro%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:52>",
     "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "driver": "kiro",
+    "providerInstanceId": "kiro",
+    "occurredAt": "<time>",
+    "type": "provider-thread.updated",
+    "payload": {
+      "id": "provider-thread:provider:kiro:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "driver": "kiro",
+      "providerInstanceId": "kiro",
+      "providerSessionId": "provider-session:provider-instance:kiro:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "appThreadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
+      "ownerNodeId": null,
+      "nativeThreadRef": {
+        "driver": "kiro",
+        "nativeId": "sess_00000000-0000-4000-8000-000000000001",
+        "strength": "strong"
+      },
+      "nativeConversationHeadRef": null,
+      "status": "active",
+      "firstRunOrdinal": 1,
+      "lastRunOrdinal": 1,
+      "handoffIds": [],
+      "forkedFrom": null,
+      "pendingBackgroundTasks": [],
+      "contextUsage": null,
+      "nativeMetadata": {
+        "title": "Create Permission Probe File",
+        "itemIdentityVersion": 2
+      },
+      "goal": null,
+      "createdAt": "<time>",
+      "updatedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Akiro%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:53>",
+    "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:provider:kiro:native-item:provider-instance%3Akiro%3Asess_00000000-0000-4000-8000-000000000001%3Aturn%3A1%3Aassistant%3A0",
     "driver": "kiro",
     "providerInstanceId": "kiro",
@@ -1849,7 +1897,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Akiro%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:53>",
+    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Akiro%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:54>",
     "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:provider:kiro:native-item:provider-instance%3Akiro%3Asess_00000000-0000-4000-8000-000000000001%3Aturn%3A1%3Aassistant%3A0",
@@ -1873,7 +1921,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Akiro%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:54>",
+    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Akiro%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:55>",
     "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:provider:kiro:native-item:provider-instance%3Akiro%3Asess_00000000-0000-4000-8000-000000000001%3Aturn%3A1%3Aassistant%3A0",
@@ -1907,7 +1955,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Akiro%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:55>",
+    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Akiro%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:56>",
     "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -1937,7 +1985,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Akiro%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:56>",
+    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Akiro%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:57>",
     "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -1975,7 +2023,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:<uuid:57>",
+    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:<uuid:58>",
     "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -1998,7 +2046,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:<uuid:58>",
+    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:<uuid:59>",
     "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -2028,7 +2076,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:<uuid:59>",
+    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:<uuid:60>",
     "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -2054,7 +2102,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:<uuid:60>",
+    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:<uuid:61>",
     "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
     "providerInstanceId": "kiro",
     "occurredAt": "<time>",
@@ -2089,7 +2137,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:61>",
+    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:62>",
     "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
     "driver": "kiro",
@@ -2112,7 +2160,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:62>",
+    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:63>",
     "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -2136,7 +2184,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:63>",
+    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:64>",
     "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -2166,7 +2214,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:64>",
+    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:65>",
     "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -2196,7 +2244,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:65>",
+    "id": "event:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:66>",
     "threadId": "thread:fixture:kiro_supervised_write:project:project%3Afixture%3Akiro_supervised_write%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Akiro_supervised_write%3Aproject%3Aproject%253Afixture%253Akiro_supervised_write%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Akiro_supervised_write%253Aproject%253Aproject%25253Afixture%25253Akiro_supervised_write%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",

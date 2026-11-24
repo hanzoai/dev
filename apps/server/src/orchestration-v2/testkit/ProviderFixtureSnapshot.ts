@@ -27,6 +27,7 @@ const encodeEvents = Schema.encodeSync(Schema.Array(OrchestrationV2DomainEvent))
  * adapter decides the order.
  */
 const RACY_EVENTS = new Set([
+  "queued_cancelled_while_active/codex",
   "claude_background_subagent_lifecycle/claudeAgent",
   "claude_background_wake_before_queued_prompt/claudeAgent",
   "claude_background_wake_before_queued_prompt_no_echo/claudeAgent",
