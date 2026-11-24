@@ -13,7 +13,7 @@ import * as Stream from "effect/Stream";
 
 import type * as CodexUsageHistory from "../../usage/CodexUsageHistory.ts";
 import type { ProviderDriver, ProviderInstance } from "@hanzodev/provider-core/server/driver";
-import { CodexDriver, type CodexDriverEnv } from "./CodexDriver.ts";
+import { createCodexProviderInstance, type CodexDriverEnv } from "./CodexDriver.ts";
 import { hanzoUsageReader } from "./HanzoDriver.ts";
 import {
   CURATED_HANZO_MODELS,
@@ -112,18 +112,21 @@ export const HanzoGenDriver: ProviderDriver<
       Effect.provideService(HostProcess.HomeDirectory, home),
     );
 
-    const baseInstance = yield* CodexDriver.create({
-      instanceId,
-      displayName: displayName ?? "Hanzo Gen",
-      accentColor,
-      environment: [
-        ...(environment ?? []),
-        { name: "HANZO_GEN", value: "1", sensitive: false },
-        ...(genBinary ? [{ name: "HANZO_GEN_BINARY", value: genBinary, sensitive: false }] : []),
-      ],
-      enabled,
-      config: codexCompatibleConfig,
-    });
+    const baseInstance = yield* createCodexProviderInstance(
+      {
+        instanceId,
+        displayName: displayName ?? "Hanzo Gen",
+        accentColor,
+        environment: [
+          ...(environment ?? []),
+          { name: "HANZO_GEN", value: "1", sensitive: false },
+          ...(genBinary ? [{ name: "HANZO_GEN_BINARY", value: genBinary, sensitive: false }] : []),
+        ],
+        enabled,
+        config: codexCompatibleConfig,
+      },
+      { adapterDriver: HANZO_GEN_DRIVER_KIND },
+    );
 
     const genInstalled = genBinary !== null;
     const wrapSnapshotEffect = (eff: Effect.Effect<ServerProvider>) =>
@@ -143,10 +146,6 @@ export const HanzoGenDriver: ProviderDriver<
       driverKind: HANZO_GEN_DRIVER_KIND,
       displayName: displayName ?? "Hanzo Gen",
       snapshot: wrappedSnapshot,
-      orchestrationAdapter: {
-        ...baseInstance.orchestrationAdapter,
-        driver: HANZO_GEN_DRIVER_KIND,
-      },
       snapshotForCwd: (_cwd: string) => wrappedSnapshot.getSnapshot,
     } satisfies ProviderInstance;
   }),

@@ -1,6 +1,11 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { CodexSettings, type ProviderReplayTranscript } from "@hanzodev/contracts";
+import {
+  CodexSettings,
+  defaultInstanceIdForDriver,
+  type ProviderDriverKind,
+  type ProviderReplayTranscript,
+} from "@hanzodev/contracts";
 import * as CodexClient from "effect-codex-app-server/client";
 import type * as CodexError from "effect-codex-app-server/errors";
 import * as CodexReplay from "effect-codex-app-server/replay";
@@ -99,7 +104,10 @@ function metadataFromTranscript(transcript: ProviderReplayTranscript): {
 export function layer(input: {
   readonly transcript: CodexReplay.CodexAppServerReplayTranscript;
   readonly driver?: CodexReplay.CodexAppServerReplayDriver;
+  /** Runs the adapter as Hanzo or Hanzo Gen, which wrap Codex under their own driver. */
+  readonly adapterDriver?: ProviderDriverKind;
 }) {
+  const adapterDriver = input.adapterDriver ?? CodexAdapterV2.CODEX_DRIVER_KIND;
   const layerReplay =
     input.driver === undefined
       ? CodexReplay.layerReplay(input.transcript)
@@ -111,7 +119,7 @@ export function layer(input: {
           Effect.mapError(
             (cause) =>
               new ProviderAdapter.ProviderAdapterOpenSessionError({
-                driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+                driver: adapterDriver,
                 providerSessionId: openInput.providerSessionId,
                 cause,
               }),
@@ -128,13 +136,16 @@ export function layer(input: {
     makeReplayServerConfig(input.transcript.scenario).pipe(Effect.orDie),
   ).pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
   const layerRegistry = ProviderAdapterRegistry.layerFromAdaptersEffect(
-    CodexAdapterV2.createCodexAdapterV2({
-      instanceId: CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
-      displayName: undefined,
-      environment: [],
-      enabled: true,
-      config: DEFAULT_CODEX_SETTINGS,
-    }).pipe(Effect.map((adapter) => [adapter])),
+    CodexAdapterV2.createCodexAdapterV2(
+      {
+        instanceId: defaultInstanceIdForDriver(adapterDriver),
+        displayName: undefined,
+        environment: [],
+        enabled: true,
+        config: DEFAULT_CODEX_SETTINGS,
+      },
+      input.adapterDriver === undefined ? {} : { driver: input.adapterDriver },
+    ).pipe(Effect.map((adapter) => [adapter])),
   ).pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -155,11 +166,14 @@ const decodeCodexAppServerReplayTranscript = Schema.decodeUnknownEffect(
   CodexReplay.CodexAppServerReplayTranscript,
 );
 
-export const CodexOrchestratorReplayHarness: OrchestratorV2ProviderReplayHarness<
+/** Replays Codex transcripts through the Codex adapter, reporting `adapterDriver` (codex by default). */
+export const makeCodexOrchestratorReplayHarness = (
+  adapterDriver: ProviderDriverKind = CodexAdapterV2.CODEX_DRIVER_KIND,
+): OrchestratorV2ProviderReplayHarness<
   CodexReplay.CodexAppServerReplayTranscript,
   CodexOrchestratorReplayHarnessError
-> = {
-  driver: CodexAdapterV2.CODEX_DRIVER_KIND,
+> => ({
+  driver: adapterDriver,
   decodeTranscript: (transcript) =>
     decodeCodexAppServerReplayTranscript(transcript).pipe(
       Effect.mapError(
@@ -189,8 +203,10 @@ export const CodexOrchestratorReplayHarness: OrchestratorV2ProviderReplayHarness
                   Effect.promise((signal) => replayGate.beforeEmit(entry.label, signal)),
               },
         );
-        return yield* Layer.build(layer({ transcript, driver }));
+        return yield* Layer.build(layer({ transcript, driver, adapterDriver }));
       }),
     );
   },
-};
+});
+
+export const CodexOrchestratorReplayHarness = makeCodexOrchestratorReplayHarness();
