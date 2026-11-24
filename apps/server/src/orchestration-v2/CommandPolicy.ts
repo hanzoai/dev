@@ -16,6 +16,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
+import { decide } from "./DevWasm.ts";
+
 export const SteeringExecutionPolicyV2 = Schema.Literals(["active_steering", "interrupt_restart"]);
 export type SteeringExecutionPolicyV2 = typeof SteeringExecutionPolicyV2.Type;
 
@@ -64,30 +66,24 @@ export function isNativeMaintenanceCommand(message: {
   readonly attachments: ReadonlyArray<ChatAttachment>;
   readonly context?: import("@hanzodev/contracts").OrchestrationMessageContext | undefined;
 }): boolean {
-  return (
-    message.attachments.length === 0 &&
-    ["/compact", "/logout"].includes(message.text.trim().toLowerCase())
-  );
+  return decide("commandPolicyNativeMaintenance", {
+    text: message.text,
+    attachments: message.attachments.length,
+  }) as boolean;
 }
 
 /**
  * A goal command sent into active work stops that work when it starts or
- * replaces goal work, or ends a goal that is driving the run.
+ * replaces goal work, or ends a goal that is driving the run. Decided by `dev.wasm`.
  */
 export function goalCommandStopsActiveRun(
   command: OrchestrationV2GoalCommand,
   goalStatus: OrchestrationV2ProviderGoalStatus | null,
 ): boolean {
-  switch (command.type) {
-    case "set":
-    case "resume":
-      return true;
-    case "clear":
-    case "pause":
-      return goalStatus === "active";
-    case "show":
-      return false;
-  }
+  return decide("commandPolicyGoalStopsActiveRun", {
+    commandType: command.type,
+    goalStatus,
+  }) as boolean;
 }
 
 export function resolveMessageDispatchIntent(
@@ -95,22 +91,24 @@ export function resolveMessageDispatchIntent(
   requestedMode: MessageDispatchMode,
   deliveryIntent?: "auto" | "steer" | "restart",
 ): MessageDispatchMode {
-  const mode = resolveDeliveryIntent(projection, requestedMode, deliveryIntent);
-  if (mode.type !== "steer_active") return mode;
-  // Compaction and sign-out cannot accept steers; queue follow-ups.
-  const target = projection.runs.find((run) => run.id === mode.targetRunId);
-  const targetMessage = projection.messages.find((message) => message.id === target?.userMessageId);
-  if (targetMessage !== undefined && isNativeMaintenanceCommand(targetMessage)) {
-    return { type: "queue_after_active" };
-  }
-  // A provider that can neither steer nor restart its turn takes the message after the turn.
-  const turns =
-    target === undefined || !isActiveRun(target)
-      ? undefined
-      : providerTurnCapabilities(projection, target);
-  return turns !== undefined && !turns.supportsActiveSteering && providerSwitchWaitsForTurn(turns)
-    ? { type: "queue_after_active" }
-    : mode;
+  return decide("commandPolicyMessageDispatchIntent", {
+    runs: projection.runs.map((run) => ({
+      id: run.id,
+      status: run.status,
+      userMessageId: run.userMessageId,
+      hasRunningProviderTurn: projection.providerTurns.some(
+        (turn) => turn.runAttemptId === run.activeAttemptId && turn.status === "running",
+      ),
+      turns: providerTurnCapabilities(projection, run) ?? null,
+    })),
+    messages: projection.messages.map((message) => ({
+      id: message.id,
+      text: message.text,
+      attachments: message.attachments.length,
+    })),
+    requestedMode,
+    ...(deliveryIntent === undefined ? {} : { deliveryIntent }),
+  }) as MessageDispatchMode;
 }
 
 /** A run that still owns the thread's provider turn. */
@@ -126,15 +124,17 @@ export function isActiveRun(run: OrchestrationV2Run): boolean {
 /**
  * Providers that key forks on native turn ids can only fork a busy source from a turn with one;
  * a synthetic or missing boundary would fork the live conversation, including the running turn.
+ * Decided by `dev.wasm`.
  */
 export function canForkBusySourceNatively(
   capabilities: OrchestrationV2ProviderCapabilities,
   hasNativeTurnBoundary: boolean,
 ): boolean {
-  return (
-    capabilities.threads.canForkWhileSourceRunning === true &&
-    (hasNativeTurnBoundary || !capabilities.turns.exposesNativeTurnId)
-  );
+  return decide("commandPolicyCanForkBusySourceNatively", {
+    canForkWhileSourceRunning: capabilities.threads.canForkWhileSourceRunning === true,
+    exposesNativeTurnId: capabilities.turns.exposesNativeTurnId,
+    hasNativeTurnBoundary,
+  }) as boolean;
 }
 
 /** The run a follow-up to a finished child binds to: the latest active one, else the last that ran. */
@@ -146,14 +146,15 @@ export function followUpOwnerRun(
   );
 }
 
-/** A provider that cannot restart its turn for new input runs a provider switch after the turn. */
+/** A provider that cannot restart its turn for new input runs a provider switch after the turn. Decided by `dev.wasm`. */
 export function providerSwitchWaitsForTurn(
   turns: OrchestrationV2ProviderCapabilities["turns"],
 ): boolean {
-  return (
-    turns.supportsQueuedMessages &&
-    !(turns.supportsInterrupt && turns.supportsSteeringByInterruptRestart)
-  );
+  return decide("commandPolicyProviderSwitchWaitsForTurn", {
+    supportsQueuedMessages: turns.supportsQueuedMessages,
+    supportsInterrupt: turns.supportsInterrupt,
+    supportsSteeringByInterruptRestart: turns.supportsSteeringByInterruptRestart,
+  }) as boolean;
 }
 
 export function providerTurnCapabilities(
@@ -170,46 +171,6 @@ export function providerTurnCapabilities(
           (candidate) => candidate.id === providerThread.providerSessionId,
         );
   return providerSession?.capabilities.turns;
-}
-
-function resolveDeliveryIntent(
-  projection: OrchestrationV2ThreadProjection,
-  requestedMode: MessageDispatchMode,
-  deliveryIntent?: "auto" | "steer" | "restart",
-): MessageDispatchMode {
-  if (deliveryIntent === undefined) return requestedMode;
-
-  const activeRun = projection.runs.findLast(isActiveRun);
-  if (activeRun === undefined) return { type: "start_immediately" };
-  if (deliveryIntent === "steer") {
-    return { type: "steer_active", targetRunId: activeRun.id };
-  }
-  if (deliveryIntent === "restart") {
-    return { type: "restart_active", targetRunId: activeRun.id };
-  }
-  // A run can be active before its provider turn starts or after it finishes.
-  // Queue automatic input in those gaps so steering cannot reject the message.
-  if (
-    activeRun.status === "preparing" ||
-    activeRun.status === "starting" ||
-    !projection.providerTurns.some(
-      (turn) => turn.runAttemptId === activeRun.activeAttemptId && turn.status === "running",
-    )
-  ) {
-    return { type: "queue_after_active" };
-  }
-
-  const capabilities = providerTurnCapabilities(projection, activeRun);
-  if (capabilities?.supportsActiveSteering === true) {
-    return { type: "steer_active", targetRunId: activeRun.id };
-  }
-  if (capabilities?.supportsQueuedMessages === true) {
-    return { type: "queue_after_active" };
-  }
-  if (capabilities?.supportsSteeringByInterruptRestart === true) {
-    return { type: "restart_active", targetRunId: activeRun.id };
-  }
-  return { type: "queue_after_active" };
 }
 
 interface CapabilityCheckInput {
@@ -275,159 +236,108 @@ function unsupported(
   });
 }
 
-const ensureQueuedMessages: CommandPolicyV2Shape["ensureQueuedMessages"] = (input) =>
-  input.capabilities.turns.supportsQueuedMessages
-    ? Effect.void
-    : Effect.fail(
-        unsupported(
-          input,
-          "queued_messages",
-          "providerInstanceId does not support app-owned queued turns",
-        ),
-      );
+type PolicyDecision<T> =
+  | { readonly ok: true; readonly value: T }
+  | { readonly ok: false; readonly capability: CommandPolicyCapability; readonly detail: string };
 
-const decideSteeringExecution: CommandPolicyV2Shape["decideSteeringExecution"] = (input) => {
-  if (!input.forceRestart && input.capabilities.turns.supportsActiveSteering) {
-    return Effect.succeed("active_steering");
-  }
-  if (
-    input.capabilities.turns.supportsInterrupt &&
-    input.capabilities.turns.supportsSteeringByInterruptRestart
-  ) {
-    return Effect.succeed("interrupt_restart");
-  }
-  return Effect.fail(
-    unsupported(
-      input,
-      input.forceRestart || input.capabilities.turns.supportsInterrupt
-        ? "interrupt_restart_steering"
-        : "active_steering",
-      input.forceRestart
-        ? "providerInstanceId cannot satisfy a required interrupt-and-restart"
-        : "providerInstanceId cannot steer active turns directly or by interrupt-and-restart",
-    ),
+const toEffect = <T>(
+  input: CapabilityCheckInput,
+  decision: PolicyDecision<T>,
+): Effect.Effect<T, CommandPolicyV2Error> =>
+  decision.ok
+    ? Effect.succeed(decision.value)
+    : Effect.fail(unsupported(input, decision.capability, decision.detail));
+
+const toVoidEffect = (
+  input: CapabilityCheckInput,
+  decision: PolicyDecision<null>,
+): Effect.Effect<void, CommandPolicyV2Error> =>
+  decision.ok ? Effect.void : Effect.fail(unsupported(input, decision.capability, decision.detail));
+
+const ensureQueuedMessages: CommandPolicyV2Shape["ensureQueuedMessages"] = (input) =>
+  toVoidEffect(
+    input,
+    decide("commandPolicyEnsureQueuedMessages", {
+      supportsQueuedMessages: input.capabilities.turns.supportsQueuedMessages,
+    }) as PolicyDecision<null>,
   );
-};
+
+const decideSteeringExecution: CommandPolicyV2Shape["decideSteeringExecution"] = (input) =>
+  toEffect(
+    input,
+    decide("commandPolicySteeringExecution", {
+      forceRestart: input.forceRestart === true,
+      supportsActiveSteering: input.capabilities.turns.supportsActiveSteering,
+      supportsInterrupt: input.capabilities.turns.supportsInterrupt,
+      supportsSteeringByInterruptRestart:
+        input.capabilities.turns.supportsSteeringByInterruptRestart,
+    }) as PolicyDecision<SteeringExecutionPolicyV2>,
+  );
 
 const ensureInterrupt: CommandPolicyV2Shape["ensureInterrupt"] = (input) =>
-  input.capabilities.turns.supportsInterrupt
-    ? Effect.void
-    : Effect.fail(
-        unsupported(input, "interrupt", "providerInstanceId does not support turn interrupts"),
-      );
+  toVoidEffect(
+    input,
+    decide("commandPolicyEnsureInterrupt", {
+      supportsInterrupt: input.capabilities.turns.supportsInterrupt,
+    }) as PolicyDecision<null>,
+  );
 
-const ensureNativeFork: CommandPolicyV2Shape["ensureNativeFork"] = (input) => {
-  if (!input.capabilities.threads.canForkThread) {
-    return Effect.fail(
-      unsupported(input, "native_fork", "providerInstanceId does not support native thread forks"),
-    );
-  }
-  if (input.fromSpecificTurn && !input.capabilities.threads.canForkFromTurn) {
-    return Effect.fail(
-      unsupported(
-        input,
-        "fork_from_turn",
-        "providerInstanceId cannot fork from a specific completed turn",
-      ),
-    );
-  }
-  if (input.capabilities.identity.nativeThreadIds !== "strong") {
-    return Effect.fail(
-      unsupported(
-        input,
-        "native_fork",
-        "providerInstanceId does not expose strong native thread ids",
-      ),
-    );
-  }
-  return Effect.void;
-};
+const ensureNativeFork: CommandPolicyV2Shape["ensureNativeFork"] = (input) =>
+  toVoidEffect(
+    input,
+    decide("commandPolicyEnsureNativeFork", {
+      canForkThread: input.capabilities.threads.canForkThread,
+      canForkFromTurn: input.capabilities.threads.canForkFromTurn,
+      fromSpecificTurn: input.fromSpecificTurn,
+      nativeThreadIds: input.capabilities.identity.nativeThreadIds,
+    }) as PolicyDecision<null>,
+  );
 
-const ensureRollback: CommandPolicyV2Shape["ensureRollback"] = (input) => {
-  // Without native truncation, the next turn replays the kept conversation as a handoff.
-  if (
-    !input.capabilities.threads.canRollbackThread ||
-    (!input.capabilities.checkpointing.providerCanRollbackConversation &&
-      !input.capabilities.context.canConsumeHandoffSummaries)
-  ) {
-    return Effect.fail(
-      unsupported(input, "rollback", "providerInstanceId conversation rollback is unavailable"),
-    );
-  }
-  if (!input.capabilities.checkpointing.providerRollbackReturnsSnapshot) {
-    return Effect.fail(
-      unsupported(
-        input,
-        "rollback_snapshot",
-        "rollback must return a providerInstanceId thread snapshot",
-      ),
-    );
-  }
-  return Effect.void;
-};
+const ensureRollback: CommandPolicyV2Shape["ensureRollback"] = (input) =>
+  toVoidEffect(
+    input,
+    decide("commandPolicyEnsureRollback", {
+      canRollbackThread: input.capabilities.threads.canRollbackThread,
+      providerCanRollbackConversation:
+        input.capabilities.checkpointing.providerCanRollbackConversation,
+      canConsumeHandoffSummaries: input.capabilities.context.canConsumeHandoffSummaries,
+      providerRollbackReturnsSnapshot:
+        input.capabilities.checkpointing.providerRollbackReturnsSnapshot,
+    }) as PolicyDecision<null>,
+  );
 
-const ensureContextHandoff: CommandPolicyV2Shape["ensureContextHandoff"] = (input) => {
-  if (!input.capabilities.context.canConsumeHandoffSummaries) {
-    return Effect.fail(
-      unsupported(input, "context_handoff", "providerInstanceId cannot consume handoff summaries"),
-    );
-  }
-  if (!input.capabilities.context.acceptsSyntheticUserContext) {
-    return Effect.fail(
-      unsupported(
-        input,
-        "context_handoff",
-        "providerInstanceId cannot receive synthetic user context",
-      ),
-    );
-  }
-  if (
-    (input.strategy === "fork_delta_context" || input.strategy === "delta_context") &&
-    !input.capabilities.context.supportsDeltaHandoff
-  ) {
-    return Effect.fail(
-      unsupported(input, "context_handoff", "providerInstanceId does not support delta handoff"),
-    );
-  }
-  if (
-    input.strategy === "full_thread_summary" &&
-    !input.capabilities.context.supportsFullThreadHandoff
-  ) {
-    return Effect.fail(
-      unsupported(
-        input,
-        "context_handoff",
-        "providerInstanceId does not support full-thread handoff",
-      ),
-    );
-  }
-  return Effect.void;
-};
+const ensureContextHandoff: CommandPolicyV2Shape["ensureContextHandoff"] = (input) =>
+  toVoidEffect(
+    input,
+    decide("commandPolicyEnsureContextHandoff", {
+      strategy: input.strategy,
+      canConsumeHandoffSummaries: input.capabilities.context.canConsumeHandoffSummaries,
+      acceptsSyntheticUserContext: input.capabilities.context.acceptsSyntheticUserContext,
+      supportsDeltaHandoff: input.capabilities.context.supportsDeltaHandoff,
+      supportsFullThreadHandoff: input.capabilities.context.supportsFullThreadHandoff,
+    }) as PolicyDecision<null>,
+  );
 
-const decideForkExecution: CommandPolicyV2Shape["decideForkExecution"] = (input) => {
-  // Unsuccessful runs may lack native cursors; fork bounded transcripts to exclude later turns.
-  const canForkNatively =
-    (input.sourceRunStatus === "completed" || input.sourceRunStatus === "waiting") &&
-    input.sameProvider &&
-    input.hasStrongNativeSource &&
-    (!input.sourceBusy ||
-      canForkBusySourceNatively(input.capabilities, input.hasNativeTurnBoundary)) &&
-    input.capabilities.threads.canForkThread &&
-    (!input.fromSpecificTurn || input.capabilities.threads.canForkFromTurn) &&
-    input.capabilities.identity.nativeThreadIds === "strong";
-
-  if (canForkNatively) {
-    return Effect.succeed("native_fork");
-  }
-
-  return ensureContextHandoff({
-    commandId: input.commandId,
-    threadId: input.threadId,
-    providerInstanceId: input.providerInstanceId,
-    capabilities: input.capabilities,
-    strategy: "full_thread_summary",
-  }).pipe(Effect.as("portable_context"));
-};
+const decideForkExecution: CommandPolicyV2Shape["decideForkExecution"] = (input) =>
+  toEffect(
+    input,
+    decide("commandPolicyForkExecution", {
+      sameProvider: input.sameProvider,
+      hasStrongNativeSource: input.hasStrongNativeSource,
+      hasNativeTurnBoundary: input.hasNativeTurnBoundary,
+      sourceRunStatus: input.sourceRunStatus,
+      fromSpecificTurn: input.fromSpecificTurn,
+      sourceBusy: input.sourceBusy,
+      canForkThread: input.capabilities.threads.canForkThread,
+      canForkFromTurn: input.capabilities.threads.canForkFromTurn,
+      canForkWhileSourceRunning: input.capabilities.threads.canForkWhileSourceRunning === true,
+      exposesNativeTurnId: input.capabilities.turns.exposesNativeTurnId,
+      nativeThreadIds: input.capabilities.identity.nativeThreadIds,
+      canConsumeHandoffSummaries: input.capabilities.context.canConsumeHandoffSummaries,
+      acceptsSyntheticUserContext: input.capabilities.context.acceptsSyntheticUserContext,
+      supportsFullThreadHandoff: input.capabilities.context.supportsFullThreadHandoff,
+    }) as PolicyDecision<ForkExecutionPolicyV2>,
+  );
 
 export const layer: Layer.Layer<CommandPolicyV2> = Layer.succeed(CommandPolicyV2, {
   ensureQueuedMessages,

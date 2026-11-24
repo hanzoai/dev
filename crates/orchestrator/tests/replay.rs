@@ -41,3 +41,8 @@ fn model_switch() -> Result<(), Box<dyn std::error::Error>> {
 fn guest_share() -> Result<(), Box<dyn std::error::Error>> {
     replay(include_str!("../corpus/guest_share.jsonl"), 1000)
 }
+
+#[test]
+fn command_policy() -> Result<(), Box<dyn std::error::Error>> {
+    replay(include_str!("../corpus/command_policy.jsonl"), 1000)
+}
