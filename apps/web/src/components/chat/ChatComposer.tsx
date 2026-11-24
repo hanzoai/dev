@@ -2600,6 +2600,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       terminalOpen={terminalOpen}
       modelPickerOpen={isComposerModelPickerOpen}
       onModelPickerOpenChange={setIsComposerModelPickerOpen}
+      closeModelPickerOnSelect={environmentless}
       modelPickerIconClassName={composerProviderState.modelPickerIconClassName}
       getModelDisabledReason={getModelDisabledReason}
     />

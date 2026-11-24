@@ -6,10 +6,12 @@ import {
   createCloudChatController,
   createSseParser,
   listChatModels,
+  needsWebSearch,
   withAuto,
   parseChatModels,
   runInCloud,
   streamChatReply,
+  webSearchQueryFor,
 } from "./index.ts";
 
 const json = (status: number, body: unknown) =>
@@ -475,5 +477,119 @@ describe("private chat", () => {
     await controller.send("kept");
     expect(controller.getState().threads).toHaveLength(1);
     expect(urls.some((u) => u.includes("/agents/chat/conversations"))).toBe(true);
+  });
+});
+
+describe("web search, abort, regenerate, and edit", () => {
+  it("detects web search prompts and extracts a clean query", () => {
+    expect(
+      needsWebSearch("Search the web: latest Next.js stable version? Cite source.", "auto"),
+    ).toBe(true);
+    expect(needsWebSearch("hi", "auto")).toBe(false);
+    expect(needsWebSearch("Write a TypeScript debounce function", "auto")).toBe(false);
+    expect(needsWebSearch("Write a TypeScript debounce function", "on")).toBe(true);
+    expect(needsWebSearch("Search the web: latest Next.js", "off")).toBe(false);
+    expect(webSearchQueryFor("Search the web: latest Next.js stable version? Cite source.")).toBe(
+      "latest Next.js stable version?",
+    );
+  });
+
+  it("runs /v1/websearch and injects today's date + live results into system prompt", async () => {
+    const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const reply = await streamChatReply({
+      auth,
+      model: "enso-pro",
+      messages: [
+        { role: "user", content: "Search the web: latest Next.js stable version? Cite source." },
+      ],
+      webSearch: "auto",
+      today: "2026-11-23",
+      onDelta: () => undefined,
+      options: {
+        fetch: async (url, init) => {
+          const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+          requests.push({ url: String(url), body });
+          if (String(url).endsWith("/v1/websearch")) {
+            return json(200, {
+              results: [
+                {
+                  title: "Next.js 16.2 Release",
+                  url: "https://nextjs.org/blog/next-16-2",
+                  snippet: "Next.js 16.2 is the latest stable release.",
+                },
+              ],
+            });
+          }
+          return sse([frame("Next.js 16.2"), "data: [DONE]\n\n"]);
+        },
+      },
+    });
+    expect(reply).toBe("Next.js 16.2");
+    expect(requests.map((r) => r.url)).toEqual([
+      "https://api.hanzo.ai/v1/websearch",
+      "https://api.hanzo.ai/v1/chat/completions",
+    ]);
+    expect(requests[0]?.body).toMatchObject({ q: "latest Next.js stable version?" });
+    const completionMessages = requests[1]?.body.messages as Array<{
+      role: string;
+      content: string;
+    }>;
+    expect(completionMessages[0]?.role).toBe("system");
+    expect(completionMessages[0]?.content).toContain("Today is 2026-11-23.");
+    expect(completionMessages[0]?.content).toContain("Next.js 16.2 Release");
+    expect(completionMessages[0]?.content).toContain("https://nextjs.org/blog/next-16-2");
+  });
+
+  it("records model on assistant replies, supports abort, regenerate, and editAndResend", async () => {
+    let turn = 0;
+    const controller = createCloudChatController({
+      getAuth: async () => auth,
+      options: {
+        fetch: async (url, init) => {
+          if (String(url).endsWith("/conversations")) return json(200, { conversationId: "c-9" });
+          turn++;
+          if (turn === 1) return sse([frame("First answer"), "data: [DONE]\n\n"]);
+          if (turn === 2) return sse([frame("Regenerated answer"), "data: [DONE]\n\n"]);
+          if (turn === 3) {
+            return new Promise<Response>((_, reject) => {
+              init?.signal?.addEventListener("abort", () => {
+                const err = new Error("aborted");
+                err.name = "AbortError";
+                reject(err);
+              });
+            });
+          }
+          return sse([frame("Edited answer"), "data: [DONE]\n\n"]);
+        },
+      },
+    });
+    controller.selectModel("enso-pro");
+    await controller.send("Hello");
+    expect(controller.getState().messages).toEqual([
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "First answer" },
+    ]);
+    expect(controller.getState().messageModels[1]).toBe("enso-pro");
+
+    await controller.regenerate();
+    expect(controller.getState().messages).toEqual([
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "Regenerated answer" },
+    ]);
+    expect(controller.getState().messageModels[1]).toBe("enso-pro");
+
+    const inflight = controller.send("Will abort");
+    await Promise.resolve();
+    controller.abort();
+    await inflight;
+    expect(controller.getState().sending).toBe(false);
+    expect(controller.getState().error).toBeNull();
+
+    await controller.editAndResend(0, "Updated question");
+    expect(controller.getState().messages).toEqual([
+      { role: "user", content: "Updated question" },
+      { role: "assistant", content: "Edited answer" },
+    ]);
+    expect(controller.getState().messageModels[1]).toBe("enso-pro");
   });
 });

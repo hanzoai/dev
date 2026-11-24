@@ -131,6 +131,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
    */
   effortColumn?: ReactNode;
   footer?: ReactNode;
+  /** When true, selecting a model immediately closes even a docked picker (used by environmentless Chat). */
+  closeOnSelect?: boolean;
 }) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
@@ -228,7 +230,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
     props.onInstanceModelChange(instanceId, model);
-    if (!docked) {
+    if (!docked || props.closeOnSelect) {
       setIsMenuOpen(false);
       return;
     }

@@ -86,6 +86,7 @@ export function ComposerControlsBar(props: {
   modelPickerOpen: boolean;
   onModelPickerOpenChange: (open: boolean) => void;
   modelPickerIconClassName: string | undefined;
+  closeModelPickerOnSelect?: boolean;
   getModelDisabledReason: ChatComposerProps["getModelDisabledReason"];
 }) {
   const {
@@ -236,6 +237,7 @@ export function ComposerControlsBar(props: {
       }
       terminalOpen={terminalOpen}
       open={modelPickerOpen}
+      {...(props.closeModelPickerOnSelect ? { closeOnSelect: true } : {})}
       instanceIndicatorBackground={
         composerControlsCollapsed
           ? "color-mix(in srgb, var(--chat-composer-glass-surface) var(--glass-opacity), transparent)"

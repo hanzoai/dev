@@ -1,8 +1,19 @@
 import "./embedded";
 import { said } from "@hanzodev/client-runtime/cloud-chat";
 import { msg, T, useGT, useMessages, Var } from "gt-react";
-import { CheckIcon, CloudIcon, LaptopIcon, LockIcon, UserRoundIcon, XIcon } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import {
+  CheckIcon,
+  CloudIcon,
+  CopyIcon,
+  GlobeIcon,
+  LaptopIcon,
+  LockIcon,
+  PencilIcon,
+  RotateCcwIcon,
+  UserRoundIcon,
+  XIcon,
+} from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import ChatMarkdown from "../components/ChatMarkdown";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu";
@@ -171,6 +182,12 @@ function Home(props: DevHomeProps): ReactNode {
   const [preparing, setPreparing] = useState<string | null>(null);
   const [firstName, setFirstName] = useState<string | null>(() => readSignedInFirstName());
   const [personaMenuOpen, setPersonaMenuOpen] = useState(false);
+  const [webSearchOn, setWebSearchOn] = useState(false);
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const stickToBottomRef = useRef(true);
   const gt = useGT();
   const resolve = useMessages();
   const machine =
@@ -178,6 +195,16 @@ function Home(props: DevHomeProps): ReactNode {
   const chat = useHomeChat(props.cloud, machine);
   const { state, controller } = chat;
   const { onConversation, conversation } = props;
+  const lastMessageLen = state.messages.at(-1)?.content.length ?? 0;
+
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- auto-scrolls the transcript container as new messages arrive and stream unless the user scrolled up
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !stickToBottomRef.current) return;
+    if (state.messages.length > 0 && lastMessageLen >= 0) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [state.messages.length, lastMessageLen]);
 
   // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- listens for the host's hanzo:user-updated event and re-reads the signed-in name from storage
   useEffect(() => {
@@ -288,6 +315,7 @@ function Home(props: DevHomeProps): ReactNode {
       props.onHandoff(machine, prompt);
       return;
     }
+    stickToBottomRef.current = true;
     const auth = { accessToken: await props.cloud.token(), orgId: props.cloud.org ?? null };
     const prepared = chat.localSelected
       ? { prompt, attachments, turn: {} }
@@ -300,7 +328,42 @@ function Home(props: DevHomeProps): ReactNode {
           persona: await chat.personaRecord(),
           say: setPreparing,
         });
-    await controller.send(prepared.prompt, prepared.attachments, prepared.turn);
+    const turn = chat.localSelected
+      ? prepared.turn
+      : { ...prepared.turn, webSearch: webSearchOn ? ("on" as const) : ("auto" as const) };
+    await controller.send(prepared.prompt, prepared.attachments, turn);
+  };
+
+  const modelLabelFor = (id: string | undefined): string | null => {
+    if (!id) return null;
+    const found = state.models.find((m) => m.id === id);
+    return found?.label || id;
+  };
+
+  const copyMessage = (index: number, text: string) => {
+    void navigator.clipboard?.writeText(text).catch(() => undefined);
+    setCopiedIdx(index);
+    window.setTimeout(() => {
+      setCopiedIdx((prev) => (prev === index ? null : prev));
+    }, 1800);
+  };
+
+  const handleRegenerate = () => {
+    stickToBottomRef.current = true;
+    void controller.regenerate({
+      webSearch: webSearchOn ? "on" : "auto",
+    });
+  };
+
+  const handleSaveEdit = (index: number) => {
+    const next = editDraft.trim();
+    if (!next) return;
+    setEditingIdx(null);
+    setEditDraft("");
+    stickToBottomRef.current = true;
+    void controller.editAndResend(index, next, {
+      webSearch: webSearchOn ? "on" : "auto",
+    });
   };
 
   const composerBlock = (
@@ -418,8 +481,28 @@ function Home(props: DevHomeProps): ReactNode {
         sending={state.sending}
         disabledReason={null}
         onSelect={(model, effort) => controller.selectModel(model, effort)}
+        onStop={() => controller.abort()}
         preparing={preparing}
-        voiceControl={<TalkMode cloud={props.cloud} />}
+        voiceControl={
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              aria-label={
+                webSearchOn
+                  ? gt("Web search: On for every message")
+                  : gt("Web search: Auto (click to always search)")
+              }
+              aria-pressed={webSearchOn}
+              data-testid="web-search-toggle"
+              disabled={state.sending}
+              onClick={() => setWebSearchOn((on) => !on)}
+              className="inline-flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground aria-pressed:bg-accent aria-pressed:text-foreground"
+            >
+              <GlobeIcon className="size-4" />
+            </button>
+            <TalkMode cloud={props.cloud} />
+          </div>
+        }
         onTogglePrivate={() => controller.setGhost(!state.ghost)}
         onOpenPersona={() => setPersonaMenuOpen((open) => !open)}
         onSend={handleSend}
@@ -470,24 +553,124 @@ function Home(props: DevHomeProps): ReactNode {
       className={`flex min-h-0 min-w-0 flex-1 flex-col ${props.className ?? ""}`}
       data-dev-home=""
     >
-      <div className="min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 py-6">
-          {state.messages.map((m, i) => (
-            <div
-              // oxlint-disable-next-line react/no-array-index-key -- turns carry no id and a conversation only appends them, so a turn keeps its position
-              key={i}
-              className={m.role === "user" ? "self-end rounded-2xl bg-accent px-4 py-2" : ""}
-            >
-              {m.role === "user" ? (
-                said(m.content).text ||
-                said(m.content)
-                  .carried?.attached.map((f) => f.name)
-                  .join(", ")
-              ) : (
-                <ChatMarkdown text={m.content} cwd={undefined} />
-              )}
-            </div>
-          ))}
+      <div
+        ref={scrollRef}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
+        }}
+        className="min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both"
+      >
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-4 pt-6 pb-10 text-base leading-relaxed text-foreground">
+          {state.messages.map((m, i) => {
+            const isLastAssistant = m.role === "assistant" && i === state.messages.length - 1;
+            const userText =
+              m.role === "user"
+                ? said(m.content).text ||
+                  said(m.content)
+                    .carried?.attached.map((f) => f.name)
+                    .join(", ") ||
+                  ""
+                : "";
+            const badge = m.role === "assistant" ? modelLabelFor(state.messageModels[i]) : null;
+            return (
+              <div
+                // oxlint-disable-next-line react/no-array-index-key -- turns carry no id and a conversation only appends them, so a turn keeps its position
+                key={i}
+                className={
+                  m.role === "user"
+                    ? "group flex flex-col items-end gap-1"
+                    : "group flex flex-col gap-1.5"
+                }
+              >
+                {m.role === "user" ? (
+                  editingIdx === i ? (
+                    <div className="w-full max-w-xl rounded-2xl border border-border bg-card p-3">
+                      <textarea
+                        value={editDraft}
+                        onChange={(e) => setEditDraft(e.target.value)}
+                        rows={3}
+                        className="w-full resize-y bg-transparent text-sm text-foreground outline-none"
+                      />
+                      <div className="mt-2 flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingIdx(null);
+                            setEditDraft("");
+                          }}
+                          className="rounded-md px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                        >
+                          <T>Cancel</T>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSaveEdit(i)}
+                          className="rounded-md bg-foreground px-2.5 py-1 text-xs font-medium text-background hover:opacity-90"
+                        >
+                          <T>Save & send</T>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl bg-accent px-4 py-2.5 text-foreground">
+                      {userText}
+                    </div>
+                  )
+                ) : (
+                  <ChatMarkdown text={m.content} cwd={undefined} />
+                )}
+                {editingIdx !== i && (!state.sending || !isLastAssistant) ? (
+                  <div
+                    className={`flex items-center gap-1.5 text-xs text-muted-foreground ${
+                      m.role === "user"
+                        ? "opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+                        : "opacity-80 transition-opacity group-hover:opacity-100"
+                    }`}
+                  >
+                    {badge ? (
+                      <span className="mr-1 font-medium text-muted-foreground">{badge}</span>
+                    ) : null}
+                    <button
+                      type="button"
+                      aria-label={copiedIdx === i ? gt("Copied") : gt("Copy message")}
+                      onClick={() => copyMessage(i, m.role === "user" ? userText : m.content)}
+                      className="inline-flex size-6 cursor-pointer items-center justify-center rounded-md hover:bg-accent hover:text-foreground"
+                    >
+                      {copiedIdx === i ? (
+                        <CheckIcon className="size-3.5" />
+                      ) : (
+                        <CopyIcon className="size-3.5" />
+                      )}
+                    </button>
+                    {m.role === "user" && !state.sending ? (
+                      <button
+                        type="button"
+                        aria-label={gt("Edit message")}
+                        onClick={() => {
+                          setEditingIdx(i);
+                          setEditDraft(userText);
+                        }}
+                        className="inline-flex size-6 cursor-pointer items-center justify-center rounded-md hover:bg-accent hover:text-foreground"
+                      >
+                        <PencilIcon className="size-3.5" />
+                      </button>
+                    ) : null}
+                    {isLastAssistant && !state.sending ? (
+                      <button
+                        type="button"
+                        aria-label={gt("Regenerate reply")}
+                        onClick={handleRegenerate}
+                        className="inline-flex size-6 cursor-pointer items-center justify-center rounded-md hover:bg-accent hover:text-foreground"
+                      >
+                        <RotateCcwIcon className="size-3.5" />
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       </div>
       <div className="pb-4">{composerBlock}</div>

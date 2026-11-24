@@ -41,6 +41,8 @@ export function HomeComposer(props: {
   disabledReason: string | null;
   onSelect: (model: string, effort: string | null) => void;
   onSend: (prompt: string, attachments: ReadonlyArray<CloudChatAttachment>) => void;
+  /** Aborts the active streaming reply when the user clicks Stop. */
+  onStop?: () => void;
   /** Optional voice conversation control placed inside the composer footer beside the mic. */
   voiceControl?: ReactNode;
   /** Triggered when `/private` is chosen from the slash menu. */
@@ -92,7 +94,7 @@ export function HomeComposer(props: {
             canOperateThread
             environmentless
             attachmentUploadsCapabilityKnown
-            supportsAttachmentUploads={false}
+            supportsAttachmentUploads
             supportsQuestionAttachments={false}
             maxFileAttachmentBytes={null}
             routeKind="draft"
@@ -109,7 +111,7 @@ export function HomeComposer(props: {
             projectSelectionRequired={false}
             phase={props.sending ? "running" : "disconnected"}
             canSteer={false}
-            canInterrupt={false}
+            canInterrupt={props.sending && Boolean(props.onStop)}
             isSendBusy={props.sending}
             canResume={false}
             sendDisabledReason={props.disabledReason}
@@ -166,7 +168,7 @@ export function HomeComposer(props: {
             onCompactContext={noop}
             onSend={send}
             onResume={noop}
-            onInterrupt={noop}
+            onInterrupt={props.onStop ?? noop}
             onSelectActivePendingUserInputOption={noop}
             onAdvanceActivePendingUserInput={noop}
             onDismissActivePendingUserInput={noop}
