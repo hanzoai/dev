@@ -47,8 +47,7 @@ function controllerFor(cloud: DevCloud) {
 }
 
 export function useHomeChat(cloud: DevCloud, machine: DevEnvironment | null) {
-  const held = controllerFor(cloud);
-  const controller = held.controller;
+  const { controller } = controllerFor(cloud);
   const state: CloudChatState = useSyncExternalStore(
     controller.subscribe,
     controller.getState,
@@ -57,6 +56,7 @@ export function useHomeChat(cloud: DevCloud, machine: DevEnvironment | null) {
   const runtime = machine?.runtime ?? null;
   // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- points the shared controller's local host at the selected Mac's runtime and lists that Mac's models
   useEffect(() => {
+    const held = controllerFor(cloud);
     // oxlint-disable-next-line react/immutability -- `held` is the module-level controller registry entry, not render state; the controller reads `local` on each turn
     held.local = runtime
       ? createLocalChatHost({
@@ -75,7 +75,7 @@ export function useHomeChat(cloud: DevCloud, machine: DevEnvironment | null) {
         })
       : null;
     void controller.loadLocalModels();
-  }, [held, controller, runtime]);
+  }, [cloud, controller, runtime]);
   // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- loads the account's models and conversations into the shared cloud-chat controller's store
   useEffect(() => {
     void controller.loadModels();
