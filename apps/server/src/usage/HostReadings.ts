@@ -1,7 +1,22 @@
 // @effect-diagnostics globalDate:off globalDateInEffect:off
-import { UsageDay, type ServerProvider, type UsageBucket } from "@hanzodev/contracts";
-import type { CostDay, HostReadings, ProviderSnapshot, UsageWindow } from "@hanzodev/usage";
+import {
+  isSecretReference,
+  UsageDay,
+  type SecretReference,
+  type ServerProvider,
+  type ServerSettings,
+  type UsageBucket,
+} from "@hanzodev/contracts";
+import * as SecretResolverCore from "@hanzodev/secret-provider-core/server/SecretResolver";
+import {
+  USAGE_ENV_KEYS,
+  type CostDay,
+  type HostReadings,
+  type ProviderSnapshot,
+  type UsageWindow,
+} from "@hanzodev/usage";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { ProviderRegistry } from "../provider/ProviderRegistry.ts";
@@ -10,6 +25,46 @@ import * as UsageService from "./UsageService.ts";
 
 const COST_DAYS = 30;
 const decodeDay = Schema.decodeSync(UsageDay);
+const USAGE_ENV_KEY_SET = new Set<string>(USAGE_ENV_KEYS);
+
+/**
+ * Extracts known usage API key environment variables from enabled provider instances.
+ * String values already include secrets hydrated from Dev's ServerSecretStore; external
+ * SecretReferences are returned separately for batch resolution via SecretResolver.
+ */
+export const collectUsageEnvFromSettings = (
+  settings: ServerSettings | undefined,
+): {
+  readonly env: Record<string, string>;
+  readonly secretRefs: ReadonlyArray<{
+    readonly name: string;
+    readonly reference: SecretReference;
+  }>;
+} => {
+  const env: Record<string, string> = {};
+  const secretRefs: Array<{ readonly name: string; readonly reference: SecretReference }> = [];
+  const seenRefs = new Set<string>();
+  for (const instance of Object.values(settings?.providerInstances ?? {})) {
+    if (instance.enabled === false) continue;
+    for (const variable of instance.environment ?? []) {
+      if (!USAGE_ENV_KEY_SET.has(variable.name)) continue;
+      if (typeof variable.value === "string") {
+        const trimmed = variable.value.trim();
+        if (trimmed && !(variable.name in env)) {
+          env[variable.name] = trimmed;
+        }
+      } else if (
+        isSecretReference(variable.value) &&
+        !(variable.name in env) &&
+        !seenRefs.has(variable.name)
+      ) {
+        seenRefs.add(variable.name);
+        secretRefs.push({ name: variable.name, reference: variable.value });
+      }
+    }
+  }
+  return { env, secretRefs };
+};
 
 /** The catalog id for a provider driver: `claudeAgent` and `claude` are both Claude. */
 export const catalogId = (driver: string): string =>
@@ -80,6 +135,22 @@ export const readHostReadings = Effect.gen(function* () {
   const settings = yield* (yield* ServerSettingsService).getSettings.pipe(
     Effect.orElseSucceed(() => undefined),
   );
+  const { env, secretRefs } = collectUsageEnvFromSettings(settings);
+  if (secretRefs.length > 0) {
+    const resolver = yield* Effect.serviceOption(SecretResolverCore.SecretResolver);
+    if (Option.isSome(resolver)) {
+      const resolved = yield* resolver.value
+        .read(secretRefs.map(({ reference }) => reference))
+        .pipe(Effect.orElseSucceed((): ReadonlyArray<string | undefined> => []));
+      for (let i = 0; i < secretRefs.length; i++) {
+        const value = resolved[i]?.trim();
+        const entry = secretRefs[i];
+        if (value && entry && !(entry.name in env)) {
+          env[entry.name] = value;
+        }
+      }
+    }
+  }
   const now = new Date();
   const summary = yield* usage
     .readSummary({
@@ -114,5 +185,6 @@ export const readHostReadings = Effect.gen(function* () {
       return s ? [s] : [];
     }),
     cost: summary ? costDays(summary.buckets) : [],
+    ...(Object.keys(env).length > 0 ? { env } : {}),
   } satisfies HostReadings;
 });

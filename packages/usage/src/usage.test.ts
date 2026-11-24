@@ -748,4 +748,47 @@ describe("accounts", () => {
     const { summary } = await svc.refresh({ instances: [], local: [], cost: [] });
     assert.match(summary.snapshots.find((x) => x.provider === "grok")!.error ?? "", /No usage API/);
   });
+  it("reads provider API keys supplied via HostReadings.env", async () => {
+    let authHeader = "";
+    const env = fakeEnv(
+      {},
+      {},
+      {},
+      {
+        fetch: (async (url, init) => {
+          if (String(url).includes("/credits")) {
+            authHeader = String(
+              (init?.headers as Record<string, string> | undefined)?.Authorization,
+            );
+          }
+          return new Response(JSON.stringify({ data: { total_credits: 50, total_usage: 10 } }), {
+            status: 200,
+          });
+        }) as typeof fetch,
+      },
+    );
+    const svc = createUsageService(env, () => ({
+      providers: {
+        openrouter: { enabled: true },
+        claude: { enabled: false },
+        codex: { enabled: false },
+        copilot: { enabled: false },
+      },
+      trayMode: "merged",
+      showInMenuBar: false,
+      notifyAtPercent: [],
+      refreshSeconds: 300,
+    }));
+    const { summary } = await svc.refresh({
+      instances: [],
+      local: [],
+      cost: [],
+      env: { OPENROUTER_API_KEY: "sk-from-instance" },
+    });
+    const or = summary.snapshots.find((x) => x.provider === "openrouter");
+    assert.strictEqual(authHeader, "Bearer sk-from-instance");
+    assert.strictEqual(or?.source, "api");
+    assert.strictEqual(or?.windows[0]?.usedPercent, 20);
+    assert.strictEqual(or?.credits?.balance, 40);
+  });
 });
