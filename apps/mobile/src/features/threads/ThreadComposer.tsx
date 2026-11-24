@@ -866,6 +866,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
                 environmentId={
                   props.environmentId === CLOUD_ENVIRONMENT ? null : props.environmentId
                 }
+                memoryKey={composerDraftKey}
                 supportsFiles={props.serverConfig !== null}
                 offersBrowser={props.isDraft !== true && props.environmentId !== CLOUD_ENVIRONMENT}
                 onPickMedia={() => void props.onPickDraftMedia()}

@@ -3475,6 +3475,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     <ComposerPlusMenu
       environmentId={environmentId}
       threadRef={routeThreadRef}
+      memoryTarget={composerDraftTarget}
       addComposerAttachments={addComposerAttachments}
       focusComposer={focusComposer}
       onInsertText={(text) => {

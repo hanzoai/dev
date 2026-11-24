@@ -1,7 +1,6 @@
 import {
   listConnectors,
   listDesignSystems,
-  listMemories,
   shelfDraftText,
   type CloudShelfRow,
 } from "@hanzodev/client-runtime/cloud-chat";
@@ -20,10 +19,11 @@ import { AppText as Text } from "../../components/ui/AppText";
 import { GlassSurface } from "../../components/ui/GlassSurface";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { serverEnvironment } from "../../state/server";
+import { toggleThreadMemoryEnabled, useThreadMemoryEnabled } from "../../state/memory-switch";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { hanzoMobileAuthStore } from "../cloud/hanzoMobileAuth";
 
-export type PlusPage = "main" | "connectors" | "design" | "memory" | "plugins";
+export type PlusPage = "main" | "connectors" | "design" | "plugins";
 
 const SYMBOLS: Record<PlusEntryId, string> = {
   upload: "paperclip",
@@ -47,7 +47,6 @@ const SYMBOLS: Record<PlusEntryId, string> = {
 const CLOUD = {
   connectors: listConnectors,
   design: listDesignSystems,
-  memory: listMemories,
 } as const;
 const BACK = msg("Back");
 const PHOTO = msg("Take a photo");
@@ -90,7 +89,7 @@ function Row(props: {
 }
 
 function CloudPage(props: {
-  readonly shelf: "connectors" | "design" | "memory";
+  readonly shelf: "connectors" | "design";
   readonly onChoose: (text: string) => void;
 }) {
   const gt = useGT();
@@ -278,6 +277,7 @@ export function ComposerPlusSheet(props: {
   readonly onPageChange: (page: PlusPage) => void;
   readonly onClose: () => void;
   readonly environmentId: EnvironmentId | null;
+  readonly memoryKey: string;
   readonly supportsFiles: boolean;
   /** False where there is no thread to show a browser beside (a draft). */
   readonly offersBrowser: boolean;
@@ -290,6 +290,7 @@ export function ComposerPlusSheet(props: {
 }) {
   const gt = useGT();
   const m = useMessages();
+  const memoryEnabled = useThreadMemoryEnabled(props.memoryKey);
   const entries = useMemo(
     () =>
       plusEntries(
@@ -325,6 +326,9 @@ export function ComposerPlusSheet(props: {
         return done(props.onBrowser)();
       case "shelf":
         return props.onPageChange(effect.shelf);
+      case "toggle":
+        toggleThreadMemoryEnabled(props.memoryKey);
+        return;
     }
   };
 
@@ -400,15 +404,51 @@ export function ComposerPlusSheet(props: {
                         ]
                       : []),
                   ]
-                : [
-                    <Row
-                      key={entry.id}
-                      symbol={SYMBOLS[entry.id]}
-                      title={entry.id === "screenshot" ? m(PHOTO) : entry.label}
-                      note={entry.id === "screenshot" ? m(PHOTO_NOTE) : entry.note}
-                      onPress={() => run(entry)}
-                    />,
-                  ],
+                : entry.effect.kind === "toggle"
+                  ? [
+                      <View
+                        key={entry.id}
+                        className="min-h-[48px] flex-row items-center gap-3 rounded-2xl px-3 py-2"
+                      >
+                        <SymbolView
+                          name={SYMBOLS[entry.id] as never}
+                          size={20}
+                          weight="regular"
+                          tintColorClassName="accent-icon"
+                          type="monochrome"
+                        />
+                        <View className="min-w-0 flex-1">
+                          <Text textRole="body" numberOfLines={1}>
+                            {entry.label}
+                          </Text>
+                          {entry.note ? (
+                            <Text
+                              textRole="caption"
+                              className="text-foreground-muted"
+                              numberOfLines={1}
+                            >
+                              {entry.note}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <Switch
+                          value={memoryEnabled}
+                          accessibilityLabel={entry.label}
+                          onValueChange={() => {
+                            toggleThreadMemoryEnabled(props.memoryKey);
+                          }}
+                        />
+                      </View>,
+                    ]
+                  : [
+                      <Row
+                        key={entry.id}
+                        symbol={SYMBOLS[entry.id]}
+                        title={entry.id === "screenshot" ? m(PHOTO) : entry.label}
+                        note={entry.id === "screenshot" ? m(PHOTO_NOTE) : entry.note}
+                        onPress={() => run(entry)}
+                      />,
+                    ],
             )
           ) : props.page === "plugins" ? (
             props.environmentId ? (

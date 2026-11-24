@@ -1,3 +1,4 @@
+import { loadMemoriesSystemContext } from "@hanzodev/client-runtime/cloud-chat";
 import { sourceControlClients } from "@hanzodev/client-runtime/source-control-clients";
 import { changeRequestTermKind } from "../lib/changeRequestTerm";
 import { errorDisplayMessage } from "@hanzodev/client-runtime/errors";
@@ -50,8 +51,10 @@ import {
   retainAcknowledgedThreadMessage,
   forgetAcknowledgedThreadMessage,
 } from "./acknowledged-thread-messages";
+import { hanzoMobileAuthStore } from "../features/cloud/hanzoMobileAuth";
+import { isThreadMemoryEnabled, transferThreadMemorySetting } from "./memory-switch";
 import { appAtomRegistry } from "./atom-registry";
-import { restoredNewTaskDraftKey } from "./new-task-draft-key";
+import { newTaskDraftKey, restoredNewTaskDraftKey } from "./new-task-draft-key";
 import {
   clearPendingThreadCreationOutcome,
   pendingThreadCreationOutcomesAtom,
@@ -986,6 +989,15 @@ export function createThreadOutboxDelivery(): {
       if (!isQueuedMessagePayloadCurrent(persistedMessage, deliveryRevision)) return;
     }
     if (!hasAccess()) return;
+    const threadKey = scopedThreadKey(queuedMessage.environmentId, queuedMessage.threadId);
+    const systemContext = isThreadMemoryEnabled(threadKey)
+      ? yield* Effect.promise(async () =>
+          loadMemoriesSystemContext({
+            accessToken: await hanzoMobileAuthStore.getToken(),
+            orgId: hanzoMobileAuthStore.getSnapshot().activeOrgId,
+          }),
+        )
+      : undefined;
     const deliveryResult = yield* deliveryCommand(threadEnvironment.startTurn, {
       environmentId: queuedMessage.environmentId,
       input: {
@@ -1003,6 +1015,7 @@ export function createThreadOutboxDelivery(): {
               prepared.attachments,
             ),
           ),
+          ...(systemContext === undefined ? {} : { systemContext }),
           attachments: prepared.attachments,
         },
         modelSelection: sendSettings.modelSelection,
@@ -1163,6 +1176,22 @@ export function createThreadOutboxDelivery(): {
       };
     }
     launchedCreations.set(persistedMessage.messageId, { revision: deliveryRevision, workspace });
+    const restoredDraftKey = restoredNewTaskDraftKey(queuedMessage.messageId);
+    const projectDraftKey = newTaskDraftKey(`${queuedMessage.environmentId}:${creation.projectId}`);
+    const threadKey = scopedThreadKey(queuedMessage.environmentId, queuedMessage.threadId);
+    if (isThreadMemoryEnabled(restoredDraftKey)) {
+      transferThreadMemorySetting(restoredDraftKey, threadKey);
+    } else if (isThreadMemoryEnabled(projectDraftKey)) {
+      transferThreadMemorySetting(projectDraftKey, threadKey);
+    }
+    const systemContext = isThreadMemoryEnabled(threadKey)
+      ? yield* Effect.promise(async () =>
+          loadMemoriesSystemContext({
+            accessToken: await hanzoMobileAuthStore.getToken(),
+            orgId: hanzoMobileAuthStore.getSnapshot().activeOrgId,
+          }),
+        )
+      : undefined;
     const deliveryResult = yield* deliveryCommand(threadEnvironment.startTurn, {
       environmentId: queuedMessage.environmentId,
       input: buildProjectThreadStartTurnInput({
@@ -1181,6 +1210,7 @@ export function createThreadOutboxDelivery(): {
             prepared.attachments,
           ),
         ),
+        ...(systemContext === undefined ? {} : { systemContext }),
         uploadedAttachments: prepared.attachments,
         modelSelection: sendSettings.modelSelection,
         runtimeMode: sendSettings.runtimeMode,

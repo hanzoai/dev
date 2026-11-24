@@ -193,6 +193,7 @@ export interface StartThreadTurnInput extends ThreadCommandInput {
     readonly text: string;
     readonly attachments: ReadonlyArray<ChatAttachment | UploadChatAttachment>;
     readonly context?: import("@hanzodev/contracts").OrchestrationMessageContext;
+    readonly systemContext?: import("@hanzodev/contracts").OrchestrationV2SystemContext;
     readonly idleCompaction?: import("@hanzodev/contracts").OrchestrationV2IdleCompaction;
   };
   readonly modelSelection?: ModelSelection;
@@ -826,6 +827,9 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
         messageId: input.message.messageId,
         text: input.message.text,
         ...(context ? { context } : {}),
+        ...(input.message.systemContext === undefined
+          ? {}
+          : { systemContext: input.message.systemContext }),
         attachments,
       },
     });
@@ -852,6 +856,9 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
             ? MANUAL_CONTINUATION_FALLBACK_TEXT
             : input.message.text,
         ...(context ? { context } : {}),
+        ...(input.message.systemContext === undefined
+          ? {}
+          : { systemContext: input.message.systemContext }),
         ...(input.message.idleCompaction === undefined
           ? {}
           : { idleCompaction: input.message.idleCompaction }),
@@ -881,6 +888,9 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       messageId: input.message.messageId,
       text: input.message.text,
       ...(context ? { context } : {}),
+      ...(input.message.systemContext === undefined
+        ? {}
+        : { systemContext: input.message.systemContext }),
       ...(input.message.idleCompaction === undefined
         ? {}
         : { idleCompaction: input.message.idleCompaction }),

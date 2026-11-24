@@ -26,10 +26,12 @@ import {
 import { type ComponentType, Fragment, useRef, useState } from "react";
 
 import { canCaptureScreen, captureScreenshot } from "../../lib/screenCapture";
+import { type MemorySwitchTarget, useMemorySwitchStore } from "../../memorySwitchStore";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { toastManager } from "../ui/toast";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuShortcut, MenuTrigger } from "../ui/menu";
+import { Switch } from "../ui/switch";
 import { ComposerShelfDialog, type ComposerShelf } from "./ComposerShelfDialog";
 import { ComposerSketchDialog } from "./ComposerSketchDialog";
 
@@ -60,6 +62,7 @@ const ICONS: Record<PlusEntryId, ComponentType<{ className?: string }>> = {
 export function ComposerPlusMenu({
   environmentId,
   threadRef,
+  memoryTarget,
   addComposerAttachments,
   focusComposer,
   onInsertText,
@@ -68,6 +71,7 @@ export function ComposerPlusMenu({
 }: {
   readonly environmentId: EnvironmentId;
   readonly threadRef: ScopedThreadRef;
+  readonly memoryTarget: MemorySwitchTarget;
   readonly addComposerAttachments: (files: File[]) => Promise<boolean>;
   readonly focusComposer: () => void;
   readonly onInsertText: (text: string) => void;
@@ -79,6 +83,8 @@ export function ComposerPlusMenu({
   const m = useMessages();
   const inputRef = useRef<HTMLInputElement>(null);
   const [sketching, setSketching] = useState(false);
+  const memoryEnabled = useMemorySwitchStore((store) => store.isMemoryEnabled(memoryTarget));
+  const toggleMemoryEnabled = useMemorySwitchStore((store) => store.toggleMemoryEnabled);
 
   const entries = plusEntries(m, new Set<PlusEntryId>(canCaptureScreen() ? [] : ["screenshot"]));
 
@@ -123,6 +129,9 @@ export function ComposerPlusMenu({
         return;
       case "shelf":
         onShelfChange(effect.shelf);
+        return;
+      case "toggle":
+        toggleMemoryEnabled(memoryTarget);
         return;
     }
   };
@@ -169,16 +178,36 @@ export function ComposerPlusMenu({
           {entries.map((entry, index) => {
             const Icon = ICONS[entry.id];
             const startsGroup = index > 0 && entries[index - 1]?.group !== entry.group;
+            const isMemoryToggle = entry.effect.kind === "toggle";
             return (
               <Fragment key={entry.id}>
                 {startsGroup ? <MenuSeparator /> : null}
-                <MenuItem data-plus-entry={entry.id} onClick={() => run(entry)}>
+                <MenuItem
+                  data-plus-entry={entry.id}
+                  {...(isMemoryToggle
+                    ? {
+                        closeOnClick: false,
+                        role: "menuitemcheckbox",
+                        "aria-checked": memoryEnabled,
+                      }
+                    : {})}
+                  onClick={() => run(entry)}
+                >
                   <Icon className="size-4 shrink-0 text-muted-foreground" />
                   <span className="flex min-w-0 flex-1 items-baseline gap-2 truncate">
                     <span className="font-medium text-foreground">{entry.label}</span>
                     <span className="truncate text-xs text-muted-foreground">{entry.note}</span>
                   </span>
-                  {entry.shortcut ? <MenuShortcut>{entry.shortcut}</MenuShortcut> : null}
+                  {isMemoryToggle ? (
+                    <Switch
+                      checked={memoryEnabled}
+                      tabIndex={-1}
+                      aria-hidden="true"
+                      className="pointer-events-none shrink-0"
+                    />
+                  ) : entry.shortcut ? (
+                    <MenuShortcut>{entry.shortcut}</MenuShortcut>
+                  ) : null}
                 </MenuItem>
               </Fragment>
             );
