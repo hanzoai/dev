@@ -3,6 +3,7 @@
 //! corpus under `corpus/`, recorded from the TS functions on real event streams.
 
 pub mod dispatch_mode_limit;
+pub mod guest_share;
 pub mod model_switch;
 
 use serde_json::value::RawValue;
@@ -13,5 +14,5 @@ pub fn apply(name: &str, input: &RawValue) -> Option<Result<String, serde_json::
     if name == "modelSwitch" {
         return Some(model_switch::apply(input));
     }
-    dispatch_mode_limit::apply(name, input)
+    guest_share::apply(name, input).or_else(|| dispatch_mode_limit::apply(name, input))
 }

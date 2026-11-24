@@ -1,17 +1,15 @@
-import {
-  GUEST_PENDING_ATTACHMENT_BYTES_LIMIT,
-  GUEST_PENDING_MESSAGE_LIMIT,
-  GUEST_RESOLVED_MESSAGE_LIMIT,
-  type GuestMessageAttribution,
-  type GuestMessageId,
-  type OrchestrationMessageContext,
-  type OrchestrationV2AppThread,
-  type OrchestrationV2ServerCommand,
-  type ThreadGuestMessage,
-  type ThreadGuestShare,
+import type {
+  GuestMessageAttribution,
+  GuestMessageId,
+  OrchestrationMessageContext,
+  OrchestrationV2AppThread,
+  OrchestrationV2ServerCommand,
+  ThreadGuestShare,
 } from "@hanzodev/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Result from "effect/Result";
+
+import { decide } from "./DevWasm.ts";
 
 export type GuestShareCommand = Extract<
   OrchestrationV2ServerCommand,
@@ -33,72 +31,31 @@ export const GUEST_FAILURE = {
   filesBusy: "Wait for the owner to answer your earlier messages before you attach more files.",
 } as const;
 
-const isExpired = (share: ThreadGuestShare, now: DateTime.Utc) =>
-  DateTime.toEpochMillis(now) >= Date.parse(share.expiresAt);
-
-const pendingAttachments = (share: ThreadGuestShare | null) =>
-  share?.messages.flatMap((message) =>
-    message.status === "pending" ? (message.attachments ?? []) : [],
-  ) ?? [];
-
 /**
  * Stored files a share change leaves behind: those of waiting messages that were dismissed or
  * dropped with the share. A sent message keeps its files, which its thread message now holds.
+ * Decided by `dev.wasm`.
  */
 export function releasedGuestAttachmentIds(
   before: ThreadGuestShare | null,
   after: ThreadGuestShare | null,
 ): ReadonlyArray<string> {
-  const kept = new Set(
-    after !== null && after.id === before?.id
-      ? after.messages.flatMap((message) =>
-          message.status === "dismissed"
-            ? []
-            : (message.attachments ?? []).map((attachment) => attachment.id),
-        )
-      : [],
-  );
-  return pendingAttachments(before)
-    .map((attachment) => attachment.id)
-    .filter((id) => !kept.has(id));
+  return decide("guestShareReleasedAttachments", { before, after }) as ReadonlyArray<string>;
 }
 
-/** Keeps every pending message and only the newest resolved ones. */
-function trimResolved(messages: ReadonlyArray<ThreadGuestMessage>): Array<ThreadGuestMessage> {
-  let resolvedBudget = GUEST_RESOLVED_MESSAGE_LIMIT;
-  const kept: Array<ThreadGuestMessage> = [];
-  for (const message of messages.toReversed()) {
-    if (message.status !== "pending") {
-      if (resolvedBudget === 0) continue;
-      resolvedBudget -= 1;
-    }
-    kept.push(message);
-  }
-  return kept.toReversed();
-}
-
-const resolveMessage = (
-  share: ThreadGuestShare,
-  guestMessageId: GuestMessageId,
-  status: "sent" | "dismissed",
-): Result.Result<ThreadGuestShare, string> => {
-  const message = share.messages.find((candidate) => candidate.id === guestMessageId);
-  if (message === undefined || message.status !== "pending") {
-    return Result.fail(`Guest message ${guestMessageId} is not pending.`);
-  }
-  return Result.succeed({
-    ...share,
-    messages: trimResolved(
-      share.messages.map((candidate) =>
-        candidate.id === guestMessageId ? { ...candidate, status } : candidate,
-      ),
-    ),
-  });
-};
+type GuestShareCommandDecision =
+  | { readonly ok: false; readonly error: string }
+  | { readonly ok: true; readonly changed: false }
+  | {
+      readonly ok: true;
+      readonly changed: true;
+      readonly guestShare: ThreadGuestShare | null;
+      readonly unsettle: boolean;
+    };
 
 /**
  * Applies a guest share command to the thread. The orchestrator runs commands one at a time, so
- * checking state here is what makes a link redeem once and a message send once.
+ * checking state here is what makes a link redeem once and a message send once. Decided by `dev.wasm`.
  */
 export function decideGuestShareCommand(input: {
   readonly thread: OrchestrationV2AppThread;
@@ -107,96 +64,48 @@ export function decideGuestShareCommand(input: {
 }): Result.Result<OrchestrationV2AppThread, string> {
   const { thread, command, now } = input;
   const share = thread.guestShare ?? null;
-  const withShare = (guestShare: ThreadGuestShare | null) =>
-    Result.succeed({ ...thread, guestShare, updatedAt: now });
+  const parsedExpiresAt = share === null ? Number.NaN : Date.parse(share.expiresAt);
+  const decision = decide("guestShareCommand", {
+    share,
+    archived: thread.archivedAt !== null,
+    settled: thread.settledOverride === "settled",
+    command,
+    nowIso: DateTime.formatIso(now),
+    nowMs: DateTime.toEpochMillis(now),
+    expiresAtMs: Number.isFinite(parsedExpiresAt) ? parsedExpiresAt : null,
+  }) as GuestShareCommandDecision;
 
-  switch (command.type) {
-    case "thread.guest-share.open": {
-      if (thread.archivedAt !== null) return Result.fail("Archived threads cannot be shared.");
-      if (share?.messages.some((message) => message.status === "pending")) {
-        return Result.fail("Answer or dismiss waiting guest messages before replacing this link.");
-      }
-      return withShare({
-        id: command.shareId,
-        host: command.host,
-        createdAt: DateTime.formatIso(now),
-        expiresAt: command.expiresAt,
-        guestName: null,
-        messages: [],
-      });
-    }
-    case "thread.guest-share.close":
-      return share === null ? Result.succeed(thread) : withShare(null);
-    case "thread.guest-share.redeem": {
-      if (share === null || share.id !== command.shareId || isExpired(share, now)) {
-        return Result.fail(GUEST_FAILURE.inactive);
-      }
-      if (share.guestName !== null) return Result.fail(GUEST_FAILURE.used);
-      return withShare({ ...share, guestName: command.guestName });
-    }
-    case "thread.guest-message.submit": {
-      if (
-        share === null ||
-        share.id !== command.shareId ||
-        share.guestName === null ||
-        isExpired(share, now)
-      ) {
-        return Result.fail(GUEST_FAILURE.inactive);
-      }
-      if (
-        share.messages.filter((message) => message.status === "pending").length >=
-        GUEST_PENDING_MESSAGE_LIMIT
-      ) {
-        return Result.fail(GUEST_FAILURE.busy);
-      }
-      const attachments = command.attachments ?? [];
-      const pendingBytes = [...pendingAttachments(share), ...attachments].reduce(
-        (total, attachment) => total + attachment.sizeBytes,
-        0,
-      );
-      if (attachments.length > 0 && pendingBytes > GUEST_PENDING_ATTACHMENT_BYTES_LIMIT) {
-        return Result.fail(GUEST_FAILURE.filesBusy);
-      }
-      const guestShare: ThreadGuestShare = {
-        ...share,
-        messages: trimResolved([
-          ...share.messages,
-          {
-            id: command.guestMessageId,
-            text: command.text,
-            status: "pending",
-            submittedAt: DateTime.formatIso(now),
-            ...(attachments.length === 0 ? {} : { attachments }),
-          },
-        ]),
-      };
-      // A request needs the owner, so a settled thread comes back as a new message brings it.
-      return thread.settledOverride === "settled"
-        ? Result.succeed({
-            ...thread,
-            guestShare,
-            settledOverride: null,
-            settledAt: null,
-            unsettledAt: now,
-            updatedAt: now,
-          })
-        : withShare(guestShare);
-    }
-    case "thread.guest-message.dismiss": {
-      if (share === null) return Result.fail("This thread has no guest link.");
-      return Result.map(resolveMessage(share, command.guestMessageId, "dismissed"), (next) => ({
+  if (!decision.ok) return Result.fail(decision.error);
+  if (!decision.changed) return Result.succeed(thread);
+  return decision.unsettle
+    ? Result.succeed({
         ...thread,
-        guestShare: next,
+        guestShare: decision.guestShare,
+        settledOverride: null,
+        settledAt: null,
+        unsettledAt: now,
         updatedAt: now,
-      }));
-    }
-  }
+      })
+    : Result.succeed({
+        ...thread,
+        guestShare: decision.guestShare,
+        updatedAt: now,
+      });
 }
+
+type GuestMessageSendDecision =
+  | { readonly ok: false; readonly error: string }
+  | {
+      readonly ok: true;
+      readonly guestShare: ThreadGuestShare;
+      readonly text: string;
+      readonly guest: GuestMessageAttribution;
+    };
 
 /**
  * Marks a guest message sent. `text` is what the agent receives: it names the guest so the agent
  * does not mistake it for the owner's words, and so a guest cannot start a slash command.
- * `guest` lets clients show the guest's own text with their name beside it.
+ * `guest` lets clients show the guest's own text with their name beside it. Decided by `dev.wasm`.
  */
 export function decideGuestMessageSend(input: {
   readonly thread: OrchestrationV2AppThread;
@@ -210,40 +119,42 @@ export function decideGuestMessageSend(input: {
   },
   string
 > {
-  const share = input.thread.guestShare ?? null;
-  if (share === null) return Result.fail("This thread has no guest link.");
-  const message = share.messages.find((candidate) => candidate.id === input.guestMessageId);
-  const name = share.guestName ?? "Guest";
-  const guestText = message?.text ?? "";
-  return Result.map(resolveMessage(share, input.guestMessageId, "sent"), (next) => ({
-    thread: { ...input.thread, guestShare: next, updatedAt: input.now },
-    text: `Message from guest ${name}, sent by the owner:\n\n${guestText}`,
-    guest: { guestMessageId: input.guestMessageId, name, text: guestText, shareId: share.id },
-  }));
+  const decision = decide("guestShareSend", {
+    share: input.thread.guestShare ?? null,
+    guestMessageId: input.guestMessageId,
+  }) as GuestMessageSendDecision;
+  if (!decision.ok) return Result.fail(decision.error);
+  return Result.succeed({
+    thread: { ...input.thread, guestShare: decision.guestShare, updatedAt: input.now },
+    text: decision.text,
+    guest: decision.guest,
+  });
 }
+
+type GuestShareCancelDecision = {
+  readonly changed: boolean;
+  readonly guestShare: ThreadGuestShare | null;
+};
 
 /**
  * The owner cancelled a queued send, so the agent never got the message. It shows as dismissed,
  * which the guest can see, instead of sent with no reply ever coming. A share that changed since
- * the send is left alone.
+ * the send is left alone. Decided by `dev.wasm`.
  */
 export function guestShareAfterCancelledSend(
   thread: OrchestrationV2AppThread,
   guest: Pick<GuestMessageAttribution, "guestMessageId" | "shareId">,
   now: DateTime.Utc,
 ): OrchestrationV2AppThread {
-  const share = thread.guestShare ?? null;
-  if (share === null || share.id !== guest.shareId) return thread;
-  const message = share.messages.find((candidate) => candidate.id === guest.guestMessageId);
-  if (message?.status !== "sent") return thread;
+  const decision = decide("guestShareAfterCancelledSend", {
+    share: thread.guestShare ?? null,
+    guestMessageId: guest.guestMessageId,
+    shareId: guest.shareId,
+  }) as GuestShareCancelDecision;
+  if (!decision.changed) return thread;
   return {
     ...thread,
-    guestShare: {
-      ...share,
-      messages: share.messages.map((candidate) =>
-        candidate.id === guest.guestMessageId ? { ...candidate, status: "dismissed" } : candidate,
-      ),
-    },
+    guestShare: decision.guestShare,
     updatedAt: now,
   };
 }
