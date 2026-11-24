@@ -19,6 +19,7 @@ function dispatch(action: Parameters<typeof sectionReducer>[1]): void {
 
 export const openWorkspaceSection = (section: WorkspaceSection) =>
   dispatch({ type: "open", section });
+export const showDevProjects = (projects: boolean) => dispatch({ type: "projects", projects });
 export const showDevMacs = (macs: boolean) => dispatch({ type: "macs", macs });
 
 const subscribe = (listener: () => void) => {

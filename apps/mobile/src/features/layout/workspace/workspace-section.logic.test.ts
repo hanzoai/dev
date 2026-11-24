@@ -29,9 +29,10 @@ describe("drawer sections", () => {
 });
 
 describe("Dev content", () => {
-  it("holds every list the app had, plus the linked Macs", () => {
+  it("holds every list the app had, plus Projects and linked Macs", () => {
     const contents = devContents(undefined, undefined);
     for (const tab of NAVIGATION_TAB_ORDER) expect(contents).toContain(tab);
+    expect(contents).toContain("projects");
     expect(contents.at(-1)).toBe("macs");
   });
 
@@ -40,6 +41,7 @@ describe("Dev content", () => {
       "usage",
       "threads",
       "pullRequests",
+      "projects",
       "macs",
     ]);
   });
@@ -55,13 +57,16 @@ describe("Dev content", () => {
 });
 
 describe("section reducer", () => {
-  it("opens a section and leaves the Macs view with Dev", () => {
+  it("opens a section and leaves Projects/Macs views with Dev", () => {
     let state = sectionReducer(INITIAL_SECTION_STATE, { type: "open", section: "dev" });
+    state = sectionReducer(state, { type: "projects", projects: true });
+    expect(state).toEqual({ section: "dev", projects: true, macs: false });
     state = sectionReducer(state, { type: "macs", macs: true });
-    expect(state).toEqual({ section: "dev", macs: true });
+    expect(state).toEqual({ section: "dev", projects: false, macs: true });
     expect(sectionReducer(state, { type: "open", section: "dev" })).toBe(state);
     expect(sectionReducer(state, { type: "open", section: "plugins" })).toEqual({
       section: "plugins",
+      projects: false,
       macs: false,
     });
   });

@@ -29,7 +29,11 @@ import {
   WorkspaceSlotOptionsContext,
 } from "../../../native/v5-workspace-context";
 import type { NativeLayoutMetrics } from "../../../lib/reserved-regions";
-import { useFloatingWorkspaceTabs, useSystemWorkspaceTabBar } from "./useSystemWorkspaceTabBar";
+import {
+  useDrawerWorkspace,
+  useFloatingWorkspaceTabs,
+  useSystemWorkspaceTabBar,
+} from "./useSystemWorkspaceTabBar";
 import { useControlTheme } from "../../../components/ui/useControlTheme";
 import { useDeviceType } from "../../../native/native-layout-metrics";
 import { WorkspaceSidebarTabs } from "./WorkspaceSidebarTabs";
@@ -153,6 +157,7 @@ export function WorkspaceNativeTabs(props: {
   const selectTab = useSelectWorkspaceTab();
   const [provenance, setProvenance] = useState(0);
   const systemTabBar = useSystemWorkspaceTabBar();
+  const drawer = useDrawerWorkspace();
   const deviceType = useDeviceType();
   const { layout } = useAdaptiveWorkspaceLayout();
   const { panes } = useWorkspacePaneState();
@@ -269,6 +274,7 @@ export function WorkspaceNativeTabs(props: {
       {(deviceType === "pad" ||
         (layout.variant === "medium" &&
           !workspaceUsesColumns(selectedTab, workspace.settingsOpen))) &&
+      !drawer &&
       !props.hidden &&
       !props.tabsInSidebarColumn &&
       !hiddenWithSidebar ? (

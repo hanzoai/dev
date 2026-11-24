@@ -18,7 +18,7 @@ import {
   navigationCustomizationAvailable,
   resolveHiddenNavigationTabs,
 } from "./navigation-tab-order";
-import { showDevMacs, useWorkspaceSection } from "./workspace-section-store";
+import { showDevMacs, showDevProjects, useWorkspaceSection } from "./workspace-section-store";
 import {
   SECTION_ICONS,
   WORKSPACE_SECTIONS,
@@ -156,8 +156,9 @@ function useDrawerSelect() {
     },
     dev: (content: DevContent) => {
       closeWorkspaceDrawer();
+      showDevProjects(content === "projects");
       showDevMacs(content === "macs");
-      selectTab(content === "macs" ? "threads" : content, "dev");
+      selectTab(content === "macs" || content === "projects" ? "threads" : content, "dev");
     },
     other: (destination: "usage" | "settings") => {
       closeWorkspaceDrawer();
@@ -175,11 +176,15 @@ export function WorkspaceDrawerMenu() {
   const select = useDrawerSelect();
   const labels = useSectionLabels();
   const devs = useDevContents();
-  const { section, macs } = useWorkspaceSection();
+  const { section, projects, macs } = useWorkspaceSection();
   const { state: catalog } = useWorkspaceState();
   const { startNewTask } = useAdaptiveWorkspaceLayout();
   const active = workspace.settingsOpen ? null : section;
-  const devSelected: DevContent = macs ? "macs" : workspace.state.selectedTab;
+  const devSelected: DevContent = macs
+    ? "macs"
+    : projects
+      ? "projects"
+      : workspace.state.selectedTab;
   const newChat = () => {
     closeWorkspaceDrawer();
     if (section === "dev" && catalog.hasReadyEnvironment) startNewTask();
@@ -237,8 +242,20 @@ export function WorkspaceDrawerMenu() {
                   <NavRow
                     key={content}
                     indent
-                    label={content === "macs" ? gt("Macs") : m(WORKSPACE_TAB_LABELS[content])}
-                    icon={content === "macs" ? "laptopcomputer" : NAVIGATION_TAB_ICONS[content]}
+                    label={
+                      content === "macs"
+                        ? gt("Macs")
+                        : content === "projects"
+                          ? gt("Projects")
+                          : m(WORKSPACE_TAB_LABELS[content])
+                    }
+                    icon={
+                      content === "macs"
+                        ? "laptopcomputer"
+                        : content === "projects"
+                          ? "folder"
+                          : NAVIGATION_TAB_ICONS[content]
+                    }
                     selected={devSelected === content}
                     onPress={() => select.dev(content)}
                   />

@@ -65,9 +65,11 @@ export function useSystemWorkspaceTabBar() {
 }
 
 /**
- * The phone drops the tab bar and dock for a side drawer holding every destination, with the menu
- * and new-chat buttons in the header. Other devices keep their tab bar, rail or sidebar.
+ * The workspace uses the side drawer holding every destination (Chat, Dev, Library, Design,
+ * Plugins) on phones, iPads, and Android, replacing the old bottom tab bar. Only Duo keeps its
+ * native rail/picker.
  */
 export function useDrawerWorkspace() {
-  return useCompactWorkspaceTabs();
+  const deviceType = useDeviceType();
+  return !isDuoDevice(deviceType);
 }
