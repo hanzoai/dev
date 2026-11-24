@@ -47,9 +47,12 @@ export const HANZO_REASONING_CAPABILITIES: ModelCapabilities = createModelCapabi
       role: "reasoning",
       currentValue: "medium",
       options: [
+        { id: "off", label: "Off" },
         { id: "low", label: "Low" },
         { id: "medium", label: "Medium", isDefault: true },
         { id: "high", label: "High" },
+        { id: "xhigh", label: "Extra High" },
+        { id: "max", label: "Max" },
       ],
     },
   ],

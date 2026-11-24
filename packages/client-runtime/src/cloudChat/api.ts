@@ -14,8 +14,11 @@ import { createSseParser } from "./sse.ts";
 export const CLOUD_CHAT_BASE_URL = "https://api.hanzo.ai";
 /* oxlint-disable hanzo/no-untranslated-copy -- model names, spelled as their makers ship them */
 export const FALLBACK_MODELS: ReadonlyArray<CloudChatModel> = [
-  { id: "enso-flash", label: "enso-flash", provider: "hanzo" },
-  { id: "enso", label: "enso", provider: "hanzo" },
+  { id: "enso-flash", label: "Enso Flash", provider: "hanzo" },
+  { id: "enso-pro", label: "Enso Pro", provider: "hanzo" },
+  { id: "enso-max", label: "Enso Max", provider: "hanzo" },
+  { id: "enso-ultra", label: "Enso Ultra", provider: "hanzo" },
+  { id: "enso", label: "Enso", provider: "hanzo" },
   { id: "zen6", label: "Zen 6", provider: "hanzo" },
   { id: "zen6-flash", label: "Zen 6 Flash", provider: "hanzo" },
   { id: "zen6-coder", label: "Zen 6 Coder", provider: "hanzo" },
