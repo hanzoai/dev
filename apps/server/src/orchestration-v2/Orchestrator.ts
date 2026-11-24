@@ -161,6 +161,7 @@ import {
   decideQueuedRunEdit,
   decideQueuedRunReorder,
 } from "./QueuedRunDecider.ts";
+import { decideThreadTriageCommand } from "./ThreadTriageDecider.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
 import { withCommandMetrics } from "../observability/Metrics.ts";
 import type { OrchestrationEffectRequestV2, PendingOrchestrationEffectV2 } from "./EffectOutbox.ts";
@@ -4762,90 +4763,24 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             updatedAt: now,
           };
         }
-        case "thread.unsnooze": {
-          const alreadyAwake = thread.snoozedUntil == null;
-          return {
-            ...thread,
-            snoozedUntil: null,
-            snoozedAt: null,
-            lastSnoozeWakeAt: alreadyAwake ? thread.lastSnoozeWakeAt : now,
-            updatedAt: alreadyAwake ? thread.updatedAt : now,
-          };
-        }
-        case "thread.auto-settle.set": {
-          const unchanged = command.enabled === (thread.autoSettleDisabledAt == null);
-          return {
-            ...thread,
-            autoSettleDisabledAt: command.enabled ? null : (thread.autoSettleDisabledAt ?? now),
-            updatedAt: unchanged ? thread.updatedAt : now,
-          };
-        }
-        case "thread.pin": {
-          const alreadyPinned = thread.pinnedAt != null;
-          const promotes = thread.settledOverride === "settled" || thread.snoozedUntil != null;
-          return {
-            ...thread,
-            pinnedAt: alreadyPinned ? thread.pinnedAt : now,
-            ...(alreadyPinned || command.orderKey === undefined
-              ? {}
-              : { pinOrderKey: command.orderKey }),
-            settledOverride:
-              thread.settledOverride === "settled" ? "active" : thread.settledOverride,
-            settledAt: thread.settledOverride === "settled" ? null : thread.settledAt,
-            ...(thread.settledOverride === "settled" ? { unsettledAt: now } : {}),
-            snoozedUntil: null,
-            snoozedAt: null,
-            lastSnoozeWakeAt: thread.snoozedUntil == null ? thread.lastSnoozeWakeAt : now,
-            updatedAt: alreadyPinned && !promotes ? thread.updatedAt : now,
-          };
-        }
-        case "thread.unpin": {
-          const alreadyUnpinned = thread.pinnedAt == null;
-          return {
-            ...thread,
-            pinnedAt: null,
-            pinOrderKey: null,
-            updatedAt: alreadyUnpinned ? thread.updatedAt : now,
-          };
-        }
-        case "thread.pin.reorder": {
-          const keyUnchanged = thread.pinOrderKey === command.orderKey;
-          return {
-            ...thread,
-            pinOrderKey: command.orderKey,
-            updatedAt: keyUnchanged ? thread.updatedAt : now,
-          };
-        }
-        case "thread.active.reorder": {
-          return {
-            ...thread,
-            activeOrderKey: command.orderKey,
-            updatedAt: thread.updatedAt,
-          };
-        }
-        case "thread.tag.set": {
-          const current = thread.tags ?? [];
-          return {
-            ...thread,
-            tags: command.tagged
-              ? current.includes(command.tag)
-                ? current
-                : [...current, command.tag]
-              : current.filter((tag) => tag !== command.tag),
-          };
-        }
+        case "thread.unsnooze":
+        case "thread.auto-settle.set":
+        case "thread.pin":
+        case "thread.unpin":
+        case "thread.pin.reorder":
+        case "thread.active.reorder":
+        case "thread.tag.set":
         case "thread.mark-unread": {
-          // Retire the wake before rewinding the visit, preserving its settlement timer.
-          const snoozeExpired =
-            thread.snoozedUntil != null &&
-            DateTime.toEpochMillis(thread.snoozedUntil) <= DateTime.toEpochMillis(now);
-          return {
-            ...thread,
-            lastVisitedAt: markUnreadVisitedAt,
-            ...(snoozeExpired
-              ? { snoozedUntil: null, snoozedAt: null, lastSnoozeWakeAt: thread.snoozedUntil }
-              : {}),
-          };
+          const decided = decideThreadTriageCommand({
+            thread,
+            command,
+            now,
+            markUnreadVisitedAt,
+          });
+          if (Result.isFailure(decided)) {
+            return thread;
+          }
+          return decided.success;
         }
         case "thread.metadata.update": {
           const previousRecovery =

@@ -51,3 +51,8 @@ fn command_policy() -> Result<(), Box<dyn std::error::Error>> {
 fn queued_run() -> Result<(), Box<dyn std::error::Error>> {
     replay(include_str!("../corpus/queued_run.jsonl"), 1000)
 }
+
+#[test]
+fn thread_triage() -> Result<(), Box<dyn std::error::Error>> {
+    replay(include_str!("../corpus/thread_triage.jsonl"), 1000)
+}
