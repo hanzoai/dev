@@ -27,6 +27,7 @@ import {
 } from "react";
 import { ChevronRightIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
+import { isLocalEngineInstanceId } from "@hanzodev/shared/localAi";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
 import { useProviderWorkspaceSnapshotRefresh } from "./useProviderWorkspaceSnapshotRefresh";
 import { getProviderStatusMessage, hasProviderSetup } from "./ProviderStatusBanner";
@@ -71,7 +72,7 @@ import {
   shouldShowInstanceBadge,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
-import { ensoTabAnchor, type PickerTab } from "./ModelPickerSidebar";
+import { ensoTabAnchor, localEngineHealthStatus, type PickerTab } from "./ModelPickerSidebar";
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
 import { hasRuntimeModelCatalog } from "../../providerModels";
 
@@ -578,13 +579,16 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     if (activeInstanceHasSelectableUnavailableModel) {
       instanceIds.add(props.activeInstanceId);
     }
-    if (canOpenProviderSetup) {
-      for (const entry of instanceEntries) {
-        if (
-          shouldOfferModelPickerSetup(entry, modelOptionsByInstance.get(entry.instanceId) ?? [])
-        ) {
-          instanceIds.add(entry.instanceId);
-        }
+    for (const entry of instanceEntries) {
+      if (isLocalEngineInstanceId(entry.instanceId)) {
+        instanceIds.add(entry.instanceId);
+        continue;
+      }
+      if (
+        canOpenProviderSetup &&
+        shouldOfferModelPickerSetup(entry, modelOptionsByInstance.get(entry.instanceId) ?? [])
+      ) {
+        instanceIds.add(entry.instanceId);
       }
     }
     return instanceIds.size > 0 ? instanceIds : undefined;
@@ -1154,6 +1158,48 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               onMouseDown={(e) => e.stopPropagation()}
               onTouchStart={(e) => e.stopPropagation()}
             />
+
+            {(() => {
+              const engineHealth =
+                selectedEntry && !isSearching ? localEngineHealthStatus(selectedEntry) : null;
+              if (engineHealth === null || !selectedEntry) return null;
+              const statusLabel =
+                engineHealth === "ready"
+                  ? gt("Ready")
+                  : engineHealth === "error"
+                    ? selectedEntry.snapshot.message?.trim() || gt("Offline")
+                    : selectedEntry.snapshot.message?.trim() || gt("Limited");
+              return (
+                <div
+                  data-testid="local-engine-status"
+                  data-engine-health={engineHealth}
+                  className="flex items-center gap-2 border-b border-border/60 px-2.5 py-1.5 text-xs"
+                >
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "size-2 shrink-0 rounded-full",
+                      engineHealth === "ready"
+                        ? "bg-success"
+                        : engineHealth === "error"
+                          ? "bg-destructive"
+                          : "bg-warning",
+                    )}
+                  />
+                  <span className="truncate font-medium text-foreground">
+                    {selectedEntry.displayName}
+                  </span>
+                  <span
+                    className={cn(
+                      "ml-auto truncate",
+                      engineHealth === "error" ? "text-destructive" : "text-muted-foreground",
+                    )}
+                  >
+                    {statusLabel}
+                  </span>
+                </div>
+              );
+            })()}
 
             <ModelPickerList
               listRef={modelListRef}
