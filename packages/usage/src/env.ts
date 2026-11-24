@@ -39,6 +39,8 @@ export interface UsageEnv {
   ) => Promise<T>;
   /** macOS keychain generic password, read through the user's own `security` tool. */
   readonly keychain: (service: string) => Promise<string | undefined>;
+  /** Active Hanzo IAM access token from hanzod's ZAP socket (refreshed via CLI on 401 spent). */
+  readonly readHanzoToken?: () => Promise<string | undefined>;
 }
 
 export interface HostFacts {

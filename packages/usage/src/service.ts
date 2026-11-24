@@ -27,6 +27,8 @@ export interface HostReadings {
   readonly cost: ReadonlyArray<CostDay>;
   /** Provider API keys resolved from configured instance environments and secrets. */
   readonly env?: Readonly<Record<string, string | undefined>>;
+  /** Fresh Hanzo IAM access token from hanzod's ZAP identity socket. */
+  readonly hanzoToken?: () => Promise<string | undefined>;
 }
 
 const failure = (env: UsageEnv, provider: string, error: string): ProviderSnapshot => ({
@@ -118,21 +120,23 @@ export const createUsageService = (
   let notified: NotifyState = new Map();
   let cost: ReadonlyArray<CostDay> = [];
 
-  const withExtraEnv = (
-    extra: Readonly<Record<string, string | undefined>> | undefined,
-  ): UsageEnv => {
-    if (!extra) return env;
-    const entries = Object.entries(extra).filter(([, v]) => typeof v === "string" && v.trim());
-    return entries.length > 0
-      ? { ...env, env: { ...env.env, ...Object.fromEntries(entries) } }
-      : env;
+  const withHostEnv = (host: HostReadings): UsageEnv => {
+    const entries = host.env
+      ? Object.entries(host.env).filter(([, v]) => typeof v === "string" && v.trim())
+      : [];
+    if (entries.length === 0 && !host.hanzoToken) return env;
+    return {
+      ...env,
+      ...(entries.length > 0 ? { env: { ...env.env, ...Object.fromEntries(entries) } } : {}),
+      ...(host.hanzoToken ? { readHanzoToken: host.hanzoToken } : {}),
+    };
   };
 
   const refresh = async (
     host: HostReadings,
   ): Promise<{ summary: UsageSummary; alerts: LimitAlert[] }> => {
     const settings = getSettings();
-    const refreshEnv = withExtraEnv(host.env);
+    const refreshEnv = withHostEnv(host);
     const ids = CATALOG.map((p) => p.id).filter((id) =>
       isEnabled(
         settings,
@@ -184,7 +188,12 @@ export const createUsageService = (
   ): Promise<ProviderSnapshot[]> => {
     const connector = CONNECTORS[id];
     if (!connector) return [failure(env, id, "This provider has no connect step.")];
-    const connectEnv = withExtraEnv(extraEnv);
+    const connectEnv = withHostEnv({
+      instances: [],
+      local: [],
+      cost: [],
+      ...(extraEnv ? { env: extraEnv } : {}),
+    });
     return [
       ...(await connector(connectEnv, instances).catch((e: unknown) => [
         failure(connectEnv, id, e instanceof Error ? e.message : String(e)),

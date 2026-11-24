@@ -41,6 +41,8 @@ describe("HostReadings", () => {
     });
     assert.isUndefined(snapshotOf(provider("codex", [])));
     assert.strictEqual(catalogId("codex"), "codex");
+    assert.strictEqual(catalogId("hanzo"), "hanzo");
+    assert.strictEqual(catalogId("hanzoGen"), "hanzo");
   });
   it("carries the driver's own reason when it has no windows", () => {
     const s = snapshotOf(
@@ -109,5 +111,39 @@ describe("HostReadings", () => {
       ZAI_API_KEY: "sk-zai",
     });
     assert.deepStrictEqual(secretRefs, [{ name: "DEEPSEEK_API_KEY", reference: ref }]);
+  });
+  it("keeps per-model token use from Hanzo driver transcripts in the Cost view", () => {
+    const bucket = (providerName: string, model: string, input: number, output: number) =>
+      ({
+        day: "2026-11-20",
+        provider: providerName,
+        model,
+        totals: {
+          uncachedInputTokens: input,
+          cachedInputTokens: 100,
+          cacheCreationTokens: 0,
+          outputTokens: output,
+          reasoningTokens: 0,
+        },
+        costUsd: 0.42,
+      }) as unknown as UsageBucket;
+    const days = costDays([
+      bucket("hanzo", "zen5", 1000, 250),
+      bucket("hanzo", "claude-sonnet-4-6", 500, 120),
+      bucket("hanzoGen", "zen5-mini", 300, 80),
+    ]);
+    assert.deepStrictEqual(
+      days.map((d) => ({
+        provider: d.provider,
+        model: d.model,
+        inputTokens: d.inputTokens,
+        outputTokens: d.outputTokens,
+      })),
+      [
+        { provider: "hanzo", model: "claude-sonnet-4-6", inputTokens: 500, outputTokens: 120 },
+        { provider: "hanzo", model: "zen5", inputTokens: 1000, outputTokens: 250 },
+        { provider: "hanzo", model: "zen5-mini", inputTokens: 300, outputTokens: 80 },
+      ],
+    );
   });
 });

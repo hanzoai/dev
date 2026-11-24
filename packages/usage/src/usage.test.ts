@@ -791,4 +791,59 @@ describe("accounts", () => {
     assert.strictEqual(or?.windows[0]?.usedPercent, 20);
     assert.strictEqual(or?.credits?.balance, 40);
   });
+  it("reads Hanzo usage using HostReadings.hanzoToken from hanzod", async () => {
+    let authHeader = "";
+    const freshJwt = `${btoa(JSON.stringify({ alg: "RS256" }))}.${btoa(
+      JSON.stringify({
+        owner: "hanzo",
+        name: "alice",
+        email: "alice@hanzo.ai",
+        exp: 1_900_000_000,
+      }),
+    )}.sig`;
+    const env = fakeEnv(
+      {},
+      {},
+      {},
+      {
+        fetch: (async (url, init) => {
+          if (String(url).includes("/v1/billing/balance")) {
+            authHeader = String(
+              (init?.headers as Record<string, string> | undefined)?.Authorization,
+            );
+            return new Response(JSON.stringify({ balance: 1250, currency: "USD" }), {
+              status: 200,
+            });
+          }
+          if (String(url).includes("/v1/billing/tier")) {
+            return new Response(JSON.stringify({ tier: "pro" }), { status: 200 });
+          }
+          return new Response("{}", { status: 404 });
+        }) as typeof fetch,
+      },
+    );
+    const svc = createUsageService(env, () => ({
+      providers: {
+        hanzo: { enabled: true },
+        claude: { enabled: false },
+        codex: { enabled: false },
+        copilot: { enabled: false },
+      },
+      trayMode: "merged",
+      showInMenuBar: false,
+      notifyAtPercent: [],
+      refreshSeconds: 300,
+    }));
+    const { summary } = await svc.refresh({
+      instances: [],
+      local: [],
+      cost: [],
+      hanzoToken: async () => freshJwt,
+    });
+    const h = summary.snapshots.find((x) => x.provider === "hanzo");
+    assert.strictEqual(authHeader, `Bearer ${freshJwt}`);
+    assert.strictEqual(h?.source, "oauth");
+    assert.strictEqual(h?.account, "alice@hanzo.ai");
+    assert.strictEqual(h?.credits?.balance, 12.5);
+  });
 });
