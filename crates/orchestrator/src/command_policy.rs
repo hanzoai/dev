@@ -221,6 +221,26 @@ struct DispatchMode {
     kind: String,
     #[serde(rename = "targetRunId", skip_serializing_if = "Option::is_none")]
     target_run_id: Option<String>,
+    #[serde(rename = "workspaceStrategy", skip_serializing_if = "Option::is_none")]
+    workspace_strategy: Option<Box<RawValue>>,
+}
+
+impl DispatchMode {
+    fn simple(kind: &str) -> Self {
+        Self {
+            kind: kind.to_owned(),
+            target_run_id: None,
+            workspace_strategy: None,
+        }
+    }
+
+    fn targeting(kind: &str, target_run_id: String) -> Self {
+        Self {
+            kind: kind.to_owned(),
+            target_run_id: Some(target_run_id),
+            workspace_strategy: None,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -278,56 +298,32 @@ fn resolve_delivery_intent(input: &DispatchIntentInput) -> DispatchMode {
         .rev()
         .find(|r| is_active_run_status(&r.status))
     else {
-        return DispatchMode {
-            kind: "start_immediately".to_owned(),
-            target_run_id: None,
-        };
+        return DispatchMode::simple("start_immediately");
     };
     if intent == "steer" {
-        return DispatchMode {
-            kind: "steer_active".to_owned(),
-            target_run_id: Some(active_run.id.clone()),
-        };
+        return DispatchMode::targeting("steer_active", active_run.id.clone());
     }
     if intent == "restart" {
-        return DispatchMode {
-            kind: "restart_active".to_owned(),
-            target_run_id: Some(active_run.id.clone()),
-        };
+        return DispatchMode::targeting("restart_active", active_run.id.clone());
     }
     if active_run.status == "preparing"
         || active_run.status == "starting"
         || !active_run.has_running_provider_turn
     {
-        return DispatchMode {
-            kind: "queue_after_active".to_owned(),
-            target_run_id: None,
-        };
+        return DispatchMode::simple("queue_after_active");
     }
     if let Some(caps) = &active_run.turns {
         if caps.supports_active_steering {
-            return DispatchMode {
-                kind: "steer_active".to_owned(),
-                target_run_id: Some(active_run.id.clone()),
-            };
+            return DispatchMode::targeting("steer_active", active_run.id.clone());
         }
         if caps.supports_queued_messages {
-            return DispatchMode {
-                kind: "queue_after_active".to_owned(),
-                target_run_id: None,
-            };
+            return DispatchMode::simple("queue_after_active");
         }
         if caps.supports_steering_by_interrupt_restart {
-            return DispatchMode {
-                kind: "restart_active".to_owned(),
-                target_run_id: Some(active_run.id.clone()),
-            };
+            return DispatchMode::targeting("restart_active", active_run.id.clone());
         }
     }
-    DispatchMode {
-        kind: "queue_after_active".to_owned(),
-        target_run_id: None,
-    }
+    DispatchMode::simple("queue_after_active")
 }
 
 fn resolve_message_dispatch_intent(input: &RawValue) -> Result<String, serde_json::Error> {
@@ -344,10 +340,7 @@ fn resolve_message_dispatch_intent(input: &RawValue) -> Result<String, serde_jso
         target.and_then(|run| input.messages.iter().find(|m| m.id == run.user_message_id));
     if let Some(msg) = target_message {
         if is_native_maintenance_str(&msg.text, msg.attachments) {
-            return serde_json::to_string(&DispatchMode {
-                kind: "queue_after_active".to_owned(),
-                target_run_id: None,
-            });
+            return serde_json::to_string(&DispatchMode::simple("queue_after_active"));
         }
     }
     let turns = target
@@ -361,10 +354,7 @@ fn resolve_message_dispatch_intent(input: &RawValue) -> Result<String, serde_jso
                 turns.supports_steering_by_interrupt_restart,
             )
         {
-            return serde_json::to_string(&DispatchMode {
-                kind: "queue_after_active".to_owned(),
-                target_run_id: None,
-            });
+            return serde_json::to_string(&DispatchMode::simple("queue_after_active"));
         }
     }
     serde_json::to_string(&mode)
