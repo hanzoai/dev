@@ -15,13 +15,16 @@ const T0 = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z");
 const T1 = DateTime.makeUnsafe("2026-01-01T01:00:00.000Z");
 const T2 = DateTime.makeUnsafe("2026-01-01T02:00:00.000Z");
 
+const THREAD_ID = ThreadId.make("thread-triage-1");
+
 const baseThread = (
   overrides: Partial<OrchestrationV2AppThread> = {},
 ): OrchestrationV2AppThread => ({
-  id: ThreadId.make("thread-triage-1"),
+  createdBy: "user",
+  creationSource: "web",
+  id: THREAD_ID,
   projectId: ProjectId.make("project-1"),
   title: "Triage test",
-  titleSource: "auto",
   modelSelection: {
     instanceId: ProviderInstanceId.make("codex"),
     model: "gpt-5.4",
@@ -31,8 +34,13 @@ const baseThread = (
   interactionMode: "default",
   branch: null,
   worktreePath: null,
-  workspaceRoot: null,
+  branchPullRequest: null,
+  activeOrderKey: null,
   activeProviderThreadId: null,
+  lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: THREAD_ID },
+  forkedFrom: null,
+  settledOverride: null,
+  settledAt: null,
   lastVisitedAt: null,
   archivedAt: null,
   deletedAt: null,
