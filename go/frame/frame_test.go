@@ -530,3 +530,41 @@ func TestAWorkspaceActionIsPerformedUnderItsThreadAndIdAfterTheSnapshot(t *testi
 		t.Fatalf("reply after the exec: %v", m)
 	}
 }
+
+// The threads a session holds are carried into a Dev server as the import it takes:
+// each under the id the client holds, with its title, model and conversation.
+func TestImportRequestCarriesEveryThread(t *testing.T) {
+	r := newRig(t, "")
+	if b, err := r.a.ImportRequest(9); b != nil || err != nil {
+		t.Fatalf("an adapter with no threads = %s %v, want nothing", b, err)
+	}
+	thread := r.chat()
+	b, err := r.a.ImportRequest(9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := parse(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := v.(*O)
+	if n, _ := f.Int("id"); f.Str("_tag") != "Request" || n != 9 || f.Str("tag") != ImportMethod {
+		t.Fatalf("frame %s", b)
+	}
+	threads := f.Obj("payload").List("threads")
+	if len(threads) != 1 {
+		t.Fatalf("%d threads, want the one", len(threads))
+	}
+	th := threads[0].(*O)
+	if th.Str("threadId") != thread || th.Str("title") == "" || th.Obj("modelSelection").Str("model") != "enso-auto" ||
+		th.Str("createdAt") == "" || th.Str("updatedAt") == "" {
+		t.Fatalf("thread %s", b)
+	}
+	var said []string
+	for _, m := range th.List("messages") {
+		said = append(said, m.(*O).Str("role")+": "+m.(*O).Str("text"))
+	}
+	if strings.Join(said, " | ") != "user: Say hello in one word. | assistant: Hello" {
+		t.Fatalf("messages %v", said)
+	}
+}

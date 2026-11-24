@@ -183,6 +183,17 @@ const seedOwner = Effect.fn(function* (
   return threadId;
 });
 
+const project = (workspaceRoot = "/workspace/project") => ({
+  id: projectId,
+  title: "Project",
+  workspaceRoot,
+  defaultModelSelection: null,
+  scripts: [],
+  createdAt: timestamp,
+  updatedAt: timestamp,
+  deletedAt: null,
+});
+
 const makeImporter = Effect.fn(function* (
   candidates: ReadonlyArray<AgentSessionScanner.AgentSessionRecentThread>,
   beforeTransaction: Effect.Effect<void> = Effect.void,
@@ -196,6 +207,7 @@ const makeImporter = Effect.fn(function* (
     readonly workspaceRoot: string;
     readonly scanner: AgentSessionScanner.AgentSessionScanner["Service"];
   },
+  projectCount = 1,
 ) {
   const sql = yield* SqlClient.SqlClient;
   const events = yield* EventStore.EventStoreV2;
@@ -243,17 +255,11 @@ const makeImporter = Effect.fn(function* (
               })
             : Layer.succeed(AgentSessionScanner.AgentSessionScanner, realScan.scanner),
           Layer.mock(ProjectService.ProjectService)({
-            getById: () =>
-              Effect.succeedSome({
-                id: projectId,
-                title: "Project",
-                workspaceRoot: realScan?.workspaceRoot ?? "/workspace/project",
-                defaultModelSelection: null,
-                scripts: [],
-                createdAt: timestamp,
-                updatedAt: timestamp,
-                deletedAt: null,
-              }),
+            getById: () => Effect.succeedSome(project(realScan?.workspaceRoot)),
+            snapshot: Effect.succeed({
+              projects: Array.from({ length: projectCount }, () => project()),
+              updatedAt: timestamp,
+            }),
           }),
           Layer.mock(Orchestrator.OrchestratorV2)({
             getThreadRecords: (threadId, fields) =>
@@ -280,6 +286,7 @@ const makeImporter = Effect.fn(function* (
   return {
     run: importer.importRecentAgentThreads({ projectId }),
     importNativeHistory: importer.importNativeHistory,
+    importChatThreads: importer.importChatThreads,
     published,
   };
 });
@@ -1050,4 +1057,82 @@ it.effect("repeated imports reach linked-worktree sessions behind the scan budge
     );
     expect(oldest.worktreePath).toBe(worktree);
   }).pipe(Effect.scoped, Effect.provide(Layer.merge(persistence, NodeServices.layer))),
+);
+
+const chatThreadId = ThreadId.make("5b0f7c1e-2a8d-4c3e-9f61-0d2b7a9e4c11");
+const chatThread = (messages: ReadonlyArray<{ role: "user" | "assistant"; text: string }>) => ({
+  threadId: chatThreadId,
+  title: "Echo",
+  modelSelection: CODEX_MODEL_SELECTION,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+  messages: messages.map((message) => ({ ...message, createdAt: timestamp })),
+});
+
+it.effect("carries a chat thread in as run-less history under the client's id, once", () =>
+  Effect.gen(function* () {
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const importer = yield* makeImporter([]);
+    const thread = chatThread([
+      { role: "user", text: "run echo hi" },
+      { role: "assistant", text: "it said hi" },
+    ]);
+
+    // With no project named, the threads land in the server's one project.
+    expect(yield* importer.importChatThreads({ threads: [thread] })).toEqual({
+      importedCount: 1,
+      skippedCount: 0,
+    });
+    const records = yield* projections.getThreadRecords(chatThreadId, [
+      "messages",
+      "providerThreads",
+      "runs",
+    ]);
+    expect(records.thread.projectId).toBe(projectId);
+    expect(records.thread.title).toBe("Echo");
+    expect(records.thread.historyOrigin).toBe("v1_import");
+    expect(records.thread.activeProviderThreadId).toBeNull();
+    expect(records.providerThreads).toEqual([]);
+    expect(records.runs).toEqual([]);
+    expect(records.messages.map((message) => [message.role, message.text])).toEqual([
+      ["user", "run echo hi"],
+      ["assistant", "it said hi"],
+    ]);
+
+    // A second upgrade of the same session writes nothing.
+    const written = importer.published.length;
+    expect(yield* importer.importChatThreads({ projectId, threads: [thread] })).toEqual({
+      importedCount: 1,
+      skippedCount: 0,
+    });
+    expect(importer.published.length).toBe(written);
+
+    // A thread here that says something else is left as it is.
+    expect(
+      yield* importer.importChatThreads({
+        threads: [chatThread([{ role: "user", text: "something else" }])],
+      }),
+    ).toEqual({ importedCount: 0, skippedCount: 1 });
+    expect((yield* projections.getThreadRecords(chatThreadId, ["messages"])).messages.length).toBe(
+      2,
+    );
+  }).pipe(Effect.scoped, Effect.provide(persistence)),
+);
+
+it.effect("asks which project when the server has more than one", () =>
+  Effect.gen(function* () {
+    const importer = yield* makeImporter(
+      [],
+      Effect.void,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      2,
+    );
+    const error = yield* importer
+      .importChatThreads({ threads: [chatThread([{ role: "user", text: "hi" }])] })
+      .pipe(Effect.flip);
+    expect(error._tag).toBe("ChatThreadImportProjectAmbiguousError");
+  }).pipe(Effect.scoped, Effect.provide(persistence)),
 );
