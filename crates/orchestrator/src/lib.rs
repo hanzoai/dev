@@ -7,6 +7,7 @@ pub mod dispatch_mode_limit;
 pub mod guest_share;
 pub mod model_switch;
 pub mod queued_run;
+pub mod thread_triage;
 
 use serde_json::value::RawValue;
 
@@ -20,4 +21,5 @@ pub fn apply(name: &str, input: &RawValue) -> Option<Result<String, serde_json::
         .or_else(|| command_policy::apply(name, input))
         .or_else(|| dispatch_mode_limit::apply(name, input))
         .or_else(|| queued_run::apply(name, input))
+        .or_else(|| thread_triage::apply(name, input))
 }
