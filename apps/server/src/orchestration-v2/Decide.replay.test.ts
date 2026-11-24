@@ -5,7 +5,7 @@ import { type DecideCase, decideFns } from "./Decide.replay.ts";
 
 // Every pure decide function replays its recorded corpus byte for byte. The corpora are the
 // reference: crates/orchestrator replays the same files against the Rust functions.
-it.each(["dispatch_mode_limit", "model_switch"])("replays the %s corpus", (name) => {
+it.each(["dispatch_mode_limit", "model_switch", "guest_share"])("replays the %s corpus", (name) => {
   const corpus = new URL(`../../../../crates/orchestrator/corpus/${name}.jsonl`, import.meta.url);
   const cases = NodeFS.readFileSync(corpus, "utf8").trimEnd().split("\n");
   assert.isAbove(cases.length, 1000);

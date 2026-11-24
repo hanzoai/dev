@@ -1,5 +1,12 @@
 import * as DateTime from "effect/DateTime";
+import * as Result from "effect/Result";
 import { modelSwitchSince } from "./modelSwitch.ts";
+import {
+  decideGuestMessageSend,
+  decideGuestShareCommand,
+  guestShareAfterCancelledSend,
+  releasedGuestAttachmentIds,
+} from "./GuestShareDecider.ts";
 import {
   exceededDispatchModeLimit,
   narrowToCeiling,
@@ -45,4 +52,46 @@ export const decideFns: Record<string, (input: any) => unknown> = {
     ),
   ceilingRefusal: ({ max, events, runtimeModes }) =>
     runtimeModeCeilingRefusal(max, events, new Map(runtimeModes)),
+  guestShareReleasedAttachments: ({ before, after }) => releasedGuestAttachmentIds(before, after),
+  guestShareCommand: (input) => {
+    const now = DateTime.toUtc(DateTime.makeUnsafe(input.nowIso));
+    const thread = {
+      guestShare: input.share,
+      archivedAt: input.archived ? now : null,
+      settledOverride: input.settled ? "settled" : null,
+    } as never;
+    const res = decideGuestShareCommand({ thread, command: input.command, now });
+    if (Result.isFailure(res)) return { ok: false, error: res.failure };
+    if (res.success === thread) return { ok: true, changed: false };
+    return {
+      ok: true,
+      changed: true,
+      guestShare: res.success.guestShare ?? null,
+      unsettle: input.settled && res.success.settledOverride === null,
+    };
+  },
+  guestShareSend: ({ share, guestMessageId }) => {
+    const now = DateTime.toUtc(DateTime.makeUnsafe("2026-11-20T12:00:00.000Z"));
+    const res = decideGuestMessageSend({
+      thread: { guestShare: share } as never,
+      guestMessageId,
+      now,
+    });
+    return Result.isFailure(res)
+      ? { ok: false, error: res.failure }
+      : {
+          ok: true,
+          guestShare: res.success.thread.guestShare ?? null,
+          text: res.success.text,
+          guest: res.success.guest,
+        };
+  },
+  guestShareAfterCancelledSend: ({ share, guestMessageId, shareId }) => {
+    const now = DateTime.toUtc(DateTime.makeUnsafe("2026-11-20T12:00:00.000Z"));
+    const thread = { guestShare: share } as never;
+    const next = guestShareAfterCancelledSend(thread, { guestMessageId, shareId }, now);
+    return next === thread
+      ? { changed: false, guestShare: share }
+      : { changed: true, guestShare: next.guestShare ?? null };
+  },
 };
