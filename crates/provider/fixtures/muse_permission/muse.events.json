@@ -1060,35 +1060,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Aapprove-runtime-request-1%3A<uuid:5>:<uuid:26>",
-    "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
-    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Anative-request%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0%3A<uuid:24>",
-    "driver": "muse",
-    "providerInstanceId": "muse",
-    "occurredAt": "<time>",
-    "type": "runtime-request.updated",
-    "payload": {
-      "id": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6:native-request:01a11a6d-4730-75f1-bc60-4e5df1a3cdc0:<uuid:24>",
-      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Anative-request%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0%3A<uuid:24>",
-      "providerTurnId": "provider-turn:provider:muse:native-turn:muse%3A01a11a6d-39bb-7000-8c93-4594c98e6a11%3A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6",
-      "nativeRequestRef": {
-        "driver": "muse",
-        "nativeId": "01a11a6d-4730-75f1-bc60-4e5df1a3cdc0",
-        "strength": "strong"
-      },
-      "kind": "command",
-      "status": "resolved",
-      "responseCapability": {
-        "type": "live",
-        "providerSessionId": "provider-session:provider-instance:muse:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:2>"
-      },
-      "createdAt": "<time>",
-      "resolvedAt": "<time>",
-      "decision": "accept"
-    }
-  },
-  {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:27>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:26>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Anative-request%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0%3A<uuid:24>",
@@ -1136,229 +1108,111 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:28>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Aapprove-runtime-request-1%3A<uuid:5>:<uuid:27>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Anative-request%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0%3A<uuid:24>",
     "driver": "muse",
     "providerInstanceId": "muse",
     "occurredAt": "<time>",
-    "type": "provider-session.updated",
+    "type": "runtime-request.updated",
     "payload": {
-      "id": "provider-session:provider-instance:muse:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
-      "driver": "muse",
-      "providerInstanceId": "muse",
-      "status": "waiting",
-      "cwd": "<workspace>",
-      "model": "muse-spark-1.3-contributor",
-      "capabilities": {
-        "sessions": {
-          "supportsMultipleProviderThreadsPerSession": false,
-          "supportsModelSwitchInSession": true,
-          "supportsProviderSwitchingViaHandoff": true,
-          "supportsRuntimeModeSwitchInSession": false,
-          "pendingRequestsSurviveRestart": false
-        },
-        "threads": {
-          "canCreateEmptyThread": true,
-          "canReadThreadSnapshot": true,
-          "canRollbackThread": false,
-          "canForkThread": false,
-          "canForkFromTurn": false,
-          "canForkFromSubagentThread": false,
-          "exposesNativeThreadId": true
-        },
-        "turns": {
-          "exposesNativeTurnId": true,
-          "emitsTurnStarted": true,
-          "emitsTurnCompleted": true,
-          "supportsInterrupt": true,
-          "supportsActiveSteering": true,
-          "supportsSteeringByInterruptRestart": false,
-          "supportsQueuedMessages": true,
-          "terminalStatusQuality": "strong"
-        },
-        "streaming": {
-          "streamsAssistantText": true,
-          "streamsReasoning": true,
-          "streamsToolOutput": true,
-          "streamsPlanText": false,
-          "emitsMessageCompleted": true
-        },
-        "tools": {
-          "exposesToolItemIds": true,
-          "emitsToolStarted": true,
-          "emitsToolCompleted": true,
-          "emitsToolOutput": true,
-          "supportsMcpTools": true,
-          "supportsDynamicToolCallbacks": false
-        },
-        "approvals": {
-          "supportsCommandApproval": true,
-          "supportsFileReadApproval": true,
-          "supportsFileChangeApproval": true,
-          "supportsApplyPatchApproval": false,
-          "approvalsHaveNativeRequestIds": true,
-          "approvalCallbacksAreLiveOnly": true,
-          "approvalsCanOriginateFromSubagents": true
-        },
-        "planning": {
-          "emitsPlanUpdated": true,
-          "emitsTodoList": true,
-          "emitsProposedPlan": false,
-          "supportsStructuredQuestions": true,
-          "planDeltasHaveItemIds": false
-        },
-        "subagents": {
-          "supportsSubagents": true,
-          "exposesSubagentThreadIds": false,
-          "emitsSubagentLifecycle": true,
-          "canWaitForSubagents": false,
-          "canCloseSubagents": false,
-          "canForkSubagentThread": false
-        },
-        "context": {
-          "acceptsSystemContext": false,
-          "acceptsDeveloperContext": false,
-          "acceptsSyntheticUserContext": true,
-          "canGenerateSummaries": false,
-          "canConsumeHandoffSummaries": true,
-          "supportsDeltaHandoff": true,
-          "supportsFullThreadHandoff": true,
-          "maxRecommendedHandoffChars": null
-        },
-        "checkpointing": {
-          "appCanCheckpointFilesystem": true,
-          "supportsNestedCheckpointScopes": false,
-          "providerCanRollbackConversation": false,
-          "providerRollbackReturnsSnapshot": false,
-          "providerCanReadConversationSnapshot": true
-        },
-        "identity": {
-          "nativeThreadIds": "strong",
-          "nativeTurnIds": "strong",
-          "nativeItemIds": "strong",
-          "nativeRequestIds": "strong"
-        },
-        "runtimePolicy": {
-          "enforcement": "native"
-        }
+      "id": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6:native-request:01a11a6d-4730-75f1-bc60-4e5df1a3cdc0:<uuid:24>",
+      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Anative-request%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0%3A<uuid:24>",
+      "providerTurnId": "provider-turn:provider:muse:native-turn:muse%3A01a11a6d-39bb-7000-8c93-4594c98e6a11%3A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6",
+      "nativeRequestRef": {
+        "driver": "muse",
+        "nativeId": "01a11a6d-4730-75f1-bc60-4e5df1a3cdc0",
+        "strength": "strong"
       },
-      "extensionStatuses": [],
+      "kind": "command",
+      "status": "resolved",
+      "responseCapability": {
+        "type": "live",
+        "providerSessionId": "provider-session:provider-instance:muse:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:2>"
+      },
       "createdAt": "<time>",
-      "updatedAt": "<time>",
-      "lastError": null
+      "resolvedAt": "<time>",
+      "decision": "accept"
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:29>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Aapprove-runtime-request-1%3A<uuid:5>:<uuid:28>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Anative-request%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0%3A<uuid:24>",
     "driver": "muse",
     "providerInstanceId": "muse",
     "occurredAt": "<time>",
-    "type": "provider-session.updated",
+    "type": "node.updated",
     "payload": {
-      "id": "provider-session:provider-instance:muse:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
-      "driver": "muse",
-      "providerInstanceId": "muse",
-      "status": "running",
-      "cwd": "<workspace>",
-      "model": "muse-spark-1.3-contributor",
-      "capabilities": {
-        "sessions": {
-          "supportsMultipleProviderThreadsPerSession": false,
-          "supportsModelSwitchInSession": true,
-          "supportsProviderSwitchingViaHandoff": true,
-          "supportsRuntimeModeSwitchInSession": false,
-          "pendingRequestsSurviveRestart": false
-        },
-        "threads": {
-          "canCreateEmptyThread": true,
-          "canReadThreadSnapshot": true,
-          "canRollbackThread": false,
-          "canForkThread": false,
-          "canForkFromTurn": false,
-          "canForkFromSubagentThread": false,
-          "exposesNativeThreadId": true
-        },
-        "turns": {
-          "exposesNativeTurnId": true,
-          "emitsTurnStarted": true,
-          "emitsTurnCompleted": true,
-          "supportsInterrupt": true,
-          "supportsActiveSteering": true,
-          "supportsSteeringByInterruptRestart": false,
-          "supportsQueuedMessages": true,
-          "terminalStatusQuality": "strong"
-        },
-        "streaming": {
-          "streamsAssistantText": true,
-          "streamsReasoning": true,
-          "streamsToolOutput": true,
-          "streamsPlanText": false,
-          "emitsMessageCompleted": true
-        },
-        "tools": {
-          "exposesToolItemIds": true,
-          "emitsToolStarted": true,
-          "emitsToolCompleted": true,
-          "emitsToolOutput": true,
-          "supportsMcpTools": true,
-          "supportsDynamicToolCallbacks": false
-        },
-        "approvals": {
-          "supportsCommandApproval": true,
-          "supportsFileReadApproval": true,
-          "supportsFileChangeApproval": true,
-          "supportsApplyPatchApproval": false,
-          "approvalsHaveNativeRequestIds": true,
-          "approvalCallbacksAreLiveOnly": true,
-          "approvalsCanOriginateFromSubagents": true
-        },
-        "planning": {
-          "emitsPlanUpdated": true,
-          "emitsTodoList": true,
-          "emitsProposedPlan": false,
-          "supportsStructuredQuestions": true,
-          "planDeltasHaveItemIds": false
-        },
-        "subagents": {
-          "supportsSubagents": true,
-          "exposesSubagentThreadIds": false,
-          "emitsSubagentLifecycle": true,
-          "canWaitForSubagents": false,
-          "canCloseSubagents": false,
-          "canForkSubagentThread": false
-        },
-        "context": {
-          "acceptsSystemContext": false,
-          "acceptsDeveloperContext": false,
-          "acceptsSyntheticUserContext": true,
-          "canGenerateSummaries": false,
-          "canConsumeHandoffSummaries": true,
-          "supportsDeltaHandoff": true,
-          "supportsFullThreadHandoff": true,
-          "maxRecommendedHandoffChars": null
-        },
-        "checkpointing": {
-          "appCanCheckpointFilesystem": true,
-          "supportsNestedCheckpointScopes": false,
-          "providerCanRollbackConversation": false,
-          "providerRollbackReturnsSnapshot": false,
-          "providerCanReadConversationSnapshot": true
-        },
-        "identity": {
-          "nativeThreadIds": "strong",
-          "nativeTurnIds": "strong",
-          "nativeItemIds": "strong",
-          "nativeRequestIds": "strong"
-        },
-        "runtimePolicy": {
-          "enforcement": "native"
-        }
+      "id": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Anative-request%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0%3A<uuid:24>",
+      "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "approval_request",
+      "status": "completed",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:muse:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:muse:native-turn:muse%3A01a11a6d-39bb-7000-8c93-4594c98e6a11%3A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6",
+      "nativeItemRef": {
+        "driver": "muse",
+        "nativeId": "01a11a6d-4730-75f1-bc60-4e5df1a3cdc0",
+        "strength": "strong"
       },
-      "extensionStatuses": [],
-      "createdAt": "<time>",
+      "runtimeRequestId": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6:native-request:01a11a6d-4730-75f1-bc60-4e5df1a3cdc0:<uuid:24>",
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Aapprove-runtime-request-1%3A<uuid:5>:<uuid:29>",
+    "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Anative-request%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0%3A<uuid:24>",
+    "driver": "muse",
+    "providerInstanceId": "muse",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Anative-request%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0%3A<uuid:24>",
+      "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Anative-request%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0%3A<uuid:24>",
+      "providerThreadId": "provider-thread:provider:muse:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:muse:native-turn:muse%3A01a11a6d-39bb-7000-8c93-4594c98e6a11%3A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6",
+      "nativeItemRef": {
+        "driver": "muse",
+        "nativeId": "request:01a11a6d-4730-75f1-bc60-4e5df1a3cdc0",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 1000002,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
       "updatedAt": "<time>",
-      "lastError": null
+      "type": "approval_request",
+      "requestId": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6:native-request:01a11a6d-4730-75f1-bc60-4e5df1a3cdc0:<uuid:24>",
+      "requestKind": "command",
+      "prompt": "touch muse-approved.txt",
+      "options": [
+        {
+          "decision": "accept",
+          "label": "Allow once"
+        },
+        {
+          "decision": "acceptAlways",
+          "label": "Always allow in this workspace: touch ..."
+        },
+        {
+          "decision": "decline",
+          "label": "Reject"
+        }
+      ]
     }
   },
   {
@@ -1372,7 +1226,7 @@
       "id": "provider-session:provider-instance:muse:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
       "driver": "muse",
       "providerInstanceId": "muse",
-      "status": "ready",
+      "status": "waiting",
       "cwd": "<workspace>",
       "model": "muse-spark-1.3-contributor",
       "capabilities": {
@@ -1477,6 +1331,232 @@
   {
     "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:31>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
+    "driver": "muse",
+    "providerInstanceId": "muse",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:muse:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "muse",
+      "providerInstanceId": "muse",
+      "status": "running",
+      "cwd": "<workspace>",
+      "model": "muse-spark-1.3-contributor",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": false,
+          "canForkThread": false,
+          "canForkFromTurn": false,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": true,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "supportsSteeringByInterruptRestart": false,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": true,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": false
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": true
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": false,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": false,
+          "acceptsDeveloperContext": false,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": false,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": false,
+          "providerCanRollbackConversation": false,
+          "providerRollbackReturnsSnapshot": false,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "strong",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "native"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:32>",
+    "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
+    "driver": "muse",
+    "providerInstanceId": "muse",
+    "occurredAt": "<time>",
+    "type": "provider-session.updated",
+    "payload": {
+      "id": "provider-session:provider-instance:muse:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:2>",
+      "driver": "muse",
+      "providerInstanceId": "muse",
+      "status": "ready",
+      "cwd": "<workspace>",
+      "model": "muse-spark-1.3-contributor",
+      "capabilities": {
+        "sessions": {
+          "supportsMultipleProviderThreadsPerSession": false,
+          "supportsModelSwitchInSession": true,
+          "supportsProviderSwitchingViaHandoff": true,
+          "supportsRuntimeModeSwitchInSession": false,
+          "pendingRequestsSurviveRestart": false
+        },
+        "threads": {
+          "canCreateEmptyThread": true,
+          "canReadThreadSnapshot": true,
+          "canRollbackThread": false,
+          "canForkThread": false,
+          "canForkFromTurn": false,
+          "canForkFromSubagentThread": false,
+          "exposesNativeThreadId": true
+        },
+        "turns": {
+          "exposesNativeTurnId": true,
+          "emitsTurnStarted": true,
+          "emitsTurnCompleted": true,
+          "supportsInterrupt": true,
+          "supportsActiveSteering": true,
+          "supportsSteeringByInterruptRestart": false,
+          "supportsQueuedMessages": true,
+          "terminalStatusQuality": "strong"
+        },
+        "streaming": {
+          "streamsAssistantText": true,
+          "streamsReasoning": true,
+          "streamsToolOutput": true,
+          "streamsPlanText": false,
+          "emitsMessageCompleted": true
+        },
+        "tools": {
+          "exposesToolItemIds": true,
+          "emitsToolStarted": true,
+          "emitsToolCompleted": true,
+          "emitsToolOutput": true,
+          "supportsMcpTools": true,
+          "supportsDynamicToolCallbacks": false
+        },
+        "approvals": {
+          "supportsCommandApproval": true,
+          "supportsFileReadApproval": true,
+          "supportsFileChangeApproval": true,
+          "supportsApplyPatchApproval": false,
+          "approvalsHaveNativeRequestIds": true,
+          "approvalCallbacksAreLiveOnly": true,
+          "approvalsCanOriginateFromSubagents": true
+        },
+        "planning": {
+          "emitsPlanUpdated": true,
+          "emitsTodoList": true,
+          "emitsProposedPlan": false,
+          "supportsStructuredQuestions": true,
+          "planDeltasHaveItemIds": false
+        },
+        "subagents": {
+          "supportsSubagents": true,
+          "exposesSubagentThreadIds": false,
+          "emitsSubagentLifecycle": true,
+          "canWaitForSubagents": false,
+          "canCloseSubagents": false,
+          "canForkSubagentThread": false
+        },
+        "context": {
+          "acceptsSystemContext": false,
+          "acceptsDeveloperContext": false,
+          "acceptsSyntheticUserContext": true,
+          "canGenerateSummaries": false,
+          "canConsumeHandoffSummaries": true,
+          "supportsDeltaHandoff": true,
+          "supportsFullThreadHandoff": true,
+          "maxRecommendedHandoffChars": null
+        },
+        "checkpointing": {
+          "appCanCheckpointFilesystem": true,
+          "supportsNestedCheckpointScopes": false,
+          "providerCanRollbackConversation": false,
+          "providerRollbackReturnsSnapshot": false,
+          "providerCanReadConversationSnapshot": true
+        },
+        "identity": {
+          "nativeThreadIds": "strong",
+          "nativeTurnIds": "strong",
+          "nativeItemIds": "strong",
+          "nativeRequestIds": "strong"
+        },
+        "runtimePolicy": {
+          "enforcement": "native"
+        }
+      },
+      "extensionStatuses": [],
+      "createdAt": "<time>",
+      "updatedAt": "<time>",
+      "lastError": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:33>",
+    "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Anative-request%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0%3A<uuid:24>",
     "driver": "muse",
@@ -1503,7 +1583,38 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:32>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:34>",
+    "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Anative-request%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0%3A<uuid:24>",
+    "driver": "muse",
+    "providerInstanceId": "muse",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Anative-request%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0%3A<uuid:24>",
+      "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "kind": "approval_request",
+      "status": "waiting",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:muse:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:muse:native-turn:muse%3A01a11a6d-39bb-7000-8c93-4594c98e6a11%3A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6",
+      "nativeItemRef": {
+        "driver": "muse",
+        "nativeId": "01a11a6d-4730-75f1-bc60-4e5df1a3cdc0",
+        "strength": "strong"
+      },
+      "runtimeRequestId": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6:native-request:01a11a6d-4730-75f1-bc60-4e5df1a3cdc0:<uuid:24>",
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": null
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:35>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Anative-request%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0%3A<uuid:24>",
@@ -1551,7 +1662,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:33>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:36>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Anative-request%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0%3A<uuid:24>",
@@ -1580,7 +1691,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:34>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:37>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Anative-request%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0%3A<uuid:24>",
@@ -1611,7 +1722,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:35>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:38>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Anative-request%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0%3A<uuid:24>",
@@ -1659,7 +1770,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:36>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:39>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:provider:muse:native-item:muse%3Aprovider-thread%3Aprovider%3Amuse%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Amuse_permission%25253Aproject%25253Aproject%2525253Afixture%2525253Amuse_permission%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0",
@@ -1690,7 +1801,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:37>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:40>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:provider:muse:native-item:muse%3Aprovider-thread%3Aprovider%3Amuse%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Amuse_permission%25253Aproject%25253Aproject%2525253Afixture%2525253Amuse_permission%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0",
@@ -1723,7 +1834,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:38>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:41>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:provider:muse:native-item:muse%3Aprovider-thread%3Aprovider%3Amuse%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Amuse_permission%25253Aproject%25253Aproject%2525253Afixture%2525253Amuse_permission%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0",
@@ -1754,7 +1865,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:39>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:42>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:provider:muse:native-item:muse%3Aprovider-thread%3Aprovider%3Amuse%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Amuse_permission%25253Aproject%25253Aproject%2525253Afixture%2525253Amuse_permission%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3A01a11a6d-4730-75f1-bc60-4e5df1a3cdc0",
@@ -1787,7 +1898,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:40>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:43>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:provider:muse:native-item:muse%3Aprovider-thread%3Aprovider%3Amuse%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Amuse_permission%25253Aproject%25253Aproject%2525253Afixture%2525253Amuse_permission%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Aae8db1e0-7a51-4efc-a025-8ae43f755700",
@@ -1811,7 +1922,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:41>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:44>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:provider:muse:native-item:muse%3Aprovider-thread%3Aprovider%3Amuse%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Amuse_permission%25253Aproject%25253Aproject%2525253Afixture%2525253Amuse_permission%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Aae8db1e0-7a51-4efc-a025-8ae43f755700",
@@ -1842,7 +1953,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:42>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:45>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:provider:muse:native-item:muse%3Aprovider-thread%3Aprovider%3Amuse%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Amuse_permission%25253Aproject%25253Aproject%2525253Afixture%2525253Amuse_permission%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3A01a11a6d-3b9f-7000-b6ad-ab05e6b973b6%3Aae8db1e0-7a51-4efc-a025-8ae43f755700",
@@ -1876,7 +1987,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:43>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:46>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -1920,7 +2031,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:44>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:47>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -1962,7 +2073,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:45>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:48>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -2006,7 +2117,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:46>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:49>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -2050,7 +2161,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:47>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:50>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -2096,7 +2207,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:48>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:51>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -2119,7 +2230,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:49>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:52>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -2149,7 +2260,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:50>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:53>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -2175,7 +2286,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:51>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:54>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "providerInstanceId": "muse",
     "occurredAt": "<time>",
@@ -2218,7 +2329,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:52>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:55>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
     "driver": "muse",
@@ -2241,7 +2352,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:53>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:56>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -2265,7 +2376,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:54>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:57>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -2295,7 +2406,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:55>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:58>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -2325,7 +2436,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:56>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:59>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -2351,7 +2462,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Amessage-2%3A<uuid:7>:<uuid:57>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Amessage-2%3A<uuid:7>:<uuid:60>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "driver": "muse",
     "providerInstanceId": "muse",
@@ -2395,7 +2506,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Amessage-2%3A<uuid:7>:<uuid:58>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Amessage-2%3A<uuid:7>:<uuid:61>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -2425,7 +2536,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Amessage-2%3A<uuid:7>:<uuid:59>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Amessage-2%3A<uuid:7>:<uuid:62>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -2447,7 +2558,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Amessage-2%3A<uuid:7>:<uuid:60>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Amessage-2%3A<uuid:7>:<uuid:63>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -2473,7 +2584,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Amessage-2%3A<uuid:7>:<uuid:61>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Amessage-2%3A<uuid:7>:<uuid:64>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -2495,7 +2606,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Amessage-2%3A<uuid:7>:<uuid:62>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Amessage-2%3A<uuid:7>:<uuid:65>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -2518,7 +2629,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Amessage-2%3A<uuid:7>:<uuid:63>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Amessage-2%3A<uuid:7>:<uuid:66>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -2550,7 +2661,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:64>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:67>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "driver": "muse",
     "providerInstanceId": "muse",
@@ -2663,7 +2774,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:65>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:68>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "driver": "muse",
     "providerInstanceId": "muse",
@@ -2707,7 +2818,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:66>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:69>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -2737,7 +2848,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:67>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:70>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -2760,7 +2871,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:68>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:71>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -2786,7 +2897,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:69>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:72>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "driver": "muse",
     "providerInstanceId": "muse",
@@ -2899,7 +3010,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:70>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:73>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "driver": "muse",
     "providerInstanceId": "muse",
@@ -3012,7 +3123,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:71>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:74>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -3037,7 +3148,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:72>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:75>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -3083,7 +3194,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:73>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:76>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -3126,7 +3237,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:74>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:77>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -3172,7 +3283,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:75>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:78>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -3216,17 +3327,17 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:76>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:79>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
-    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:77>",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
     "driver": "muse",
     "providerInstanceId": "muse",
     "occurredAt": "<time>",
     "type": "runtime-request.updated",
     "payload": {
-      "id": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-8566-7000-8ad1-6269ac187a29:native-request:01a11a6d-9054-70c0-bf68-3ec59d37fbf8:<uuid:77>",
-      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:77>",
+      "id": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-8566-7000-8ad1-6269ac187a29:native-request:01a11a6d-9054-70c0-bf68-3ec59d37fbf8:<uuid:80>",
+      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
       "providerTurnId": "provider-turn:provider:muse:native-turn:muse%3A01a11a6d-39bb-7000-8c93-4594c98e6a11%3A01a11a6d-8566-7000-8ad1-6269ac187a29",
       "nativeRequestRef": {
         "driver": "muse",
@@ -3244,16 +3355,16 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:78>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:81>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
-    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:77>",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
     "driver": "muse",
     "providerInstanceId": "muse",
     "occurredAt": "<time>",
     "type": "node.updated",
     "payload": {
-      "id": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:77>",
+      "id": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
       "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
       "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
       "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -3268,54 +3379,26 @@
         "nativeId": "01a11a6d-9054-70c0-bf68-3ec59d37fbf8",
         "strength": "strong"
       },
-      "runtimeRequestId": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-8566-7000-8ad1-6269ac187a29:native-request:01a11a6d-9054-70c0-bf68-3ec59d37fbf8:<uuid:77>",
+      "runtimeRequestId": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-8566-7000-8ad1-6269ac187a29:native-request:01a11a6d-9054-70c0-bf68-3ec59d37fbf8:<uuid:80>",
       "checkpointScopeId": null,
       "startedAt": "<time>",
       "completedAt": null
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Aapprove-runtime-request-2%3A<uuid:9>:<uuid:79>",
-    "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
-    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:77>",
-    "driver": "muse",
-    "providerInstanceId": "muse",
-    "occurredAt": "<time>",
-    "type": "runtime-request.updated",
-    "payload": {
-      "id": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-8566-7000-8ad1-6269ac187a29:native-request:01a11a6d-9054-70c0-bf68-3ec59d37fbf8:<uuid:77>",
-      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:77>",
-      "providerTurnId": "provider-turn:provider:muse:native-turn:muse%3A01a11a6d-39bb-7000-8c93-4594c98e6a11%3A01a11a6d-8566-7000-8ad1-6269ac187a29",
-      "nativeRequestRef": {
-        "driver": "muse",
-        "nativeId": "01a11a6d-9054-70c0-bf68-3ec59d37fbf8",
-        "strength": "strong"
-      },
-      "kind": "command",
-      "status": "resolved",
-      "responseCapability": {
-        "type": "live",
-        "providerSessionId": "provider-session:provider-instance:muse:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:2>"
-      },
-      "createdAt": "<time>",
-      "resolvedAt": "<time>",
-      "decision": "decline"
-    }
-  },
-  {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:80>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:82>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
-    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:77>",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
     "driver": "muse",
     "providerInstanceId": "muse",
     "occurredAt": "<time>",
     "type": "turn-item.updated",
     "payload": {
-      "id": "turn-item:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:77>",
+      "id": "turn-item:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
       "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
       "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
-      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:77>",
+      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
       "providerThreadId": "provider-thread:provider:muse:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
       "providerTurnId": "provider-turn:provider:muse:native-turn:muse%3A01a11a6d-39bb-7000-8c93-4594c98e6a11%3A01a11a6d-8566-7000-8ad1-6269ac187a29",
       "nativeItemRef": {
@@ -3331,7 +3414,7 @@
       "completedAt": null,
       "updatedAt": "<time>",
       "type": "approval_request",
-      "requestId": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-8566-7000-8ad1-6269ac187a29:native-request:01a11a6d-9054-70c0-bf68-3ec59d37fbf8:<uuid:77>",
+      "requestId": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-8566-7000-8ad1-6269ac187a29:native-request:01a11a6d-9054-70c0-bf68-3ec59d37fbf8:<uuid:80>",
       "requestKind": "command",
       "prompt": "touch muse-declined.txt",
       "options": [
@@ -3351,7 +3434,115 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:81>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Aapprove-runtime-request-2%3A<uuid:9>:<uuid:83>",
+    "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
+    "driver": "muse",
+    "providerInstanceId": "muse",
+    "occurredAt": "<time>",
+    "type": "runtime-request.updated",
+    "payload": {
+      "id": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-8566-7000-8ad1-6269ac187a29:native-request:01a11a6d-9054-70c0-bf68-3ec59d37fbf8:<uuid:80>",
+      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
+      "providerTurnId": "provider-turn:provider:muse:native-turn:muse%3A01a11a6d-39bb-7000-8c93-4594c98e6a11%3A01a11a6d-8566-7000-8ad1-6269ac187a29",
+      "nativeRequestRef": {
+        "driver": "muse",
+        "nativeId": "01a11a6d-9054-70c0-bf68-3ec59d37fbf8",
+        "strength": "strong"
+      },
+      "kind": "command",
+      "status": "resolved",
+      "responseCapability": {
+        "type": "live",
+        "providerSessionId": "provider-session:provider-instance:muse:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:2>"
+      },
+      "createdAt": "<time>",
+      "resolvedAt": "<time>",
+      "decision": "decline"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Aapprove-runtime-request-2%3A<uuid:9>:<uuid:84>",
+    "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
+    "driver": "muse",
+    "providerInstanceId": "muse",
+    "occurredAt": "<time>",
+    "type": "node.updated",
+    "payload": {
+      "id": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
+      "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "rootNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
+      "kind": "approval_request",
+      "status": "cancelled",
+      "countsForRun": false,
+      "providerThreadId": "provider-thread:provider:muse:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:muse:native-turn:muse%3A01a11a6d-39bb-7000-8c93-4594c98e6a11%3A01a11a6d-8566-7000-8ad1-6269ac187a29",
+      "nativeItemRef": {
+        "driver": "muse",
+        "nativeId": "01a11a6d-9054-70c0-bf68-3ec59d37fbf8",
+        "strength": "strong"
+      },
+      "runtimeRequestId": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-8566-7000-8ad1-6269ac187a29:native-request:01a11a6d-9054-70c0-bf68-3ec59d37fbf8:<uuid:80>",
+      "checkpointScopeId": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>"
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Amuse_permission%3Aapprove-runtime-request-2%3A<uuid:9>:<uuid:85>",
+    "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
+    "driver": "muse",
+    "providerInstanceId": "muse",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
+      "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
+      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
+      "providerThreadId": "provider-thread:provider:muse:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:muse:native-turn:muse%3A01a11a6d-39bb-7000-8c93-4594c98e6a11%3A01a11a6d-8566-7000-8ad1-6269ac187a29",
+      "nativeItemRef": {
+        "driver": "muse",
+        "nativeId": "request:01a11a6d-9054-70c0-bf68-3ec59d37fbf8",
+        "strength": "strong"
+      },
+      "parentItemId": null,
+      "ordinal": 2000002,
+      "status": "cancelled",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "approval_request",
+      "requestId": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-8566-7000-8ad1-6269ac187a29:native-request:01a11a6d-9054-70c0-bf68-3ec59d37fbf8:<uuid:80>",
+      "requestKind": "command",
+      "prompt": "touch muse-declined.txt",
+      "options": [
+        {
+          "decision": "accept",
+          "label": "Allow once"
+        },
+        {
+          "decision": "acceptAlways",
+          "label": "Always allow in this workspace: touch ..."
+        },
+        {
+          "decision": "decline",
+          "label": "Reject"
+        }
+      ]
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:86>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "driver": "muse",
     "providerInstanceId": "muse",
@@ -3464,7 +3655,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:82>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:87>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "driver": "muse",
     "providerInstanceId": "muse",
@@ -3577,17 +3768,17 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:83>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:88>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
-    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:77>",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
     "driver": "muse",
     "providerInstanceId": "muse",
     "occurredAt": "<time>",
     "type": "runtime-request.updated",
     "payload": {
-      "id": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-8566-7000-8ad1-6269ac187a29:native-request:01a11a6d-9054-70c0-bf68-3ec59d37fbf8:<uuid:77>",
-      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:77>",
+      "id": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-8566-7000-8ad1-6269ac187a29:native-request:01a11a6d-9054-70c0-bf68-3ec59d37fbf8:<uuid:80>",
+      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
       "providerTurnId": "provider-turn:provider:muse:native-turn:muse%3A01a11a6d-39bb-7000-8c93-4594c98e6a11%3A01a11a6d-8566-7000-8ad1-6269ac187a29",
       "nativeRequestRef": {
         "driver": "muse",
@@ -3606,16 +3797,16 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:84>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:89>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
-    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:77>",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
     "driver": "muse",
     "providerInstanceId": "muse",
     "occurredAt": "<time>",
     "type": "node.updated",
     "payload": {
-      "id": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:77>",
+      "id": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
       "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
       "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
       "parentNodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -3630,26 +3821,26 @@
         "nativeId": "01a11a6d-9054-70c0-bf68-3ec59d37fbf8",
         "strength": "strong"
       },
-      "runtimeRequestId": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-8566-7000-8ad1-6269ac187a29:native-request:01a11a6d-9054-70c0-bf68-3ec59d37fbf8:<uuid:77>",
+      "runtimeRequestId": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-8566-7000-8ad1-6269ac187a29:native-request:01a11a6d-9054-70c0-bf68-3ec59d37fbf8:<uuid:80>",
       "checkpointScopeId": null,
       "startedAt": "<time>",
       "completedAt": "<time>"
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:85>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:90>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
-    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:77>",
+    "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
     "driver": "muse",
     "providerInstanceId": "muse",
     "occurredAt": "<time>",
     "type": "turn-item.updated",
     "payload": {
-      "id": "turn-item:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:77>",
+      "id": "turn-item:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
       "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
       "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
-      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:77>",
+      "nodeId": "node:runtime-request:runtime-request%3Aprovider%3Amuse%3Aprovider-turn%3Aprovider-turn%253Aprovider%253Amuse%253Anative-turn%253Amuse%25253A01a11a6d-39bb-7000-8c93-4594c98e6a11%25253A01a11a6d-8566-7000-8ad1-6269ac187a29%3Anative-request%3A01a11a6d-9054-70c0-bf68-3ec59d37fbf8%3A<uuid:80>",
       "providerThreadId": "provider-thread:provider:muse:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
       "providerTurnId": "provider-turn:provider:muse:native-turn:muse%3A01a11a6d-39bb-7000-8c93-4594c98e6a11%3A01a11a6d-8566-7000-8ad1-6269ac187a29",
       "nativeItemRef": {
@@ -3665,7 +3856,7 @@
       "completedAt": "<time>",
       "updatedAt": "<time>",
       "type": "approval_request",
-      "requestId": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-8566-7000-8ad1-6269ac187a29:native-request:01a11a6d-9054-70c0-bf68-3ec59d37fbf8:<uuid:77>",
+      "requestId": "runtime-request:provider:muse:provider-turn:provider-turn%3Aprovider%3Amuse%3Anative-turn%3Amuse%253A01a11a6d-39bb-7000-8c93-4594c98e6a11%253A01a11a6d-8566-7000-8ad1-6269ac187a29:native-request:01a11a6d-9054-70c0-bf68-3ec59d37fbf8:<uuid:80>",
       "requestKind": "command",
       "prompt": "touch muse-declined.txt",
       "options": [
@@ -3685,7 +3876,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:86>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:91>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:provider:muse:native-item:muse%3Aprovider-thread%3Aprovider%3Amuse%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Amuse_permission%25253Aproject%25253Aproject%2525253Afixture%2525253Amuse_permission%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3A01a11a6d-8566-7000-8ad1-6269ac187a29%3A05a64d05-5be4-48c4-938e-70db3ba23f0a",
@@ -3709,7 +3900,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:87>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:92>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:provider:muse:native-item:muse%3Aprovider-thread%3Aprovider%3Amuse%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Amuse_permission%25253Aproject%25253Aproject%2525253Afixture%2525253Amuse_permission%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3A01a11a6d-8566-7000-8ad1-6269ac187a29%3A05a64d05-5be4-48c4-938e-70db3ba23f0a",
@@ -3740,7 +3931,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:88>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:93>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:provider:muse:native-item:muse%3Aprovider-thread%3Aprovider%3Amuse%3Anative-thread%3Apending%253Arun%253Athread%253Athread%25253Afixture%25253Amuse_permission%25253Aproject%25253Aproject%2525253Afixture%2525253Amuse_permission%2525253A<uuid:0>%25253A<uuid:1>%253Aordinal%253A1%3A01a11a6d-8566-7000-8ad1-6269ac187a29%3A05a64d05-5be4-48c4-938e-70db3ba23f0a",
@@ -3774,7 +3965,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:89>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:94>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -3818,7 +4009,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:90>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:95>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -3864,7 +4055,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:91>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:96>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -3908,7 +4099,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:92>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:97>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -3952,7 +4143,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:93>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Amuse%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:98>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -3998,7 +4189,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:94>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:99>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -4021,7 +4212,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:95>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:100>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -4051,7 +4242,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:96>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:101>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -4077,7 +4268,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:97>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:<uuid:102>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "providerInstanceId": "muse",
     "occurredAt": "<time>",
@@ -4120,7 +4311,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:<uuid:98>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:<uuid:103>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -4144,7 +4335,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:<uuid:99>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:<uuid:104>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -4174,7 +4365,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:<uuid:100>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:<uuid:105>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",
@@ -4204,7 +4395,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:<uuid:101>",
+    "id": "event:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:<uuid:106>",
     "threadId": "thread:fixture:muse_permission:project:project%3Afixture%3Amuse_permission%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Amuse_permission%3Aproject%3Aproject%253Afixture%253Amuse_permission%253A<uuid:0>%3A<uuid:1>:ordinal:2",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Amuse_permission%253Aproject%253Aproject%25253Afixture%25253Amuse_permission%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A2:root",

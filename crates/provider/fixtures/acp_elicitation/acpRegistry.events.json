@@ -841,7 +841,71 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:24>",
+    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aacp_elicitation%3Aanswer-user-input-request-1%3A<uuid:5>:<uuid:24>",
+    "threadId": "thread:fixture:acp_elicitation:project:project%3Afixture%3Aacp_elicitation%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:provider:acpRegistry:native-item:provider-instance%3AacpRegistry%3Aregistry-replay-session-1%3Aelicitation%3A0",
+    "driver": "acpRegistry",
+    "providerInstanceId": "acpRegistry",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:provider:acpRegistry:native-item:provider-instance%3AacpRegistry%3Aregistry-replay-session-1%3Aelicitation%3A0",
+      "threadId": "thread:fixture:acp_elicitation:project:project%3Afixture%3Aacp_elicitation%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:provider:acpRegistry:native-item:provider-instance%3AacpRegistry%3Aregistry-replay-session-1%3Aelicitation%3A0",
+      "providerThreadId": "provider-thread:provider:acpRegistry:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:acpRegistry:native-turn:provider-instance%3AacpRegistry%3Aregistry-replay-session-1%3Aturn%3A1",
+      "nativeItemRef": {
+        "driver": "acpRegistry",
+        "nativeId": "registry-replay-session-1:elicitation:0",
+        "strength": "weak"
+      },
+      "parentItemId": null,
+      "ordinal": 1000002,
+      "status": "completed",
+      "title": null,
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "user_input_request",
+      "requestId": "runtime-request:provider:acpRegistry:provider-turn:provider-turn%3Aprovider%3AacpRegistry%3Anative-turn%3Aprovider-instance%253AacpRegistry%253Aregistry-replay-session-1%253Aturn%253A1:native-request:registry-replay-session-1%3Aelicitation%3A0:<uuid:19>",
+      "questions": [
+        {
+          "id": "schema_vs_ui_flexibility",
+          "header": "Fixture",
+          "question": "Should this fixture prefer strict schemas or UI flexibility?",
+          "options": [
+            {
+              "label": "Strict schemas (Recommended)",
+              "description": "Strict schemas (Recommended)",
+              "value": "Strict schemas (Recommended)"
+            },
+            {
+              "label": "UI flexibility",
+              "description": "UI flexibility",
+              "value": "UI flexibility"
+            }
+          ],
+          "allowCustomAnswer": false
+        }
+      ],
+      "questionAnswer": {
+        "requestId": "runtime-request:provider:acpRegistry:provider-turn:provider-turn%3Aprovider%3AacpRegistry%3Anative-turn%3Aprovider-instance%253AacpRegistry%253Aregistry-replay-session-1%253Aturn%253A1:native-request:registry-replay-session-1%3Aelicitation%3A0:<uuid:19>",
+        "questionTextById": {
+          "schema_vs_ui_flexibility": "Should this fixture prefer strict schemas or UI flexibility?"
+        },
+        "answers": {
+          "schema_vs_ui_flexibility": "Strict schemas (Recommended)",
+          "schema_preference": "Strict schemas (Recommended)",
+          "question-0-schema-vs-flexibility": "Strict schemas"
+        },
+        "attachmentsByQuestionId": {}
+      }
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:25>",
     "threadId": "thread:fixture:acp_elicitation:project:project%3Afixture%3Aacp_elicitation%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:provider:acpRegistry:native-item:provider-instance%3AacpRegistry%3Aregistry-replay-session-1%3Aturn%3A1%3Aassistant%3A0",
@@ -872,7 +936,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:25>",
+    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:26>",
     "threadId": "thread:fixture:acp_elicitation:project:project%3Afixture%3Aacp_elicitation%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:provider:acpRegistry:native-item:provider-instance%3AacpRegistry%3Aregistry-replay-session-1%3Aturn%3A1%3Aassistant%3A0",
@@ -896,7 +960,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:26>",
+    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:27>",
     "threadId": "thread:fixture:acp_elicitation:project:project%3Afixture%3Aacp_elicitation%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:provider:acpRegistry:native-item:provider-instance%3AacpRegistry%3Aregistry-replay-session-1%3Aturn%3A1%3Aassistant%3A0",
@@ -930,7 +994,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:27>",
+    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:28>",
     "threadId": "thread:fixture:acp_elicitation:project:project%3Afixture%3Aacp_elicitation%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -960,7 +1024,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:28>",
+    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3AacpRegistry%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:29>",
     "threadId": "thread:fixture:acp_elicitation:project:project%3Afixture%3Aacp_elicitation%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -997,7 +1061,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:<uuid:29>",
+    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:<uuid:30>",
     "threadId": "thread:fixture:acp_elicitation:project:project%3Afixture%3Aacp_elicitation%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -1020,7 +1084,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:<uuid:30>",
+    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:<uuid:31>",
     "threadId": "thread:fixture:acp_elicitation:project:project%3Afixture%3Aacp_elicitation%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -1050,7 +1114,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:<uuid:31>",
+    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:<uuid:32>",
     "threadId": "thread:fixture:acp_elicitation:project:project%3Afixture%3Aacp_elicitation%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -1076,7 +1140,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:<uuid:32>",
+    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:<uuid:33>",
     "threadId": "thread:fixture:acp_elicitation:project:project%3Afixture%3Aacp_elicitation%3A<uuid:0>:<uuid:1>",
     "providerInstanceId": "acpRegistry",
     "occurredAt": "<time>",
@@ -1110,7 +1174,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:33>",
+    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:34>",
     "threadId": "thread:fixture:acp_elicitation:project:project%3Afixture%3Aacp_elicitation%3A<uuid:0>:<uuid:1>",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
     "driver": "acpRegistry",
@@ -1133,7 +1197,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:34>",
+    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:35>",
     "threadId": "thread:fixture:acp_elicitation:project:project%3Afixture%3Aacp_elicitation%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -1157,7 +1221,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:35>",
+    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:36>",
     "threadId": "thread:fixture:acp_elicitation:project:project%3Afixture%3Aacp_elicitation%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -1187,7 +1251,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:36>",
+    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:37>",
     "threadId": "thread:fixture:acp_elicitation:project:project%3Afixture%3Aacp_elicitation%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
@@ -1217,7 +1281,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:37>",
+    "id": "event:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:command:command%3Aeffect%3Acheckpoint.capture%3Arun%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:<uuid:38>",
     "threadId": "thread:fixture:acp_elicitation:project:project%3Afixture%3Aacp_elicitation%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Aacp_elicitation%3Aproject%3Aproject%253Afixture%253Aacp_elicitation%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aacp_elicitation%253Aproject%253Aproject%25253Afixture%25253Aacp_elicitation%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",

@@ -222,7 +222,15 @@ function scenarioCommands(scenario: OrchestratorV2Scenario): ReadonlyArray<Orche
 }
 
 const findPendingRuntimeRequest = (projection: OrchestrationV2ThreadProjection) =>
-  projection.runtimeRequests.find((request) => request.status === "pending");
+  projection.runtimeRequests.find(
+    (request) =>
+      request.status === "pending" &&
+      projection.turnItems.some(
+        (item) =>
+          (item.type === "approval_request" || item.type === "user_input_request") &&
+          item.requestId === request.id,
+      ),
+  );
 
 const hasActiveRun = (projection: OrchestrationV2ThreadProjection) =>
   projection.runs.some((run) =>
