@@ -89,6 +89,7 @@ describe("DevHome", () => {
       />,
       { router: false },
     );
+    await page.getByTestId("composer-editor").click();
     const webSearch = page.getByTestId("web-search-toggle");
     await expect.element(webSearch).toBeVisible();
     await expect.element(webSearch).toHaveAttribute("aria-pressed", "false");
