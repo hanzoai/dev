@@ -34,6 +34,7 @@ on:
       - apps/server/scripts/cli.ts
       - scripts/build-cli-archive.ts
       - scripts/smoke-cli-archive.ts
+      - scripts/lib/packaged-server-smoke.ts
   workflow_dispatch:
 
 concurrency:
