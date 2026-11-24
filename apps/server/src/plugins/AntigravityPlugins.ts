@@ -16,7 +16,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-export const ANTIGRAVITY_PLUGIN_MARKETPLACE = "antigravity";
+const ANTIGRAVITY_PLUGIN_MARKETPLACE = "antigravity";
 
 const isValidPluginId = Schema.is(PluginId);
 

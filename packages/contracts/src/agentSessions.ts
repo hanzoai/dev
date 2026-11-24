@@ -98,11 +98,8 @@ export class AgentSessionScanError extends Schema.TaggedError<AgentSessionScanEr
 }
 
 /**
- * A chat-mode thread carried into a Dev server whole: the cloud's chat adapter
- * holds a person's threads until a request needs a workspace, then upgrades the
- * session to the Dev server in their cell and brings the threads with it. Each
- * lands as run-less history, as an imported agent session does, so the first run
- * in the cell is handed the conversation as context.
+ * Chat-mode thread carried into a Dev server as run-less history so the first run in the cell
+ * receives the prior conversation as context.
  */
 export const ChatThreadImportMessage = Schema.Struct({
   role: Schema.Literals(["user", "assistant"]),

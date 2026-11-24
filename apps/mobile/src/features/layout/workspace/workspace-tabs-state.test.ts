@@ -274,6 +274,24 @@ vi.mock("./AndroidWorkspaceNavigation", () => ({
 vi.mock("./WorkspaceNoTabs", () => ({ WorkspaceNoTabs: () => null }));
 vi.mock("../../../components/ui/Pane", () => ({ usePaneRole: () => "screen" }));
 vi.mock("./AndroidWorkspaceSidebar.android", () => ({ AndroidWorkspaceSidebar: () => null }));
+vi.mock("./WorkspaceDrawer", () => ({
+  WorkspaceDrawer: ({ children }: { children: ReactNode }) => createElement("div", null, children),
+}));
+vi.mock("./WorkspaceDrawerMenu", () => ({ WorkspaceDrawerMenu: () => null }));
+vi.mock("./usePhoneHeaderButtons", () => ({ PhoneFloatingHeader: () => null }));
+vi.mock("./WorkspaceWebSection", () => ({ WorkspaceWebSection: () => null }));
+vi.mock("./DevMacsList", () => ({ DevMacsList: () => null }));
+vi.mock("./DevProjectsList", () => ({ DevProjectsList: () => null }));
+vi.mock("./useDrawerWorkspace", () => ({ useDrawerWorkspace: () => false }));
+vi.mock("./workspace-section-store", () => ({
+  openWorkspaceSection: () => undefined,
+  useWorkspaceSection: () => ({ section: "dev", projects: false, macs: false }),
+}));
+vi.mock("gt-react-native", () => ({
+  msg: (value: string) => value,
+  useGT: () => (value: string) => value,
+}));
+vi.mock("../../chat/PhoneChatLanding", () => ({ PhoneChatLanding: () => null }));
 vi.mock("../../../components/ui/WorkspaceAppBar.android", () => ({
   WorkspaceAppBarScope: ({ children }: { children: ReactNode }) => children,
 }));

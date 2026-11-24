@@ -19,8 +19,8 @@ const HEADER = 16;
 const SLOTS = 48;
 const MAX_FRAME = 64 << 20;
 
-export const ZAP_FRAME_REQUEST = 0x01;
-export const ZAP_FRAME_RESPONSE = 0x02;
+const ZAP_FRAME_REQUEST = 0x01;
+const ZAP_FRAME_RESPONSE = 0x02;
 
 export interface ZapHttpRequest {
   readonly method: string;
@@ -214,7 +214,7 @@ export async function readHanzodSigninOrigin(
 const DEFAULT_ZAP_TIMEOUT_MS = 2_000;
 
 /** Sends one ZAP-HTTP request over a Unix socket; returns `null` if unreachable or malformed. */
-export async function callHanzodZap(
+async function callHanzodZap(
   socketPath: string,
   request: ZapHttpRequest,
   timeoutMs = DEFAULT_ZAP_TIMEOUT_MS,

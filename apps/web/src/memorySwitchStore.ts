@@ -6,11 +6,11 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import type { DraftId } from "./composerDraftStore";
 import { createMemoryStorage } from "./lib/storage";
 
-export const MEMORY_SWITCH_STORAGE_KEY = "hanzodev:thread-memory:v1";
+const MEMORY_SWITCH_STORAGE_KEY = "hanzodev:thread-memory:v1";
 
 export type MemorySwitchTarget = ScopedThreadRef | DraftId | string;
 
-export function memorySwitchKey(target: MemorySwitchTarget): string {
+function memorySwitchKey(target: MemorySwitchTarget): string {
   return typeof target === "string" ? target : scopedThreadKey(target);
 }
 

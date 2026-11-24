@@ -390,7 +390,6 @@
   "d277f9cf266c9819": "Automático",
   "0549eeedb2c63c32": "Use the {name} connector to ",
   "f55196e4afe2840c": "Use the {name} design system: ",
-  "5f2b771aa73eb6c6": "Keep in mind: {name}",
   "5f68899450a25421": "Este servidor no admite este cliente. Actualiza la app o usa una versión compatible para conectarte a {host}.",
   "0dc649e828db5ee1": "Este cliente necesita un servidor más reciente. Actualiza Hanzo Dev en {host} para conectarte.",
   "b7554d48eece78bf": "Este dispositivo no tiene conexión",
@@ -2854,6 +2853,11 @@
   "cfb3f269b6b2422c": "Cerrar el selector de persona",
   "6cf1b5f50233d093": "Salir del modo privado",
   "085959508fedad72": "Quitar persona",
+  "8b70216a0e7275bc": "Web search: On for every message",
+  "85064e30da80bbae": "Web search: Auto (click to always search)",
+  "4fd8927b7afc2a92": "Copiar mensaje",
+  "6aa69394ec8e9be1": "Edit message",
+  "7d51c8144c8c277e": "Regenerate reply",
   "094d723edc8a00ab": [
     "Seleccionar persona (",
     {
@@ -2866,6 +2870,7 @@
   "08268bb17a38c420": "Sin persona",
   "d0c2a7992c20c04d": "Inicia sesión para cargar tus personas.",
   "01d67f2bc91c6eee": "Modo privado · no se guarda ni registra nada",
+  "22aa580bd4c48e62": "Save & send",
   "c4b860aca29ee1c5": [
     "No se pudo conectar con ",
     {
@@ -3705,7 +3710,7 @@
   "ab6720311ff3140d": "El próximo envío compacta primero {tokens} tokens.",
   "1486a422ba77a084": "Clic para compactar primero",
   "b971f881c5dc4fca": "Clic para conservar todo el historial",
-  "2e614197574aadd9": "Plugins could not be read. Is Claude Code installed on this machine?",
+  "e2b89b7d0d89beb5": "Plugins could not be read. No supported agent CLI was found on this machine.",
   "4f3d24b01fc07868": "{name} could not be changed.",
   "09b739f584a09a2b": "Search plugins",
   "8368b0500372fa16": "Reading plugins",
@@ -3719,7 +3724,6 @@
   "361ea0d216079cc1": "Sign in to Hanzo to use this.",
   "7bf03bd919185339": "No connectors yet",
   "21c75717bc385bb7": "No design systems yet",
-  "e882f98c10c5852f": "Nothing remembered yet",
   "ff545ba23dc2c350": "Reading",
   "b7a3723bd5ce6686": "Drawing pad",
   "5d0c71caa8f328b0": "Clear",
@@ -3937,7 +3941,6 @@
       "v": "v"
     }
   ],
-  "4fd8927b7afc2a92": "Copiar mensaje",
   "6f8651e48261911a": "Razonamiento",
   "07e65dba2b16d3f7": "{count, plural, one {{path} y {count} más} other {{path} y {count} más}}",
   "4d4981a1c5bd9728": "Ejecutando comando",
@@ -4021,6 +4024,9 @@
   "cb2476679502d798": "Modelo: {name}",
   "1889823ac6b01f7b": "{provider} no está disponible en este hilo. Inicia un hilo nuevo para cambiar de proveedor.",
   "071b1cfc4d0d10d9": "Buscar modelos...",
+  "a553be36e93303cd": "Listo",
+  "4ba692b01a327ce3": "Sin conexión",
+  "6fffd817251576ba": "Limited",
   "ffea432e08602f9c": "Mostrar menos",
   "04b2f5e7a86fd8db": "Mostrar más",
   "316d2cea8d8145ea": "Unavailable",
@@ -5110,7 +5116,6 @@
   "830103d02a9ac4e2": "Relay sin conexión",
   "0b2dd2fe0a45c628": "Comprobando el estado del relay…",
   "6280ea23e2192d27": "Estado del relay no disponible",
-  "4ba692b01a327ce3": "Sin conexión",
   "81ca8a49acedf36d": "Comprobando…",
   "363b49d2880a5109": "Comprobando el estado del relay",
   "548f9db69b69ff04": "Añadiendo…",
@@ -7831,7 +7836,6 @@
   "3916007360d4cf63": "Instala la extensión de Hanzo en un navegador e inicia sesión. Se conecta sola a este equipo.",
   "6948433092727396": "en {browser}",
   "7ce808b7103eeec9": "No se informó de productos de IA con sesión iniciada.",
-  "a553be36e93303cd": "Listo",
   "159e05bacc582a55": "Requiere iniciar sesión",
   "d3b0a2fdb2fb90d8": "Solo lectura. Los inicios de sesión se quedan en el navegador y nunca se enrutan a él.",
   "570567bbea004eac": "Solo lectura",

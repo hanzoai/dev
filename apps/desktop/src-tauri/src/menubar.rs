@@ -12,8 +12,15 @@ use tokio::process::Command;
 const HELPER: &str = "HanzoMenubar.app/Contents/MacOS/HanzoMenubar";
 
 fn helper_path(app: &AppHandle) -> Option<PathBuf> {
-    let bundled = app.path().resource_dir().ok()?.join("resources/menubar").join(HELPER);
-    let staged = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/menubar").join(HELPER);
+    let bundled = app
+        .path()
+        .resource_dir()
+        .ok()?
+        .join("resources/menubar")
+        .join(HELPER);
+    let staged = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("resources/menubar")
+        .join(HELPER);
     [bundled, staged].into_iter().find(|p| p.is_file())
 }
 

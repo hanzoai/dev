@@ -112,7 +112,7 @@ export async function listDesignSystems(auth: CloudChatAuth, options: CloudChatO
   return parseDesignSystems(await read("/v1/studio/brands", auth, options));
 }
 
-export async function listMemories(auth: CloudChatAuth, options: CloudChatOptions = {}) {
+async function listMemories(auth: CloudChatAuth, options: CloudChatOptions = {}) {
   return parseMemories(await read(`/v1/ai/memory/list?limit=${MEMORY_LIMIT}`, auth, options));
 }
 
