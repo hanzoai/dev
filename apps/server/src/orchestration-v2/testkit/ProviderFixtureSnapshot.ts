@@ -2,6 +2,7 @@
 import { OrchestrationV2DomainEvent } from "@hanzodev/contracts";
 import * as Effect from "effect/Effect";
 import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 import * as Schema from "effect/Schema";
 import { expect } from "vite-plus/test";
 
@@ -26,17 +27,11 @@ const encodeEvents = Schema.encodeSync(Schema.Array(OrchestrationV2DomainEvent))
  * adapter decides the order.
  */
 const RACY_EVENTS = new Set([
-  "grok_auto_blocked_command/grok",
-  "kiro_tool_call_read_only_on_request/kiro",
   "queued_cancelled_while_active/codex",
-  "subagent/kiro",
-  "acp_titled_multiselect/acpRegistry",
   "claude_background_subagent_lifecycle/claudeAgent",
   "claude_background_wake_before_queued_prompt/claudeAgent",
   "claude_background_wake_before_queued_prompt_no_echo/claudeAgent",
-  "muse_permission/muse",
   "thread_rollback_after_stop/pi",
-  "tool_call_read_only_on_request/grok",
 ]);
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
@@ -54,8 +49,10 @@ function normalizeEvents(
 ): string {
   const recorded = new Set(input.transcript.match(UUID) ?? []);
   const minted = new Map<string, string>();
+  const workspaceName = NodePath.basename(input.workspace);
   return [`/private${input.workspace}`, input.workspace]
     .reduce((out, workspace) => out.replaceAll(workspace, "<workspace>"), text)
+    .replaceAll(workspaceName, "<workspace-name>")
     .replace(TIMESTAMP, "<time>")
     .replace(UUID, (id) => {
       if (recorded.has(id)) return id;

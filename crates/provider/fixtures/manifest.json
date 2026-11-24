@@ -3,9 +3,15 @@
   "transcript.ndjson": "Recorded provider wire. First record is transcript_start; the rest are expect_outbound and emit_inbound entries. A replay answers each outbound request from the next recorded inbound frame.",
   "input.json": "The user steps that drive the replay, with the model selection and runtime modes.",
   "events.json": "The domain events a replay must produce, in order, as JSON.",
-  "unpinned_events": ["grok_auto_blocked_command/grok", "kiro_tool_call_read_only_on_request/kiro", "queued_cancelled_while_active/codex", "subagent/kiro"],
+  "unpinned_events": [
+    "queued_cancelled_while_active/codex",
+    "claude_background_subagent_lifecycle/claudeAgent",
+    "claude_background_wake_before_queued_prompt/claudeAgent",
+    "claude_background_wake_before_queued_prompt_no_echo/claudeAgent",
+    "thread_rollback_after_stop/pi"
+  ],
   "normalization": {
-    "workspace": "The replay's temp workspace path is written as <workspace>.",
+    "workspace": "The replay's temp workspace path is written as <workspace> and its basename as <workspace-name>.",
     "timestamps": "Every ISO timestamp is written as <time>. Wall-clock values differ per run and a race shifts the test clock by a millisecond, so no value is pinned.",
     "uuids": "UUIDs minted by the adapter are written as <uuid:N>, numbered by first appearance in events.json. UUIDs that occur in the transcript stay as recorded."
   }
