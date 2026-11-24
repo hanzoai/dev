@@ -647,11 +647,21 @@ jobs:
             executable=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$app/Contents/Info.plist")
             test -x "$app/Contents/MacOS/$executable"
             test -f "$app/Contents/Resources/resources/server/dist/bin.mjs"
+            # The app's own Node and server dispatch a turn, which loads dev.wasm.
+            node scripts/smoke-desktop-server.ts \
+              --node "$app/Contents/Resources/resources/node/node" \
+              --server "$app/Contents/Resources/resources/server/dist/bin.mjs"
           else
             appimage=$(ls "$GITHUB_WORKSPACE"/release/*.AppImage)
             chmod +x "$appimage"
             (cd "$RUNNER_TEMP" && "$appimage" --appimage-extract >/dev/null)
-            test -f "$RUNNER_TEMP/squashfs-root/usr/lib/Hanzo Dev/resources/server/dist/bin.mjs" || test -d "$RUNNER_TEMP/squashfs-root/usr/bin"
+            resources="$RUNNER_TEMP/squashfs-root/usr/lib/Hanzo Dev/resources"
+            test -f "$resources/server/dist/bin.mjs" || test -d "$RUNNER_TEMP/squashfs-root/usr/bin"
+            if [[ -f "$resources/server/dist/bin.mjs" ]]; then
+              node scripts/smoke-desktop-server.ts \
+                --node "$resources/node/node" \
+                --server "$resources/server/dist/bin.mjs"
+            fi
           fi
 
       - name: Collect release assets

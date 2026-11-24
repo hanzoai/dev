@@ -1,9 +1,7 @@
 #!/usr/bin/env node
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
@@ -16,8 +14,9 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import * as NetService from "@hanzodev/shared/Net";
 import * as HostProcess from "@hanzodev/shared/HostProcess";
+import { smokePackagedServer } from "./lib/packaged-server-smoke.ts";
 import { windowsSystemTar } from "./lib/windows-tar.ts";
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
+import { FetchHttpClient } from "effect/http";
 
 export class CliArchiveSmokeError extends Schema.TaggedError<CliArchiveSmokeError>()(
   "CliArchiveSmokeError",
@@ -144,64 +143,14 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
     });
   }
 
-  const net = yield* NetService.NetService;
-  const port = yield* net.findAvailablePort(47700);
-  const home = path.join(scratch, "home");
-  const server = yield* spawner.spawn(
-    ChildProcess.make(
-      executable,
-      ["serve", "--host", "127.0.0.1", "--port", String(port), "--no-browser"],
-      {
-        cwd: contentDir,
-        env: {
-          PATH: "",
-          HOME: home,
-          USERPROFILE: home,
-          TMPDIR: scratch,
-          TEMP: scratch,
-          HANZO_DEV_HOME: home,
-          // The archive has a release channel built in, so its events would
-          // look like a real new install.
-          HANZO_DEV_TELEMETRY_ENABLED: "false",
-        },
-        extendEnv: false,
-      },
-    ),
-  );
-  const output = yield* Effect.forkScoped(
-    Effect.all([collect(server.stdout), collect(server.stderr)]),
-  );
-  const httpClient = yield* HttpClient.HttpClient;
-  // Probes can hang during server initialization; bound each request as SSH readiness does.
-  const probe = httpClient.execute(HttpClientRequest.get(`http://127.0.0.1:${String(port)}/`)).pipe(
-    Effect.map((response) => response.status === 200),
-    Effect.timeout(Duration.seconds(2)),
-    Effect.orElseSucceed(() => false),
-  );
-  const pollUntilReady = Effect.gen(function* () {
-    while (!(yield* probe)) {
-      yield* Effect.sleep(Duration.millis(250));
-    }
-    return true;
+  const served = yield* smokePackagedServer({
+    cli: { command: executable, args: [], cwd: contentDir },
+    scratch: path.join(scratch, "serve"),
+    // The archive carries the web client, so the server's root answers too.
+    readyPath: "/",
   });
-  const ready = yield* pollUntilReady.pipe(
-    Effect.timeout(Duration.seconds(30)),
-    Effect.orElseSucceed(() => false),
-  );
-  yield* server.kill({ killSignal: "SIGTERM" }).pipe(Effect.ignore);
-  yield* server.exitCode.pipe(Effect.timeout(Duration.seconds(10)), Effect.ignore);
-  const [stdout, stderr] = yield* Fiber.join(output).pipe(
-    Effect.timeout(Duration.seconds(5)),
-    Effect.orElseSucceed(() => ["", ""] as const),
-  );
-  if (!ready) {
-    return yield* new CliArchiveSmokeError({
-      step: "serving from the extracted archive",
-      detail: `no 200 from / within 30s\n${stdout}${stderr}`,
-    });
-  }
   yield* Effect.log(
-    `[cli-smoke] ${root}: --version and __service-launcher passed, and serve answered on ${String(port)}.`,
+    `[cli-smoke] ${root}: --version and __service-launcher passed, and serve on ${String(served.port)} dispatched a turn.`,
   );
 });
 
