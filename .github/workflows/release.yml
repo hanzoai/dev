@@ -889,18 +889,26 @@ jobs:
         name: Resolve release asset list
         shell: bash
         run: |
+          shopt -s nullglob
           {
             echo 'files<<EOF'
             echo 'release-assets/*.dmg'
             echo 'release-assets/*.zip'
             echo 'release-assets/*.AppImage'
-            echo 'release-assets/*.deb'
             echo 'release-assets/*.exe'
-            echo 'release-assets/*.msi'
+            for optional_glob in 'release-assets/*.deb' 'release-assets/*.msi'; do
+              matches=($optional_glob)
+              if [[ ${#matches[@]} -gt 0 ]]; then
+                echo "$optional_glob"
+              fi
+            done
             if [[ "${{ needs.preflight.outputs.release_channel }}" != "preview" ]]; then
-              echo 'release-assets/*.json'
-              echo 'release-assets/*.sig'
-              echo 'release-assets/*.yml'
+              for updater_glob in 'release-assets/*.json' 'release-assets/*.sig' 'release-assets/*.yml'; do
+                matches=($updater_glob)
+                if [[ ${#matches[@]} -gt 0 ]]; then
+                  echo "$updater_glob"
+                fi
+              done
             fi
             echo 'release-assets/*.tar.gz'
             # A failed or timed-out fetch can leave partial bytes, so list the APK
