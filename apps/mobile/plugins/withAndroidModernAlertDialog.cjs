@@ -82,7 +82,7 @@ function withAlertDialogStyles(config) {
       {
         $: { name: "AppAlertDialog.Title", parent: "RtlOverlay.DialogWindowTitle.AppCompat" },
         item: [
-          { _: "@font/zen_medium", $: { name: "android:fontFamily" } },
+          { _: "@font/xml_zen_medium", $: { name: "android:fontFamily" } },
           { _: "18sp", $: { name: "android:textSize" } },
           { _: "@color/alert_dialog_text", $: { name: "android:textColor" } },
         ],
@@ -94,7 +94,7 @@ function withAlertDialogStyles(config) {
         },
         item: [
           // Override AppCompat's hardcoded sans-serif-medium button font.
-          { _: "@font/zen_medium", $: { name: "android:fontFamily" } },
+          { _: "@font/xml_zen_medium", $: { name: "android:fontFamily" } },
           { _: "@color/alert_dialog_button_text", $: { name: "android:textColor" } },
           { _: "false", $: { name: "android:textAllCaps" } },
           { _: "0", $: { name: "android:letterSpacing" } },

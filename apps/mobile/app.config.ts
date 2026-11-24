@@ -390,8 +390,22 @@ const config: ExpoConfig = {
     [
       "expo-alternate-app-icons",
       [
-        { name: "DevHanzo", ios: fromRepoRoot("assets/app-icons/dev-hanzo-1024.png") },
-        { name: "Dev", ios: fromRepoRoot("assets/app-icons/dev-1024.png") },
+        {
+          name: "DevHanzo",
+          ios: fromRepoRoot("assets/app-icons/dev-hanzo-1024.png"),
+          android: {
+            foregroundImage: fromRepoRoot("assets/app-icons/dev-hanzo-1024.png"),
+            backgroundColor: variant.assets.androidAdaptiveBackgroundColor,
+          },
+        },
+        {
+          name: "Dev",
+          ios: fromRepoRoot("assets/app-icons/dev-1024.png"),
+          android: {
+            foregroundImage: fromRepoRoot("assets/app-icons/dev-1024.png"),
+            backgroundColor: variant.assets.androidAdaptiveBackgroundColor,
+          },
+        },
       ],
     ],
     "expo-secure-store",

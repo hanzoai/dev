@@ -5,7 +5,7 @@ import {
 } from "expo-alternate-app-icons";
 import { useGT } from "gt-react-native";
 import { useState } from "react";
-import { Platform, View } from "react-native";
+import { View } from "react-native";
 
 import { ListChoiceRow as SettingsChoiceRow } from "../../../../components/ui/ListChoiceRow";
 import { SettingsSection } from "../../components/SettingsSection";
@@ -20,7 +20,7 @@ const ICONS = [
 export function AppIconAppearanceSection() {
   const gt = useGT();
   const [current, setCurrent] = useState<string | null>(() => getAppIconName());
-  if (Platform.OS !== "ios" || !supportsAlternateIcons) return null;
+  if (!supportsAlternateIcons) return null;
 
   const choose = (name: string | null) => {
     setAlternateAppIcon(name as never).then(
