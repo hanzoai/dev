@@ -6,6 +6,7 @@ import {
   getThemeColorsForAppearance,
   MOBILE_DEFAULT_THEME_ID,
   MOBILE_THEME_IDS as SHARED_MOBILE_THEME_IDS,
+  resolveLegacyThemeId,
   type MobileThemeId as SharedMobileThemeId,
   type ThemeAppearance,
   type ThemeColors,
@@ -34,10 +35,16 @@ export const MOBILE_THEME_OPTIONS: ReadonlyArray<{
 export type MobileThemeVariable = keyof ReturnType<typeof createMobileThemeVariables>;
 export type MobileThemeVariables = Readonly<Record<MobileThemeVariable, string>>;
 
+export function parseMobileThemeId(value: unknown): MobileThemeId | undefined {
+  if (typeof value !== "string") return undefined;
+  const resolved = resolveLegacyThemeId(value);
+  return (MOBILE_THEME_IDS as readonly string[]).includes(resolved)
+    ? (resolved as MobileThemeId)
+    : undefined;
+}
+
 function normalizeMobileThemeId(value: unknown): MobileThemeId {
-  return typeof value === "string" && (MOBILE_THEME_IDS as readonly string[]).includes(value)
-    ? (value as MobileThemeId)
-    : DEFAULT_MOBILE_THEME_ID;
+  return parseMobileThemeId(value) ?? DEFAULT_MOBILE_THEME_ID;
 }
 
 export function normalizeMobileThemeMode(value: unknown): MobileThemeMode {

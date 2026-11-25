@@ -1,6 +1,6 @@
 export const BUILT_IN_THEME_IDS = [
   "zen",
-  "lelouch",
+  "clay",
   "hanzo-chat",
   "grove",
   "ocean",
@@ -12,17 +12,29 @@ export const MOBILE_DEFAULT_THEME_ID = "hanzo-dev";
 
 export const MOBILE_THEME_IDS = [MOBILE_DEFAULT_THEME_ID, ...BUILT_IN_THEME_IDS] as const;
 
+/** Maps retired built-in theme ids to their current built-in replacement. */
+const LEGACY_THEME_ID_ALIASES: Readonly<Record<string, BuiltInThemeId>> = {
+  lelouch: "clay",
+  "hanzo-chat-dark": "hanzo-chat",
+  "hanzo-grove": "grove",
+  "hanzo-ocean": "ocean",
+  "hanzo-ember": "ember",
+  "hanzo-iris": "iris",
+};
+
+export function resolveLegacyThemeId(themeId: string): string {
+  return Object.hasOwn(LEGACY_THEME_ID_ALIASES, themeId)
+    ? (LEGACY_THEME_ID_ALIASES[themeId] ?? themeId)
+    : themeId;
+}
+
 /** Reserve appearance keywords, built-ins, and legacy aliases so custom themes cannot capture stored preferences. */
 export const RESERVED_THEME_IDS: ReadonlySet<string> = new Set([
   "system",
   "light",
   "dark",
   ...BUILT_IN_THEME_IDS,
-  "hanzo-chat-dark",
-  "hanzo-grove",
-  "hanzo-ocean",
-  "hanzo-ember",
-  "hanzo-iris",
+  ...Object.keys(LEGACY_THEME_ID_ALIASES),
 ]);
 
 /** The mobile default id is valid in saved themes but cannot be published because web/desktop cannot resolve it. */
@@ -965,9 +977,9 @@ const ZEN_THEME: ThemeDefinition = {
   },
 };
 
-const LELOUCH_THEME: ThemeDefinition = {
-  id: "lelouch",
-  label: "Lelouch",
+const CLAY_THEME: ThemeDefinition = {
+  id: "clay",
+  label: "Clay",
   appearance: "light",
   colors: {
     ...HANZO_DEV_LIGHT_THEME_COLORS,
@@ -1068,7 +1080,7 @@ const LELOUCH_THEME: ThemeDefinition = {
 
 export const BUILT_IN_THEMES: ReadonlyArray<ThemeDefinition> = [
   ZEN_THEME,
-  LELOUCH_THEME,
+  CLAY_THEME,
   HANZO_CHAT_THEME,
   GROVE_THEME,
   OCEAN_THEME,

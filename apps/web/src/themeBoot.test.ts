@@ -189,6 +189,16 @@ describe("index.html boot script", () => {
       prefersDark: true,
     },
     {
+      name: "Clay follows a dark OS",
+      storage: { [THEME_STORAGE_KEY]: "clay", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true" },
+      prefersDark: true,
+    },
+    {
+      name: "a legacy lelouch preference resolves through the alias to clay",
+      storage: { [THEME_STORAGE_KEY]: "lelouch", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true" },
+      prefersDark: true,
+    },
+    {
       name: "a legacy hanzo-grove preference resolves through the alias",
       storage: { [THEME_STORAGE_KEY]: "hanzo-grove", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true" },
       prefersDark: true,
@@ -395,6 +405,20 @@ describe("index.html boot script", () => {
     expect(boot.bootVariables["--boot-accent"]).toBe(getDefaultThemeColors("dark").accent);
     expect(boot.backgroundColor).toBe(DEFAULT_DARK_CHROME);
     expect(boot.metaContent).toBe(DEFAULT_DARK_CHROME);
+  });
+
+  it("resolves legacy lelouch preferences to clay on boot", () => {
+    const boot = runBootScript({
+      storage: {
+        [THEME_STORAGE_KEY]: "lelouch",
+        [THEME_APPEARANCE_MODE_STORAGE_KEY]: "dark",
+      },
+      prefersDark: true,
+    });
+    expect(boot.themeId).toBe("clay");
+    expect(boot.isDark).toBe(true);
+    expect(boot.bootVariables["--boot-background"]).toBe("#141418");
+    expect(boot.bootVariables["--boot-accent"]).toBe("#d11641");
   });
 
   it("follows the OS appearance when storage is unavailable", () => {

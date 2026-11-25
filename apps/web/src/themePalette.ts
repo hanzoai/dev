@@ -17,6 +17,7 @@ import {
   HANZO_DEV_LIGHT_THEME_COLORS,
   HANZO_DEV_DARK_THEME_COLORS,
   RESERVED_THEME_IDS,
+  resolveLegacyThemeId,
   THEME_COLOR_ROLES,
   type ThemeAppearance,
   type ThemeColorRole,
@@ -39,11 +40,6 @@ import { themeServerEnvironmentThemesAtom } from "./state/server";
 export { EMBER_THEME, GROVE_THEME, IRIS_THEME, OCEAN_THEME, HANZO_CHAT_THEME, THEME_COLOR_ROLES };
 export type { ThemeAppearance, ThemeColorRole, ThemeColors, ThemeDefinition, ThemeVariants };
 
-const HANZO_CHAT_THEME_ID = "hanzo-chat" as const;
-const GROVE_THEME_ID = "grove" as const;
-const OCEAN_THEME_ID = "ocean" as const;
-const EMBER_THEME_ID = "ember" as const;
-const IRIS_THEME_ID = "iris" as const;
 export const THEME_FILE_VERSION = 1 as const;
 export const CUSTOM_THEMES_STORAGE_KEY = "hanzodev:themes:v1";
 export const THEME_FOLLOW_SYSTEM_STORAGE_KEY = "hanzodev:theme-follow-system";
@@ -406,18 +402,8 @@ export function subscribeToCustomThemes(listener: () => void): () => void {
   };
 }
 
-const LEGACY_THEME_ID_ALIASES: Readonly<Record<string, string>> = {
-  [LEGACY_HANZO_CHAT_DARK_THEME_ID]: HANZO_CHAT_THEME_ID,
-  "hanzo-grove": GROVE_THEME_ID,
-  "hanzo-ocean": OCEAN_THEME_ID,
-  "hanzo-ember": EMBER_THEME_ID,
-  "hanzo-iris": IRIS_THEME_ID,
-};
-
 function normalizeThemeId(themeId: string): string {
-  return Object.hasOwn(LEGACY_THEME_ID_ALIASES, themeId)
-    ? (LEGACY_THEME_ID_ALIASES[themeId] ?? themeId)
-    : themeId;
+  return resolveLegacyThemeId(themeId);
 }
 
 export function canonicalThemePreference(theme: string): string {

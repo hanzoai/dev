@@ -229,6 +229,13 @@ describe("mobile themes", () => {
       light: "grove",
       dark: "grove",
     });
+    expect(resolveMobileThemeIds({ themeId: "lelouch" })).toEqual({
+      light: "clay",
+      dark: "clay",
+    });
+    expect(
+      resolveMobileThemeIds({ themeId: "grove", lightThemeId: "lelouch", darkThemeId: "ocean" }),
+    ).toEqual({ light: "clay", dark: "ocean" });
     expect(
       resolveMobileThemeIds({ themeId: "grove", lightThemeId: "iris", darkThemeId: "ocean" }),
     ).toEqual({ light: "iris", dark: "ocean" });

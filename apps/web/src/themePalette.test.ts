@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { converter } from "culori/fn";
-import { BUILT_IN_THEMES } from "@hanzodev/shared/themePalettes";
+import { BUILT_IN_THEMES, RESERVED_THEME_IDS } from "@hanzodev/shared/themePalettes";
 
 import { CONTEXT_CHIP_ACCENTS, contextChipColorVariable } from "./lib/contextChipAccents";
 import { appAtomRegistry } from "./rpc/atomRegistry";
@@ -806,5 +806,17 @@ describe("stored theme preferences", () => {
 
     vi.unstubAllGlobals();
     invalidateCustomThemes();
+  });
+
+  it("migrates legacy lelouch theme preferences to clay while keeping lelouch reserved", () => {
+    expect(RESERVED_THEME_IDS.has("clay")).toBe(true);
+    expect(RESERVED_THEME_IDS.has("lelouch")).toBe(true);
+    expect(canonicalThemePreference("lelouch")).toBe("clay");
+    expect(getThemeDefinition("lelouch")?.id).toBe("clay");
+    expect(getThemeDefinition("lelouch")?.label).toBe("Clay");
+    expect(parseThemeHalves(JSON.stringify({ light: "lelouch", dark: "lelouch" }))).toEqual({
+      light: "clay",
+      dark: "clay",
+    });
   });
 });
