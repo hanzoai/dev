@@ -1,4 +1,4 @@
-/** Where Hanzo Dev for iOS and Android is downloaded. */
+/** Where Hanzo for iOS and Android is downloaded. */
 export const MOBILE_APP_DOWNLOADS = [
   {
     platform: "iOS",

@@ -103,8 +103,8 @@ function EmptyMobileClients() {
         </EmptyTitle>
         <EmptyDescription>
           <T>
-            Install Hanzo Dev on your phone and sign in to Hanzo Link to get push notifications and
-            Live Activities.
+            Install Hanzo on your phone and sign in to Hanzo Link to get push notifications and Live
+            Activities.
           </T>
         </EmptyDescription>
       </EmptyHeader>

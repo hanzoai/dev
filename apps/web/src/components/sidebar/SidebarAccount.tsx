@@ -197,7 +197,7 @@ export const SidebarAccount = memo(function SidebarAccount({
           </MenuItem>
           <MenuItem onClick={() => setPhoneOpen(true)}>
             <SmartphoneIcon />
-            <T>Get Hanzo Dev on your phone</T>
+            <T>Get Hanzo on your phone</T>
           </MenuItem>
           <MenuSeparator />
           <MenuItem onClick={() => void controller.signOut()} variant="destructive">

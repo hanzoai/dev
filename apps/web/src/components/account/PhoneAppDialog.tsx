@@ -24,12 +24,12 @@ export function PhoneAppDialog({
       <DialogPopup>
         <DialogHeader>
           <DialogTitle>
-            <T>Get Hanzo Dev on your phone</T>
+            <T>Get Hanzo on your phone</T>
           </DialogTitle>
           <DialogDescription>
             <T>
-              Scan to download it. Sign in with the same account and your phone controls this Mac
-              automatically.
+              Scan to download it. Sign in with the same account and your phone controls this
+              computer automatically.
             </T>
           </DialogDescription>
         </DialogHeader>

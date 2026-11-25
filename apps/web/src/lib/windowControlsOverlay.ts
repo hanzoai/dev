@@ -83,24 +83,38 @@ html:has([data-testid="hanzo-dev-signin-landing"]) [data-slot="window-controls-d
 html[data-window-mode="login"] [data-slot="window-controls-divider"] {
   display: none !important;
 }
-html.tauri-linux {
+html.tauri-linux:not([data-maximized="true"]),
+html.tauri-linux:not([data-maximized="true"]) body {
   background: transparent !important;
+  background-color: transparent !important;
 }
 html.tauri-linux:not([data-maximized="true"]) body {
+  clip-path: inset(0 round 12px) !important;
+}
+html.tauri-linux:not([data-maximized="true"]) #root {
+  background-color: var(--background, #000000);
   border-radius: 12px !important;
   overflow: hidden !important;
   box-shadow: inset 0 0 0 1px var(--hz-wco-divider, rgba(255, 255, 255, 0.10));
 }
 @media (max-width: 640px) {
   html.tauri-linux:not([data-maximized="true"]) body {
+    clip-path: inset(0 round 24px) !important;
+  }
+  html.tauri-linux:not([data-maximized="true"]) #root {
     border-radius: 24px !important;
   }
 }
 html.tauri-linux[data-window-mode="login"]:not([data-maximized="true"]) body {
+  clip-path: inset(0 round 24px) !important;
+}
+html.tauri-linux[data-window-mode="login"]:not([data-maximized="true"]) #root {
   border-radius: 24px !important;
 }
+html.tauri-linux[data-maximized="true"] #root,
 html.tauri-linux[data-maximized="true"] body {
   border-radius: 0 !important;
+  clip-path: none !important;
   box-shadow: none !important;
 }
 `;
