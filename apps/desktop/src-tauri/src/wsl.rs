@@ -69,7 +69,11 @@ fn write_persisted_wsl_settings(state_dir: &Path, settings: &PersistedWslSetting
 
 pub fn decode_wsl_output(bytes: &[u8]) -> String {
     if bytes.len() >= 2 && (bytes[1] == 0 || (bytes[0] == 0xFF && bytes[1] == 0xFE)) {
-        let offset = if bytes[0] == 0xFF && bytes[1] == 0xFE { 2 } else { 0 };
+        let offset = if bytes[0] == 0xFF && bytes[1] == 0xFE {
+            2
+        } else {
+            0
+        };
         let units: Vec<u16> = bytes[offset..]
             .chunks_exact(2)
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
@@ -241,7 +245,9 @@ pub fn desktop_set_wsl_distro(
 ) -> DesktopWslState {
     let dir = &state.supervisor.config.state_dir;
     let mut settings = read_persisted_wsl_settings(dir);
-    settings.distro = distro.map(|d| d.trim().to_string()).filter(|d| !d.is_empty());
+    settings.distro = distro
+        .map(|d| d.trim().to_string())
+        .filter(|d| !d.is_empty());
     write_persisted_wsl_settings(dir, &settings);
     let next = build_wsl_state(dir);
     if next.enabled {

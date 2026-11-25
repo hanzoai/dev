@@ -24,7 +24,9 @@ use crate::snapshot::{spawn_interactive_snapshot, SnapshotManager};
 use crate::ssh::SshTunnelSupervisor;
 use std::env;
 use std::sync::Mutex;
-use tauri::{Emitter, LogicalSize, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{
+    Emitter, LogicalSize, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+};
 #[cfg(target_os = "macos")]
 use tauri::{LogicalPosition, TitleBarStyle};
 use tauri_plugin_deep_link::DeepLinkExt;

@@ -15,7 +15,10 @@ pub fn start(app: &AppHandle) {
     #[cfg(target_os = "macos")]
     if std::env::current_exe()
         .ok()
-        .and_then(|p| p.parent().map(|d| d.join("../Resources/resources/menubar/HanzoMenubar.app")))
+        .and_then(|p| {
+            p.parent()
+                .map(|d| d.join("../Resources/resources/menubar/HanzoMenubar.app"))
+        })
         .is_some_and(|p| p.is_dir())
     {
         return;
@@ -28,9 +31,13 @@ pub fn start(app: &AppHandle) {
     let Ok(sep1) = PredefinedMenuItem::separator(app) else {
         return;
     };
-    let Ok(start_item) =
-        MenuItem::with_id(app, TRAY_ID_HANZOD_START, "Start hanzod", true, None::<&str>)
-    else {
+    let Ok(start_item) = MenuItem::with_id(
+        app,
+        TRAY_ID_HANZOD_START,
+        "Start hanzod",
+        true,
+        None::<&str>,
+    ) else {
         return;
     };
     let Ok(restart_item) = MenuItem::with_id(

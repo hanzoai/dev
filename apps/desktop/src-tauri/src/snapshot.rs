@@ -308,12 +308,16 @@ pub async fn capture_screen_region_to_file(
              $bmp.Save('{escaped}', [System.Drawing.Imaging.ImageFormat]::Png);"
         );
         let mut ps_cmd = tokio::process::Command::new("powershell");
-        ps_cmd.args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &ps_script]);
+        ps_cmd.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            &ps_script,
+        ]);
         crate::hide_tokio_console(&mut ps_cmd);
-        let status = ps_cmd
-            .status()
-            .await
-            .map_err(|e| e.to_string())?;
+        let status = ps_cmd.status().await.map_err(|e| e.to_string())?;
         Ok(status.success() && dest_path.is_file())
     }
 }
