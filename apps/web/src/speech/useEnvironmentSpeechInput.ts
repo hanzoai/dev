@@ -18,7 +18,7 @@ import type {
 } from "@hanzodev/contracts";
 import { resolveProjectSettings } from "@hanzodev/shared/projectSettings";
 import { chooseSetupSpeechModel } from "@hanzodev/shared/speech";
-import { useNavigate } from "@tanstack/react-router";
+import { useRouter } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import { msg, useGT } from "gt-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -150,7 +150,7 @@ export function useVoiceTranscriptionDestination() {
 }
 
 export function useEnvironmentSpeechInput(input: HookInput) {
-  const navigate = useNavigate();
+  const router = useRouter({ warn: false });
   const destination = useVoiceTranscriptionDestination();
   const prepared = destination.prepared;
   const grantId = destination.grantId;
@@ -396,8 +396,13 @@ export function useEnvironmentSpeechInput(input: HookInput) {
   const start = useStableCallback(async () => {
     if (latestRef.current.input.disabled || (setup.open && setup.downloading)) return;
     if (!grantId) {
-      if (destination.offerFirstRunSetup && latestRef.current.input.offerSetup !== false)
-        await navigate({ to: "/settings/voice", hash: "voice-transcription-destination" });
+      if (destination.offerFirstRunSetup && latestRef.current.input.offerSetup !== false) {
+        if (router) {
+          await router.navigate({ to: "/settings/voice", hash: "voice-transcription-destination" });
+        } else if (typeof window !== "undefined") {
+          window.location.assign("/settings/voice#voice-transcription-destination");
+        }
+      }
       return;
     }
     const request = ++startRequestRef.current;
