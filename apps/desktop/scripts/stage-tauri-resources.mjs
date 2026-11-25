@@ -141,7 +141,7 @@ NodeFS.writeFileSync(
   JSON.stringify(
     {
       name: "hanzo-desktop-server",
-      version: serverPkg.version ?? "0.1.13",
+      version: serverPkg.version ?? "0.1.14",
       private: true,
       type: "module",
     },
