@@ -23,7 +23,7 @@ import { useAppearancePreferences } from "../AppearancePreferencesProvider";
 
 const THEME_NAMES: Readonly<Record<string, string>> = {
   zen: msg("Zen", { $context: "color theme name" }),
-  lelouch: msg("Lelouch", { $context: "color theme name" }),
+  clay: msg("Clay", { $context: "color theme name" }),
   grove: msg("Grove", { $context: "color theme name" }),
   ocean: msg("Ocean", { $context: "color theme name" }),
   ember: msg("Ember", { $context: "color theme name" }),

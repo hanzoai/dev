@@ -52,6 +52,20 @@
         // Keep this small boot-time copy in sync with the built-in palettes so
         // the selected theme is visible before the app has mounted.
         const BUILT_IN_THEME_PALETTES = {
+          clay: {
+            light: {
+              background: "#f7f6fa",
+              foreground: "#181424",
+              accent: "#be123c",
+              chrome: "#f7f6fa",
+            },
+            dark: {
+              background: "#141418",
+              foreground: "#f4f2f8",
+              accent: "#d11641",
+              chrome: "#141418",
+            },
+          },
           "hanzo-chat": {
             light: {
               background: "oklch(0.982446 0.010114 325.653)",
@@ -133,11 +147,14 @@
           "system",
           "light",
           "dark",
+          "zen",
+          "clay",
           "hanzo-chat",
           "grove",
           "ocean",
           "ember",
           "iris",
+          "lelouch",
           "hanzo-chat-dark",
           "hanzo-grove",
           "hanzo-ocean",
@@ -222,6 +239,7 @@
           const storedTheme = window.localStorage.getItem("hanzodev:theme");
           const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
           const LEGACY_THEME_IDS = {
+            lelouch: "clay",
             "hanzo-chat-dark": "hanzo-chat",
             "hanzo-grove": "grove",
             "hanzo-ocean": "ocean",

@@ -649,7 +649,7 @@
       --color-profile-border: #191919;
     }
 
-    @variant lelouch-light {
+    @variant clay-light {
       --color-screen: #f7f6fa;
       --color-sheet: rgba(247, 246, 250, 0.98);
       --color-sheet-solid: #f7f6fa;
@@ -811,7 +811,7 @@
       --color-profile-border: #e4e4e7;
     }
 
-    @variant lelouch-dark {
+    @variant clay-dark {
       --color-screen: #141418;
       --color-sheet: rgba(20, 20, 24, 0.98);
       --color-sheet-solid: #141418;
