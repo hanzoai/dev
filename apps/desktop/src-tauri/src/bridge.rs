@@ -47,15 +47,34 @@ pub fn build_initialization_script(config: &BackendRuntimeConfig, local_enabled:
   let __fullscreen = false;
   let __localEnabled = __STATE__.localEnvironmentEnabled !== false;
 
-  if (__STATE__.clientPlatform === "darwin") {{
-    const applyInset = () => {{
-      if (document.documentElement) {{
-        document.documentElement.style.setProperty("--desktop-window-controls-inset", "84px");
-      }}
-    }};
-    applyInset();
-    window.addEventListener("DOMContentLoaded", applyInset, {{ once: true }});
-  }}
+  const applyDesktopChrome = () => {{
+    const docEl = document.documentElement;
+    if (!docEl) return;
+    docEl.setAttribute("data-desktop", "true");
+    docEl.style.setProperty("--workspace-topbar-height", "44px");
+    if (__STATE__.clientPlatform === "darwin") {{
+      docEl.style.setProperty("--desktop-window-controls-inset", "84px");
+    }} else {{
+      docEl.classList.add("wco");
+      docEl.style.setProperty("--workspace-native-controls-inset", "104px");
+    }}
+    const styleId = "hanzo-dev-desktop-chrome";
+    const root = document.head || docEl;
+    if (root && !document.getElementById(styleId)) {{
+      const style = document.createElement("style");
+      style.id = styleId;
+      style.textContent = [
+        "[data-slot='popover-popup'], [data-slot='menu-popup'], [data-slot='dropdown-menu-content'], [data-slot='select-popup'], [data-slot='combobox-popup'], [role='menu'], [role='listbox'] {{",
+        "  background-color: #121214 !important;",
+        "  backdrop-filter: none !important;",
+        "  -webkit-backdrop-filter: none !important;",
+        "}}"
+      ].join("\\n");
+      root.appendChild(style);
+    }}
+  }};
+  applyDesktopChrome();
+  window.addEventListener("DOMContentLoaded", applyDesktopChrome, {{ once: true }});
 
   function invoke(cmd, args) {{
     if (window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === "function") {{
@@ -96,8 +115,8 @@ pub fn build_initialization_script(config: &BackendRuntimeConfig, local_enabled:
 
   window.addEventListener("mousedown", function (event) {{
     if (event.button !== 0 || !(event.target instanceof Element)) return;
-    if (!event.target.closest(".drag-region")) return;
-    if (event.target.closest("button, a, input, textarea, select, [role='button'], [role='combobox'], [role='menuitem'], [data-sidebar='trigger'], [data-no-drag]")) return;
+    if (!event.target.closest(".drag-region, [data-tauri-drag-region], [data-slot='masthead'], [data-slot='title-bar']")) return;
+    if (event.target.closest("button, a, input, textarea, select, [role='button'], [role='combobox'], [role='menuitem'], [data-sidebar='trigger'], [data-no-drag], [data-tauri-drag-region='false'], [data-slot='window-controls']")) return;
     if (event.detail === 2) {{
       invoke("desktop_toggle_maximize").catch(function () {{}});
     }} else if (event.detail === 1) {{

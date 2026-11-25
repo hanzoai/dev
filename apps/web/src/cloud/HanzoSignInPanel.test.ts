@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
+import { DesktopWindowControls } from "../components/desktop/DesktopWindowControls";
 import {
   HANZO_DEV_APP_ICON_DATA_URL,
   HanzoDevAppIcon,
@@ -9,7 +10,7 @@ import {
   HanzoLoginMasthead,
 } from "./HanzoSignInPanel";
 
-describe("Hanzo Dev canonical login branding", () => {
+describe("Hanzo Dev canonical login & frameless window chrome", () => {
   it("renders the 28px corner hanzo wordmark masthead with no maxWidth constraint", () => {
     const webHtml = renderToStaticMarkup(
       createElement(HanzoLoginMasthead, { desktop: false, macDesktop: false }),
@@ -27,6 +28,19 @@ describe("Hanzo Dev canonical login branding", () => {
     );
     expect(macHtml).toContain('data-tauri-drag-region=""');
     expect(macHtml).toContain("padding-left:84px");
+  });
+
+  it("renders crisp 28x28 monochrome Minimize, Maximize, and Close window controls", () => {
+    const controlsHtml = renderToStaticMarkup(
+      createElement(DesktopWindowControls, { forceRender: true }),
+    );
+    expect(controlsHtml).toContain('data-slot="window-controls"');
+    expect(controlsHtml).toContain('data-tauri-drag-region="false"');
+    expect(controlsHtml).toContain("width:28px");
+    expect(controlsHtml).toContain("height:28px");
+    expect(controlsHtml).toContain('aria-label="Minimize"');
+    expect(controlsHtml).toContain('aria-label="Maximize"');
+    expect(controlsHtml).toContain('aria-label="Close"');
   });
 
   it("embeds the 64px canonical Obsidian Glass Squircle hanzo-dev icon and Hanzo AI footer", () => {

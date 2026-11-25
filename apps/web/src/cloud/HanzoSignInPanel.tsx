@@ -2,6 +2,10 @@ import { T, useGT } from "gt-react";
 import { useState, type CSSProperties } from "react";
 
 import { HanzoIcon } from "../components/Icons";
+import {
+  dragDesktopWindow,
+  toggleDesktopMaximize,
+} from "../components/desktop/DesktopWindowControls";
 import type { HanzoWebAuthController } from "./hanzoWebAuth";
 
 export const HANZO_DEV_APP_ICON_DATA_URL =
@@ -63,11 +67,13 @@ export function HanzoLoginMasthead({
       data-slot="masthead"
       data-tauri-drag-region={desktop ? "" : undefined}
       className={desktop ? "drag-region" : undefined}
+      onMouseDown={desktop ? dragDesktopWindow : undefined}
+      onDoubleClick={desktop ? toggleDesktopMaximize : undefined}
       style={{
         width: "100%",
-        height: 60,
+        height: desktop ? 44 : 60,
         paddingLeft: macDesktop ? 84 : 24,
-        paddingRight: 24,
+        paddingRight: desktop && !macDesktop ? 112 : 24,
         boxSizing: "border-box",
         display: "flex",
         alignItems: "center",

@@ -12502,5 +12502,8 @@
   "b7df38b7d8792d78": "Open guide",
   "9e91e9a77b664e4e": "Could not start a review guide",
   "8f6bfaad6d4285fc": "Sign in to Hanzo Dev",
-  "a04b8d1db28e305b": "Cloud coding agents, local workspaces, and connected computers."
+  "a04b8d1db28e305b": "Cloud coding agents, local workspaces, and connected computers.",
+  "dc8b0f21fc87be70": "Minimize",
+  "90e19ab2fba5da15": "Restore",
+  "13d514f5472e92fe": "Maximize"
 }

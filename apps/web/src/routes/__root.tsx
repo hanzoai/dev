@@ -32,6 +32,7 @@ import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPrompt
 import { SnapShotCoordinator } from "../components/desktop/SnapShotCoordinator";
 import { DesktopAppActivationCoordinator } from "../components/desktop/DesktopAppActivationCoordinator";
 import { DesktopWebLinkCoordinator } from "../components/desktop/DesktopWebLinkCoordinator";
+import { DesktopWindowControlsOverlay } from "../components/desktop/DesktopWindowControls";
 import { RunningThreadKeepAlive } from "../components/desktop/RunningThreadKeepAlive";
 import { ReopenClosedViewShortcut } from "../components/ReopenClosedViewShortcut";
 import { ProjectCloneToastCoordinator } from "../components/ProjectCloneToastCoordinator";
@@ -154,6 +155,7 @@ function RootRouteView() {
     <ToastProvider>
       <AnchoredToastProvider>
         <HanzoAnalyticsCoordinator />
+        <DesktopWindowControlsOverlay />
         <RootRouteBranch />
       </AnchoredToastProvider>
     </ToastProvider>

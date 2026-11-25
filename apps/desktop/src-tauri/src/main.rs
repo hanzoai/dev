@@ -80,6 +80,42 @@ fn dispatch_global_shortcut(app: &tauri::AppHandle, shortcut: &Shortcut) {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn apply_windows_dwm_chrome(window: &tauri::WebviewWindow) {
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmSetWindowAttribute(
+            hwnd: *mut std::ffi::c_void,
+            dw_attribute: u32,
+            pv_attribute: *const std::ffi::c_void,
+            cb_attribute: u32,
+        ) -> i32;
+    }
+    const DWMWA_USE_IMMERSIVE_DARK_MODE: u32 = 20;
+    const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
+    const DWMWCP_ROUND: u32 = 2;
+
+    if let Ok(hwnd) = window.hwnd() {
+        let raw = hwnd.0 as *mut std::ffi::c_void;
+        let dark: u32 = 1;
+        let corner: u32 = DWMWCP_ROUND;
+        unsafe {
+            let _ = DwmSetWindowAttribute(
+                raw,
+                DWMWA_USE_IMMERSIVE_DARK_MODE,
+                &dark as *const u32 as *const std::ffi::c_void,
+                std::mem::size_of::<u32>() as u32,
+            );
+            let _ = DwmSetWindowAttribute(
+                raw,
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                &corner as *const u32 as *const std::ffi::c_void,
+                std::mem::size_of::<u32>() as u32,
+            );
+        }
+    }
+}
+
 fn dispatch_deep_link(app: &tauri::AppHandle, url: String) {
     if let Some(state) = app.try_state::<AppState>() {
         let is_ready = state.web_links_ready.lock().map(|g| *g).unwrap_or(false);
@@ -202,6 +238,7 @@ fn main() {
                 .title(title)
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(900.0, 600.0)
+                .background_color(tauri::window::Color(0, 0, 0, 255))
                 .initialization_script(&init_script);
 
             #[cfg(target_os = "macos")]
@@ -209,10 +246,17 @@ fn main() {
                 win_builder = win_builder
                     .title_bar_style(TitleBarStyle::Overlay)
                     .hidden_title(true)
-                    .traffic_light_position(LogicalPosition::new(16.0, 26.0));
+                    .traffic_light_position(LogicalPosition::new(16.0, 22.0));
+            }
+
+            #[cfg(not(target_os = "macos"))]
+            {
+                win_builder = win_builder.decorations(false);
             }
 
             let window = win_builder.build()?;
+            #[cfg(target_os = "windows")]
+            apply_windows_dwm_chrome(&window);
             menubar::start(app.handle());
 
             let win_clone = window.clone();
@@ -333,5 +377,19 @@ mod tests {
             Some(GlobalShortcutAction::SnapShot)
         );
         assert_eq!(resolve_global_shortcut_action(&unrelated), None);
+    }
+
+    #[test]
+    fn default_capability_grants_frameless_window_controls() {
+        let cap = include_str!("../capabilities/default.json");
+        for perm in [
+            "core:window:allow-start-dragging",
+            "core:window:allow-minimize",
+            "core:window:allow-toggle-maximize",
+            "core:window:allow-is-maximized",
+            "core:window:allow-close",
+        ] {
+            assert!(cap.contains(perm), "missing capability {perm}");
+        }
     }
 }

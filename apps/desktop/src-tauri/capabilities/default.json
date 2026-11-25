@@ -1,14 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capabilities for the Hanzo Dev Tauri desktop window",
+  "description": "Default capabilities for the Hanzo Dev frameless Tauri desktop window",
   "local": true,
   "remote": {
     "urls": [
       "http://127.0.0.1:*",
       "http://127.0.0.1:*/*",
       "http://localhost:*",
-      "http://localhost:*/*"
+      "http://localhost:*/*",
+      "https://hanzo.ai/*",
+      "https://*.hanzo.ai/*"
     ]
   },
   "windows": ["main"],
@@ -16,6 +18,11 @@
     "core:default",
     "core:event:default",
     "core:window:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-is-maximized",
+    "core:window:allow-close",
     "dialog:default",
     "opener:default",
     "os:default",
