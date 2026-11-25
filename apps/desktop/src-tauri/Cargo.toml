@@ -1,6 +1,6 @@
 [package]
 name = "hanzo-dev-desktop"
-version = "0.1.14"
+version = "0.1.15"
 description = "Hanzo Dev — Native Tauri Desktop Control Plane"
 authors = ["Hanzo AI Inc. <dev@hanzo.ai>"]
 license = "MIT"
@@ -15,7 +15,7 @@ default = []
 custom-protocol = ["tauri/custom-protocol"]
 
 [dependencies]
-tauri = { version = "2.11", features = ["macos-private-api", "image-png", "devtools"] }
+tauri = { version = "2.11", features = ["macos-private-api", "image-png", "devtools", "tray-icon"] }
 tauri-plugin-dialog = "2.7"
 tauri-plugin-opener = "2.5"
 tauri-plugin-os = "2.3"
