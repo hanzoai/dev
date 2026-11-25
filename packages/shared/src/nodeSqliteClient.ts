@@ -105,7 +105,7 @@ const TransactionAcquire = Context.Reference<
   | undefined
 >("@hanzodev/shared/nodeSqliteClient/TransactionAcquire", { defaultValue: () => undefined });
 
-export class UnsupportedNodeSqliteVersionError extends Schema.TaggedError<UnsupportedNodeSqliteVersionError>()(
+class UnsupportedNodeSqliteVersionError extends Schema.TaggedError<UnsupportedNodeSqliteVersionError>()(
   "UnsupportedNodeSqliteVersionError",
   {
     nodeVersion: Schema.String,
@@ -117,7 +117,7 @@ export class UnsupportedNodeSqliteVersionError extends Schema.TaggedError<Unsupp
   }
 }
 
-export class UnsupportedNodeSqliteOperationError extends Schema.TaggedError<UnsupportedNodeSqliteOperationError>()(
+class UnsupportedNodeSqliteOperationError extends Schema.TaggedError<UnsupportedNodeSqliteOperationError>()(
   "UnsupportedNodeSqliteOperationError",
   {},
 ) {

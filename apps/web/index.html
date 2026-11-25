@@ -37,21 +37,35 @@
         // app colors before React mounts.
         const DEFAULT_THEME_PALETTES = {
           light: {
-            background: "oklch(0.982446 0.010114 325.653)",
-            foreground: "oklch(0.325698 0.116116 325.037)",
-            accent: "oklch(0.591646 0.217985 0.584)",
-            chrome: "oklch(0.982446 0.010114 325.653)",
+            background: "oklch(0.991069 0 0)",
+            foreground: "oklch(0.273936 0.005477 286.033)",
+            accent: "oklch(0.210331 0.00586 285.885)",
+            chrome: "oklch(0.991069 0 0)",
           },
           dark: {
-            background: "oklch(0.22813 0.020366 307.469)",
-            foreground: "oklch(0.980735 0.004092 301.426)",
-            accent: "oklch(0.460685 0.185347 4.099)",
-            chrome: "oklch(0.22813 0.020366 307.469)",
+            background: "oklch(0.144788 0 0)",
+            foreground: "oklch(0.970151 0 0)",
+            accent: "oklch(1 0 0)",
+            chrome: "oklch(0.144788 0 0)",
           },
         };
         // Keep this small boot-time copy in sync with the built-in palettes so
         // the selected theme is visible before the app has mounted.
         const BUILT_IN_THEME_PALETTES = {
+          zen: {
+            light: {
+              background: "#ffffff",
+              foreground: "#27272a",
+              accent: "#18181b",
+              chrome: "#ffffff",
+            },
+            dark: {
+              background: "#000000",
+              foreground: "#f5f5f5",
+              accent: "#ffffff",
+              chrome: "#000000",
+            },
+          },
           clay: {
             light: {
               background: "#f7f6fa",
@@ -64,20 +78,6 @@
               foreground: "#f4f2f8",
               accent: "#d11641",
               chrome: "#141418",
-            },
-          },
-          "hanzo-chat": {
-            light: {
-              background: "oklch(0.982446 0.010114 325.653)",
-              foreground: "oklch(0.325698 0.116116 325.037)",
-              accent: "oklch(0.591646 0.217985 0.584)",
-              chrome: "oklch(0.982446 0.010114 325.653)",
-            },
-            dark: {
-              background: "oklch(0.22813 0.020366 307.469)",
-              foreground: "oklch(0.980735 0.004092 301.426)",
-              accent: "oklch(0.460685 0.185347 4.099)",
-              chrome: "oklch(0.22813 0.020366 307.469)",
             },
           },
           grove: {
@@ -149,12 +149,12 @@
           "dark",
           "zen",
           "clay",
-          "hanzo-chat",
           "grove",
           "ocean",
           "ember",
           "iris",
           "lelouch",
+          "hanzo-chat",
           "hanzo-chat-dark",
           "hanzo-grove",
           "hanzo-ocean",
@@ -240,7 +240,8 @@
           const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
           const LEGACY_THEME_IDS = {
             lelouch: "clay",
-            "hanzo-chat-dark": "hanzo-chat",
+            "hanzo-chat": "zen",
+            "hanzo-chat-dark": "zen",
             "hanzo-grove": "grove",
             "hanzo-ocean": "ocean",
             "hanzo-ember": "ember",

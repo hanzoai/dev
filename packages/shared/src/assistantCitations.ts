@@ -173,32 +173,6 @@ export function expandAssistantCitationsForProvider(prompt: string): string {
   return `${text}\n\n<assistant_citations>\n${description}\n${data}\n</assistant_citations>`;
 }
 
-function escapeMarkdownText(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/[\\`*_[\]{}()#+.!|~-]/g, "\\$&");
-}
-
-export function renderAssistantCitationsAsText(prompt: string): string {
-  const matches = collectAssistantCitations(prompt);
-  let text = "";
-  let cursor = 0;
-  for (const match of matches) {
-    const quote = escapeMarkdownText(match.citation.text);
-    text += `${prompt.slice(cursor, match.start)}\n\n> Assistant quote:\n${quote
-      .split("\n")
-      .map((line) => `> ${line}`)
-      .join("\n")}\n\n`;
-    if (match.citation.comment !== undefined) {
-      text += `Comment: ${escapeMarkdownText(match.citation.comment)}\n\n`;
-    }
-    cursor = match.end;
-  }
-  return text + prompt.slice(cursor);
-}
-
 export type AssistantTextSelector = {
   readonly text: string;
   readonly start: number;

@@ -16,7 +16,6 @@ import {
   expandAssistantCitationsForProvider,
   formatAssistantCitationHref,
   parseAssistantCitationHref,
-  renderAssistantCitationsAsText,
   serializeAssistantCitation,
   withAssistantCitationComment,
 } from "./assistantCitations.ts";
@@ -102,7 +101,6 @@ describe("assistant citation references", () => {
     expect(collectAssistantCitations(prompt)).toEqual([]);
     expect(assistantCitationsToPlainText(prompt)).toBe(prompt);
     expect(expandAssistantCitationsForProvider(prompt)).toBe(prompt);
-    expect(renderAssistantCitationsAsText(prompt)).toBe(prompt);
   });
 
   it("bounds selected text and surrounding context", () => {
@@ -150,9 +148,6 @@ describe("assistant citation references", () => {
     ]);
     expect(assistantCitationsToPlainText(marker)).toBe(
       `${largeCitation.text}\nComment: ${largeCitation.comment}`,
-    );
-    expect(renderAssistantCitationsAsText(marker)).toBe(
-      `\n\n> Assistant quote:\n> ${largeCitation.text}\n\nComment: ${largeCitation.comment}\n\n`,
     );
   });
 
@@ -253,32 +248,5 @@ describe("assistant citation references", () => {
 
     expect(assistantCitationsToPlainText("")).toBe("");
     expect(assistantCitationsToPlainText(prompt)).toBe(prompt);
-  });
-
-  it("renders escaped user comments outside the assistant quote block", () => {
-    const commented = {
-      ...citation,
-      text: "Assistant answer.\nSecond line.",
-      comment:
-        "Please change [x](url) & <tag>.\n> *Not assistant speech*\n\n# Request\n`code` \\path",
-    };
-
-    expect(renderAssistantCitationsAsText(serializeAssistantCitation(commented))).toBe(
-      [
-        "",
-        "",
-        "> Assistant quote:",
-        "> Assistant answer\\.",
-        "> Second line\\.",
-        "",
-        "Comment: Please change \\[x\\]\\(url\\) &amp; &lt;tag&gt;\\.",
-        "&gt; \\*Not assistant speech\\*",
-        "",
-        "\\# Request",
-        "\\`code\\` \\\\path",
-        "",
-        "",
-      ].join("\n"),
-    );
   });
 });
