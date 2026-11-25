@@ -7,10 +7,10 @@ import {
   type MobileThemeVariables,
 } from "./mobileTheme";
 
-import { HANZO_CHAT_THEME } from "@hanzodev/shared/themePalettes";
+import { ZEN_THEME } from "@hanzodev/shared/themePalettes";
 
 const MOBILE_THEME_VARIABLE_NAMES = Object.keys(
-  createMobileThemeVariables(HANZO_CHAT_THEME.colors, "light"),
+  createMobileThemeVariables(ZEN_THEME.colors, "light"),
 ) as ReadonlyArray<MobileThemeVariable>;
 
 export function readDefaultMobileThemeVariables(

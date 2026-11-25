@@ -13,6 +13,7 @@ import { useState, type ReactElement } from "react";
 import { useEnvironmentThemeDefinitions } from "../../hooks/useEnvironmentTheme";
 import { readThemeHalvesRaw } from "../../hooks/useTheme";
 import { cn } from "../../lib/utils";
+import { BUILT_IN_THEMES } from "@hanzodev/shared/themePalettes";
 import {
   getThemeDefinition,
   singleAppearanceOf,
@@ -22,11 +23,6 @@ import {
   type ThemeAppearance,
   type ThemeDefinition,
   type ThemeHalves,
-  HANZO_CHAT_THEME,
-  EMBER_THEME,
-  GROVE_THEME,
-  IRIS_THEME,
-  OCEAN_THEME,
 } from "../../themePalette";
 import {
   AlertDialog,
@@ -55,13 +51,7 @@ import {
 import { ThemeWireframe } from "./ThemeWireframe";
 import { T, useGT } from "gt-react";
 
-const MAINTAINER_THEMES: ReadonlyArray<ThemeDefinition> = [
-  HANZO_CHAT_THEME,
-  GROVE_THEME,
-  OCEAN_THEME,
-  EMBER_THEME,
-  IRIS_THEME,
-];
+const MAINTAINER_THEMES: ReadonlyArray<ThemeDefinition> = BUILT_IN_THEMES;
 
 function collectionVariantLabels(themes: ReadonlyArray<ThemeDefinition>): ReadonlyArray<string> {
   if (themes.length === 0) return [];

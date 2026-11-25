@@ -2,10 +2,10 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   BUILT_IN_THEME_IDS,
   BUILT_IN_THEMES,
-  HANZO_CHAT_THEME,
   HANZO_DEV_LIGHT_THEME_COLORS,
   HANZO_DEV_DARK_THEME_COLORS,
   MOBILE_THEME_IDS,
+  ZEN_THEME,
   getThemeColorsForAppearance,
 } from "@hanzodev/shared/themePalettes";
 import {
@@ -58,7 +58,7 @@ function compositeOver(overlay: string, background: string): string {
 
 describe("mobile themes", () => {
   it("declares every runtime theme variable in the static stylesheet", () => {
-    const generatedVariables = createMobileThemeVariables(HANZO_CHAT_THEME.colors, "light");
+    const generatedVariables = createMobileThemeVariables(ZEN_THEME.colors, "light");
     expect(Object.keys(readDefaultMobileThemeVariables("light")).sort()).toEqual(
       Object.keys(generatedVariables).sort(),
     );
@@ -233,9 +233,24 @@ describe("mobile themes", () => {
       light: "clay",
       dark: "clay",
     });
+    expect(resolveMobileThemeIds({ themeId: "hanzo-chat" })).toEqual({
+      light: "zen",
+      dark: "zen",
+    });
+    expect(resolveMobileThemeIds({ themeId: "hanzo-chat-dark" })).toEqual({
+      light: "zen",
+      dark: "zen",
+    });
     expect(
       resolveMobileThemeIds({ themeId: "grove", lightThemeId: "lelouch", darkThemeId: "ocean" }),
     ).toEqual({ light: "clay", dark: "ocean" });
+    expect(
+      resolveMobileThemeIds({
+        themeId: "grove",
+        lightThemeId: "hanzo-chat",
+        darkThemeId: "hanzo-chat-dark",
+      }),
+    ).toEqual({ light: "zen", dark: "zen" });
     expect(
       resolveMobileThemeIds({ themeId: "grove", lightThemeId: "iris", darkThemeId: "ocean" }),
     ).toEqual({ light: "iris", dark: "ocean" });
@@ -246,11 +261,11 @@ describe("mobile themes", () => {
   });
 
   it("changes either theme without switching the active appearance", () => {
-    const themeIds = { light: "hanzo-chat", dark: "grove" } as const;
+    const themeIds = { light: "zen", dark: "grove" } as const;
     expect(createMobileThemeSelectionPatch(themeIds, "light", "dark", "ocean")).toEqual({
-      lightThemeId: "hanzo-chat",
+      lightThemeId: "zen",
       darkThemeId: "ocean",
-      themeId: "hanzo-chat",
+      themeId: "zen",
     });
     expect(createMobileThemeSelectionPatch(themeIds, "light", "light", "iris")).toEqual({
       lightThemeId: "iris",

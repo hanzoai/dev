@@ -10,11 +10,12 @@ import {
   isKnownThemePreference,
   publishedThemeDefinitions,
   resolveThemeAppearance,
-  HANZO_CHAT_THEME,
+  CLAY_THEME,
   EMBER_THEME,
   GROVE_THEME,
   IRIS_THEME,
   OCEAN_THEME,
+  ZEN_THEME,
   THEME_APPEARANCE_MODE_STORAGE_KEY,
   THEME_FOLLOW_SYSTEM_STORAGE_KEY,
   toCanonicalThemeColor,
@@ -155,18 +156,23 @@ describe("index.html boot script", () => {
   }> = [
     { name: "no stored preference on a dark OS", storage: {}, prefersDark: true },
     {
-      name: "Hanzo Chat follows a dark OS",
-      storage: { [THEME_STORAGE_KEY]: "hanzo-chat", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true" },
+      name: "Zen follows a dark OS",
+      storage: { [THEME_STORAGE_KEY]: "zen", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true" },
       prefersDark: true,
     },
     {
-      name: "an explicit global dark mode applies to Hanzo Chat",
+      name: "an explicit global dark mode applies to Zen",
       storage: {
-        [THEME_STORAGE_KEY]: "hanzo-chat",
+        [THEME_STORAGE_KEY]: "zen",
         [THEME_APPEARANCE_MODE_STORAGE_KEY]: "dark",
         [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "false",
       },
       prefersDark: false,
+    },
+    {
+      name: "legacy hanzo-chat resolves to Zen",
+      storage: { [THEME_STORAGE_KEY]: "hanzo-chat", [THEME_FOLLOW_SYSTEM_STORAGE_KEY]: "true" },
+      prefersDark: true,
     },
     {
       name: "Grove follows a dark OS",
@@ -204,7 +210,7 @@ describe("index.html boot script", () => {
       prefersDark: true,
     },
     {
-      name: "legacy hanzo-chat-dark resolves to dark Hanzo Chat",
+      name: "legacy hanzo-chat-dark resolves to dark Zen",
       storage: { [THEME_STORAGE_KEY]: "hanzo-chat-dark" },
       prefersDark: true,
     },
@@ -320,7 +326,14 @@ describe("index.html boot script", () => {
   });
 
   it("keeps every built-in boot splash in sync with the real palettes", () => {
-    for (const theme of [HANZO_CHAT_THEME, GROVE_THEME, OCEAN_THEME, EMBER_THEME, IRIS_THEME]) {
+    for (const theme of [
+      ZEN_THEME,
+      CLAY_THEME,
+      GROVE_THEME,
+      OCEAN_THEME,
+      EMBER_THEME,
+      IRIS_THEME,
+    ]) {
       expect(theme.appearance).toBe("light");
       for (const mode of ["light", "dark"] as const) {
         const colors = getThemeColorsForMode(theme, mode);
@@ -345,7 +358,7 @@ describe("index.html boot script", () => {
 
   it("applies the matching half of an automatic mix to the splash", () => {
     const storage = {
-      [THEME_STORAGE_KEY]: "hanzo-chat",
+      [THEME_STORAGE_KEY]: "zen",
       [THEME_APPEARANCE_MODE_STORAGE_KEY]: "system",
       "hanzodev:theme-halves:v1": JSON.stringify({ dark: GROVE_THEME.id }),
     };
@@ -359,9 +372,9 @@ describe("index.html boot script", () => {
 
     const light = runBootScript({ storage, prefersDark: false });
     expect(light.isDark).toBe(false);
-    expect(light.themeId).toBe("hanzo-chat");
+    expect(light.themeId).toBe("zen");
     expect(light.bootVariables["--boot-background"]).toBe(
-      getThemeColorsForMode(HANZO_CHAT_THEME, "light")!.canvas,
+      getThemeColorsForMode(ZEN_THEME, "light")!.canvas,
     );
   });
 
@@ -407,18 +420,38 @@ describe("index.html boot script", () => {
     expect(boot.metaContent).toBe(DEFAULT_DARK_CHROME);
   });
 
-  it("resolves legacy lelouch preferences to clay on boot", () => {
-    const boot = runBootScript({
+  it("resolves legacy lelouch and hanzo-chat preferences on boot", () => {
+    const clayBoot = runBootScript({
       storage: {
         [THEME_STORAGE_KEY]: "lelouch",
         [THEME_APPEARANCE_MODE_STORAGE_KEY]: "dark",
       },
       prefersDark: true,
     });
-    expect(boot.themeId).toBe("clay");
-    expect(boot.isDark).toBe(true);
-    expect(boot.bootVariables["--boot-background"]).toBe("#141418");
-    expect(boot.bootVariables["--boot-accent"]).toBe("#d11641");
+    expect(clayBoot.themeId).toBe("clay");
+    expect(clayBoot.isDark).toBe(true);
+    expect(clayBoot.bootVariables["--boot-background"]).toBe("#141418");
+    expect(clayBoot.bootVariables["--boot-accent"]).toBe("#d11641");
+
+    const legacyChatBoot = runBootScript({
+      storage: {
+        [THEME_STORAGE_KEY]: "hanzo-chat",
+      },
+      prefersDark: false,
+    });
+    expect(legacyChatBoot.themeId).toBe("zen");
+    expect(legacyChatBoot.isDark).toBe(false);
+    expect(legacyChatBoot.bootVariables["--boot-background"]).toBe("#ffffff");
+
+    const legacyChatDarkBoot = runBootScript({
+      storage: {
+        [THEME_STORAGE_KEY]: "hanzo-chat-dark",
+      },
+      prefersDark: false,
+    });
+    expect(legacyChatDarkBoot.themeId).toBe("zen");
+    expect(legacyChatDarkBoot.isDark).toBe(true);
+    expect(legacyChatDarkBoot.bootVariables["--boot-background"]).toBe("#000000");
   });
 
   it("defaults to dark appearance when storage is unavailable", () => {

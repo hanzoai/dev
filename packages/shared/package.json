@@ -219,10 +219,6 @@
       "types": "./src/telemetryId.ts",
       "import": "./src/telemetryId.ts"
     },
-    "./relayAuth": {
-      "types": "./src/relayAuth.ts",
-      "import": "./src/relayAuth.ts"
-    },
     "./relayUrl": {
       "types": "./src/relayUrl.ts",
       "import": "./src/relayUrl.ts"
@@ -514,10 +510,6 @@
     "./codexArtifactTemplates": {
       "types": "./src/codexArtifactTemplates.ts",
       "import": "./src/codexArtifactTemplates.ts"
-    },
-    "./codexFileCitations": {
-      "types": "./src/codexFileCitations.ts",
-      "import": "./src/codexFileCitations.ts"
     },
     "./codexMarkdownDirectives": {
       "types": "./src/codexMarkdownDirectives.ts",

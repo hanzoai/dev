@@ -33,7 +33,7 @@ export class RemotePairingUrlInvalidError extends Schema.TaggedError<RemotePairi
   }
 }
 
-export class RemoteBackendUrlInvalidError extends Schema.TaggedError<RemoteBackendUrlInvalidError>()(
+class RemoteBackendUrlInvalidError extends Schema.TaggedError<RemoteBackendUrlInvalidError>()(
   "RemoteBackendUrlInvalidError",
   {
     source: Schema.Literals(["direct-host", "hosted-pairing-host"]),
@@ -55,7 +55,7 @@ export class RemotePairingTokenMissingError extends Schema.TaggedError<RemotePai
   }
 }
 
-export class RemotePairingCodeMissingError extends Schema.TaggedError<RemotePairingCodeMissingError>()(
+class RemotePairingCodeMissingError extends Schema.TaggedError<RemotePairingCodeMissingError>()(
   "RemotePairingCodeMissingError",
   { host: Schema.String },
 ) {
@@ -63,15 +63,6 @@ export class RemotePairingCodeMissingError extends Schema.TaggedError<RemotePair
     return "Enter a pairing code.";
   }
 }
-
-export const RemotePairingTargetError = Schema.Union([
-  RemoteBackendUrlMissingError,
-  RemotePairingUrlInvalidError,
-  RemoteBackendUrlInvalidError,
-  RemotePairingTokenMissingError,
-  RemotePairingCodeMissingError,
-]);
-export type RemotePairingTargetError = typeof RemotePairingTargetError.Type;
 
 const hasSupportedRemoteBackendProtocol = (url: URL): boolean =>
   SUPPORTED_REMOTE_BACKEND_PROTOCOLS.has(url.protocol);

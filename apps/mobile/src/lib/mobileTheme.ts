@@ -1,12 +1,12 @@
 import {
   BUILT_IN_THEMES,
-  HANZO_CHAT_THEME,
-  HANZO_DEV_LIGHT_THEME_COLORS,
-  HANZO_DEV_DARK_THEME_COLORS,
+  getBuiltInTheme,
+  getDefaultThemeColors,
   getThemeColorsForAppearance,
   MOBILE_DEFAULT_THEME_ID,
   MOBILE_THEME_IDS as SHARED_MOBILE_THEME_IDS,
   resolveLegacyThemeId,
+  ZEN_THEME,
   type MobileThemeId as SharedMobileThemeId,
   type ThemeAppearance,
   type ThemeColors,
@@ -460,9 +460,9 @@ export function getMobileThemeColors(
   appearance: MobileThemeAppearance,
 ): ThemeColors {
   if (themeId === DEFAULT_MOBILE_THEME_ID) {
-    return appearance === "dark" ? HANZO_DEV_DARK_THEME_COLORS : HANZO_DEV_LIGHT_THEME_COLORS;
+    return getDefaultThemeColors(appearance);
   }
-  const theme = BUILT_IN_THEMES.find((candidate) => candidate.id === themeId) ?? HANZO_CHAT_THEME;
+  const theme = getBuiltInTheme(themeId) ?? ZEN_THEME;
   return getThemeColorsForAppearance(theme, appearance) ?? theme.colors;
 }
 
@@ -477,11 +477,7 @@ export function getMobileThemeVariables(
       ? appearance === "light"
         ? colors.toolbarControlHover
         : colors.sidebarRowActive
-      : themeId === "hanzo-chat"
-        ? appearance === "light"
-          ? colors.toolbarControl
-          : colors.surface
-        : colors.muted;
+      : colors.muted;
   const mobileColors =
     themeId === DEFAULT_MOBILE_THEME_ID
       ? {
@@ -499,11 +495,9 @@ export function getMobileThemeVariables(
     mobileColors,
     appearance,
     groupedCard,
-    themeId === "hanzo-chat" && appearance === "dark"
-      ? [colors.messageActionForeground, colors.messageAction]
-      : themeId !== DEFAULT_MOBILE_THEME_ID && themeId !== "hanzo-chat"
-        ? [colors.messageAction, colors.messageActionForeground]
-        : undefined,
+    themeId !== DEFAULT_MOBILE_THEME_ID
+      ? [colors.messageAction, colors.messageActionForeground]
+      : undefined,
   );
 
   return overrides ? ({ ...baseVariables, ...overrides } as MobileThemeVariables) : baseVariables;
@@ -515,7 +509,7 @@ export function getMobileThemePreviewColors(
 ): ThemePreviewColors {
   if (themeId === DEFAULT_MOBILE_THEME_ID || themeId === "material-you")
     return STANDARD_THEME_PREVIEW_COLORS[appearance];
-  const theme = BUILT_IN_THEMES.find((candidate) => candidate.id === themeId) ?? HANZO_CHAT_THEME;
+  const theme = getBuiltInTheme(themeId) ?? ZEN_THEME;
   const colors = getThemeColorsForAppearance(theme, appearance) ?? theme.colors;
   return {
     canvas: themeColorToNativeColor(colors.canvas),

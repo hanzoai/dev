@@ -9,16 +9,19 @@ import "culori/css";
 import { converter, parse } from "culori/fn";
 import {
   BUILT_IN_THEMES,
+  CLAY_THEME,
   EMBER_THEME,
+  getBuiltInTheme,
+  getDefaultThemeColors as getSharedDefaultThemeColors,
   GROVE_THEME,
+  HANZO_DEV_DARK_THEME_COLORS,
+  HANZO_DEV_LIGHT_THEME_COLORS,
   IRIS_THEME,
   OCEAN_THEME,
-  HANZO_CHAT_THEME,
-  HANZO_DEV_LIGHT_THEME_COLORS,
-  HANZO_DEV_DARK_THEME_COLORS,
   RESERVED_THEME_IDS,
   resolveLegacyThemeId,
   THEME_COLOR_ROLES,
+  ZEN_THEME,
   type ThemeAppearance,
   type ThemeColorRole,
   type ThemeColors,
@@ -37,7 +40,15 @@ import { applyThemeBackground } from "./themeBackground";
 import { applyThemeCss } from "./themeCss";
 import { themeServerEnvironmentThemesAtom } from "./state/server";
 
-export { EMBER_THEME, GROVE_THEME, IRIS_THEME, OCEAN_THEME, HANZO_CHAT_THEME, THEME_COLOR_ROLES };
+export {
+  CLAY_THEME,
+  EMBER_THEME,
+  GROVE_THEME,
+  IRIS_THEME,
+  OCEAN_THEME,
+  THEME_COLOR_ROLES,
+  ZEN_THEME,
+};
 export type { ThemeAppearance, ThemeColorRole, ThemeColors, ThemeDefinition, ThemeVariants };
 
 export const THEME_FILE_VERSION = 1 as const;
@@ -450,6 +461,8 @@ type ParsedThemeColor = { color: ThemeOklch; alpha: number };
 
 let standardLightThemeColors: ThemeColors | undefined;
 let standardDarkThemeColors: ThemeColors | undefined;
+let defaultLightThemeColors: ThemeColors | undefined;
+let defaultDarkThemeColors: ThemeColors | undefined;
 
 const THEME_LIGHT_FOREGROUND: ThemeRgbColor = { r: 255, g: 250, b: 255 };
 const THEME_DARK_FOREGROUND: ThemeRgbColor = { r: 36, g: 21, b: 35 };
@@ -1011,7 +1024,10 @@ function standardMutedThemeText(
 }
 
 export function getDefaultThemeColors(appearance: ThemeAppearance): ThemeColors {
-  return appearance === "dark" ? HANZO_CHAT_THEME.variants!.dark! : HANZO_CHAT_THEME.colors;
+  if (appearance === "dark") {
+    return (defaultDarkThemeColors ??= decodeThemeColors(getSharedDefaultThemeColors("dark")));
+  }
+  return (defaultLightThemeColors ??= decodeThemeColors(getSharedDefaultThemeColors("light")));
 }
 
 export function updateThemeColorFamily(
@@ -1217,7 +1233,7 @@ const BUILT_IN_THEME_DEFINITIONS: ReadonlyArray<ThemeDefinition> = BUILT_IN_THEM
 export function getThemeDefinition(theme: ThemePreference): ThemeDefinition | null {
   const themeId = themeIdFromPreference(theme);
   return (
-    BUILT_IN_THEME_DEFINITIONS.find((definition) => definition.id === themeId) ??
+    getBuiltInTheme(themeId) ??
     getCustomThemes().find((definition) => definition.id === themeId) ??
     getEnvironmentThemes().find((definition) => definition.id === themeId) ??
     null
@@ -1225,11 +1241,7 @@ export function getThemeDefinition(theme: ThemePreference): ThemeDefinition | nu
 }
 
 export function themeAllowsSidebarArtwork(theme: ThemePreference): boolean {
-  const themeId = themeIdFromPreference(theme);
-  return (
-    BUILT_IN_THEME_DEFINITIONS.find((definition) => definition.id === themeId)?.sidebarArtwork ===
-    true
-  );
+  return getBuiltInTheme(themeIdFromPreference(theme))?.sidebarArtwork === true;
 }
 
 /** Every selection path must check single-appearance themes to keep mix and appearance tiles in sync. */

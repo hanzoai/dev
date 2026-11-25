@@ -25,7 +25,7 @@ import {
   resolveDesktopTheme,
   resolveThemeAppearance,
   serializeThemeFile,
-  HANZO_CHAT_THEME,
+  ZEN_THEME,
   GROVE_THEME,
   updateCustomTheme,
   updateThemeColorFamily,
@@ -300,11 +300,11 @@ describe("theme files", () => {
       canvas: canonical("#101827"),
       text: canonical("#eef5ff"),
     });
-    expect(getThemeModes(HANZO_CHAT_THEME)).toEqual(["light", "dark"]);
-    expect(resolveThemeAppearance(HANZO_CHAT_THEME.id, true, true)).toBe("dark");
-    expect(resolveDesktopTheme(HANZO_CHAT_THEME.id, true)).toBe("system");
-    expect(resolveThemeAppearance(HANZO_CHAT_THEME.id, false, false, "dark")).toBe("dark");
-    expect(resolveDesktopTheme(HANZO_CHAT_THEME.id, false, "dark")).toBe("dark");
+    expect(getThemeModes(ZEN_THEME)).toEqual(["light", "dark"]);
+    expect(resolveThemeAppearance(ZEN_THEME.id, true, true)).toBe("dark");
+    expect(resolveDesktopTheme(ZEN_THEME.id, true)).toBe("system");
+    expect(resolveThemeAppearance(ZEN_THEME.id, false, false, "dark")).toBe("dark");
+    expect(resolveDesktopTheme(ZEN_THEME.id, false, "dark")).toBe("dark");
     expect(JSON.parse(serializeThemeFile(theme)).variants.dark).toMatchObject({
       canvas: canonical("#101827"),
       text: canonical("#eef5ff"),
@@ -808,15 +808,36 @@ describe("stored theme preferences", () => {
     invalidateCustomThemes();
   });
 
-  it("migrates legacy lelouch theme preferences to clay while keeping lelouch reserved", () => {
+  it("migrates legacy lelouch and hanzo-chat theme preferences while keeping them reserved", () => {
+    expect(BUILT_IN_THEMES.map((theme) => theme.id)).toEqual([
+      "zen",
+      "clay",
+      "grove",
+      "ocean",
+      "ember",
+      "iris",
+    ]);
     expect(RESERVED_THEME_IDS.has("clay")).toBe(true);
     expect(RESERVED_THEME_IDS.has("lelouch")).toBe(true);
+    expect(RESERVED_THEME_IDS.has("hanzo-chat")).toBe(true);
+    expect(RESERVED_THEME_IDS.has("hanzo-chat-dark")).toBe(true);
     expect(canonicalThemePreference("lelouch")).toBe("clay");
     expect(getThemeDefinition("lelouch")?.id).toBe("clay");
     expect(getThemeDefinition("lelouch")?.label).toBe("Clay");
+    expect(canonicalThemePreference("hanzo-chat")).toBe("zen");
+    expect(getThemeDefinition("hanzo-chat")?.id).toBe("zen");
+    expect(getThemeDefinition("hanzo-chat")?.label).toBe("Zen");
+    expect(getThemeDefinition("hanzo-chat-dark")?.id).toBe("zen");
+    expect(resolveThemeAppearance("hanzo-chat-dark", false, false)).toBe("dark");
     expect(parseThemeHalves(JSON.stringify({ light: "lelouch", dark: "lelouch" }))).toEqual({
       light: "clay",
       dark: "clay",
+    });
+    expect(
+      parseThemeHalves(JSON.stringify({ light: "hanzo-chat", dark: "hanzo-chat-dark" })),
+    ).toEqual({
+      light: "zen",
+      dark: "zen",
     });
   });
 });
