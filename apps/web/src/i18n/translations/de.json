@@ -1517,7 +1517,6 @@
   "30c3acfa1f5a1f4e": "API-Schlüssel einfügen",
   "91db467ba740171f": "Hanzo-API-Schlüssel",
   "a658cdcd4c5c220d": "Bei Hanzo anmelden",
-  "7fcc196f346d07a8": "Weiter mit Hanzo",
   "d902c58ac1103551": "API-Schlüssel ausblenden",
   "79c9acda7b68c762": "API-Schlüssel verwenden",
   "4ee0e56be980f682": "Waiting for browser sign-in to return via hanzodev://...",
@@ -3367,7 +3366,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "auf dem Computer, der diese Seite geöffnet hat"]
+      "c": [
+        " ",
+        "auf dem Computer, der diese Seite geöffnet hat"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3379,7 +3381,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· wer es ausführt, erhält diesen Zugriff"]
+      "c": [
+        " ",
+        "· wer es ausführt, erhält diesen Zugriff"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Genehmige nur eine Anmeldung, die du gerade selbst gestartet hast.",
@@ -12496,5 +12501,19 @@
   "a04b8d1db28e305b": "Cloud-Coding-Agenten, lokale Arbeitsbereiche und verbundene Computer.",
   "dc8b0f21fc87be70": "Minimieren",
   "90e19ab2fba5da15": "Wiederherstellen",
-  "13d514f5472e92fe": "Maximieren"
+  "13d514f5472e92fe": "Maximieren",
+  "64954452ec7312dc": "Mit Google fortfahren",
+  "516637ea4c604cd7": "Mit GitHub fortfahren",
+  "25e5fbe77d7cc75c": "oder",
+  "df7ef2aa0b99739a": "Mit E-Mail fortfahren",
+  "1e880ebec21829e4": "Ohne Anmeldung fortfahren",
+  "e3234f3e3cab4319": "Anwendungsmenü",
+  "508a977a44f33b3b": "Ordner öffnen…",
+  "0a526f1ba3d398ce": "Suchen…",
+  "cc4be4b34d211d87": "In Windows erneut öffnen",
+  "03a3ba1572b99b91": "In WSL erneut öffnen ({distro})",
+  "0ad4756ad17130ed": "Lokale Modelle & Node",
+  "fda9624c5fbcb76a": "Konto & Nutzung",
+  "ca907740e0ed3853": "Fenster neu laden",
+  "01f8519a311a22a9": "Hanzo Dev beenden"
 }

@@ -1,3 +1,5 @@
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
 use crate::dock_icon::{self, DockIconMode};
 #[cfg(target_os = "macos")]
 use tauri::menu::{CheckMenuItem, MenuItemKind};

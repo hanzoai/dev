@@ -15,6 +15,7 @@ import { CheckIcon, CopyIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { APP_DISPLAY_NAME, APP_VERSION } from "../branding";
+import { DesktopSignInGate } from "../cloud/HanzoSignInPanel";
 import { useAuth } from "../cloud/hanzoWebAuth";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
@@ -250,7 +251,7 @@ function RootRouteBranch() {
   );
 
   return (
-    <>
+    <DesktopSignInGate>
       <ChatGptWelcomeCoordinator />
       {isWelcome ? (
         <>
@@ -271,7 +272,7 @@ function RootRouteBranch() {
       )}
       {/* Above both shells and the router, so drafts survive navigation, including to /welcome. */}
       <ThemeEditorHost />
-    </>
+    </DesktopSignInGate>
   );
 }
 

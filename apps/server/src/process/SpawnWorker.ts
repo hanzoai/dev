@@ -95,7 +95,7 @@ parentPort.on("message", (request) => {
   if (request.type === "spawn") {
     let child;
     try {
-      child = locked(() => spawn(request.command, request.args, request.options));
+      child = locked(() => spawn(request.command, request.args, { windowsHide: true, ...request.options }));
     } catch (error) {
       post({ type: "error", id, error: serialize(error) });
       return;

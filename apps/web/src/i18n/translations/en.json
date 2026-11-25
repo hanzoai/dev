@@ -1517,7 +1517,6 @@
   "30c3acfa1f5a1f4e": "Paste your API key",
   "91db467ba740171f": "Hanzo API key",
   "a658cdcd4c5c220d": "Sign in to Hanzo",
-  "7fcc196f346d07a8": "Continue with Hanzo",
   "d902c58ac1103551": "Hide API key",
   "79c9acda7b68c762": "Use an API key",
   "4ee0e56be980f682": "Waiting for browser sign-in to return via hanzodev://...",
@@ -3367,7 +3366,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "on the computer that opened this page"]
+      "c": [
+        " ",
+        "on the computer that opened this page"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3379,7 +3381,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· whoever runs it gets this access"]
+      "c": [
+        " ",
+        "· whoever runs it gets this access"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Only approve a sign-in you just started.",
@@ -12505,5 +12510,19 @@
   "a04b8d1db28e305b": "Cloud coding agents, local workspaces, and connected computers.",
   "dc8b0f21fc87be70": "Minimize",
   "90e19ab2fba5da15": "Restore",
-  "13d514f5472e92fe": "Maximize"
+  "13d514f5472e92fe": "Maximize",
+  "64954452ec7312dc": "Continue with Google",
+  "516637ea4c604cd7": "Continue with GitHub",
+  "25e5fbe77d7cc75c": "or",
+  "df7ef2aa0b99739a": "Continue with email",
+  "1e880ebec21829e4": "Continue without signing in",
+  "e3234f3e3cab4319": "Application menu",
+  "508a977a44f33b3b": "Open folder…",
+  "0a526f1ba3d398ce": "Search…",
+  "cc4be4b34d211d87": "Reopen in Windows",
+  "03a3ba1572b99b91": "Reopen in WSL ({distro})",
+  "0ad4756ad17130ed": "Local Models & Node",
+  "fda9624c5fbcb76a": "Account & Usage",
+  "ca907740e0ed3853": "Reload window",
+  "01f8519a311a22a9": "Quit Hanzo Dev"
 }

@@ -9,6 +9,8 @@ mod menu;
 mod menubar;
 mod snapshot;
 mod ssh;
+mod tray;
+mod wsl;
 
 use crate::auth::{generate_random_hex, read_or_create_host_scope};
 use crate::backend::{
@@ -22,7 +24,7 @@ use crate::snapshot::{spawn_interactive_snapshot, SnapshotManager};
 use crate::ssh::SshTunnelSupervisor;
 use std::env;
 use std::sync::Mutex;
-use tauri::{Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{Emitter, LogicalSize, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 #[cfg(target_os = "macos")]
 use tauri::{LogicalPosition, TitleBarStyle};
 use tauri_plugin_deep_link::DeepLinkExt;
@@ -55,12 +57,49 @@ fn resolve_global_shortcut_action(shortcut: &Shortcut) -> Option<GlobalShortcutA
     }
 }
 
-fn reveal_main_window(app: &tauri::AppHandle) {
+pub(crate) fn reveal_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+#[cfg(windows)]
+pub(crate) fn hide_std_console(cmd: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+pub(crate) fn hide_std_console(_cmd: &mut std::process::Command) {}
+
+#[cfg(windows)]
+pub(crate) fn hide_tokio_console(cmd: &mut tokio::process::Command) {
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+pub(crate) fn hide_tokio_console(_cmd: &mut tokio::process::Command) {}
+
+#[tauri::command]
+fn desktop_set_window_mode(window: tauri::WebviewWindow, mode: String) -> Result<(), String> {
+    if mode == "login" {
+        let _ = window.set_min_size(Some(LogicalSize::new(400.0, 560.0)));
+        window
+            .set_size(LogicalSize::new(460.0, 640.0))
+            .map_err(|e| e.to_string())?;
+        let _ = window.center();
+    } else {
+        let _ = window.set_min_size(Some(LogicalSize::new(900.0, 600.0)));
+        window
+            .set_size(LogicalSize::new(1360.0, 860.0))
+            .map_err(|e| e.to_string())?;
+        let _ = window.center();
+    }
+    Ok(())
 }
 
 fn dispatch_global_shortcut(app: &tauri::AppHandle, shortcut: &Shortcut) {
@@ -129,6 +168,9 @@ fn dispatch_deep_link(app: &tauri::AppHandle, url: String) {
 }
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    wsl::configure_linux_and_wslg_env();
+
     let dev_vite_url = env::var("VITE_DEV_SERVER_URL")
         .ok()
         .map(|s| s.trim().to_string())
@@ -189,11 +231,16 @@ fn main() {
                 })
                 .build(),
         )
-        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_deep_link::init());
+
+    #[cfg(target_os = "macos")]
+    let builder = builder
         .menu(menu::build_app_menu)
         .on_menu_event(|app, event| {
             menu::handle_menu_event(app, event.id().as_ref());
-        })
+        });
+
+    let builder = builder
         .setup(move |app| {
             dock_icon::apply_saved_mode_on_startup(app.handle());
             let supervisor = BackendSupervisor::start(runtime_config.clone(), local_enabled);
@@ -236,8 +283,8 @@ fn main() {
             };
             let mut win_builder = WebviewWindowBuilder::new(app, "main", webview_url)
                 .title(title)
-                .inner_size(1440.0, 900.0)
-                .min_inner_size(900.0, 600.0)
+                .inner_size(1360.0, 860.0)
+                .min_inner_size(400.0, 560.0)
                 .background_color(tauri::window::Color(0, 0, 0, 255))
                 .initialization_script(&init_script);
 
@@ -249,7 +296,15 @@ fn main() {
                     .traffic_light_position(LogicalPosition::new(16.0, 22.0));
             }
 
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(target_os = "linux")]
+            {
+                win_builder = win_builder
+                    .decorations(false)
+                    .transparent(true)
+                    .background_color(tauri::window::Color(0, 0, 0, 0));
+            }
+
+            #[cfg(all(not(target_os = "macos"), not(target_os = "linux")))]
             {
                 win_builder = win_builder.decorations(false);
             }
@@ -258,6 +313,7 @@ fn main() {
             #[cfg(target_os = "windows")]
             apply_windows_dwm_chrome(&window);
             menubar::start(app.handle());
+            tray::start(app.handle());
 
             let win_clone = window.clone();
             let app_for_events = app.handle().clone();
@@ -288,6 +344,7 @@ fn main() {
             commands::desktop_reveal_window,
             commands::desktop_start_dragging,
             commands::desktop_toggle_maximize,
+            desktop_set_window_mode,
             commands::desktop_open_external,
             commands::desktop_open_system_settings,
             commands::desktop_read_media,
@@ -321,6 +378,11 @@ fn main() {
             commands::desktop_preview_capture_screenshot,
             commands::desktop_preview_save_recording,
             commands::desktop_web_links_set_ready,
+            wsl::desktop_get_wsl_state,
+            wsl::desktop_set_wsl_backend_enabled,
+            wsl::desktop_set_wsl_distro,
+            wsl::desktop_set_wsl_only,
+            wsl::desktop_to_local_backend_path,
             dock_icon::get_dock_icon_mode,
             dock_icon::set_dock_icon_mode,
         ]);

@@ -32,6 +32,7 @@ const spawnDetachedVerbatim: WindowsVerbatimSpawner = (command, args) =>
     NodeChildProcess.spawn(command, args, {
       detached: true,
       stdio: "ignore",
+      windowsHide: true,
       windowsVerbatimArguments: true,
     }),
   );

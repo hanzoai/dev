@@ -85,17 +85,17 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
     >
       {backdropVariant ? <SidebarStageBackdrop variant={backdropVariant} /> : null}
       <div className="relative z-10 flex h-full min-w-0 flex-1 items-center gap-x-2 overflow-hidden">
-        <div className="ml-[var(--workspace-titlebar-content-left)] hidden shrink-0 items-center gap-0.5 md:flex">
-          <HistoryNavigationButton direction="back" onBackdrop={backdropVariant !== null} />
-          <HistoryNavigationButton direction="forward" onBackdrop={backdropVariant !== null} />
-        </div>
         {pillLabel ? (
-          <div className="ml-1 flex h-7 items-center">
+          <div className="ml-[var(--workspace-titlebar-content-left)] flex h-7 items-center">
             <Badge data-environment-identification="pill" size="sm" variant="secondary">
               {pillLabel}
             </Badge>
           </div>
         ) : null}
+        <div className="ml-auto hidden shrink-0 items-center gap-0.5 md:flex">
+          <HistoryNavigationButton direction="back" onBackdrop={backdropVariant !== null} />
+          <HistoryNavigationButton direction="forward" onBackdrop={backdropVariant !== null} />
+        </div>
       </div>
     </div>
   );

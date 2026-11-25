@@ -1517,7 +1517,6 @@
   "30c3acfa1f5a1f4e": "Klistra in din API-nyckel",
   "91db467ba740171f": "Hanzo API-nyckel",
   "a658cdcd4c5c220d": "Logga in på Hanzo",
-  "7fcc196f346d07a8": "Fortsätt med Hanzo",
   "d902c58ac1103551": "Dölj API-nyckel",
   "79c9acda7b68c762": "Använd en API-nyckel",
   "4ee0e56be980f682": "Waiting for browser sign-in to return via hanzodev://...",
@@ -3367,7 +3366,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "på datorn som öppnade den här sidan"]
+      "c": [
+        " ",
+        "på datorn som öppnade den här sidan"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3379,7 +3381,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· den som kör den får den här åtkomsten"]
+      "c": [
+        " ",
+        "· den som kör den får den här åtkomsten"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Godkänn bara en inloggning som du själv precis har startat.",
@@ -12503,5 +12508,19 @@
   "a04b8d1db28e305b": "Kodningsagenter i molnet, lokala arbetsytor och anslutna datorer.",
   "dc8b0f21fc87be70": "Minimera",
   "90e19ab2fba5da15": "Återställ",
-  "13d514f5472e92fe": "Maximera"
+  "13d514f5472e92fe": "Maximera",
+  "64954452ec7312dc": "Fortsätt med Google",
+  "516637ea4c604cd7": "Fortsätt med GitHub",
+  "25e5fbe77d7cc75c": "eller",
+  "df7ef2aa0b99739a": "Fortsätt med e-post",
+  "1e880ebec21829e4": "Fortsätt utan att logga in",
+  "e3234f3e3cab4319": "Programmeny",
+  "508a977a44f33b3b": "Öppna mapp…",
+  "0a526f1ba3d398ce": "Sök…",
+  "cc4be4b34d211d87": "Öppna igen i Windows",
+  "03a3ba1572b99b91": "Öppna igen i WSL ({distro})",
+  "0ad4756ad17130ed": "Lokala modeller och nod",
+  "fda9624c5fbcb76a": "Konto och användning",
+  "ca907740e0ed3853": "Ladda om fönster",
+  "01f8519a311a22a9": "Avsluta Hanzo Dev"
 }

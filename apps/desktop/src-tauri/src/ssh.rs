@@ -76,9 +76,10 @@ fn terminate_pid(pid: u32) {
     }
     #[cfg(windows)]
     {
-        let _ = std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .status();
+        let mut tk = std::process::Command::new("taskkill");
+        tk.args(["/PID", &pid.to_string(), "/T", "/F"]);
+        crate::hide_std_console(&mut tk);
+        let _ = tk.status();
     }
 }
 
@@ -144,11 +145,14 @@ impl SshTunnelSupervisor {
         let local_port = pick_available_port(23773);
         let args = build_ssh_tunnel_args(&target, local_port, remote_port);
 
-        let mut child = Command::new("ssh")
+        let mut ssh_cmd = Command::new("ssh");
+        ssh_cmd
             .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+        crate::hide_tokio_console(&mut ssh_cmd);
+        let mut child = ssh_cmd
             .spawn()
             .map_err(|e| format!("Failed to launch ssh client: {e}"))?;
 

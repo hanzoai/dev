@@ -27,7 +27,10 @@ function getTauriWindow(): TauriWindowHandle | null {
   }
 }
 
-function invokeWindowPlugin(command: string): Promise<unknown> {
+function invokeWindowPlugin(
+  command: string,
+  extraArgs?: Record<string, unknown>,
+): Promise<unknown> {
   if (typeof window === "undefined") return Promise.resolve(null);
   const winGlobal = window as unknown as {
     readonly __TAURI_INTERNALS__?: {
@@ -50,22 +53,44 @@ function invokeWindowPlugin(command: string): Promise<unknown> {
     "main";
   const fullCmd =
     command.includes("|") || command.startsWith("desktop_") ? command : `plugin:window|${command}`;
+  const payload = { label, ...extraArgs };
   if (winGlobal.__TAURI_INTERNALS__?.invoke) {
-    return winGlobal.__TAURI_INTERNALS__.invoke(fullCmd, { label });
+    return winGlobal.__TAURI_INTERNALS__.invoke(fullCmd, payload);
   }
   if (winGlobal.__TAURI__?.core?.invoke) {
-    return winGlobal.__TAURI__.core.invoke(fullCmd, { label });
+    return winGlobal.__TAURI__.core.invoke(fullCmd, payload);
   }
   return Promise.resolve(null);
 }
 
-const INTERACTIVE_TARGET =
-  "button, input, select, textarea, label, summary, a:not([data-tauri-drag-region]), [role='button'], [role='link'], [role='menuitem'], [role='tab'], [role='combobox'], [aria-haspopup], [contenteditable='true'], [data-no-drag], [data-tauri-drag-region='false'], [data-slot='window-controls'], [data-sidebar='trigger']";
+let lastWindowMode: "login" | "workspace" | null = null;
 
-export function dragDesktopWindow(event: ReactMouseEvent): void {
-  if (event.button !== 0 || !(event.target instanceof Element)) return;
-  if (event.target.closest(INTERACTIVE_TARGET)) return;
-  if (event.detail > 1) return;
+export function setDesktopWindowMode(mode: "login" | "workspace"): void {
+  if (typeof document !== "undefined") {
+    document.documentElement.dataset.windowMode = mode;
+  }
+  if (!isTauri || lastWindowMode === mode) return;
+  lastWindowMode = mode;
+  void invokeWindowPlugin("desktop_set_window_mode", { mode }).catch(() => {
+    const size = mode === "login" ? { width: 460, height: 640 } : { width: 1360, height: 860 };
+    const min = mode === "login" ? { width: 400, height: 560 } : { width: 900, height: 600 };
+    void invokeWindowPlugin("plugin:window|set_min_size", { value: { Logical: min } });
+    void invokeWindowPlugin("plugin:window|set_size", { value: { Logical: size } });
+    void invokeWindowPlugin("plugin:window|center");
+  });
+}
+
+const INTERACTIVE_TARGET =
+  "button, input, select, textarea, label, summary, a:not([data-tauri-drag-region]), [role='button'], [role='link'], [role='menuitem'], [role='tab'], [role='combobox'], [aria-haspopup], [contenteditable='true'], [data-no-drag], [data-tauri-drag-region='false'], [data-slot='window-controls'], [data-slot='desktop-app-menu'], [data-slot='desktop-app-menu-trigger'], [data-sidebar='trigger'], [-webkit-app-region\\:no-drag]";
+
+function isInteractiveElement(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return true;
+  if (target.closest(INTERACTIVE_TARGET)) return true;
+  const computed = window.getComputedStyle(target).getPropertyValue("-webkit-app-region");
+  return computed.trim() === "no-drag";
+}
+
+function startWindowDrag(): void {
   const win = getTauriWindow();
   if (win?.startDragging) {
     void win.startDragging().catch(() => invokeWindowPlugin("desktop_start_dragging"));
@@ -74,14 +99,37 @@ export function dragDesktopWindow(event: ReactMouseEvent): void {
   void invokeWindowPlugin("desktop_start_dragging");
 }
 
-export function toggleDesktopMaximize(event: ReactMouseEvent): void {
-  if (!(event.target instanceof Element) || event.target.closest(INTERACTIVE_TARGET)) return;
+function triggerToggleMaximize(): Promise<unknown> {
   const win = getTauriWindow();
   if (win?.toggleMaximize) {
-    void win.toggleMaximize().catch(() => invokeWindowPlugin("desktop_toggle_maximize"));
+    return win.toggleMaximize().catch(() => invokeWindowPlugin("desktop_toggle_maximize"));
+  }
+  return invokeWindowPlugin("desktop_toggle_maximize");
+}
+
+export function closeDesktopWindow(): void {
+  const win = getTauriWindow();
+  if (win?.close) {
+    void win.close().catch(() => invokeWindowPlugin("close"));
     return;
   }
-  void invokeWindowPlugin("desktop_toggle_maximize");
+  void invokeWindowPlugin("close");
+}
+
+export function dragDesktopWindow(event: ReactMouseEvent): void {
+  if (event.button !== 0 || isInteractiveElement(event.target)) return;
+  if (event.detail > 1) return;
+  startWindowDrag();
+}
+
+export function toggleDesktopMaximize(event: ReactMouseEvent): void {
+  if (isInteractiveElement(event.target)) return;
+  void triggerToggleMaximize();
+}
+
+function syncMaximizedAttribute(isMax: boolean): void {
+  if (typeof document === "undefined") return;
+  document.documentElement.dataset.maximized = isMax ? "true" : "false";
 }
 
 const BUTTON_BASE_STYLE: CSSProperties = {
@@ -90,7 +138,7 @@ const BUTTON_BASE_STYLE: CSSProperties = {
   borderRadius: 6,
   border: "none",
   backgroundColor: "transparent",
-  color: "#a1a1aa",
+  color: "var(--hz-wco-fg, #a1a1aa)",
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
@@ -109,14 +157,18 @@ export function DesktopWindowControls({ forceRender = false }: { readonly forceR
       typeof navigator !== "undefined" &&
       !isMacPlatform(navigator.platform));
 
-  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- subscribes to window resize and queries Tauri window isMaximized IPC
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- subscribes to window resize and syncs Tauri window isMaximized IPC + html[data-maximized]
   useEffect(() => {
     if (!show || typeof window === "undefined") return;
     const sync = () => {
       const win = getTauriWindow();
       const pending = win?.isMaximized ? win.isMaximized() : invokeWindowPlugin("is_maximized");
       void Promise.resolve(pending)
-        .then((value) => setMaximized(Boolean(value)))
+        .then((value) => {
+          const next = Boolean(value);
+          setMaximized(next);
+          syncMaximizedAttribute(next);
+        })
         .catch(() => undefined);
     };
     sync();
@@ -153,8 +205,10 @@ export function DesktopWindowControls({ forceRender = false }: { readonly forceR
         }}
         style={{
           ...BUTTON_BASE_STYLE,
-          backgroundColor: hovered === "min" ? "rgba(255, 255, 255, 0.08)" : "transparent",
-          color: hovered === "min" ? "#fafafa" : "#a1a1aa",
+          backgroundColor:
+            hovered === "min" ? "var(--hz-wco-hover-bg, rgba(255, 255, 255, 0.08))" : "transparent",
+          color:
+            hovered === "min" ? "var(--hz-wco-fg-hover, #fafafa)" : "var(--hz-wco-fg, #a1a1aa)",
         }}
       >
         <svg
@@ -176,16 +230,20 @@ export function DesktopWindowControls({ forceRender = false }: { readonly forceR
         onMouseEnter={() => setHovered("max")}
         onMouseLeave={() => setHovered(null)}
         onClick={() => {
-          const win = getTauriWindow();
-          const act = win?.toggleMaximize
-            ? win.toggleMaximize().catch(() => invokeWindowPlugin("desktop_toggle_maximize"))
-            : invokeWindowPlugin("desktop_toggle_maximize");
-          void Promise.resolve(act).then(() => setMaximized((prev) => !prev));
+          void Promise.resolve(triggerToggleMaximize()).then(() =>
+            setMaximized((prev) => {
+              const next = !prev;
+              syncMaximizedAttribute(next);
+              return next;
+            }),
+          );
         }}
         style={{
           ...BUTTON_BASE_STYLE,
-          backgroundColor: hovered === "max" ? "rgba(255, 255, 255, 0.08)" : "transparent",
-          color: hovered === "max" ? "#fafafa" : "#a1a1aa",
+          backgroundColor:
+            hovered === "max" ? "var(--hz-wco-hover-bg, rgba(255, 255, 255, 0.08))" : "transparent",
+          color:
+            hovered === "max" ? "var(--hz-wco-fg-hover, #fafafa)" : "var(--hz-wco-fg, #a1a1aa)",
         }}
       >
         {maximized ? (
@@ -220,15 +278,11 @@ export function DesktopWindowControls({ forceRender = false }: { readonly forceR
         data-tauri-drag-region="false"
         onMouseEnter={() => setHovered("close")}
         onMouseLeave={() => setHovered(null)}
-        onClick={() => {
-          const win = getTauriWindow();
-          if (win?.close) void win.close().catch(() => invokeWindowPlugin("close"));
-          else void invokeWindowPlugin("close");
-        }}
+        onClick={closeDesktopWindow}
         style={{
           ...BUTTON_BASE_STYLE,
           backgroundColor: hovered === "close" ? "#e5484d" : "transparent",
-          color: hovered === "close" ? "#fafafa" : "#a1a1aa",
+          color: hovered === "close" ? "#ffffff" : "var(--hz-wco-fg, #a1a1aa)",
         }}
       >
         <svg
@@ -252,6 +306,31 @@ export function DesktopWindowControlsOverlay() {
     (isElectron || isTauri) &&
     typeof navigator !== "undefined" &&
     !isMacPlatform(navigator.platform);
+
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- delegates drag and double-click maximize for .drag-region headers on Linux/Windows Tauri
+  useEffect(() => {
+    if (!show || typeof document === "undefined") return;
+    const onMouseDown = (event: MouseEvent) => {
+      if (event.button !== 0 || event.defaultPrevented || event.detail > 1) return;
+      if (!(event.target instanceof Element)) return;
+      if (!event.target.closest(".drag-region, [data-tauri-drag-region]")) return;
+      if (isInteractiveElement(event.target)) return;
+      startWindowDrag();
+    };
+    const onDoubleClick = (event: MouseEvent) => {
+      if (event.defaultPrevented || !(event.target instanceof Element)) return;
+      if (!event.target.closest(".drag-region, [data-tauri-drag-region]")) return;
+      if (isInteractiveElement(event.target)) return;
+      void triggerToggleMaximize();
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("dblclick", onDoubleClick);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("dblclick", onDoubleClick);
+    };
+  }, [show]);
+
   if (!show) return null;
 
   return (
@@ -261,14 +340,25 @@ export function DesktopWindowControlsOverlay() {
       style={{
         position: "fixed",
         top: 0,
-        right: 12,
+        right: 14,
         height: "var(--workspace-topbar-height, 44px)",
         display: "flex",
         alignItems: "center",
+        gap: 8,
         zIndex: 60,
         pointerEvents: "auto",
       }}
     >
+      <span
+        aria-hidden="true"
+        data-slot="window-controls-divider"
+        style={{
+          width: 1,
+          height: 14,
+          backgroundColor: "var(--hz-wco-divider, rgba(255, 255, 255, 0.12))",
+          flexShrink: 0,
+        }}
+      />
       <DesktopWindowControls />
     </div>
   );

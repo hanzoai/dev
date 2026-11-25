@@ -41,6 +41,7 @@ import {
   usePanelNavigationSuppression,
 } from "../panelAnimations";
 import { MobileCircleButton, MobileMenuIcon, MobileNewChatIcon } from "./MobileHeaderControls";
+import { DesktopAppMenuButton } from "./desktop/DesktopAppMenu";
 import { BackgroundThreadAnnouncer } from "./BackgroundThreadAnnouncer";
 import { HistorySwipeNavigation } from "./HistorySwipeNavigation";
 import ThreadSidebar from "./Sidebar";
@@ -425,10 +426,26 @@ function SidebarControl({ showSidebar }: { readonly showSidebar: boolean }) {
     <div
       ref={appShellCommandsRef}
       className={cn(
-        "pointer-events-none fixed left-[var(--workspace-controls-left)] top-[var(--workspace-controls-top)] z-50 ml-px flex h-[var(--workspace-topbar-height)] items-center",
+        "pointer-events-none fixed left-[var(--workspace-controls-left)] top-[var(--workspace-controls-top)] z-50 ml-px flex h-[var(--workspace-topbar-height)] items-center gap-1",
       )}
       data-sidebar-control=""
     >
+      <DesktopAppMenuButton
+        onNewThread={startNewChat}
+        onOpenFolder={() => openCommandPalette({ open: "add-project" })}
+        onSearch={() => openCommandPalette()}
+        onLocalModelsAndNode={() => openLocalAiManager("engines")}
+        onAccountAndUsage={() => {
+          if (router.state.location.pathname !== "/settings/usage") {
+            void router.navigate({ to: "/settings/usage" });
+          }
+        }}
+        onSettings={() => {
+          if (!/^\/settings(\/|$)/.test(router.state.location.pathname)) {
+            void router.navigate({ to: "/settings" });
+          }
+        }}
+      />
       {showSidebar && isMobile ? (
         <MobileCircleButton
           aria-label={gt("Toggle main sidebar")}
@@ -506,10 +523,19 @@ export function AppSidebarLayout({
     subscribeToWindowFullscreen,
     readWindowFullscreen,
   );
+  const isFramelessNonMacDesktop =
+    isElectron && typeof navigator !== "undefined" && !isMacPlatform(navigator.platform);
   const windowControlsInsetStyle = (
     isMacosDesktop && !isWindowFullscreen
       ? { "--workspace-controls-left": MACOS_TRAFFIC_LIGHTS_LEFT_INSET }
-      : {}
+      : isFramelessNonMacDesktop
+        ? {
+            "--workspace-controls-left": "14px",
+            "--workspace-titlebar-content-left": showSidebar
+              ? "calc(14px + 2 * var(--workspace-titlebar-control-size) + 0.25rem + 0.5rem)"
+              : "calc(14px + var(--workspace-titlebar-control-size) + 0.5rem)",
+          }
+        : {}
   ) as CSSProperties;
   const sidebarProviderStyle = {
     "--sidebar-width": `${clampThreadSidebarWidth(sidebarWidth, sidebarMinimumWidth, sidebarMaximumWidth)}px`,

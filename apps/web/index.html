@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark" style="background-color:#000000;color-scheme:dark">
   <head>
     <meta charset="UTF-8" />
     <meta
@@ -264,7 +264,7 @@
             storedTheme === "dark" ||
             storedTheme === "system" ||
             themeModes !== null;
-          const theme = isKnownTheme && storedTheme ? storedTheme : "system";
+          const theme = isKnownTheme && storedTheme ? storedTheme : "dark";
           const isThemed = isKnownTheme && themeModes !== null;
           const baseAppearance = customTheme ? customTheme.appearance : "light";
           const systemMode = prefersDark ? "dark" : "light";
@@ -397,16 +397,11 @@
           }
           setThemeColor(chromeColor);
         } catch {
-          let prefersDark = true;
-          try {
-            prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-          } catch {}
           delete document.documentElement.dataset.themeId;
           delete document.documentElement.dataset.themeSelected;
-          document.documentElement.classList.toggle("dark", prefersDark);
-          const fallbackColor = prefersDark ? DARK_BACKGROUND : LIGHT_BACKGROUND;
-          document.documentElement.style.backgroundColor = fallbackColor;
-          setThemeColor(fallbackColor);
+          document.documentElement.classList.toggle("dark", true);
+          document.documentElement.style.backgroundColor = DARK_BACKGROUND;
+          setThemeColor(DARK_BACKGROUND);
         }
       })();
     </script>
@@ -420,14 +415,14 @@
       }
 
       body {
-        background: #ffffff;
-        color: #262626;
+        background: #000000;
+        color: #f5f5f5;
         font-family: "Zen", system-ui, sans-serif;
       }
 
-      html.dark body {
-        background: #000000;
-        color: #f5f5f5;
+      html:not(.dark) body {
+        background: #ffffff;
+        color: #262626;
       }
 
       #boot-shell {

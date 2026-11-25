@@ -64,6 +64,26 @@ pub struct BackendSupervisor {
     via_daemon: Arc<AtomicBool>,
 }
 
+pub async fn start_hanzod_daemon() -> Result<(), String> {
+    hanzod::ensure().await
+}
+
+pub fn stop_hanzod_daemon() {
+    #[cfg(unix)]
+    {
+        let _ = std::process::Command::new("pkill")
+            .args(["-f", "hanzod"])
+            .status();
+    }
+    #[cfg(windows)]
+    {
+        let mut tk = std::process::Command::new("taskkill");
+        tk.args(["/IM", "hanzod.exe", "/T", "/F"]);
+        crate::hide_std_console(&mut tk);
+        let _ = tk.status();
+    }
+}
+
 pub fn pick_available_port(preferred_start: u16) -> u16 {
     for candidate in preferred_start..=preferred_start.saturating_add(200) {
         if TcpListener::bind(("127.0.0.1", candidate)).is_ok() {
@@ -395,10 +415,10 @@ mod hanzod {
     }
 
     fn version_of(bin: &Path) -> Option<(u64, u64, u64)> {
-        let out = std::process::Command::new(bin)
-            .arg("--version")
-            .output()
-            .ok()?;
+        let mut cmd = std::process::Command::new(bin);
+        cmd.arg("--version");
+        crate::hide_std_console(&mut cmd);
+        let out = cmd.output().ok()?;
         let text = String::from_utf8_lossy(&out.stdout);
         let v = text.split_whitespace().nth(1)?;
         let mut it = v.split('.').map(|p| p.parse::<u64>().ok());
@@ -468,6 +488,7 @@ mod hanzod {
         cmd.stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
+        crate::hide_std_console(&mut cmd);
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
@@ -543,11 +564,21 @@ impl BackendSupervisor {
                         } => (executable, None, cwd, resource_monitor),
                     };
 
+                    let wsl_target = crate::wsl::active_windows_wsl_target(&cfg.state_dir);
+                    let wsl_entry = entry_arg.as_ref().and_then(|p| {
+                        crate::wsl::convert_windows_path_for_wsl(&p.to_string_lossy())
+                    });
+                    let run_in_wsl = wsl_target.is_some() && wsl_entry.is_some();
+
                     let payload = DesktopBackendBootstrapPayload {
                         mode: "desktop",
                         no_browser: true,
                         port: cfg.port,
-                        hanzo_home: cfg.hanzo_home.to_string_lossy().into_owned(),
+                        hanzo_home: if run_in_wsl {
+                            "~/.hanzo-dev".to_string()
+                        } else {
+                            cfg.hanzo_home.to_string_lossy().into_owned()
+                        },
                         host: cfg.bind_host.clone(),
                         desktop_bootstrap_token: current_desktop_bootstrap_token(
                             &cfg.bootstrap_secret,
@@ -558,8 +589,11 @@ impl BackendSupervisor {
                         tailscale_serve_enabled: false,
                         tailscale_serve_port: 443,
                         desktop_app_update: false,
-                        resource_monitor_path: monitor_path
-                            .map(|p| p.to_string_lossy().into_owned()),
+                        resource_monitor_path: if run_in_wsl {
+                            None
+                        } else {
+                            monitor_path.map(|p| p.to_string_lossy().into_owned())
+                        },
                     };
                     let Ok(bootstrap) = serde_json::to_value(&payload) else {
                         break;
@@ -582,20 +616,24 @@ impl BackendSupervisor {
                     ]);
 
                     let started = std::time::Instant::now();
-                    let outcome = async {
-                        let digest = hanzod::sha256_of(&program).map_err(|e| e.to_string())?;
-                        hanzod::ensure().await?;
-                        hanzod::register(serde_json::json!({
-                            "program": program,
-                            "sha256": digest,
-                            "args": args,
-                            "cwd": backend_cwd,
-                            "env": env,
-                            "bootstrap": bootstrap,
-                        }))
+                    let outcome = if run_in_wsl {
+                        Err("WSL2 backend mode selected".to_string())
+                    } else {
+                        async {
+                            let digest = hanzod::sha256_of(&program).map_err(|e| e.to_string())?;
+                            hanzod::ensure().await?;
+                            hanzod::register(serde_json::json!({
+                                "program": program,
+                                "sha256": digest,
+                                "args": args,
+                                "cwd": backend_cwd,
+                                "env": env,
+                                "bootstrap": bootstrap,
+                            }))
+                            .await
+                        }
                         .await
-                    }
-                    .await;
+                    };
 
                     match outcome {
                         Ok(pid) => {
@@ -615,11 +653,23 @@ impl BackendSupervisor {
                             let Ok(bootstrap_json) = serde_json::to_vec(&bootstrap) else {
                                 break;
                             };
-                            let mut cmd = Command::new(&program);
-                            cmd.args(&args)
-                                .current_dir(&backend_cwd)
-                                .env("PATH", augmented_path())
-                                .env("HANZO_DEV_DESKTOP_HOST_SCOPE", &cfg.host_scope)
+                            let mut cmd = if let (Some(distro_opt), Some(ref script_wsl)) =
+                                (&wsl_target, &wsl_entry)
+                            {
+                                let mut w = Command::new("wsl.exe");
+                                if let Some(distro_name) = distro_opt {
+                                    w.args(["-d", distro_name]);
+                                }
+                                w.args(["--", "node", script_wsl, "--bootstrap-fd", "0"]);
+                                w
+                            } else {
+                                let mut n = Command::new(&program);
+                                n.args(&args)
+                                    .current_dir(&backend_cwd)
+                                    .env("PATH", augmented_path());
+                                n
+                            };
+                            cmd.env("HANZO_DEV_DESKTOP_HOST_SCOPE", &cfg.host_scope)
                                 .env_remove("HANZO_DEV_PORT")
                                 .env_remove("HANZO_DEV_MODE")
                                 .env_remove("HANZO_DEV_NO_BROWSER")
@@ -627,6 +677,7 @@ impl BackendSupervisor {
                                 .stdin(Stdio::piped())
                                 .stdout(Stdio::inherit())
                                 .stderr(Stdio::inherit());
+                            crate::hide_tokio_console(&mut cmd);
                             match cmd.spawn() {
                                 Ok(mut child) => {
                                     if let Some(pid) = child.id() {
@@ -668,6 +719,34 @@ impl BackendSupervisor {
         }
     }
 
+    pub fn restart_active_worker(&self) {
+        let pid = self.child_pid.swap(0, Ordering::SeqCst);
+        if pid == 0 {
+            return;
+        }
+        if self.via_daemon.swap(false, Ordering::SeqCst) {
+            let _ = tauri::async_runtime::block_on(async {
+                tokio::time::timeout(
+                    Duration::from_secs(3),
+                    hanzod::call("DELETE", "/v1/dev/session", vec![]),
+                )
+                .await
+            });
+            return;
+        }
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(pid as i32, libc::SIGTERM);
+        }
+        #[cfg(windows)]
+        {
+            let mut tk = std::process::Command::new("taskkill");
+            tk.args(["/PID", &pid.to_string(), "/T", "/F"]);
+            crate::hide_std_console(&mut tk);
+            let _ = tk.status();
+        }
+    }
+
     /// Stop the backend this app started. As hanzod's worker it is released to the daemon, which
     /// keeps running (it is the machine's, not this app's); run directly it is terminated.
     pub fn shutdown(&self) {
@@ -692,9 +771,10 @@ impl BackendSupervisor {
         }
         #[cfg(windows)]
         {
-            let _ = std::process::Command::new("taskkill")
-                .args(["/PID", &pid.to_string(), "/T", "/F"])
-                .status();
+            let mut tk = std::process::Command::new("taskkill");
+            tk.args(["/PID", &pid.to_string(), "/T", "/F"]);
+            crate::hide_std_console(&mut tk);
+            let _ = tk.status();
         }
     }
 }

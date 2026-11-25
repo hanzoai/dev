@@ -115,7 +115,7 @@ export async function runHanzoAuth(
     NodeChildProcess.execFile(
       binary,
       ["auth", ...args],
-      { timeout: timeoutMs, env: { ...host.env, NO_COLOR: "1" } },
+      { timeout: timeoutMs, windowsHide: true, env: { ...host.env, NO_COLOR: "1" } },
       (error, stdout, stderr) =>
         error ? reject(new Error(stderr.trim() || error.message)) : resolve(stdout.trim()),
     );
