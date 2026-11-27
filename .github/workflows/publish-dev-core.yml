@@ -7,7 +7,9 @@ name: Publish @hanzo/dev
 on:
   push:
     branches: [main]
-    paths: ["packages/dev/package.json"]
+    paths:
+      - "packages/dev/package.json"
+      - ".github/workflows/publish-dev-core.yml"
   workflow_dispatch:
 
 concurrency:
@@ -89,4 +91,5 @@ jobs:
         run: |
           set -euo pipefail
           cd packages/dev
-          npm publish --access public
+          pnpm config set '//registry.npmjs.org/:_authToken' "${NODE_AUTH_TOKEN}"
+          pnpm publish --access public --no-git-checks --registry https://registry.npmjs.org
