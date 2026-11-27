@@ -3,6 +3,7 @@ import { OrchestrationV2DomainEvent } from "@hanzodev/contracts";
 import * as Effect from "effect/Effect";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 import * as Schema from "effect/Schema";
 import { expect } from "vite-plus/test";
 
@@ -50,7 +51,17 @@ function normalizeEvents(
   const recorded = new Set(input.transcript.match(UUID) ?? []);
   const minted = new Map<string, string>();
   const workspaceName = NodePath.basename(input.workspace);
-  return [`/private${input.workspace}`, input.workspace]
+  const escapedWorkspace = JSON.stringify(input.workspace).slice(1, -1);
+  const posixWorkspace = input.workspace.replaceAll("\\", "/");
+  const workspaceForms = new Set([
+    `/private${escapedWorkspace}`,
+    escapedWorkspace,
+    `/private${posixWorkspace}`,
+    posixWorkspace,
+    `/private${input.workspace}`,
+    input.workspace,
+  ]);
+  return Array.from(workspaceForms)
     .reduce((out, workspace) => out.replaceAll(workspace, "<workspace>"), text)
     .replaceAll(workspaceName, "<workspace-name>")
     .replace(TIMESTAMP, "<time>")
@@ -82,7 +93,7 @@ export const matchProviderFixture = Effect.fn("matchProviderFixture")(function* 
 }) {
   const driver = input.driver.driver;
   const file = (name: string) =>
-    new URL(`${input.fixtureName}/${driver}.${name}`, FIXTURES_ROOT).pathname;
+    NodeURL.fileURLToPath(new URL(`${input.fixtureName}/${driver}.${name}`, FIXTURES_ROOT));
   const transcript = NodeFS.readFileSync(new URL(input.driver.transcriptFile), "utf8");
   const inputJson = json({
     fixture: input.fixtureName,
