@@ -64,23 +64,36 @@ pub struct BackendSupervisor {
     via_daemon: Arc<AtomicBool>,
 }
 
-pub async fn start_hanzod_daemon() -> Result<(), String> {
-    hanzod::ensure().await
-}
-
-pub fn stop_hanzod_daemon() {
-    #[cfg(unix)]
-    {
-        let _ = std::process::Command::new("pkill")
-            .args(["-f", "hanzod"])
-            .status();
+/// Delegate local runtime lifecycle (`start` | `restart` | `stop`) to canonical `hanzod`
+/// `/v1/lifecycle/runtime` without ever terminating the shared `hanzod` daemon.
+pub async fn control_local_runtime(action: &str) -> Result<(), String> {
+    if action != "stop" {
+        let _ = hanzod::ensure().await;
     }
-    #[cfg(windows)]
-    {
-        let mut tk = std::process::Command::new("taskkill");
-        tk.args(["/IM", "hanzod.exe", "/T", "/F"]);
-        crate::hide_std_console(&mut tk);
-        let _ = tk.status();
+    let body =
+        serde_json::to_vec(&serde_json::json!({ "action": action })).map_err(|e| e.to_string())?;
+    if let Ok(reply) = hanzod::call("POST", "/v1/lifecycle/runtime", body.clone()).await {
+        if (200..300).contains(&reply.status) {
+            return Ok(());
+        }
+    }
+    let addr = env::var("HANZOD_HTTP_ADDR").unwrap_or_else(|_| "http://127.0.0.1:3690".into());
+    let url = format!("{}/v1/lifecycle/runtime", addr.trim_end_matches('/'));
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| format!("hanzod lifecycle request failed: {e}"))?;
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("hanzod lifecycle returned HTTP {}", resp.status()))
     }
 }
 

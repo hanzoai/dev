@@ -4,9 +4,9 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Manager};
 
 const TRAY_ID_OPEN: &str = "tray:open";
-const TRAY_ID_HANZOD_START: &str = "tray:hanzod-start";
-const TRAY_ID_HANZOD_RESTART: &str = "tray:hanzod-restart";
-const TRAY_ID_HANZOD_STOP: &str = "tray:hanzod-stop";
+const TRAY_ID_RUNTIME_START: &str = "tray:runtime-start";
+const TRAY_ID_RUNTIME_RESTART: &str = "tray:runtime-restart";
+const TRAY_ID_RUNTIME_STOP: &str = "tray:runtime-stop";
 const TRAY_ID_QUIT: &str = "tray:quit";
 
 pub fn start(app: &AppHandle) {
@@ -33,8 +33,8 @@ pub fn start(app: &AppHandle) {
     };
     let Ok(start_item) = MenuItem::with_id(
         app,
-        TRAY_ID_HANZOD_START,
-        "Start hanzod",
+        TRAY_ID_RUNTIME_START,
+        "Start Hanzo Runtime",
         true,
         None::<&str>,
     ) else {
@@ -42,16 +42,20 @@ pub fn start(app: &AppHandle) {
     };
     let Ok(restart_item) = MenuItem::with_id(
         app,
-        TRAY_ID_HANZOD_RESTART,
-        "Restart hanzod",
+        TRAY_ID_RUNTIME_RESTART,
+        "Restart Hanzo Runtime",
         true,
         None::<&str>,
     ) else {
         return;
     };
-    let Ok(stop_item) =
-        MenuItem::with_id(app, TRAY_ID_HANZOD_STOP, "Stop hanzod", true, None::<&str>)
-    else {
+    let Ok(stop_item) = MenuItem::with_id(
+        app,
+        TRAY_ID_RUNTIME_STOP,
+        "Stop Hanzo Runtime",
+        true,
+        None::<&str>,
+    ) else {
         return;
     };
     let Ok(sep2) = PredefinedMenuItem::separator(app) else {
@@ -83,24 +87,23 @@ pub fn start(app: &AppHandle) {
         .show_menu_on_left_click(false)
         .on_menu_event(|app_handle, event| match event.id().as_ref() {
             TRAY_ID_OPEN => crate::reveal_main_window(app_handle),
-            TRAY_ID_HANZOD_START => {
+            TRAY_ID_RUNTIME_START => {
                 tauri::async_runtime::spawn(async {
-                    let _ = crate::backend::start_hanzod_daemon().await;
+                    let _ = crate::backend::control_local_runtime("start").await;
                 });
             }
-            TRAY_ID_HANZOD_RESTART => {
+            TRAY_ID_RUNTIME_RESTART => {
                 let handle = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
-                    crate::backend::stop_hanzod_daemon();
-                    let _ = crate::backend::start_hanzod_daemon().await;
+                    let _ = crate::backend::control_local_runtime("restart").await;
                     if let Some(state) = handle.try_state::<AppState>() {
                         state.supervisor.restart_active_worker();
                     }
                 });
             }
-            TRAY_ID_HANZOD_STOP => {
+            TRAY_ID_RUNTIME_STOP => {
                 tauri::async_runtime::spawn(async {
-                    crate::backend::stop_hanzod_daemon();
+                    let _ = crate::backend::control_local_runtime("stop").await;
                 });
             }
             TRAY_ID_QUIT => {

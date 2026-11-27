@@ -6,8 +6,6 @@
   "scripts": {
     "start": "node scripts/start-tauri.mjs",
     "dev:tauri": "node scripts/dev-tauri.mjs",
-    "build": "node scripts/stage-tauri-resources.mjs && cargo build --release --features custom-protocol --manifest-path src-tauri/Cargo.toml",
-    "build:bundle": "node scripts/stage-tauri-resources.mjs && npx tauri build",
     "build:tauri": "cargo build --release --features custom-protocol --manifest-path src-tauri/Cargo.toml",
     "stage:resources": "node scripts/stage-tauri-resources.mjs",
     "test:tauri": "cargo test --manifest-path src-tauri/Cargo.toml",

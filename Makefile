@@ -2,11 +2,80 @@ CARGO_HOME ?= $(HOME)/.cargo
 export PATH := $(CARGO_HOME)/bin:$(PATH)
 export NEXTEST_HIDE_PROGRESS_BAR := true
 
-# The wasm2go compiler: build it from hanzoai/wasm2go (go build ./cmd/wasm2go).
+# Canonical Hanzo CLI & wasm2go compiler (`hanzoai/wasm2go`).
+HANZO ?= hanzo
 WASM2GO ?= wasm2go
 
-.PHONY: test wasm wasm-check wasm2go frames-check fmt help
+.PHONY: up down start stop start-vm stop-vm dev dev-app dev-desktop debug logs clean build build-desktop test wasm wasm-check wasm2go frames-check fmt help
 .DEFAULT_GOAL := test
+
+# ---------------------------------------------------------------------------
+# Canonical Hanzo Lifecycle Targets (§6)
+#   make up / down           -> hanzo up / hanzo down       (environment)
+#   make start / stop        -> start / stop this repo app  (workload only; never kills shared runtime)
+#   make start-vm / stop-vm  -> hanzo start / hanzo stop    (local k3s runtime)
+#   make dev / debug         -> hanzo dev / hanzo dev --debug
+#   make logs                -> project-scoped logs (hanzo app logs dev)
+#   make clean               -> build artifacts only (never touches ~/.hanzo)
+# ---------------------------------------------------------------------------
+
+## up: start or reconcile the local Hanzo environment (hanzo up)
+up:
+	@$(HANZO) up
+
+## down: stop environment workloads while keeping warm runtime (hanzo down)
+down:
+	@$(HANZO) down
+
+## start: start this repository's Hanzo Dev workload without restarting unrelated services
+start:
+	@$(HANZO) app start dev
+
+## stop: stop ONLY this repository's Hanzo Dev workload (never terminates shared runtime)
+stop:
+	@$(HANZO) app stop dev
+
+## start-vm: start the local Hanzo runtime (microVM / native k3s + containerd)
+start-vm:
+	@$(HANZO) start
+
+## stop-vm: gracefully shut down the local Hanzo runtime
+stop-vm:
+	@$(HANZO) stop
+
+## dev: run canonical Hanzo Dev interactive session (hanzo dev)
+dev:
+	@$(HANZO) dev
+
+## dev-app: run local monorepo dev runner (web + server hot reload)
+dev-app:
+	@pnpm dev
+
+## dev-desktop: run local Tauri desktop shell in dev mode
+dev-desktop:
+	@pnpm dev:desktop
+
+## debug: run canonical Hanzo Dev with verbose debug inspector (hanzo dev --debug)
+debug:
+	@$(HANZO) dev --debug
+
+## logs: stream project-scoped logs for Hanzo Dev (hanzo app logs dev)
+logs:
+	@$(HANZO) app logs dev
+
+## build: build standalone web + server bundles
+build:
+	@pnpm build
+
+## build-desktop: build standalone web + server + Tauri desktop release binary
+build-desktop:
+	@pnpm build:desktop
+
+## clean: remove local build artifacts only (never touches ~/.hanzo or committed go/dev.wasm)
+clean:
+	@rm -rf apps/web/dist apps/server/dist apps/server/dist-exe \
+		apps/desktop/src-tauri/resources apps/desktop/src-tauri/target \
+		native/resource-monitor/target go/devwasm target/frames.jsonl
 
 ## test: run the Rust tests and the Go host's tests on the committed module
 test:
