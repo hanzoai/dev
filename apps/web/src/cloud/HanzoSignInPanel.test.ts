@@ -1,9 +1,19 @@
-import { createElement } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeAll, describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+vi.mock("gt-react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("gt-react")>()),
+  useGT:
+    () =>
+    (text: string, values: Record<string, unknown> = {}) =>
+      text.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key])),
+  useMessages: () => (text: string) => text,
+  T: ({ children }: { children: ReactNode }) => children,
+  Var: ({ children }: { children: ReactNode }) => children,
+}));
 
 import { DesktopWindowControls } from "../components/desktop/DesktopWindowControls";
-import { startI18n } from "../i18n/runtime";
 import {
   HANZO_DEV_APP_ICON_DATA_URL,
   HanzoDevAppIcon,
@@ -23,9 +33,6 @@ const stubController = {
 } as unknown as HanzoWebAuthController;
 
 describe("Hanzo Dev compact login & frameless window chrome", () => {
-  beforeAll(() => {
-    startI18n();
-  });
 
   it("renders a clean 44px wordmark-free drag masthead", () => {
     const desktopHtml = renderToStaticMarkup(createElement(HanzoLoginMasthead, { desktop: true }));
