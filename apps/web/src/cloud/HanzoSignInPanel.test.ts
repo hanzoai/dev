@@ -33,7 +33,6 @@ const stubController = {
 } as unknown as HanzoWebAuthController;
 
 describe("Hanzo Dev compact login & frameless window chrome", () => {
-
   it("renders a clean 44px wordmark-free drag masthead", () => {
     const desktopHtml = renderToStaticMarkup(createElement(HanzoLoginMasthead, { desktop: true }));
     expect(desktopHtml).toContain('data-slot="masthead"');

@@ -1,21 +1,14 @@
 import { T, useGT } from "gt-react";
-import {
-  useEffect,
-  useState,
-  useSyncExternalStore,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 
 import { HanzoIcon } from "../components/Icons";
 import {
   dragDesktopWindow,
-  setDesktopWindowMode,
   toggleDesktopMaximize,
 } from "../components/desktop/DesktopWindowControls";
 import { isElectron, isTauri } from "../env";
 import { ensureHanzoThemeChromeStylesheet } from "../lib/windowControlsOverlay";
-import { getHanzoWebAuthController, type HanzoWebAuthController } from "./hanzoWebAuth";
+import type { HanzoWebAuthController } from "./hanzoWebAuth";
 
 export const HANZO_DEV_APP_ICON_DATA_URL =
   "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221024%22%20height%3D%221024%22%20viewBox%3D%220%200%201024%201024%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22bg%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%2319191b%22%2F%3E%3Cstop%20offset%3D%2228%25%22%20stop-color%3D%22%2309090a%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23000000%22%2F%3E%3C%2FlinearGradient%3E%3CradialGradient%20id%3D%22topGlow%22%20cx%3D%2250%25%22%20cy%3D%226%25%22%20r%3D%2265%25%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23ffffff%22%20stop-opacity%3D%220.14%22%2F%3E%3Cstop%20offset%3D%2245%25%22%20stop-color%3D%22%23ffffff%22%20stop-opacity%3D%220.03%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23ffffff%22%20stop-opacity%3D%220%22%2F%3E%3C%2FradialGradient%3E%3ClinearGradient%20id%3D%22rimGrad%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23ffffff%22%20stop-opacity%3D%220.34%22%2F%3E%3Cstop%20offset%3D%2222%25%22%20stop-color%3D%22%23ffffff%22%20stop-opacity%3D%220.12%22%2F%3E%3Cstop%20offset%3D%2275%25%22%20stop-color%3D%22%23ffffff%22%20stop-opacity%3D%220.05%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23ffffff%22%20stop-opacity%3D%220.10%22%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D%22glyphWhite%22%20gradientUnits%3D%22userSpaceOnUse%22%20x1%3D%220%22%20y1%3D%22220%22%20x2%3D%220%22%20y2%3D%22800%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23ffffff%22%2F%3E%3Cstop%20offset%3D%2275%25%22%20stop-color%3D%22%23f4f4f7%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23d8d8e0%22%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D%22glyphShade%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23ffffff%22%2F%3E%3Cstop%20offset%3D%2265%25%22%20stop-color%3D%22%23ececf0%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23d2d2da%22%2F%3E%3C%2FlinearGradient%3E%3CclipPath%20id%3D%22shellClip%22%3E%3Cpath%20d%3D%22M%20248.00%2C24.00%20L%20776.00%2C24.00%20C%20905.92%2C24.00%201000.00%2C118.08%201000.00%2C248.00%20L%201000.00%2C776.00%20C%201000.00%2C905.92%20905.92%2C1000.00%20776.00%2C1000.00%20L%20248.00%2C1000.00%20C%20118.08%2C1000.00%2024.00%2C905.92%2024.00%2C776.00%20L%2024.00%2C248.00%20C%2024.00%2C118.08%20118.08%2C24.00%20248.00%2C24.00%20Z%22%2F%3E%3C%2FclipPath%3E%3C%2Fdefs%3E%3Cpath%20d%3D%22M%20248.00%2C24.00%20L%20776.00%2C24.00%20C%20905.92%2C24.00%201000.00%2C118.08%201000.00%2C248.00%20L%201000.00%2C776.00%20C%201000.00%2C905.92%20905.92%2C1000.00%20776.00%2C1000.00%20L%20248.00%2C1000.00%20C%20118.08%2C1000.00%2024.00%2C905.92%2024.00%2C776.00%20L%2024.00%2C248.00%20C%2024.00%2C118.08%20118.08%2C24.00%20248.00%2C24.00%20Z%22%20fill%3D%22url(%23bg)%22%2F%3E%3Cpath%20d%3D%22M%20248.00%2C24.00%20L%20776.00%2C24.00%20C%20905.92%2C24.00%201000.00%2C118.08%201000.00%2C248.00%20L%201000.00%2C776.00%20C%201000.00%2C905.92%20905.92%2C1000.00%20776.00%2C1000.00%20L%20248.00%2C1000.00%20C%20118.08%2C1000.00%2024.00%2C905.92%2024.00%2C776.00%20L%2024.00%2C248.00%20C%2024.00%2C118.08%20118.08%2C24.00%20248.00%2C24.00%20Z%22%20fill%3D%22url(%23topGlow)%22%2F%3E%3Cpath%20d%3D%22M%20249.00%2C31.00%20L%20775.00%2C31.00%20C%20901.44%2C31.00%20993.00%2C122.56%20993.00%2C249.00%20L%20993.00%2C775.00%20C%20993.00%2C901.44%20901.44%2C993.00%20775.00%2C993.00%20L%20249.00%2C993.00%20C%20122.56%2C993.00%2031.00%2C901.44%2031.00%2C775.00%20L%2031.00%2C249.00%20C%2031.00%2C122.56%20122.56%2C31.00%20249.00%2C31.00%20Z%22%20fill%3D%22none%22%20stroke%3D%22url(%23rimGrad)%22%20stroke-width%3D%2210%22%2F%3E%3Cg%20clip-path%3D%22url(%23shellClip)%22%3E%3Cpath%20d%3D%22M%20224%20344%20L%20448%20512%20L%20224%20680%22%20fill%3D%22none%22%20stroke%3D%22url(%23glyphWhite)%22%20stroke-width%3D%2292%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3Crect%20x%3D%22504%22%20y%3D%22628%22%20width%3D%22296%22%20height%3D%2292%22%20rx%3D%2246%22%20fill%3D%22url(%23glyphWhite)%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E";
@@ -30,7 +23,7 @@ function isLocalOrDesktopHost(): boolean {
   return host === "localhost" || host === "127.0.0.1";
 }
 
-function readSkippedSignIn(): boolean {
+export function readSkippedSignIn(): boolean {
   if (typeof window === "undefined") return false;
   try {
     return window.localStorage.getItem(SKIP_SIGNIN_STORAGE_KEY) === "1";
@@ -39,7 +32,7 @@ function readSkippedSignIn(): boolean {
   }
 }
 
-function writeSkippedSignIn(skipped: boolean): void {
+export function writeSkippedSignIn(skipped: boolean): void {
   if (typeof window === "undefined") return;
   try {
     if (skipped) window.localStorage.setItem(SKIP_SIGNIN_STORAGE_KEY, "1");
@@ -397,101 +390,6 @@ export function HanzoSignInPanel({
       ) : null}
 
       <HanzoLoginFooter />
-    </div>
-  );
-}
-
-export function DesktopSignInGate({ children }: { readonly children: ReactNode }) {
-  const controller = getHanzoWebAuthController();
-  const isLoaded = useSyncExternalStore(
-    controller.subscribe,
-    () => controller.isLoaded,
-    () => false,
-  );
-  const accountCount = useSyncExternalStore(
-    controller.subscribe,
-    () => controller.accounts.length,
-    () => 0,
-  );
-  const isBusy = useSyncExternalStore(
-    controller.subscribe,
-    () => controller.isBusy,
-    () => false,
-  );
-  const pendingAuthorizeUrl = useSyncExternalStore(
-    controller.subscribe,
-    () => controller.pendingOAuthAuthorizeUrl,
-    () => null,
-  );
-  const errorMessage = useSyncExternalStore(
-    controller.subscribe,
-    () => controller.errorMessage,
-    () => null,
-  );
-  const [skipped, setSkipped] = useState(readSkippedSignIn);
-  const [prevAccountCount, setPrevAccountCount] = useState(accountCount);
-
-  if (prevAccountCount !== accountCount) {
-    setPrevAccountCount(accountCount);
-    if (prevAccountCount > 0 && accountCount === 0 && skipped) {
-      writeSkippedSignIn(false);
-      setSkipped(false);
-    }
-  }
-
-  const showLoginGate = isTauri && isLoaded && accountCount === 0 && !skipped;
-
-  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- resizes Tauri window between compact 460x640 login and 1360x860 workspace
-  useEffect(() => {
-    if (!isTauri || !isLoaded) return;
-    setDesktopWindowMode(showLoginGate ? "login" : "workspace");
-  }, [isLoaded, showLoginGate]);
-
-  if (!isTauri) return children;
-  if (!isLoaded) {
-    return (
-      <div
-        style={{
-          minHeight: "100dvh",
-          width: "100%",
-          backgroundColor: "var(--hz-login-bg, #000000)",
-        }}
-      />
-    );
-  }
-  if (!showLoginGate) return children;
-
-  return (
-    <div
-      data-testid="hanzo-dev-signin-landing"
-      style={{
-        minHeight: "100dvh",
-        width: "100%",
-        backgroundColor: "var(--hz-login-bg, #000000)",
-        color: "var(--hz-login-fg, #fafafa)",
-        padding: "0 0 16px",
-        boxSizing: "border-box",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "space-between",
-      }}
-    >
-      <HanzoLoginMasthead desktop />
-      <main className="my-auto flex w-full items-center justify-center px-4">
-        <HanzoSignInPanel
-          bare
-          controller={controller}
-          isBusy={isBusy}
-          pendingAuthorizeUrl={pendingAuthorizeUrl}
-          errorMessage={errorMessage}
-          onContinueWithoutLogin={() => {
-            writeSkippedSignIn(true);
-            setSkipped(true);
-          }}
-        />
-      </main>
-      <span />
     </div>
   );
 }
