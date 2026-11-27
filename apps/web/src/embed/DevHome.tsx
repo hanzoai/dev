@@ -505,6 +505,7 @@ function Home(props: DevHomeProps): ReactNode {
         }
         onTogglePrivate={() => controller.setGhost(!state.ghost)}
         onOpenPersona={() => setPersonaMenuOpen((open) => !open)}
+        onToggleWebSearch={() => setWebSearchOn((on) => !on)}
         onSend={handleSend}
       />
       {props.mode === "dev" && props.environments.some((e) => e.available) ? (
@@ -613,7 +614,7 @@ function Home(props: DevHomeProps): ReactNode {
                       </div>
                     </div>
                   ) : (
-                    <div className="rounded-2xl bg-accent px-4 py-2.5 text-foreground">
+                    <div className="rounded-full bg-accent px-4 py-2 text-foreground">
                       {userText}
                     </div>
                   )

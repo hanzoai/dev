@@ -29,8 +29,7 @@ function Shell({
   );
 }
 
-const outlineClasses =
-  "after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:border after:border-(--chat-composer-outline) dark:after:inset-shadow-2xs dark:after:inset-shadow-(color:--chat-composer-highlight)";
+const outlineClasses = "";
 
 function Host({ className, ...props }: ComponentProps<"div">) {
   return (

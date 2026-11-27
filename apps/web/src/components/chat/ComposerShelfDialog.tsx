@@ -79,7 +79,9 @@ function PluginsShelf({ environmentId }: { readonly environmentId: EnvironmentId
               setError(null);
             } else {
               setError(
-                gt("Plugins could not be read. No supported agent CLI was found on this machine."),
+                environmentId === "cloud"
+                  ? null
+                  : gt("Plugins could not be read. No supported agent CLI was found on this machine."),
               );
             }
           },
@@ -135,7 +137,28 @@ function PluginsShelf({ environmentId }: { readonly environmentId: EnvironmentId
             <p className="px-2 text-sm text-muted-foreground">{gt("Reading plugins")}</p>
           ) : null}
           {!reading && !error && plugins.length === 0 ? (
-            <p className="px-2 text-sm text-muted-foreground">{gt("No plugins match")}</p>
+            <div className="flex items-center justify-between gap-3 px-2 py-1">
+              <p className="text-sm text-muted-foreground">
+                {environmentId === "cloud"
+                  ? gt("Manage MCP servers and workspace plugins")
+                  : gt("No plugins match")}
+              </p>
+              {environmentId === "cloud" ? (
+                <Button
+                  size="compact"
+                  variant="outline"
+                  onClick={() => {
+                    if (typeof window !== "undefined") {
+                      window.dispatchEvent(
+                        new CustomEvent("hanzo:navigate", { detail: "/dev/customize/plugins" }),
+                      );
+                    }
+                  }}
+                >
+                  {gt("Open Plugins")}
+                </Button>
+              ) : null}
+            </div>
           ) : null}
           {installed.length > 0 ? (
             <h3 className="px-2 pb-1 text-xs font-medium text-muted-foreground">
@@ -213,7 +236,23 @@ function CloudShelf({
     const auth = getHanzoWebAuthController();
     void (async () => {
       try {
-        const credentials = { accessToken: await auth.getToken(), orgId: auth.activeOrgId };
+        let accessToken = "";
+        let orgId: string | null = null;
+        try {
+          accessToken = await auth.getToken();
+          orgId = auth.activeOrgId;
+        } catch {
+          // Embedded inside @hanzo/app: fall back to IAM session in localStorage
+        }
+        if (!accessToken && typeof window !== "undefined") {
+          try {
+            accessToken = window.localStorage.getItem("hanzo_iam_access_token") ?? "";
+            orgId = window.localStorage.getItem("hanzo_iam_org") || orgId;
+          } catch {
+            // ignore storage errors
+          }
+        }
+        const credentials = { accessToken, orgId };
         const read = shelf === "connectors" ? listConnectors : listDesignSystems;
         const next = await read(credentials);
         if (live) setRows(next);

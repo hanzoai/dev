@@ -49,6 +49,8 @@ export function HomeComposer(props: {
   onTogglePrivate?: () => void;
   /** Triggered when `/persona` is chosen from the slash menu. */
   onOpenPersona?: () => void;
+  /** Triggered when Web search is chosen from the `+` menu. */
+  onToggleWebSearch?: () => void;
   /** Said under the composer while a send is being prepared (files uploading and being read). */
   preparing?: string | null | undefined;
 }) {
@@ -186,6 +188,7 @@ export function HomeComposer(props: {
             extraPrimaryActions={props.voiceControl}
             {...(props.onTogglePrivate ? { onTogglePrivate: props.onTogglePrivate } : {})}
             {...(props.onOpenPersona ? { onOpenPersona: props.onOpenPersona } : {})}
+            {...(props.onToggleWebSearch ? { onToggleWebSearch: props.onToggleWebSearch } : {})}
           />
         </ComposerSurface.Host>
       </ComposerSurface.Shell>

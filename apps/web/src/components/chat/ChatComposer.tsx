@@ -496,6 +496,7 @@ export interface ChatComposerProps {
   extraPrimaryActions?: ReactNode;
   onTogglePrivate?: () => void;
   onOpenPersona?: () => void;
+  onToggleWebSearch?: () => void;
 }
 
 const NO_PROVIDER_SKILLS: ServerProvider["skills"] = [];
@@ -3474,6 +3475,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerAttachButton = showComposerAttachAction ? (
     <ComposerPlusMenu
       environmentId={environmentId}
+      environmentless={Boolean(props.environmentless)}
       threadRef={routeThreadRef}
       memoryTarget={composerDraftTarget}
       addComposerAttachments={addComposerAttachments}
@@ -3481,6 +3483,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       onInsertText={(text) => {
         insertComposerTextAtEndStable(text);
       }}
+      {...(props.onOpenPersona ? { onOpenPersona: props.onOpenPersona } : {})}
+      {...(props.onToggleWebSearch ? { onToggleWebSearch: props.onToggleWebSearch } : {})}
       shelf={plusShelf}
       onShelfChange={setPlusShelf}
     />

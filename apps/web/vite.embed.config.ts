@@ -1,5 +1,7 @@
 // The Dev core as a library: `@hanzo/dev` (packages/dev), for a host that draws Dev
 // inside its own shell. One ES entry; React stays the host's.
+import { fileURLToPath } from "node:url";
+
 import react from "@vitejs/plugin-react";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import { defineConfig, type Plugin } from "vite-plus";
@@ -16,7 +18,7 @@ const HOST_MODULES =
 // app and the web client build with the engines as before.
 const OFFICE_VIEWERS = /[\\/]files[\\/]office[\\/](WordDocument|Spreadsheet|Presentation)\.tsx$/;
 function officeViewersOut(): Plugin {
-  const replacement = new URL("./src/embed/OfficeUnavailable.tsx", import.meta.url).pathname;
+  const replacement = fileURLToPath(new URL("./src/embed/OfficeUnavailable.tsx", import.meta.url));
   return {
     name: "hanzodev:embed-office-out",
     enforce: "pre",
@@ -75,7 +77,7 @@ export default defineConfig({
     alias: [
       {
         find: /^use-sync-external-store\/(shim(\/index\.js)?|(shim\/)?with-selector(\.js)?)$/,
-        replacement: new URL("./vite/syncExternalStore.ts", import.meta.url).pathname,
+        replacement: fileURLToPath(new URL("./vite/syncExternalStore.ts", import.meta.url)),
       },
     ],
   },

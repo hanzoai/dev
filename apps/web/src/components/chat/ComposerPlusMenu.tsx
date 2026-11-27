@@ -61,20 +61,26 @@ const ICONS: Record<PlusEntryId, ComponentType<{ className?: string }>> = {
  */
 export function ComposerPlusMenu({
   environmentId,
+  environmentless = false,
   threadRef,
   memoryTarget,
   addComposerAttachments,
   focusComposer,
   onInsertText,
+  onOpenPersona,
+  onToggleWebSearch,
   shelf,
   onShelfChange,
 }: {
   readonly environmentId: EnvironmentId;
+  readonly environmentless?: boolean;
   readonly threadRef: ScopedThreadRef;
   readonly memoryTarget: MemorySwitchTarget;
   readonly addComposerAttachments: (files: File[]) => Promise<boolean>;
   readonly focusComposer: () => void;
   readonly onInsertText: (text: string) => void;
+  readonly onOpenPersona?: () => void;
+  readonly onToggleWebSearch?: () => void;
   /** The open list, held by the composer so `/plugins` opens it too. */
   readonly shelf: ComposerShelf | null;
   readonly onShelfChange: (shelf: ComposerShelf | null) => void;
@@ -95,6 +101,31 @@ export function ComposerPlusMenu({
 
   const run = (entry: PlusEntry) => {
     const { effect } = entry;
+    if (entry.id === "webSearch" && onToggleWebSearch) {
+      onToggleWebSearch();
+      focusComposer();
+      return;
+    }
+    if (environmentless) {
+      if (entry.id === "library") {
+        inputRef.current?.click();
+        return;
+      }
+      if (entry.id === "agents" && onOpenPersona) {
+        onOpenPersona();
+        return;
+      }
+      if (entry.id === "skills") {
+        insert("/");
+        return;
+      }
+      if (entry.id === "devices") {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("hanzo:navigate", { detail: "/dev/settings/machines" }));
+        }
+        return;
+      }
+    }
     switch (effect.kind) {
       case "attach":
         inputRef.current?.click();
@@ -126,6 +157,9 @@ export function ComposerPlusMenu({
         return;
       case "browser":
         useRightPanelStore.getState().openBrowser(threadRef, null);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("hanzo:open-browser-tabs"));
+        }
         return;
       case "shelf":
         onShelfChange(effect.shelf);
@@ -162,7 +196,6 @@ export function ComposerPlusMenu({
               variant="ghost"
               size="icon-sm"
               data-slot="composer-plus-trigger"
-              onPointerDown={(event) => event.preventDefault()}
               aria-label={gt("Add files, agents, skills and more")}
             />
           }
