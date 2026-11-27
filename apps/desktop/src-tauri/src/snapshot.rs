@@ -184,6 +184,7 @@ pub fn read_configured_snapshot_shortcut(state_dir: &Path) -> Value {
 
 pub fn build_snapshot_state_payload(state_dir: &Path, shortcut_registered: bool) -> Value {
     let shortcut = read_configured_snapshot_shortcut(state_dir);
+    #[allow(unused_mut)]
     let mut payload = json!({
         "mode": "direct",
         "shortcut": shortcut,
