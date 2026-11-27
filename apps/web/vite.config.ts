@@ -138,7 +138,13 @@ const browserTestProject = {
     browser: {
       enabled: true,
       headless: true,
-      provider: playwright(),
+      // Avoid /dev/shm exhaustion (64 MB default on Linux CI runners) that causes
+      // Chromium to disconnect (VITEST_BROWSER_CONNECTION_CLOSED) or stall mid-shard.
+      provider: playwright({
+        launchOptions: {
+          args: ["--disable-dev-shm-usage"],
+        },
+      }),
       instances: [{ browser: "chromium" }],
       screenshotFailures: false,
       commands: {
@@ -432,6 +438,7 @@ export default defineConfig(({ command }) => {
     },
     worker: { format: "es" },
     test: {
+      teardownTimeout: 15_000,
       projects: [
         defineProject(unitTestProject),
         defineProject(browserTestProject),

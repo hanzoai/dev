@@ -15,7 +15,7 @@ import { CheckIcon, CopyIcon } from "lucide-react";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { APP_DISPLAY_NAME, APP_VERSION } from "../branding";
-import { DesktopSignInGate } from "../cloud/HanzoSignInPanel";
+import { DesktopSignInGate } from "../cloud/DesktopSignInGate";
 import { useAuth } from "../cloud/hanzoWebAuth";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
