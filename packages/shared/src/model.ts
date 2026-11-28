@@ -48,6 +48,7 @@ export const HANZO_REASONING_CAPABILITIES: ModelCapabilities = createModelCapabi
       currentValue: "medium",
       options: [
         { id: "off", label: "Off" },
+        { id: "minimal", label: "Minimal" },
         { id: "low", label: "Low" },
         { id: "medium", label: "Medium", isDefault: true },
         { id: "high", label: "High" },
@@ -57,6 +58,37 @@ export const HANZO_REASONING_CAPABILITIES: ModelCapabilities = createModelCapabi
     },
   ],
 });
+
+/** Whether a model entry is the retired `Enso Free` tier (never shown in pickers or catalogs). */
+export function isEnsoFreeModel(slug: string, name?: string | null): boolean {
+  const normalizedSlug = slug
+    .trim()
+    .toLowerCase()
+    .replace(/^hanzo\//, "");
+  if (normalizedSlug === "enso-free" || normalizedSlug === "enso_free") {
+    return true;
+  }
+  const normalizedName = name?.trim().toLowerCase() ?? "";
+  return normalizedName === "enso free";
+}
+
+/**
+ * Ensures a Hanzo/Enso model exposes the full 7-level `HANZO_REASONING_CAPABILITIES` ladder while
+ * preserving any non-reasoning option descriptors (such as service tiers or context windows).
+ */
+export function withHanzoReasoningCapabilities(
+  capabilities: ModelCapabilities | null | undefined,
+): ModelCapabilities {
+  const hanzoReasoning = HANZO_REASONING_CAPABILITIES.optionDescriptors![0]!;
+  const others = (capabilities?.optionDescriptors ?? []).filter(
+    (descriptor) =>
+      descriptor.id !== "reasoningEffort" &&
+      !(descriptor.type === "select" && descriptor.role === "reasoning"),
+  );
+  return createModelCapabilities({
+    optionDescriptors: [hanzoReasoning, ...others],
+  });
+}
 
 function getRawSelectionValueById(
   selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,

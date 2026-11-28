@@ -5,6 +5,7 @@
  * completion. Thread sync is best effort: a failure degrades to a local thread, never a blocked send.
  */
 import { buildHanzoApiHeaders } from "@hanzodev/shared/hanzoIamAuth";
+import { isEnsoFreeModel } from "@hanzodev/shared/model";
 import { mFallback, msg } from "gt-i18n";
 
 import { createCloudSession, type DiscoveryFetch } from "../discovery/environments.ts";
@@ -45,7 +46,9 @@ export function withAuto(models: ReadonlyArray<CloudChatModel>): ReadonlyArray<C
       id: AUTO_MODEL_ID,
       label: mFallback(msg("Auto", { $context: "model choice: the gateway picks the model" })),
     },
-    ...models.filter((model) => model.id !== AUTO_MODEL_ID),
+    ...models.filter(
+      (model) => model.id !== AUTO_MODEL_ID && !isEnsoFreeModel(model.id, model.label),
+    ),
   ];
 }
 
@@ -177,6 +180,8 @@ export function parseChatModels(body: unknown): ReadonlyArray<CloudChatModel> {
       provider?: unknown;
     };
     if (typeof model.id !== "string" || model.id === "") continue;
+    const label = typeof model.name === "string" && model.name !== "" ? model.name : model.id;
+    if (isEnsoFreeModel(model.id, label)) continue;
     const outputs = Array.isArray(model.outputs)
       ? model.outputs.filter((value): value is string => typeof value === "string")
       : undefined;
@@ -195,7 +200,7 @@ export function parseChatModels(body: unknown): ReadonlyArray<CloudChatModel> {
     );
     models.push({
       id: model.id,
-      label: typeof model.name === "string" && model.name !== "" ? model.name : model.id,
+      label,
       ...(owner === undefined ? {} : { provider: owner.trim() }),
       ...(inputs === undefined ? {} : { inputs }),
     });

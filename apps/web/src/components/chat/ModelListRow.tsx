@@ -10,7 +10,7 @@ import { Kbd } from "../ui/kbd";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { modelPickerModelKey } from "./modelPickerKeys";
-import { isEnsoModel } from "@hanzodev/client-runtime/enso-ring";
+import { ensoModelGap, isEnsoModel } from "@hanzodev/client-runtime/enso-ring";
 import { EnsoRing } from "./EnsoRing";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 
@@ -62,7 +62,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
       {/* One row shape in every tab: the logo names the provider, so Favorites needs no second line. */}
       {props.driverKind === "hanzo" && isEnsoModel(props.slug) ? (
         <EnsoRing
-          gap={props.isSelected ? (props.ensoRing?.gap ?? 0) : 0}
+          gap={ensoModelGap(props.slug)}
           dot={props.isSelected ? (props.ensoRing?.dot ?? false) : false}
           className="size-4 shrink-0"
         />

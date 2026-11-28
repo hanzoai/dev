@@ -63,11 +63,12 @@ describe('the kept choice', () => {
   it('reads an effort it does not know, a blank model and a broken entry as the defaults', () => {
     browser({ 'hanzo.mind': JSON.stringify({ model: '  ', effort: 'extreme' }) })
     expect(kept()).toEqual(FIRST)
-    // Low is Dev's Fast effort, so a saved 'low' is kept; Medium was offered once and opens on Auto, which a run sends as medium.
     browser({ 'hanzo.mind': JSON.stringify({ model: 'zen6', effort: 'low' }) })
     expect(kept()).toEqual({ model: 'zen6', effort: 'low' })
     browser({ 'hanzo.mind': JSON.stringify({ model: 'zen6', effort: 'medium' }) })
-    expect(kept()).toEqual({ model: 'zen6', effort: 'auto' })
+    expect(kept()).toEqual({ model: 'zen6', effort: 'medium' })
+    browser({ 'hanzo.mind': JSON.stringify({ model: 'zen6', effort: 'xhigh' }) })
+    expect(kept()).toEqual({ model: 'zen6', effort: 'xhigh' })
     browser({ 'hanzo.mind': '{not json' })
     expect(kept()).toEqual(FIRST)
   })
@@ -75,12 +76,12 @@ describe('the kept choice', () => {
   it('keeps only an effort it offers, whoever asks', () => {
     const { items } = browser()
     keep({ model: 'zen6', effort: 'max' })
-    keep({ effort: 'medium' as never })
+    keep({ effort: 'bogus' as never })
     expect(JSON.parse(items.get('hanzo.mind')!)).toEqual({ model: 'zen6', effort: 'auto' })
-    keep({ effort: 'low' })
-    expect(JSON.parse(items.get('hanzo.mind')!)).toEqual({ model: 'zen6', effort: 'low' })
+    keep({ effort: 'minimal' })
+    expect(JSON.parse(items.get('hanzo.mind')!)).toEqual({ model: 'zen6', effort: 'minimal' })
     keep({ model: 'zen6-flash' })
-    expect(kept()).toEqual({ model: 'zen6-flash', effort: 'low' })
+    expect(kept()).toEqual({ model: 'zen6-flash', effort: 'minimal' })
   })
 
   it('holds a choice for the page where the browser refuses to store it', () => {
@@ -97,12 +98,13 @@ describe('the kept choice', () => {
     expect(kept()).toEqual({ model: 'zen6', effort: 'auto' })
   })
 
-  it('offers Auto, Fast, High and Max, in that order, and nothing else', () => {
-    expect(EFFORTS.map((e) => e.label)).toEqual(['Auto', 'Fast', 'High', 'Max'])
+  it('offers the full reasoning effort ladder matching all tracked models', () => {
+    expect(EFFORTS.map((e) => e.id)).toEqual(['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
+    expect(EFFORTS.map((e) => e.label)).toEqual(['Auto', 'Off', 'Minimal', 'Low', 'Medium', 'High', 'Extra High', 'Max'])
   })
 
-  it('names to a coding run only an effort it takes: medium for Auto, low for Fast, high for the rest', () => {
-    expect(EFFORTS.map((e) => level(e.id))).toEqual(['medium', 'low', 'high', 'high'])
+  it('maps the full ladder to the coding run efforts (low, medium, high)', () => {
+    expect(EFFORTS.map((e) => level(e.id))).toEqual(['medium', 'low', 'low', 'low', 'medium', 'high', 'high', 'high'])
   })
 })
 
@@ -153,10 +155,38 @@ describe('the catalog', () => {
 })
 
 describe('the Free plan', () => {
-  it('grants Enso Auto alone; every other plan grants every model', () => {
+  it('grants Enso Auto and Enso Flash only (never Enso Free or other paid models)', () => {
     expect(grants(true, ENSO)).toBe(true)
-    for (const id of ['zen6', 'opus', 'enso-flash']) expect(grants(true, id)).toBe(false)
-    for (const id of [ENSO, 'zen6', 'opus']) expect(grants(false, id)).toBe(true)
+    expect(grants(true, 'enso-auto')).toBe(true)
+    expect(grants(true, 'hanzo/enso-auto')).toBe(true)
+    expect(grants(true, 'enso-flash')).toBe(true)
+    expect(grants(true, 'hanzo/enso-flash')).toBe(true)
+    for (const id of ['enso-free', 'hanzo/enso-free', 'enso-ultra', 'enso-max', 'zen6', 'opus']) {
+      expect(grants(true, id)).toBe(false)
+    }
+    for (const id of [ENSO, 'enso-flash', 'zen6', 'opus']) expect(grants(false, id)).toBe(true)
+  })
+
+  it('strips Enso Free from the fetched catalog', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            data: [
+              ...CATALOG,
+              { id: 'enso-free', name: 'Enso Free', family: 'enso', class: 'ours' },
+              { id: 'hanzo/enso-free', name: 'Enso Free', family: 'enso', class: 'ours' },
+              { id: 'enso-flash', name: 'Enso Flash', family: 'enso', class: 'ours' },
+            ],
+          }),
+          { status: 200 },
+        ),
+      ),
+    )
+    const t: Target = { api: 'https://api.nofree', token: () => 'tok', org: null }
+    const list = await catalog(t)
+    expect(list.map((m) => m.id)).toEqual(['enso-auto', 'zen6', 'zen6-flash', 'opus', 'enso-flash'])
   })
 
   it('answers on Enso Auto, and a pick of another model is not kept', async () => {

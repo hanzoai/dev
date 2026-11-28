@@ -12,9 +12,38 @@ const CLOSED_LEVELS = new Set(["auto", "default", "max", "ultracode"]);
 const GAP_CENTER = Math.PI / 4;
 const OFF_LEVELS = new Set(["off", "none"]);
 
-/** Enso is Hanzo's router family: `enso`, `enso-auto`, `enso-flash`, `enso-ultra`, `enso-max`. */
+/** Normalize an Enso slug: trim, lowercase, and strip any `hanzo/` router prefix. */
+function normalizeEnsoSlug(slug: string): string {
+  return slug
+    .trim()
+    .toLowerCase()
+    .replace(/^hanzo\//, "");
+}
+
+/**
+ * Progressive open gap per Enso model tier: ONLY `enso-auto` (our default) is the closed circle.
+ * Higher tiers start slightly open and open progressively wider toward Flash.
+ */
+export const ENSO_MODEL_GAPS: Readonly<Record<string, number>> = {
+  "enso-auto": 0,
+  "enso-ultra": 0.08,
+  "enso-max": 0.16,
+  "enso-pro": 0.24,
+  enso: 0.32,
+  "enso-flash": 0.42,
+};
+
+/** Enso is Hanzo's router family: `enso`, `enso-auto`, `enso-flash`, `enso-pro`, `enso-max`, `enso-ultra`. */
 export function isEnsoModel(slug: string): boolean {
-  return /^enso($|-)/i.test(slug);
+  return /^enso($|-)/i.test(normalizeEnsoSlug(slug));
+}
+
+/**
+ * Canonical ring gap for an Enso model slug (0 = closed circle for `enso-auto`, progressively
+ * opening from `enso-ultra` at 0.08 through `enso-flash` at 0.42).
+ */
+export function ensoModelGap(slug: string): number {
+  return ENSO_MODEL_GAPS[normalizeEnsoSlug(slug)] ?? 0;
 }
 
 /**

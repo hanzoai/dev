@@ -16,6 +16,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 export interface SidebarThreadHeaderProps {
   hasProjects: boolean;
   projectScope: ReactNode;
+  /** In-place view (Priority / Day by day) and density (1 / 2 / 3 lines) toggle menu. */
+  viewControls?: ReactNode;
   onNewProject: () => void;
   onNewThread: (event: ReactMouseEvent) => void;
   /** False on phones, where the header's round new-chat button already starts a thread. */
@@ -37,6 +39,7 @@ export interface SidebarThreadHeaderProps {
 export function SidebarThreadHeader({
   hasProjects,
   projectScope,
+  viewControls,
   onNewProject,
   onNewThread,
   showNewThread = true,
@@ -102,6 +105,7 @@ export function SidebarThreadHeader({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center">
+        {viewControls}
         {hasProjects ? (
           <>
             {projectScope}

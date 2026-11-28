@@ -15,8 +15,14 @@ import { call, type Target } from './call.ts'
 export { ENSO } from '@hanzo/ui/models/catalog'
 export type Model = ModelCatalogEntry
 
+/** Whether a catalog entry is the retired `Enso Free` tier (never surfaced). */
+export function isRemovedEnsoFree(m: Pick<Model, 'id' | 'name'>): boolean {
+  const id = m.id.trim().toLowerCase().replace(/^hanzo\//, '')
+  return id === 'enso-free' || id === 'enso_free' || (m.name ?? '').trim().toLowerCase() === 'enso free'
+}
+
 export async function models(t: Target): Promise<Model[]> {
-  return parseModels(await call<unknown>(t, 'GET', '/v1/models'))
+  return parseModels(await call<unknown>(t, 'GET', '/v1/models')).filter((m) => !isRemovedEnsoFree(m))
 }
 
 /** The payer's plan usage, as `GET /v1/ai/limits` answers it: what a picker marks paused. */

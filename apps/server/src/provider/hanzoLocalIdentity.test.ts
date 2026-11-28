@@ -12,6 +12,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { BUILT_IN_DRIVERS } from "./builtInDrivers.ts";
 import {
   CURATED_HANZO_MODELS,
+  mergeCuratedHanzoModels,
   readLocalHanzoIdentities,
   resolveHanzoProviderAuth,
 } from "./hanzoLocalIdentity.ts";
@@ -28,6 +29,87 @@ describe("Native Hanzo Agent & Local IAM Multi-Account Identity", () => {
     expect(DEFAULT_ENABLED_DEFAULT_INSTANCES.has(ProviderInstanceId.make("hanzoGen"))).toBe(false);
     expect(CURATED_HANZO_MODELS[0]?.slug).toBe("enso-auto");
     expect(CURATED_HANZO_MODELS.some((m) => m.slug === "zen6-coder")).toBe(true);
+    expect(CURATED_HANZO_MODELS.some((m) => m.slug === "enso-free")).toBe(false);
+  });
+
+  it("filters Enso Free and upgrades discovered Hanzo models to full 7-level reasoning", () => {
+    const merged = mergeCuratedHanzoModels([
+      {
+        slug: "enso-free",
+        name: "Enso Free",
+        isCustom: false,
+        capabilities: null,
+      },
+      {
+        slug: "hanzo/enso-free",
+        name: "Enso Free",
+        isCustom: false,
+        capabilities: null,
+      },
+      {
+        slug: "enso_free",
+        name: "Enso Free",
+        isCustom: false,
+        capabilities: null,
+      },
+      {
+        slug: "hanzo/enso-ultra",
+        name: "Enso Ultra",
+        isCustom: false,
+        capabilities: {
+          optionDescriptors: [
+            {
+              id: "reasoningEffort",
+              label: "Reasoning",
+              type: "select",
+              currentValue: "medium",
+              options: [
+                { id: "low", label: "Low" },
+                { id: "medium", label: "Medium", isDefault: true },
+                { id: "high", label: "High" },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        slug: "enso",
+        name: "Enso",
+        isCustom: false,
+        capabilities: {
+          optionDescriptors: [
+            {
+              id: "reasoningEffort",
+              label: "Reasoning",
+              type: "select",
+              currentValue: "medium",
+              options: [
+                { id: "low", label: "Low" },
+                { id: "medium", label: "Medium", isDefault: true },
+                { id: "high", label: "High" },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(merged.some((m) => m.slug.includes("free") || m.name === "Enso Free")).toBe(false);
+    expect(merged.filter((m) => m.slug.includes("enso-ultra"))).toHaveLength(1);
+    const enso = merged.find((m) => m.slug === "enso");
+    expect(enso).toBeDefined();
+    const reasoning = enso?.capabilities?.optionDescriptors?.find(
+      (d) => d.id === "reasoningEffort",
+    );
+    expect(reasoning?.type === "select" ? reasoning.options.map((o) => o.id) : []).toEqual([
+      "off",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
   });
 
   it("orders Hanzo snapshots ahead of Codex and Claude", () => {

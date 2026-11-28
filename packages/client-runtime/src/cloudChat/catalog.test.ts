@@ -12,18 +12,42 @@ import {
 } from "./index.ts";
 
 describe("cloud chat catalog", () => {
-  it("groups catalog models by provider and gives Hanzo's the effort panel", () => {
+  it("groups catalog models by provider and gives Hanzo's the full 7-level effort panel", () => {
     const providers = cloudChatProviders([
       { id: "enso-flash", label: "Enso Flash" },
+      { id: "enso-free", label: "Enso Free" },
+      { id: "hanzo/enso-free", label: "Enso Free" },
       { id: "claude-sonnet", label: "Claude Sonnet" },
       { id: "gpt-5", label: "GPT 5" },
     ]);
     expect(providers.map((p) => p.driver)).toEqual(["hanzo", "claudeAgent", "codex"]);
     expect(providers[0]?.models.map((m) => m.slug)).toEqual(["enso-flash"]);
-    expect(providers[0]?.models[0]?.capabilities?.optionDescriptors?.[0]?.id).toBe(
-      "reasoningEffort",
-    );
+    const reasoning = providers[0]?.models[0]?.capabilities?.optionDescriptors?.[0];
+    expect(reasoning?.id).toBe("reasoningEffort");
+    expect(reasoning?.type === "select" ? reasoning.options.map((o) => o.id) : []).toEqual([
+      "off",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
     expect(providers[1]?.models[0]?.capabilities).toBeNull();
+  });
+
+  it("excludes retired Enso Free entries when parsing /v1/models", () => {
+    const parsed = parseChatModels({
+      data: [
+        { id: "enso-auto", name: "Enso Auto" },
+        { id: "enso-free", name: "Enso Free" },
+        { id: "hanzo/enso-free", name: "Enso Free" },
+        { id: "enso_free", name: "Enso Free" },
+        { id: "custom-free", name: "Enso Free" },
+        { id: "enso-flash", name: "Enso Flash" },
+      ],
+    });
+    expect(parsed.map((m) => m.id)).toEqual(["enso-auto", "enso-flash"]);
   });
 
   it("round-trips effort through the selection", () => {

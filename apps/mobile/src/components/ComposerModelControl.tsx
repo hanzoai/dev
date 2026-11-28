@@ -1,6 +1,6 @@
 import type { ModelSelection, ProviderDriverKind } from "@hanzodev/contracts";
 import { useGT, useMessages } from "gt-react-native";
-import { ensoRingDot, ensoRingGap, isEnsoModel } from "@hanzodev/client-runtime/enso-ring";
+import { ensoModelGap, ensoRingDot, isEnsoModel } from "@hanzodev/client-runtime/enso-ring";
 import {
   buildTraitsTriggerDisplay,
   getDescriptorStringValue,
@@ -87,13 +87,10 @@ export function ComposerModelControl(props: {
       disabled={props.disabled}
       emphasized
       renderIcon={(size) =>
-        ensoSelect ? (
+        ensoSelect && props.selection ? (
           <ProviderIcon
             provider="enso"
-            ensoGap={ensoRingGap(
-              ensoSelect.options.map((option) => option.id),
-              ensoEffort,
-            )}
+            ensoGap={ensoModelGap(props.selection.model)}
             ensoDot={ensoRingDot(ensoEffort)}
             size={size}
           />

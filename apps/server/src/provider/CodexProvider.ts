@@ -169,6 +169,7 @@ export interface CodexAppServerProviderSnapshot {
 }
 
 const REASONING_EFFORT_LABELS: Readonly<Record<string, string>> = {
+  off: "Off",
   none: "None",
   minimal: "Minimal",
   low: "Low",

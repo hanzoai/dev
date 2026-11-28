@@ -9,7 +9,7 @@ import {
   type ResolvedKeybindingsConfig,
   MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
 } from "@hanzodev/contracts";
-import { resolveSelectableModel } from "@hanzodev/shared/model";
+import { isEnsoFreeModel, resolveSelectableModel } from "@hanzodev/shared/model";
 import { useAtomValue } from "@effect/atom-react";
 import { formatProviderUpdateRequiredNotice } from "@hanzodev/client-runtime/providerUpdateRequiredModels";
 import { groupModelsBySubProvider } from "@hanzodev/client-runtime/providerSubProviders";
@@ -116,6 +116,9 @@ function shouldIncludeModelPickerOption(input: {
   readonly activeInstanceId: ProviderInstanceId;
   readonly activeModel: string;
 }): boolean {
+  if (isEnsoFreeModel(input.option.slug, input.option.name)) {
+    return false;
+  }
   if (input.entry.driverKind === "antigravity" && input.option.slug === ANTIGRAVITY_DEFAULT_MODEL) {
     return false;
   }

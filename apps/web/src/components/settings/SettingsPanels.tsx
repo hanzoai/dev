@@ -154,6 +154,7 @@ const isSidebarProjectSortOrder = Schema.is(SidebarProjectSortOrder);
 const SIDEBAR_THREAD_ROWS_LABELS: Record<SidebarThreadRows, string> = {
   one_line: msg("One line"),
   two_lines: msg("Two lines"),
+  three_lines: msg("Three lines"),
 };
 const isSidebarThreadRows = Schema.is(SidebarThreadRows);
 
@@ -951,8 +952,8 @@ export function GeneralSettingsPanel() {
           {...setting("thread-rows")}
           description={
             <T>
-              One line shows the title, time, and status. Two lines add the project, branch, and
-              preview. This device only.
+              One line shows the title, time, and status. Two lines add the project and branch.
+              Three lines add full context. This device only.
             </T>
           }
           resetAction={

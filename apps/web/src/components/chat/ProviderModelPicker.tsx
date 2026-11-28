@@ -25,6 +25,7 @@ import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { ModelPickerContent, resolveModelPickerSelectedModel } from "./ModelPickerContent";
 import { retainedModelWhileProviderLocked } from "./ProviderModelPicker.logic";
 import { ChatGptSharingControl } from "./ChatGptSharingControl";
+import { ensoModelGap, isEnsoModel } from "@hanzodev/client-runtime/enso-ring";
 import { EnsoRing } from "./EnsoRing";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { ModelEsque, getDisplayModelName, getTriggerDisplayModelName } from "./providerIconUtils";
@@ -425,6 +426,12 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 <EnsoRing
                   gap={props.triggerRing.gap}
                   dot={props.triggerRing.dot}
+                  className={cn("size-[18px] shrink-0", props.activeProviderIconClassName)}
+                />
+              ) : activeEntry.driverKind === "hanzo" &&
+                isEnsoModel(selectedModel?.slug ?? props.model) ? (
+                <EnsoRing
+                  gap={ensoModelGap(selectedModel?.slug ?? props.model)}
                   className={cn("size-[18px] shrink-0", props.activeProviderIconClassName)}
                 />
               ) : (
