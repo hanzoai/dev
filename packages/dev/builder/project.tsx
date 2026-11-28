@@ -48,6 +48,7 @@ import {
   Check,
   Clock,
   ExternalLink,
+  Github,
   Globe,
   MousePointerClick,
   PanelLeft,
@@ -91,7 +92,8 @@ import { RING } from './pane.ts'
 import { read as pushed, type Pull } from './api/changes.ts'
 import { codebases, one, type Codebase } from './api/codebases.ts'
 import { start, steer as steerCoding, type Mode } from './api/coding.ts'
-import { blob, tree } from './api/git.ts'
+import { blob, listGitTargets, tree, type GitTarget } from './api/git.ts'
+import { githubRepoFrom, type GitHubRepoBadgeInfo } from './api/github.ts'
 import { limits as readLimits } from './api/models.ts'
 import { declare } from './api/platform.ts'
 import { address, deployments, name as repoName, ours, templates, type Project as Row } from './api/projects.ts'
@@ -101,6 +103,7 @@ import { decode, followed, outcome, pull, said, scrub, who } from './api/turn.ts
 import { verdict as record } from './api/verdict.ts'
 import { useKept, useProjects, useRead, useRun } from './data.ts'
 import { Merge } from './git.tsx'
+import { GitHubBadge, SyncToGitHubDialog } from './github-sync.tsx'
 import { Gutter } from './gutter.tsx'
 import { useHost, useTarget } from './host.tsx'
 import { cacheBustUrl, previewRevision, resolvePreviewSource } from './preview-url.ts'
@@ -427,6 +430,21 @@ export function Project({ at }: { at: Where }) {
   // Files and Code: native git, at the branch the open run pushed (or the project's own).
   const repo = named ? named.name : project?.repo ? repoName(project.repo) : ''
   const ref = run.record?.branch || home
+  // Outbound GitHub mirror targets: shows a GitHub badge when synced, or "Sync to GitHub" when Hanzo Git only.
+  const gitTargets = useRead(
+    signed && repo ? () => listGitTargets(target, repo).catch(() => [] as GitTarget[]) : null,
+    [] as GitTarget[],
+    [target, signed, repo],
+  )
+  const [syncDialogOpen, setSyncDialogOpen] = useState(false)
+  const [syncedGitHub, setSyncedGitHub] = useState<GitHubRepoBadgeInfo | null>(null)
+  useEffect(() => {
+    setSyncedGitHub(null)
+  }, [repo])
+  const githubInfo = useMemo(
+    () => syncedGitHub ?? githubRepoFrom(project?.repo || clone || '', gitTargets.value),
+    [syncedGitHub, project?.repo, clone, gitTargets.value],
+  )
   const [files, setFiles] = useState<OpenFile[]>([])
   const [file, setFile] = useState<string | null>(null)
   useEffect(() => {
@@ -1069,6 +1087,24 @@ export function Project({ at }: { at: Where }) {
             shrink={0}
             style={{ paddingInlineEnd: 'var(--hanzo-shell-top-right-inset, 0px)' }}
           >
+            {githubInfo ? (
+              <GitHubBadge fullName={githubInfo.fullName} htmlUrl={githubInfo.htmlUrl} syncedLabel={t('Synced')} compact />
+            ) : repo ? (
+              <Button
+                variant="outline"
+                size="sm"
+                data-slot="project-sync-github"
+                aria-label={t('Sync to GitHub')}
+                {...({ title: t('Sync to GitHub') } as object)}
+                onPress={() => setSyncDialogOpen(true)}
+                shrink={0}
+              >
+                <Github size={14} />
+                <SizableText size="$2" color="inherit" $max-md={{ display: 'none' }}>
+                  {t('Sync to GitHub')}
+                </SizableText>
+              </Button>
+            ) : null}
             {/* Share gives way on a phone, where Publish is the one that matters. */}
             <XStack display="none" $md={{ display: 'flex' }} shrink={0}>
               <Button variant="outline" size="sm" onPress={() => void share()}>
@@ -1245,6 +1281,20 @@ export function Project({ at }: { at: Where }) {
       </Dialog>
 
       <Publish source={publish} onClose={() => setPublish(null)} onLive={fresh} />
+
+      {repo ? (
+        <SyncToGitHubDialog
+          open={syncDialogOpen}
+          onOpenChange={setSyncDialogOpen}
+          repoName={repo}
+          defaultName={slug || repo}
+          defaultDescription={forge.value?.description || ''}
+          onSynced={(info) => {
+            setSyncedGitHub(info)
+            gitTargets.reload()
+          }}
+        />
+      ) : null}
     </>
   )
 }

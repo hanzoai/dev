@@ -14,16 +14,17 @@
  */
 import { SizableText, XStack, YStack } from '@hanzo/gui'
 import { useI18n } from '@hanzo/i18n/react'
-import { Check, ChevronLeft, ChevronRight, Plus, X } from '@hanzogui/lucide-icons-2'
-import { Button, Input } from '@hanzo/ui'
+import { Check, ChevronLeft, ChevronRight, GitFork, Plus, X } from '@hanzogui/lucide-icons-2'
+import { Button, Input, toast } from '@hanzo/ui'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import { here, useBack } from './back.ts'
 import { Refusal } from './api/call.ts'
-import { accounts, added, bring, grants, type Grant, type Grants } from './api/github.ts'
+import { accounts, added, bring, grants, type CreatedRepo, type Grant, type Grants } from './api/github.ts'
 import { authorize } from './api/provider.ts'
 import { pinHub, readPending, writePending, type Pending } from './choice.ts'
 import { useRead } from './data.ts'
+import { CreateGitHubRepoForm, ForkGitHubRepoForm } from './github-sync.tsx'
 import { useHost, useTarget } from './host.tsx'
 import { path } from './route.ts'
 
@@ -36,7 +37,7 @@ export function Sync() {
   const signed = Boolean(host.person)
   const [q, setQ] = useState('')
   const [owner, setOwner] = useState('')
-  const [step, setStep] = useState<'pick' | 'access'>('pick')
+  const [step, setStep] = useState<'pick' | 'access' | 'create' | 'fork'>('pick')
   const [picked, setPicked] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -121,6 +122,28 @@ export function Sync() {
 
   const back = () => {
     host.go(path({ kind: 'screen', screen: 'projects' }))
+  }
+
+  const openCreatedOrForked = async (created: CreatedRepo, verb: 'created' | 'forked') => {
+    const [repoOwner = '', repoName = created.full_name] = created.full_name.split('/')
+    try {
+      const queued = await bring(target, [created.full_name])
+      const codebaseName = queued.codebases[created.full_name.toLowerCase()] || repoName
+      const next: Pending[] = [
+        ...readPending(host.org).filter((p) => p.fullName.toLowerCase() !== created.full_name.toLowerCase()),
+        { fullName: created.full_name, name: codebaseName },
+      ]
+      writePending(host.org, next)
+    } catch {
+      /* direct GitHub editing via pinHub still works */
+    }
+    pinHub(host.org, { owner: repoOwner, name: repoName, private: created.private, branch: created.default_branch || 'main' })
+    toast.success(
+      verb === 'created'
+        ? t('Created {repo} on GitHub — opening in Dev', { repo: created.full_name })
+        : t('Forked {repo} to GitHub — opening in Dev', { repo: created.full_name }),
+    )
+    host.go('')
   }
 
   useEffect(() => {
@@ -264,7 +287,25 @@ export function Sync() {
                   </XStack>
                 </XStack>
                 {shownRepos.length === 0 ? (
-                  <Soft>{t('Nothing matches.')}</Soft>
+                  <YStack gap="$2.5" py="$1">
+                    <Soft>
+                      {ofOwner.length === 0
+                        ? t('No repositories found under {owner} yet. Create a new repository or fork an existing one.', { owner })
+                        : t('Nothing matches.')}
+                    </Soft>
+                    {ofOwner.length === 0 ? (
+                      <XStack gap="$2" flexWrap="wrap">
+                        <Button size="sm" variant="primary" onPress={() => setStep('create')}>
+                          <Plus size={14} />
+                          {t('Create a new GitHub repository')}
+                        </Button>
+                        <Button size="sm" variant="outline" onPress={() => setStep('fork')}>
+                          <GitFork size={14} />
+                          {t('Fork a GitHub repository')}
+                        </Button>
+                      </XStack>
+                    ) : null}
+                  </YStack>
                 ) : (
                   shownRepos.map((r) => (
                     <RepoRow key={r.fullName} repo={r} on={picked.includes(r.fullName)} onPress={() => toggle(r.fullName)} />
@@ -325,6 +366,42 @@ export function Sync() {
               </SizableText>
             </>
           ) : null}
+          {step === 'create' ? (
+            <>
+              <YStack gap="$1" items="center">
+                <SizableText size="$5" color="$ink">
+                  {t('Create a new GitHub repository')}
+                </SizableText>
+                <SizableText size="$2" color="$soft" text="center">
+                  {t('Create a repository on GitHub and open it in Dev.')}
+                </SizableText>
+              </YStack>
+              <CreateGitHubRepoForm
+                orgs={orgs.filter((a) => !a.blocked).map((a) => a.name)}
+                submitLabel={t('Create & edit in /dev')}
+                onCancel={() => setStep('pick')}
+                onCreated={(r) => openCreatedOrForked(r, 'created')}
+              />
+            </>
+          ) : null}
+          {step === 'fork' ? (
+            <>
+              <YStack gap="$1" items="center">
+                <SizableText size="$5" color="$ink">
+                  {t('Fork a GitHub repository')}
+                </SizableText>
+                <SizableText size="$2" color="$soft" text="center">
+                  {t('Fork any public owner/repo to your GitHub and edit it in Dev.')}
+                </SizableText>
+              </YStack>
+              <ForkGitHubRepoForm
+                orgs={orgs.filter((a) => !a.blocked).map((a) => a.name)}
+                submitLabel={t('Fork & edit in /dev')}
+                onCancel={() => setStep('pick')}
+                onForked={(r) => openCreatedOrForked(r, 'forked')}
+              />
+            </>
+          ) : null}
           {error ? <Soft>{error}</Soft> : null}
           {unbound && step === 'access' ? (
             <Button width="100%" variant="outline" onPress={() => void addOrg()}>
@@ -333,10 +410,24 @@ export function Sync() {
             </Button>
           ) : null}
           {step === 'pick' ? (
-            <Button width="100%" disabled={!owner || picked.length === 0} onPress={() => setStep('access')}>
-              {t('Continue')}
-            </Button>
-          ) : (
+            <YStack gap="$2.5" width="100%">
+              <Button width="100%" disabled={!owner || picked.length === 0} onPress={() => setStep('access')}>
+                {t('Continue')}
+              </Button>
+              {signed ? (
+                <XStack gap="$2" flexWrap="wrap" justify="center">
+                  <Button size="sm" variant="outline" onPress={() => setStep('create')}>
+                    <Plus size={14} />
+                    {t('Create new repo')}
+                  </Button>
+                  <Button size="sm" variant="outline" onPress={() => setStep('fork')}>
+                    <GitFork size={14} />
+                    {t('Fork repo')}
+                  </Button>
+                </XStack>
+              ) : null}
+            </YStack>
+          ) : step === 'access' ? (
             <YStack gap="$3" items="center" width="100%">
               <Button width="100%" disabled={busy || syncing || picked.length === 0} onPress={() => void send()}>
                 {syncing || busy
@@ -353,7 +444,7 @@ export function Sync() {
                 </XStack>
               )}
             </YStack>
-          )}
+          ) : null}
           {!signed ? (
             <Button width="100%" onPress={() => host.signIn?.()}>
               {t('Sign in')}

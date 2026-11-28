@@ -22,9 +22,13 @@
  */
 import { phrase } from '@hanzo/i18n'
 
-import { call, query, seg, type Target } from './call.ts'
+import { onGitHub } from '../address.ts'
+import { call, query, Refusal, seg, type Target } from './call.ts'
 import { codebases } from './codebases.ts'
+import { attachGitHubMirror, linkGitHubRepo, listGitTargets, parseGitHubRepo, type GitTarget } from './git.ts'
 import { links, type Link } from './links.ts'
+
+export { attachGitHubMirror, linkGitHubRepo, listGitTargets, parseGitHubRepo, type GitTarget }
 
 export interface Repo {
   owner: string
@@ -425,4 +429,133 @@ export async function syncIssues(t: Target, repo = ''): Promise<Synced> {
     failed: num(raw.failed),
     truncated: raw.truncated === true,
   }
+}
+
+/** A repository created or forked on GitHub through the platform. */
+export interface CreatedRepo {
+  full_name: string
+  html_url: string
+  clone_url: string
+  default_branch: string
+  private: boolean
+  existing: boolean
+}
+
+export interface CreateRepoInput {
+  name: string
+  description?: string
+  private?: boolean
+  org?: string
+  linkRepo?: string
+}
+
+export interface ForkRepoInput {
+  /** `owner/repo`, GitHub URL, or bare repo name. */
+  repo: string
+  org?: string
+  name?: string
+}
+
+function createdRepo(raw: unknown): CreatedRepo {
+  const r = obj(raw)
+  const full = str(r.full_name)
+  const html = str(r.html_url) || (full ? `https://github.com/${full}` : '')
+  const cloneUrl = str(r.clone_url) || (full ? `https://github.com/${full}.git` : '')
+  return {
+    full_name: full,
+    html_url: html,
+    clone_url: cloneUrl,
+    default_branch: str(r.default_branch) || 'main',
+    private: r.private === true,
+    existing: r.existing === true,
+  }
+}
+
+/**
+ * Create a GitHub repository via `POST /v1/provider/github/repos`.
+ * When `linkRepo` is provided, the platform also links and syncs that Hanzo Git repo to it.
+ * May throw `Refusal` with status 412 or 409 when personal GitHub user OAuth is required.
+ */
+export async function createGitHubRepo(t: Target, input: CreateRepoInput): Promise<CreatedRepo> {
+  const name = input.name.trim()
+  if (!name) throw new Error(phrase('Enter a repository name'))
+  const body: Record<string, unknown> = { name }
+  const desc = input.description?.trim()
+  if (desc) body.description = desc
+  if (input.private !== undefined) body.private = input.private
+  const org = input.org?.trim()
+  if (org) body.org = org
+  const linkRepo = input.linkRepo?.trim()
+  if (linkRepo) body.linkRepo = linkRepo
+  return createdRepo(await call<unknown>(t, 'POST', '/v1/provider/github/repos', body))
+}
+
+/**
+ * Fork a GitHub repository via `POST /v1/provider/github/fork`.
+ * Accepts `owner/repo`, a full GitHub URL (normalized to `owner/repo`), or a bare repo name.
+ * May throw `Refusal` with status 412 or 409 when personal GitHub user OAuth is required.
+ */
+export async function forkGitHubRepo(t: Target, input: ForkRepoInput): Promise<CreatedRepo> {
+  const rawRepo = input.repo.trim()
+  if (!rawRepo) throw new Error(phrase('Enter a GitHub repository to fork (owner/repo)'))
+  const parsed = onGitHub(rawRepo)
+  const repo = parsed ? `${parsed.owner}/${parsed.name}` : rawRepo.replace(/^\/+|\/+$/g, '').replace(/\.git$/i, '')
+  const body: Record<string, unknown> = { repo }
+  const org = input.org?.trim()
+  if (org) body.org = org
+  const name = input.name?.trim()
+  if (name) body.name = name
+  return createdRepo(await call<unknown>(t, 'POST', '/v1/provider/github/fork', body))
+}
+
+/**
+ * True when creating or forking a GitHub repository failed because the user's
+ * personal GitHub account requires user OAuth authorization (HTTP 412 or 409).
+ */
+export function isGitHubUserOAuthRequired(err: unknown): boolean {
+  if (err instanceof Refusal) return err.status === 412 || err.status === 409
+  if (err && typeof err === 'object' && 'status' in err) {
+    const status = (err as { status?: unknown }).status
+    return status === 412 || status === 409
+  }
+  return false
+}
+
+/** Resolved GitHub identity for a project backed directly by GitHub or via an outbound mirror target. */
+export interface GitHubRepoBadgeInfo {
+  owner: string
+  name: string
+  fullName: string
+  htmlUrl: string
+  source: 'repo' | 'target' | 'link'
+}
+
+/**
+ * Resolve a project's GitHub repository from its primary clone URL or outbound mirror targets.
+ * Returns null if the project is Hanzo Git only and not yet synced to GitHub.
+ */
+export function githubRepoFrom(repoUrl: string, targets?: readonly GitTarget[]): GitHubRepoBadgeInfo | null {
+  const direct = repoUrl ? onGitHub(repoUrl) : null
+  if (direct) {
+    return {
+      owner: direct.owner,
+      name: direct.name,
+      fullName: `${direct.owner}/${direct.name}`,
+      htmlUrl: `https://github.com/${direct.owner}/${direct.name}`,
+      source: 'repo',
+    }
+  }
+  for (const t of targets ?? []) {
+    const at = parseGitHubRepo(t.url)
+    if (at) {
+      return {
+        owner: at.owner,
+        name: at.name,
+        fullName: `${at.owner}/${at.name}`,
+        htmlUrl: `https://github.com/${at.owner}/${at.name}`,
+        source: 'target',
+      }
+    }
+  }
+  return null
 }

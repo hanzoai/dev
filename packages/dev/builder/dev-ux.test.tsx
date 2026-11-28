@@ -153,11 +153,11 @@ vi.mock('@hanzo/voice', () => ({ useDictation: () => ({}), useVoice: () => ({}) 
 vi.mock('@hanzogui/lucide-icons-2', () =>
   Object.fromEntries(
     [
-      'AlertCircle', 'ArrowLeft', 'ArrowRight', 'AudioLines', 'Bell', 'BookOpen', 'Bot', 'Box', 'Brain',
+      'AlertCircle', 'ArrowLeft', 'ArrowRight', 'ArrowUpRight', 'AudioLines', 'Bell', 'BookOpen', 'Bot', 'Box', 'Brain',
       'Check', 'ChevronDown', 'ChevronRight', 'Circle', 'CircleDot', 'Clapperboard', 'Clock', 'Code',
       'CodeXml', 'Columns2', 'Container', 'Copy', 'Cpu', 'CreditCard', 'Download', 'ExternalLink', 'File',
-      'FileDiff', 'FileText', 'Folder', 'FolderGit2', 'Gauge', 'GitBranch', 'GitPullRequest', 'Globe',
-      'Image', 'Info', 'Key', 'Laptop', 'Layers', 'LayoutTemplate', 'Library', 'Maximize2', 'Menu',
+      'FileDiff', 'FileText', 'Folder', 'FolderGit2', 'Gauge', 'GitBranch', 'GitFork', 'Github', 'GitPullRequest', 'Globe',
+      'Image', 'Info', 'Key', 'Laptop', 'Layers', 'LayoutTemplate', 'Library', 'Link2', 'Lock', 'Maximize2', 'Menu',
       'MessageSquare', 'Minimize2', 'Minus', 'MonitorPlay', 'MoreHorizontal', 'MousePointerClick', 'PanelLeft',
       'PanelLeftOpen', 'Paperclip', 'Pencil', 'Pin', 'Play', 'Plug', 'Plus', 'Presentation', 'Puzzle', 'RefreshCcw',
       'Rocket', 'RotateCcw', 'RotateCw', 'Search', 'Settings', 'Settings2', 'Share', 'Share2', 'Shield',
