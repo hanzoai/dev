@@ -21,15 +21,14 @@ function normalizeEnsoSlug(slug: string): string {
 }
 
 /**
- * Progressive open gap per Enso model tier: ONLY `enso-auto` (our default) is the closed circle.
- * Higher tiers start slightly open and open progressively wider toward Flash.
+ * Enso and Enso Auto use a closed ring. Other tiers open progressively from Ultra to Flash.
  */
 export const ENSO_MODEL_GAPS: Readonly<Record<string, number>> = {
   "enso-auto": 0,
   "enso-ultra": 0.08,
   "enso-max": 0.16,
   "enso-pro": 0.24,
-  enso: 0.32,
+  enso: 0,
   "enso-flash": 0.42,
 };
 
@@ -39,11 +38,10 @@ export function isEnsoModel(slug: string): boolean {
 }
 
 /**
- * Canonical ring gap for an Enso model slug (0 = closed circle for `enso-auto`, progressively
- * opening from `enso-ultra` at 0.08 through `enso-flash` at 0.42).
+ * Unknown Enso tiers get an open ring so they cannot be mistaken for Enso or Enso Auto.
  */
 export function ensoModelGap(slug: string): number {
-  return ENSO_MODEL_GAPS[normalizeEnsoSlug(slug)] ?? 0;
+  return ENSO_MODEL_GAPS[normalizeEnsoSlug(slug)] ?? 0.32;
 }
 
 /**

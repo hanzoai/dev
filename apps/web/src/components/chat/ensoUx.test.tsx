@@ -68,14 +68,16 @@ describe("Hanzo reasoning capabilities & progressive Enso composer glyphs", () =
     }
   });
 
-  it("maps every Enso model to its progressive arc (only Enso Auto closed) and shows dot on max", () => {
+  it("maps every Enso model to its progressive arc (only Enso and Enso Auto closed) and shows dot on max", () => {
     const cases = [
       ["enso-auto", 0],
       ["hanzo/enso-auto", 0],
       ["enso-ultra", 0.08],
       ["enso-max", 0.16],
       ["enso-pro", 0.24],
-      ["enso", 0.32],
+      ["enso", 0],
+      ["hanzo/enso", 0],
+      ["enso-hybrid", 0.32],
       ["enso-flash", 0.42],
     ] as const;
 

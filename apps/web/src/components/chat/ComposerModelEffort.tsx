@@ -160,7 +160,7 @@ export function describeComposerEffort(
               modelSelection,
               traits.reportedModelSelection,
             ) ?? (reasoning.id === "thinking" ? reasoning.label : null));
-  // Enso models display their progressive tier arc as the ring (closed only for Enso Auto),
+  // Enso models display their progressive tier arc as the ring (closed for Enso and Enso Auto),
   // with a center dot when effort is Max.
   const ensoSelect = isEnso && reasoning?.type === "select" ? reasoning : null;
   const ensoChosen =
