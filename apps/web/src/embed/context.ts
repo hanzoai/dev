@@ -3,9 +3,9 @@ import { createContext, useContext } from "react";
 import type { AppRouter } from "../router";
 import type { DevRuntime } from "./runtime";
 
-/** What a host's `DevProvider` gives the pieces it draws, and the core's root route. */
+/** What a host's `DevProvider` or `DevSettings` gives the pieces it draws, and the core's root route. */
 export interface EmbedState {
-  readonly runtime: DevRuntime;
+  readonly runtime: DevRuntime | null;
   readonly router: AppRouter;
   /** The two places the core draws into: the host's sidebar and its pane. */
   readonly slots: EmbedSlots;

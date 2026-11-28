@@ -37,9 +37,10 @@ import {
 } from "lucide-react";
 import { resolveEventKeys } from "@hanzodev/shared/keybindings";
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { T, useGT, useMessages } from "gt-react";
+import { decodeMsg, msg, T, useGT, useMessages } from "gt-react";
 
-import { cn } from "../../lib/utils";
+import { useEmbedSettingsHost, type DevSettingsExtraSection } from "../../embed/settingsHost";
+import { cn, normalizeSearchText } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Kbd } from "../ui/kbd";
 import {
@@ -137,6 +138,7 @@ function SettingsSectionIcon({ to }: { to: SettingsPath }) {
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const gt = useGT();
   const m = useMessages();
+  const host = useEmbedSettingsHost();
   const navArea = workspaceAreaProps("settings-nav", 0, gt("Settings sections"));
   const navigate = useNavigate();
   const currentHash = useLocation({ select: (location) => location.hash });
@@ -147,7 +149,25 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const [compactSearchOpen, setCompactSearchOpen] = useState(false);
   const [activeResultIndex, setActiveResultIndex] = useState(0);
   const searchableItems = useAvailableSettingsSearchItems();
-  const results = searchSettings(query, searchableItems, m);
+  const builtInResults = searchSettings(query, searchableItems, m);
+  const extraSections = host?.extraSections ?? [];
+  const normalizedQuery = normalizeSearchText(query);
+  const extraResults: ReadonlyArray<DevSettingsExtraSection> =
+    normalizedQuery.length === 0
+      ? []
+      : extraSections.filter((section) => {
+          const hay = normalizeSearchText(
+            [section.label, section.group ?? "Account", ...(section.searchTerms ?? [])].join(" "),
+          );
+          return normalizedQuery.split(" ").every((token) => hay.includes(token));
+        });
+  type CombinedResult =
+    | { readonly kind: "extra"; readonly section: DevSettingsExtraSection }
+    | { readonly kind: "builtin"; readonly item: SettingsSearchItem };
+  const results: ReadonlyArray<CombinedResult> = [
+    ...extraResults.map((section): CombinedResult => ({ kind: "extra", section })),
+    ...builtInResults.map((item): CombinedResult => ({ kind: "builtin", item })),
+  ];
   const isSearching = query.trim().length > 0;
   const hasResults = results.length > 0;
   const maxResultIndex = Math.max(results.length - 1, 0);
@@ -202,21 +222,34 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   }, [compactSearchOpen]);
 
   const handleSectionClick = (to: SettingsPath) => {
+    host?.onSelectExtraPath(null);
     void navigate({
       to,
       hash: "",
       replace: true,
       hashScrollIntoView: false,
     });
+    host?.onPathChange?.(to);
+  };
+
+  const handleExtraSectionClick = (section: DevSettingsExtraSection) => {
+    host?.onSelectExtraPath(section.path);
+    host?.onPathChange?.(section.path);
   };
 
   const clearSearch = () => {
     setQuery("");
     setActiveResultIndex(0);
   };
-  const handleSearchResultClick = (item: SettingsSearchItem) => {
+  const handleSearchResultClick = (result: CombinedResult) => {
     clearSearch();
     setCompactSearchOpen(false);
+    if (result.kind === "extra") {
+      handleExtraSectionClick(result.section);
+      return;
+    }
+    const item = result.item;
+    host?.onSelectExtraPath(null);
     const targetId = item.targetId ?? item.id;
     revealSettingsSearchTarget(targetId);
     if (pathname === item.to && currentHash.replace(/^#/, "") === targetId) {
@@ -230,6 +263,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
       hashScrollIntoView: false,
       state: { settingsTargetHighlight: true },
     });
+    host?.onPathChange?.(item.to);
   };
 
   const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -301,7 +335,11 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                 aria-controls={isSearching && hasResults ? "settings-search-results" : undefined}
                 aria-activedescendant={
                   isSearching && results[activeResultIndex]
-                    ? `settings-search-result-${results[activeResultIndex].id}`
+                    ? `settings-search-result-${
+                        results[activeResultIndex].kind === "extra"
+                          ? results[activeResultIndex].section.path
+                          : results[activeResultIndex].item.id
+                      }`
                     : undefined
                 }
                 className="min-w-0 flex-1"
@@ -338,35 +376,46 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                 role={hasResults ? "listbox" : undefined}
                 aria-label={hasResults ? gt("Settings search results") : undefined}
               >
-                {results.map((item, index) => (
-                  <SidebarMenuItem
-                    key={item.id}
-                    role="presentation"
-                    ref={index === activeResultIndex ? scrollResultIntoView : undefined}
-                  >
-                    <SidebarMenuButton
-                      id={`settings-search-result-${item.id}`}
-                      role="option"
-                      aria-selected={index === activeResultIndex}
-                      tabIndex={-1}
-                      size="sm"
-                      isActive={index === activeResultIndex}
-                      className="h-auto min-h-10 items-start"
-                      onMouseMove={() => setActiveResultIndex(index)}
-                      onClick={() => handleSearchResultClick(item)}
+                {results.map((result, index) => {
+                  const key = result.kind === "extra" ? result.section.path : result.item.id;
+                  return (
+                    <SidebarMenuItem
+                      key={key}
+                      role="presentation"
+                      ref={index === activeResultIndex ? scrollResultIntoView : undefined}
                     >
-                      <SettingsSectionIcon to={item.to} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium text-sidebar-foreground">
-                          {m(item.title)}
+                      <SidebarMenuButton
+                        id={`settings-search-result-${key}`}
+                        role="option"
+                        aria-selected={index === activeResultIndex}
+                        tabIndex={-1}
+                        size="sm"
+                        isActive={index === activeResultIndex}
+                        className="h-auto min-h-10 items-start"
+                        onMouseMove={() => setActiveResultIndex(index)}
+                        onClick={() => handleSearchResultClick(result)}
+                      >
+                        {result.kind === "extra" ? (
+                          <span className="flex size-4 h-5 shrink-0 items-center justify-center text-(--sidebar-icon-color)">
+                            {result.section.icon ?? <Settings2Icon className="size-4" />}
+                          </span>
+                        ) : (
+                          <SettingsSectionIcon to={result.item.to} />
+                        )}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium text-sidebar-foreground">
+                            {result.kind === "extra" ? result.section.label : m(result.item.title)}
+                          </span>
+                          <span className="block truncate text-2xs text-sidebar-muted-foreground/75">
+                            {result.kind === "extra"
+                              ? (result.section.group ?? gt("Account"))
+                              : m(SETTINGS_SECTION_LABELS[result.item.to])}
+                          </span>
                         </span>
-                        <span className="block truncate text-2xs text-sidebar-muted-foreground/75">
-                          {m(SETTINGS_SECTION_LABELS[item.to])}
-                        </span>
-                      </span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                ))}
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
               </SidebarMenu>
             ) : (
               <div className="flex flex-col gap-4">
@@ -383,51 +432,112 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                   </SidebarMenu>
                 )}
                 <div onKeyDown={handleSettingsSectionKeyDown} className="flex flex-col gap-4">
-                  {SETTINGS_NAV_GROUPS.map((group, index) => (
-                    <div
-                      key={group.heading}
-                      className="flex flex-col gap-1 max-md:border-t max-md:border-sidebar-border max-md:pt-4 max-md:first:border-t-0 max-md:first:pt-0"
-                    >
-                      <h3
-                        id={`settings-nav-group-${index}`}
-                        className={cn(
-                          "px-2 text-xs font-medium text-sidebar-muted-foreground/80",
-                          group.headingHidden ? "sr-only" : !compactSearchOpen && "max-md:sr-only",
-                        )}
+                  {(() => {
+                    const accountExtras = extraSections.filter(
+                      (section) => !section.group || section.group === "Account",
+                    );
+                    type NavGroupBlock = {
+                      readonly key: string;
+                      readonly heading: string;
+                      readonly headingHidden?: true;
+                      readonly builtInPaths: ReadonlyArray<SettingsPath>;
+                      readonly extras: ReadonlyArray<DevSettingsExtraSection>;
+                    };
+                    const blocks: NavGroupBlock[] = [];
+                    SETTINGS_NAV_GROUPS.forEach((group, idx) => {
+                      const rawHeading = decodeMsg(group.heading);
+                      const matchedExtras = extraSections.filter(
+                        (section) => section.group === rawHeading,
+                      );
+                      blocks.push({
+                        key: group.heading,
+                        heading: group.heading,
+                        ...(group.headingHidden ? { headingHidden: true as const } : {}),
+                        builtInPaths: group.paths,
+                        extras: matchedExtras,
+                      });
+                      if (idx === 0 && accountExtras.length > 0) {
+                        blocks.push({
+                          key: "host-account",
+                          heading: msg("Account"),
+                          builtInPaths: [],
+                          extras: accountExtras,
+                        });
+                      }
+                    });
+                    return blocks.map((block, index) => (
+                      <div
+                        key={block.key}
+                        className="flex flex-col gap-1 max-md:border-t max-md:border-sidebar-border max-md:pt-4 max-md:first:border-t-0 max-md:first:pt-0"
                       >
-                        {m(group.heading)}
-                      </h3>
-                      {/* The heading stays outside the group it names so NVDA does not read the name twice. */}
-                      <div role="group" aria-labelledby={`settings-nav-group-${index}`}>
-                        <SidebarMenu>
-                          {group.paths.map((to) => {
-                            const Icon = SETTINGS_SECTION_ICONS[to];
-                            const isActive = activePath === to || activePath.startsWith(`${to}/`);
-                            return (
-                              <SidebarMenuItem key={to}>
-                                <SidebarMenuButton
-                                  data-settings-section={to}
-                                  aria-current={isActive ? "page" : undefined}
-                                  isActive={isActive}
-                                  onClick={() => handleSectionClick(to)}
-                                >
-                                  <Icon />
-                                  <span
-                                    className={cn(
-                                      "truncate",
-                                      !compactSearchOpen && "max-md:sr-only",
-                                    )}
+                        <h3
+                          id={`settings-nav-group-${index}`}
+                          className={cn(
+                            "px-2 text-xs font-medium text-sidebar-muted-foreground/80",
+                            block.headingHidden
+                              ? "sr-only"
+                              : !compactSearchOpen && "max-md:sr-only",
+                          )}
+                        >
+                          {m(block.heading)}
+                        </h3>
+                        {/* The heading stays outside the group it names so NVDA does not read the name twice. */}
+                        <div role="group" aria-labelledby={`settings-nav-group-${index}`}>
+                          <SidebarMenu>
+                            {block.builtInPaths.map((to) => {
+                              const Icon = SETTINGS_SECTION_ICONS[to];
+                              const isActive = activePath === to || activePath.startsWith(`${to}/`);
+                              return (
+                                <SidebarMenuItem key={to}>
+                                  <SidebarMenuButton
+                                    data-settings-section={to}
+                                    aria-current={isActive ? "page" : undefined}
+                                    isActive={isActive}
+                                    onClick={() => handleSectionClick(to)}
                                   >
-                                    {m(SETTINGS_NAV_LABELS[to])}
-                                  </span>
-                                </SidebarMenuButton>
-                              </SidebarMenuItem>
-                            );
-                          })}
-                        </SidebarMenu>
+                                    <Icon />
+                                    <span
+                                      className={cn(
+                                        "truncate",
+                                        !compactSearchOpen && "max-md:sr-only",
+                                      )}
+                                    >
+                                      {m(SETTINGS_NAV_LABELS[to])}
+                                    </span>
+                                  </SidebarMenuButton>
+                                </SidebarMenuItem>
+                              );
+                            })}
+                            {block.extras.map((section) => {
+                              const isActive =
+                                activePath === section.path ||
+                                activePath.startsWith(`${section.path}/`);
+                              return (
+                                <SidebarMenuItem key={section.path}>
+                                  <SidebarMenuButton
+                                    data-settings-section={section.path}
+                                    aria-current={isActive ? "page" : undefined}
+                                    isActive={isActive}
+                                    onClick={() => handleExtraSectionClick(section)}
+                                  >
+                                    {section.icon ?? <Settings2Icon />}
+                                    <span
+                                      className={cn(
+                                        "truncate",
+                                        !compactSearchOpen && "max-md:sr-only",
+                                      )}
+                                    >
+                                      {section.label}
+                                    </span>
+                                  </SidebarMenuButton>
+                                </SidebarMenuItem>
+                              );
+                            })}
+                          </SidebarMenu>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ));
+                  })()}
                 </div>
               </div>
             )}
@@ -435,6 +545,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className="max-md:hidden">
+        {host?.sidebarFooter ?? null}
         <Suspense fallback={null}>
           <HanzoConnectSidebarSignIn />
         </Suspense>

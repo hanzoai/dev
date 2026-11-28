@@ -31,6 +31,7 @@ export interface OpenRepository {
  * `edit` needs nothing more. This is what a host's "Open / Edit in Hanzo" deep link calls.
  */
 export async function openRepository(embed: EmbedState, input: OpenRepository): Promise<string> {
+  if (!embed.runtime) throw new Error("No machine runtime is connected.");
   const environmentId = await whenPaired(embed.runtime.id);
   const remoteUrl = normalizePastedCloneUrl(input.repo);
   const settings = appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.settings;

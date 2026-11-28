@@ -1,10 +1,12 @@
 import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { Outlet, createFileRoute, redirect, useLocation } from "@tanstack/react-router";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { T, useGT, useMessages, Var } from "gt-react";
-import { RotateCcwIcon } from "lucide-react";
+import { RotateCcwIcon, XIcon } from "lucide-react";
 import { Button } from "../components/ui/button";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
+import { useEmbedSettingsHost } from "../embed/settingsHost";
 
 import { AppRouteModal, AppRouteModalClose } from "../components/AppRouteModal";
 import { SettingsBreadcrumb } from "../components/settings/SettingsBreadcrumb";
@@ -125,38 +127,114 @@ function SettingsContentLayout() {
   const gt = useGT();
   const contentArea = workspaceAreaProps("settings", 1, gt("Settings content"));
   const location = useLocation();
+  const host = useEmbedSettingsHost();
   const { search, environment } = useSettingsScope();
+  const activeExtra =
+    host?.activeExtraPath != null
+      ? (host.extraSections.find((section) => section.path === host.activeExtraPath) ?? null)
+      : null;
+  const activePathname = activeExtra?.path ?? location.pathname;
   const contentScopeKey =
-    location.pathname === "/settings/diagnostics" || location.pathname === "/settings/providers"
+    activePathname === "/settings/diagnostics" || activePathname === "/settings/providers"
       ? environment?.environmentId
       : JSON.stringify(search);
   const [restoreSignal, setRestoreSignal] = useState(0);
 
-  return (
-    <AppRouteModal label={gt("Settings")}>
-      <div className="relative flex min-h-0 flex-1">
-        <SettingsSidebarNav pathname={location.pathname} />
-        <div {...contentArea} className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <header className="flex h-12 shrink-0 items-center gap-3 border-b ps-5 pe-2">
-            <SettingsBreadcrumb pathname={location.pathname} />
-            <div className="ms-auto flex shrink-0 items-center gap-1">
-              {location.pathname === "/settings/general" ? (
-                <RestoreDeviceDefaultsButton
-                  onRestored={() => setRestoreSignal((value) => value + 1)}
-                />
-              ) : null}
+  // oxlint-disable-next-line hanzo/no-unreasoned-state-sync -- binds Escape to close inline embedded settings when focus is outside inputs and nested dialogs
+  useEffect(() => {
+    if (!host?.inline || !host.onClose) return;
+    const onClose = host.onClose;
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.key !== "Escape") return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable ||
+          target.closest(
+            '[role="dialog"]:not([data-app-modal]), [aria-modal="true"]:not([data-app-modal]), [data-slot$="popup"]:not([data-app-modal]), [data-keybinding-capture]',
+          ) !== null)
+      ) {
+        return;
+      }
+      event.preventDefault();
+      onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [host]);
+
+  const body = (
+    <div className="relative flex min-h-0 min-w-0 flex-1">
+      <SettingsSidebarNav pathname={activePathname} />
+      <div {...contentArea} className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <header className="flex h-12 shrink-0 items-center gap-3 border-b ps-5 pe-2">
+          <SettingsBreadcrumb pathname={activePathname} />
+          <div className="ms-auto flex shrink-0 items-center gap-1">
+            {activePathname === "/settings/general" ? (
+              <RestoreDeviceDefaultsButton
+                onRestored={() => setRestoreSignal((value) => value + 1)}
+              />
+            ) : null}
+            {host?.inline ? (
+              host.onClose ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        aria-label={gt("Close")}
+                        onClick={host.onClose}
+                      />
+                    }
+                  >
+                    <XIcon />
+                  </TooltipTrigger>
+                  <TooltipPopup side="bottom">
+                    <T>Close (Esc)</T>
+                  </TooltipPopup>
+                </Tooltip>
+              ) : null
+            ) : (
               <AppRouteModalClose />
+            )}
+          </div>
+        </header>
+        <div key={`${contentScopeKey}:${restoreSignal}`} className="min-h-0 flex flex-1 flex-col">
+          {activeExtra ? (
+            <div
+              data-settings-extra={activeExtra.path}
+              className="min-h-0 flex flex-1 flex-col overflow-y-auto"
+            >
+              {activeExtra.render()}
             </div>
-          </header>
-          <div key={`${contentScopeKey}:${restoreSignal}`} className="min-h-0 flex flex-1 flex-col">
+          ) : (
             <SettingsScopeBoundary pathname={location.pathname}>
               <Outlet />
             </SettingsScopeBoundary>
-          </div>
+          )}
         </div>
       </div>
-    </AppRouteModal>
+    </div>
   );
+
+  if (host?.inline) {
+    return (
+      <div
+        data-dev-settings=""
+        data-app-modal=""
+        aria-label={gt("Settings")}
+        className="relative flex size-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background text-foreground"
+      >
+        {body}
+      </div>
+    );
+  }
+
+  return <AppRouteModal label={gt("Settings")}>{body}</AppRouteModal>;
 }
 
 function SettingsRouteLayout() {

@@ -14,6 +14,7 @@ import {
   subscribeUsage,
   updateUsageSettings,
 } from "../../usage/usageStore";
+import { useEmbedSettingsHost } from "../../embed/settingsHost";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 
 const barColor = (percent: number) =>
@@ -145,6 +146,7 @@ function ProviderCard({
 
 export function UsageSettingsPanel() {
   const gt = useGT();
+  const host = useEmbedSettingsHost();
   const { summary, settings, error, refreshing } = useSyncExternalStore(
     subscribeUsage,
     getUsageState,
@@ -158,6 +160,7 @@ export function UsageSettingsPanel() {
 
   return (
     <SettingsPageContainer>
+      {host?.usageHeader ?? null}
       <SettingsSection
         id="usage"
         title={gt("Usage")}
@@ -190,9 +193,11 @@ export function UsageSettingsPanel() {
           control={
             <div className="flex items-center gap-3">
               <span className="text-sm font-medium tabular-nums">${totalUsd.toFixed(2)}</span>
-              <Button size="sm" variant="outline" render={<Link to="/usage" />}>
-                {gt("Details")}
-              </Button>
+              {!host?.inline ? (
+                <Button size="sm" variant="outline" render={<Link to="/usage" />}>
+                  {gt("Details")}
+                </Button>
+              ) : null}
             </div>
           }
         />
