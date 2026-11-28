@@ -13,13 +13,15 @@
  */
 import { SizableText, XStack, YStack } from '@hanzo/gui'
 import { useI18n, type Say } from '@hanzo/i18n/react'
-import { Check, Circle, ExternalLink, Folder, GitBranch, GitPullRequest, Globe, Info, Laptop, Maximize2, MoreHorizontal, Play, RefreshCcw, Square, SquareTerminal, Upload, X } from '@hanzogui/lucide-icons-2'
+import { Check, Circle, ExternalLink, FileText, Folder, GitBranch, GitPullRequest, Globe, Info, Laptop, Maximize2, MoreHorizontal, Play, RefreshCcw, Square, SquareTerminal, Upload, X } from '@hanzogui/lucide-icons-2'
 import { Button, DropdownMenu, Switch, type DropdownMenuProps } from '@hanzo/ui'
 import { Console, DEVICES, PreviewFrame, Views, type FrameEvent, type Line, type PreviewHandle } from '@hanzo/ui/agents'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { RING } from './pane.ts'
+import { resolveFallbackPreview, svgPreviewDocument, type FallbackPreview } from './preview-fallback.ts'
 import { cacheBustUrl, hasUnpublishedEdits, previewRevision, resolvePreviewSource } from './preview-url.ts'
+import { Prose } from './prose.tsx'
 import { read as readChanges, type Changes } from './api/changes.ts'
 import { read as readEnvironment } from './api/environment.ts'
 import { park, ports as listening, preview, sandbox as look, serve, served, stay, wake, type Box, type Port } from './api/sandbox.ts'
@@ -140,11 +142,14 @@ export function Desk({
       bleed: true,
       render: () => (
         <Browser
+          session={id}
           sandbox={sandbox}
           held={held}
           site={site}
           live={live}
           repo={repo}
+          branch={branch}
+          base={base}
           events={events}
           published={published}
           sessionStatus={sessionStatus}
@@ -243,12 +248,13 @@ export function Desk({
             >
               <XStack
                 px="$2.5"
-                py="$1.5"
+                py="$1"
                 gap="$1.5"
                 items="center"
                 borderBottomWidth={1}
                 borderColor="$borderColor"
-                minH={36}
+                height={40}
+                minH={40}
                 style={idx === 1 && (topRightInset ?? !sheet) ? { paddingInlineEnd: 'calc(10px + var(--hanzo-shell-top-right-inset, 0px))' } : undefined}
               >
                 <SizableText flex={1} minW={0} size="$2" color="$ink" numberOfLines={1}>
@@ -310,8 +316,8 @@ export function Desk({
         menu={
           <DropdownMenu
             trigger={
-              <XStack render="button" aria-label={say('Session actions')} p="$1.5" rounded="$2" hoverStyle={{ bg: '$hover' }}>
-                <MoreHorizontal size={16} />
+              <XStack render="button" aria-label={say('Session actions')} width={28} height={28} items="center" justify="center" rounded={8} hoverStyle={{ bg: '$hover' }}>
+                <MoreHorizontal size={15} />
               </XStack>
             }
             items={[...menu, { key: 'details', label: say('Details'), icon: <Info size={16} />, onSelect: environ }]}
@@ -481,11 +487,14 @@ const SAYS: Record<number, (port: number, say: Say) => string> = {
  * in a while; any other status is said, and Retry is the person's.
  */
 function Browser({
+  session,
   sandbox,
   held,
   site,
   live,
   repo,
+  branch,
+  base,
   events,
   published,
   sessionStatus,
@@ -493,11 +502,14 @@ function Browser({
   onPublish,
   onEnvironment,
 }: {
+  session: string
   sandbox: string
   held: Box['state'] | ''
   site: string
   live: boolean
   repo: string
+  branch: string
+  base: string
   events: Event[]
   published: number
   sessionStatus: string
@@ -662,6 +674,11 @@ function Browser({
       <>
         {dialog}
         <Site
+          session={session}
+          sandbox={sandbox}
+          repo={repo}
+          branch={branch}
+          base={base}
           site={site}
           rev={rev}
           onReload={() => setRev((n) => n + 1)}
@@ -835,10 +852,17 @@ const WATCHING = 3_000
 
 /**
  * Where the run published its work, framed, with its address, a reload and the
- * page in a tab of its own; or what keeps its sandbox from serving, and the
- * server the person can start in it.
+ * page in a tab of its own; or, when nothing is serving yet, an automatic
+ * inline preview of the session's most recently edited file or the project's
+ * README.md (falling back to a quiet "No files yet" state only when there are
+ * genuinely zero files).
  */
 function Site({
+  session,
+  sandbox,
+  repo,
+  branch,
+  base,
   site,
   rev,
   onReload,
@@ -853,6 +877,11 @@ function Site({
   onPublish,
   onEnvironment,
 }: {
+  session: string
+  sandbox: string
+  repo: string
+  branch: string
+  base: string
   site: string
   rev: number
   onReload: () => void
@@ -868,15 +897,58 @@ function Site({
   onEnvironment?: () => void
 }) {
   const { t } = useI18n()
+  const host = useHost()
+  const target = useTarget()
+  const signed = Boolean(host.person)
+  const running = Boolean(sandbox) && held === 'running'
   const progress = live ? steps(events) : []
   const frame = useRef<PreviewHandle | null>(null)
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop')
   const [dock, setDock] = useKept('hanzo.build.dock', 36)
   const [lines, setLines] = useState<Line[]>([])
+  const [fallback, setFallback] = useState<FallbackPreview | null>(null)
+  const [fallbackLoading, setFallbackLoading] = useState(false)
   const onBridge = (e: FrameEvent) => {
     if (e.type === 'preview:console') setLines((was) => [...was.slice(-400), { id: `p${was.length}-${Date.now()}`, level: e.level, text: e.text, source: 'page' }])
   }
+
+  // When no live server or published site is serving, load the session's latest edited file or project README.
+  useEffect(() => {
+    if (site) {
+      setFallback(null)
+      setFallbackLoading(false)
+      return
+    }
+    const ctrl = new AbortController()
+    setFallbackLoading(true)
+    void resolveFallbackPreview({
+      target,
+      session,
+      sandbox,
+      running,
+      signed,
+      repo,
+      branch,
+      base,
+      events,
+      signal: ctrl.signal,
+    })
+      .then((found) => {
+        if (!ctrl.signal.aborted) setFallback(found)
+      })
+      .catch(() => {
+        if (!ctrl.signal.aborted) setFallback(null)
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setFallbackLoading(false)
+      })
+    return () => ctrl.abort()
+  }, [site, target, session, sandbox, running, signed, repo, branch, base, rev, events.length])
+
   const framedSite = site ? cacheBustUrl(site, rev) : ''
+  const showDeviceToggle = Boolean(site) || fallback?.format === 'html'
+  const fallbackPillLabel = fallback ? fallback.path : ''
+
   return (
     <YStack flex={1} minH={0}>
       <XStack px="$2" py="$1.5" gap="$1.5" items="center" borderBottomWidth={1} borderColor="$borderColor" minW={0}>
@@ -902,18 +974,39 @@ function Site({
               {t('Live site')}
             </SizableText>
           </XStack>
+        ) : fallback ? (
+          <XStack
+            data-slot="preview-mode"
+            data-kind={fallback.source === 'readme' ? 'readme' : 'file'}
+            items="center"
+            gap="$1"
+            px="$2"
+            py="$0.5"
+            rounded={999}
+            bg="$edge"
+            borderWidth={1}
+            borderColor="$borderColor"
+            shrink={1}
+            minW={0}
+            maxW={260}
+          >
+            <FileText size={11} opacity={0.75} />
+            <SizableText size="$1" color="$ink" numberOfLines={1} style={mono}>
+              {fallbackPillLabel}
+            </SizableText>
+          </XStack>
         ) : null}
         <SizableText flex={1} minW={0} size="$1" color="$soft" numberOfLines={1} style={mono}>
-          {site || t('Nothing is serving yet')}
+          {site ? site : fallback ? '' : fallbackLoading ? t('Loading preview…') : t('No files yet')}
         </SizableText>
         {onUseSandbox ? (
           <Button size="sm" variant="outline" onPress={onUseSandbox} shrink={0}>
             {t('Sandbox preview')}
           </Button>
-        ) : onStart && site ? (
+        ) : onStart ? (
           <XStack
             render="button"
-            aria-label={t('Start sandbox preview')}
+            aria-label={site ? t('Start sandbox preview') : t('Start dev server')}
             onPress={onStart}
             items="center"
             gap="$1"
@@ -928,7 +1021,7 @@ function Site({
           >
             <Play size={12} />
             <SizableText size="$1" color="$ink" numberOfLines={1}>
-              {serving?.up ? t('Starting…') : t('Sandbox preview')}
+              {serving?.up ? t('Starting…') : site ? t('Sandbox preview') : t('Start dev server')}
             </SizableText>
           </XStack>
         ) : null}
@@ -940,7 +1033,9 @@ function Site({
             </SizableText>
           </Button>
         ) : null}
-        <Views views={DEVICES} value={device} onChange={(d) => setDevice(d as 'desktop' | 'mobile')} label={t('Device')} labels="none" />
+        {showDeviceToggle ? (
+          <Views views={DEVICES} value={device} onChange={(d) => setDevice(d as 'desktop' | 'mobile')} label={t('Device')} labels="none" />
+        ) : null}
         {site ? (
           <Out href={site} label={t('Open in browser')}>
             <OpenOut label={t('Open in browser')} />
@@ -964,66 +1059,135 @@ function Site({
           ) : null}
         </XStack>
       ) : null}
-      <PreviewFrame
-        ref={frame}
-        src={framedSite}
-        title={t('Where this session is published')}
-        device={device}
-        onBridge={onBridge}
-        empty={
-          <YStack items="center" gap="$2.5" p="$6">
-            <Globe size={28} opacity={0.45} />
-            <SizableText size="$3" color="$ink">
-              {t('Nothing is serving yet')}
+      {!site && serving ? (
+        <YStack data-slot="preview-serving-banner" px="$3" py="$2" gap="$1.5" bg="$sunken" borderBottomWidth={1} borderColor="$borderColor">
+          <XStack items="center" gap="$2" flexWrap="wrap">
+            <SizableText size="$1" color="$ink" role="status" flex={1} minW={140}>
+              {serving.why || (serving.command ? t('Starting {command}…', { command: serving.command }) : t('Starting the dev server…'))}
             </SizableText>
-            <SizableText size="$2" color="$soft" style={{ textAlign: 'center', maxWidth: 280 }}>
-              {held === 'parked'
-                ? `${t('This session’s sandbox is suspended.')} ${t('Resume it to see what it serves.')}`
-                : live
-                  ? t('When the session starts a server in its sandbox, the page opens here.')
-                  : `${t('Nothing listens in this session’s sandbox, and it published no site.')} ${t('A server the session started stopped when the session ended.')}`}
-            </SizableText>
-            {progress.length ? (
-              <YStack render="ol" aria-label={t('Live session steps')} gap="$2" m={0} p={0} width="100%" maxW={340}>
-                {progress.map((step) => (
-                  <XStack render="li" key={step.name} borderWidth={1} borderColor="$borderColor" bg="$sunken" rounded="$3" p="$2.5" gap="$2" items="center">
-                    {step.done ? <Check size={15} aria-hidden /> : <Circle size={15} aria-hidden />}
-                    <SizableText size="$2" flex={1}>{step.name}</SizableText>
-                    <SizableText size="$1" color="$soft">{step.done ? t('Finished') : t('Running')}</SizableText>
-                  </XStack>
-                ))}
-              </YStack>
-            ) : null}
-            {serving ? (
-              <YStack items="center" gap="$2" width="100%">
-                <SizableText size="$2" color="$ink" role="status" style={{ textAlign: 'center', maxWidth: 320 }}>
-                  {serving.why || (serving.command ? t('Starting {command}…', { command: serving.command }) : t('Starting the dev server…'))}
-                </SizableText>
-                {serving.log ? <Tail log={serving.log} /> : null}
-                {serving.why ? (
-                  <XStack gap="$2" flexWrap="wrap" justify="center">
-                    {onStart ? (
-                      <Button size="sm" variant="outline" onPress={onStart}>
-                        {t('Try again')}
-                      </Button>
-                    ) : null}
-                    {onEnvironment ? (
-                      <Button size="sm" variant="outline" onPress={onEnvironment}>
-                        {t('Set a start command')}
-                      </Button>
-                    ) : null}
-                  </XStack>
-                ) : null}
-              </YStack>
-            ) : onStart ? (
-              <Button size="sm" onPress={onStart}>
-                {t('Start dev server')}
+            {serving.why && onStart ? (
+              <Button size="sm" variant="outline" onPress={onStart}>
+                {t('Try again')}
               </Button>
             ) : null}
-          </YStack>
-        }
-      />
-      {site ? <Console lines={lines} height={dock} onHeight={setDock} onClear={() => setLines([])} label={t('Console')} /> : null}
+            {serving.why && onEnvironment ? (
+              <Button size="sm" variant="outline" onPress={onEnvironment}>
+                {t('Set a start command')}
+              </Button>
+            ) : null}
+          </XStack>
+          {serving.log ? <Tail log={serving.log} /> : null}
+        </YStack>
+      ) : null}
+      {site ? (
+        <>
+          <PreviewFrame
+            ref={frame}
+            src={framedSite}
+            title={t('Where this session is published')}
+            device={device}
+            onBridge={onBridge}
+          />
+          <Console lines={lines} height={dock} onHeight={setDock} onClear={() => setLines([])} label={t('Console')} />
+        </>
+      ) : fallback ? (
+        <FallbackPreviewBody preview={fallback} device={device} />
+      ) : (
+        <YStack data-slot="preview-empty" flex={1} items="center" justify="center" gap="$2.5" p="$6">
+          <FileText size={24} opacity={0.35} />
+          <SizableText size="$3" color="$ink">
+            {fallbackLoading ? t('Loading preview…') : t('No files yet')}
+          </SizableText>
+          {progress.length ? (
+            <YStack render="ol" aria-label={t('Live session steps')} gap="$2" m={0} p={0} width="100%" maxW={340}>
+              {progress.map((step) => (
+                <XStack render="li" key={step.name} borderWidth={1} borderColor="$borderColor" bg="$sunken" rounded="$3" p="$2.5" gap="$2" items="center">
+                  {step.done ? <Check size={15} aria-hidden /> : <Circle size={15} aria-hidden />}
+                  <SizableText size="$2" flex={1}>{step.name}</SizableText>
+                  <SizableText size="$1" color="$soft">{step.done ? t('Finished') : t('Running')}</SizableText>
+                </XStack>
+              ))}
+            </YStack>
+          ) : null}
+          {!serving && onStart ? (
+            <Button size="sm" variant="outline" onPress={onStart}>
+              {t('Start dev server')}
+            </Button>
+          ) : null}
+        </YStack>
+      )}
+    </YStack>
+  )
+}
+
+/** Inline renderer for session-edited files and project README.md when no dev server is listening. */
+export function FallbackPreviewBody({ preview, device }: { preview: FallbackPreview; device: 'desktop' | 'mobile' }) {
+  if (preview.format === 'markdown') {
+    return (
+      <YStack data-slot="preview-fallback" data-format="markdown" flex={1} minH={0} overflow="scroll" px="$5" py="$4">
+        <YStack maxW={760} width="100%" mx="auto">
+          <Prose text={preview.text} />
+        </YStack>
+      </YStack>
+    )
+  }
+  if (preview.format === 'html' || preview.format === 'svg') {
+    const srcDoc = preview.format === 'svg' ? svgPreviewDocument(preview.text) : preview.text
+    return (
+      <YStack data-slot="preview-fallback" data-format={preview.format} flex={1} minH={0} items="center" justify="center" bg="$sunken">
+        <iframe
+          srcDoc={srcDoc}
+          title={preview.path}
+          sandbox="allow-scripts"
+          style={{
+            border: 0,
+            width: preview.format === 'html' && device === 'mobile' ? 390 : '100%',
+            maxWidth: '100%',
+            height: '100%',
+            display: 'block',
+            background: preview.format === 'html' ? '#fff' : 'transparent',
+          }}
+        />
+      </YStack>
+    )
+  }
+  if (preview.format === 'image' && preview.imageUrl) {
+    return (
+      <YStack data-slot="preview-fallback" data-format="image" flex={1} minH={0} items="center" justify="center" p="$4" overflow="scroll">
+        <img src={preview.imageUrl} alt={preview.path} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 6 }} />
+      </YStack>
+    )
+  }
+  const codeLines = preview.text.replace(/\r\n?/g, '\n').split('\n')
+  return (
+    <YStack data-slot="preview-fallback" data-format="code" flex={1} minH={0} overflow="scroll" px="$3" py="$3" bg="$background">
+      {codeLines.map((line, idx) => (
+        <XStack key={idx} gap="$3" items="flex-start">
+          <SizableText
+            size="$1"
+            color="$soft"
+            width={36}
+            shrink={0}
+            text="end"
+            fontFamily="$mono"
+            opacity={0.55}
+            fontVariant={['tabular-nums']}
+            style={{ userSelect: 'none' }}
+          >
+            {String(idx + 1)}
+          </SizableText>
+          <SizableText
+            flex={1}
+            minW={0}
+            size="$1"
+            color="$ink"
+            fontFamily="$mono"
+            $platform-web={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+          >
+            {line || ' '}
+          </SizableText>
+        </XStack>
+      ))}
     </YStack>
   )
 }

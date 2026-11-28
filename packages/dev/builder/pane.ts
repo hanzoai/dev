@@ -10,7 +10,7 @@ export const pane = {
   bg: 'var(--pane-fill, var(--sheet-1))',
   rounded: 'var(--pane-round, var(--radius-xl))',
   borderWidth: 1,
-  borderColor: 'var(--pane-edge, var(--white-08))',
+  borderColor: 'var(--pane-edge, rgba(255, 255, 255, 0.08))',
   backdropFilter: 'var(--pane-blur, blur(20px) saturate(1.8))',
   boxShadow: 'var(--shadow-sheet-2)',
 } as const

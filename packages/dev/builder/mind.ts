@@ -28,24 +28,37 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 
 import { prepaid as readPrepaid } from './api/billing.ts'
 import { Refusal, type Target } from './api/call.ts'
-import { ENSO, models as read, type Model } from './api/models.ts'
+import { ENSO, isRemovedEnsoFree, models as read, type Model } from './api/models.ts'
 import { usePick } from './pick.ts'
 
-export type Effort = 'auto' | 'low' | 'high' | 'max'
+export type Effort = 'auto' | 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
-const EFFORT_LABELS: Partial<Record<Effort, string>> = {
-  low: phrase('Fast'),
+const EFFORT_ORDER: readonly Effort[] = ['auto', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+
+const EFFORT_LABELS: Record<Effort, string> = {
+  auto: phrase('Auto'),
+  off: phrase('Off'),
+  minimal: phrase('Minimal'),
+  low: phrase('Low'),
+  medium: phrase('Medium'),
+  high: phrase('High'),
+  xhigh: phrase('Extra High'),
+  max: phrase('Max'),
 }
 
 const EFFORT_NOTES: Record<Effort, string> = {
   auto: phrase('Matches thinking depth to the complexity of each prompt.'),
-  low: phrase('Fastest edits and replies for straightforward coding tasks.'),
+  off: phrase('Direct replies without extended reasoning.'),
+  minimal: phrase('Lightest reasoning pass for quick checks and small edits.'),
+  low: phrase('Fast edits and replies for straightforward coding tasks.'),
+  medium: phrase('Balanced reasoning depth for everyday engineering work.'),
   high: phrase('Spends extra time reasoning through multi-step tasks and code.'),
+  xhigh: phrase('Extended reasoning for hard debugging and multi-file changes.'),
   max: phrase('Deepest reasoning and verification for complex architecture.'),
 }
 
-/** The efforts a Dev run offers, in order: Auto (medium), Fast (low), High, and Max. Marked English, drawn through `t`. */
-export const EFFORTS = (['auto', 'low', 'high', 'max'] as const).map((id) => {
+/** The efforts a Dev run offers, matching every reasoning level tracked across models. Marked English, drawn through `t`. */
+export const EFFORTS = EFFORT_ORDER.map((id) => {
   const base = EVERY.find((e) => e.id === id)
   return {
     id,
@@ -54,9 +67,13 @@ export const EFFORTS = (['auto', 'low', 'high', 'max'] as const).map((id) => {
   }
 })
 
-/** The effort a coding run names (apps/coding takes low, medium or high): low for Fast, medium for Auto, high for High/Max. */
+/** The effort a coding run names (apps/coding takes low, medium or high). */
 export const level = (effort: Effort): 'low' | 'medium' | 'high' =>
-  effort === 'low' ? 'low' : effort === 'auto' ? 'medium' : 'high'
+  effort === 'off' || effort === 'minimal' || effort === 'low'
+    ? 'low'
+    : effort === 'auto' || effort === 'medium'
+      ? 'medium'
+      : 'high'
 
 /** What a person chose: the model (Enso routes) and the effort. */
 export interface Choice {
@@ -101,8 +118,8 @@ function useAllowThirdPartyModels(): boolean {
   return allowed
 }
 
-/** An effort kept, read back: one the ladder still offers, XHigh (which Max replaced) as Max, else Auto. */
-const effortOf = (v: unknown): Effort => (v === 'xhigh' ? 'max' : EFFORTS.some((e) => e.id === v) ? (v as Effort) : FIRST.effort)
+/** An effort kept, read back: one the ladder still offers, else Auto. */
+const effortOf = (v: unknown): Effort => (EFFORTS.some((e) => e.id === v) ? (v as Effort) : FIRST.effort)
 
 /** The store, or null where the browser gives none (a server render, blocked site data). */
 function store(): Storage | null {
@@ -199,7 +216,7 @@ const ROUTER: Model[] = parseModels([{ id: ENSO, name: 'Enso Auto', family: 'ens
 /** The last list this browser read, or none. */
 function last(): Model[] {
   try {
-    return parseModels(JSON.parse(store()?.getItem(LAST) ?? 'null'))
+    return parseModels(JSON.parse(store()?.getItem(LAST) ?? 'null')).filter((m) => !isRemovedEnsoFree(m))
   } catch {
     return []
   }
@@ -266,7 +283,10 @@ export function useCatalog(t: Target): Catalog {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [at])
   const now = state?.at === at ? state : settled.has(at) ? { at, models: settled.get(at)!, error: null } : null
-  if (!now?.error) return { models: now?.models ?? [], list: now?.models ?? [], loading: !now, error: null, note: '' }
+  if (!now?.error) {
+    const clean = (now?.models ?? []).filter((m) => !isRemovedEnsoFree(m))
+    return { models: clean, list: clean, loading: !now, error: null, note: '' }
+  }
   const kept = last()
   if (kept.length) return { models: kept, list: kept, loading: false, error: null, note: 'The model list could not be refreshed; these are the models as last read.' }
   const spent = now.error instanceof Refusal && now.error.status === 429
@@ -279,9 +299,12 @@ export function useCatalog(t: Target): Catalog {
   }
 }
 
-/** Whether `model` is one this plan may send: on Free, Enso Auto alone (commerce's `allowedModels`). */
+const FREE_ALLOWED_MODELS: ReadonlySet<string> = new Set([ENSO, 'enso-auto', 'hanzo/enso-auto', 'enso-flash', 'hanzo/enso-flash'])
+
+/** Whether `model` is one this plan may send: on Free, Enso Auto and Enso Flash only (never Enso Free or other paid models). */
 export function grants(free: boolean, model: string): boolean {
-  return !free || model === ENSO
+  if (!free) return true
+  return FREE_ALLOWED_MODELS.has(model.trim().toLowerCase())
 }
 
 /** Whole cents as dollars. */

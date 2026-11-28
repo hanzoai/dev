@@ -1,5 +1,9 @@
 import type { ServerProvider, ServerProviderModel } from "@hanzodev/contracts";
-import { HANZO_REASONING_CAPABILITIES } from "@hanzodev/shared/model";
+import {
+  HANZO_REASONING_CAPABILITIES,
+  isEnsoFreeModel,
+  withHanzoReasoningCapabilities,
+} from "@hanzodev/shared/model";
 import type { SharedIdentitySnapshot } from "@hanzodev/shared/hanzoSharedIdentity";
 import * as HostProcess from "@hanzodev/shared/HostProcess";
 import * as Effect from "effect/Effect";
@@ -29,6 +33,13 @@ export const CURATED_HANZO_MODELS: ReadonlyArray<ServerProviderModel> = [
     slug: "enso-max",
     name: "Enso Max",
     shortName: "Max",
+    isCustom: false,
+    capabilities: HANZO_REASONING_CAPABILITIES,
+  },
+  {
+    slug: "enso-pro",
+    name: "Enso Pro",
+    shortName: "Pro",
     isCustom: false,
     capabilities: HANZO_REASONING_CAPABILITIES,
   },
@@ -125,19 +136,31 @@ export const mergeCuratedHanzoModels = (
 ): ReadonlyArray<ServerProviderModel> => {
   const bySlug = new Map<string, ServerProviderModel>();
   const usedNames = new Set<string>();
+  const canonicalSlug = (slug: string) =>
+    slug
+      .trim()
+      .toLowerCase()
+      .replace(/^hanzo\//, "");
+  const canonicalCuratedSlugs = new Set<string>();
   for (const curated of CURATED_HANZO_MODELS) {
     bySlug.set(curated.slug, curated);
+    canonicalCuratedSlugs.add(canonicalSlug(curated.slug));
     usedNames.add(curated.name.trim().toLowerCase());
   }
   for (const model of discovered ?? []) {
-    if (!bySlug.has(model.slug)) {
-      const normalizedName = model.name.trim().toLowerCase();
-      const disambiguatedName = usedNames.has(normalizedName)
-        ? `${model.name} (${model.slug})`
-        : model.name;
-      usedNames.add(disambiguatedName.trim().toLowerCase());
-      bySlug.set(model.slug, { ...model, name: disambiguatedName, isDefault: false });
-    }
+    if (isEnsoFreeModel(model.slug, model.name)) continue;
+    if (bySlug.has(model.slug) || canonicalCuratedSlugs.has(canonicalSlug(model.slug))) continue;
+    const normalizedName = model.name.trim().toLowerCase();
+    const disambiguatedName = usedNames.has(normalizedName)
+      ? `${model.name} (${model.slug})`
+      : model.name;
+    usedNames.add(disambiguatedName.trim().toLowerCase());
+    bySlug.set(model.slug, {
+      ...model,
+      name: disambiguatedName,
+      isDefault: false,
+      capabilities: withHanzoReasoningCapabilities(model.capabilities),
+    });
   }
   return Array.from(bySlug.values());
 };

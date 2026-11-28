@@ -259,6 +259,8 @@ export interface Node {
   names: string[]
   /** A file's text, or '' when it is binary or past the view cap. */
   text: string
+  /** Base64 bytes when binary and within the view cap (used for inline image previews). */
+  base64?: string
   binary: boolean
   truncated: boolean
 }
@@ -271,7 +273,8 @@ export async function read(t: Target, sandbox: string, path: string): Promise<No
   const o = (await call<Record<string, unknown>>(t, 'POST', '/v1/sandbox/read', { id: sandbox, path })) ?? {}
   const dir = o.dir === true
   const names = Array.isArray(o.entries) ? o.entries.filter((n): n is string => typeof n === 'string').sort() : []
-  const bytes = !dir && typeof o.data === 'string' ? decode(o.data) : new Uint8Array()
+  const rawB64 = !dir && typeof o.data === 'string' ? o.data : ''
+  const bytes = rawB64 ? decode(rawB64) : new Uint8Array()
   const binary = bytes.includes(0)
   const truncated = bytes.length > CAP
   return {
@@ -279,6 +282,7 @@ export async function read(t: Target, sandbox: string, path: string): Promise<No
     dir,
     names,
     text: binary || truncated ? '' : new TextDecoder().decode(bytes),
+    ...(binary && !truncated && rawB64 ? { base64: rawB64 } : {}),
     binary,
     truncated,
   }

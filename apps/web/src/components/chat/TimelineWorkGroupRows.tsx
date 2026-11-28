@@ -461,7 +461,7 @@ export function ThinkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind:
         liveAnswerPreview ??
         (localModel ? gt("Loading model…") : gt("Thinking"))
       }
-      iconName="brain"
+      iconName={undefined}
       active={live}
       shimmer={live}
     />
@@ -489,7 +489,7 @@ function LiveActivityRow({
   shimmer = false,
 }: {
   label: ReactNode;
-  iconName?: WorkEntryIconName;
+  iconName?: WorkEntryIconName | undefined;
   toolIcon?: ToolActivityIcon | undefined;
   failed?: boolean;
   active?: boolean;
@@ -608,6 +608,7 @@ export function LiveWorkEntryTimelineRow({
       ? liveThoughtLine((row.thought.detail ?? "").slice(0, THOUGHT_PREVIEW_SOURCE_MAX_LENGTH))
       : "";
   const thoughtIsStatus = thoughtLine !== "" && row.entry === row.thought;
+  const hideReasoningIcon = thoughtIsStatus || row.entry.itemType === "reasoning";
 
   return (
     <button
@@ -628,16 +629,7 @@ export function LiveWorkEntryTimelineRow({
     >
       {thoughtLine ? (
         <WorkLogRow
-          icon={
-            <span className="flex size-4 items-center justify-center text-icon-muted">
-              <ToolActivityIconView
-                icon={undefined}
-                fallbackName="brain"
-                className="block size-4 shrink-0 stroke-2"
-                muted
-              />
-            </span>
-          }
+          icon={null}
           label={
             <span className="line-clamp-4">
               <ChatMarkdown
@@ -682,8 +674,10 @@ export function LiveWorkEntryTimelineRow({
             label
           )
         }
-        iconName={workEntryIconName(row.entry)}
-        toolIcon={row.entry.toolIcon ?? row.entry.toolSource?.icon}
+        iconName={hideReasoningIcon ? undefined : workEntryIconName(row.entry)}
+        toolIcon={
+          hideReasoningIcon ? undefined : (row.entry.toolIcon ?? row.entry.toolSource?.icon)
+        }
         failed={failed}
         active={row.active}
       />

@@ -37,7 +37,10 @@ import {
   createInboxReturnTracker,
   isThreadWorking,
 } from "@hanzodev/client-runtime/state/thread-inbox";
-import { sortSettledThreads } from "@hanzodev/client-runtime/state/thread-sort";
+import {
+  resolveThreadActivityTimestamp,
+  sortSettledThreads,
+} from "@hanzodev/client-runtime/state/thread-sort";
 import {
   nextShownOrder,
   threadSearchMatchKey,
@@ -69,6 +72,7 @@ import {
 } from "@hanzodev/client-runtime/state/threads";
 
 import {
+  AlignJustifyIcon,
   CheckIcon,
   ChevronDownIcon,
   FolderIcon,
@@ -136,7 +140,7 @@ import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { registerSettleAndAdvance } from "../settleAndAdvance";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
-import { useClientSettings } from "../hooks/useSettings";
+import { updateClientSettings, useClientSettings } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
@@ -259,6 +263,17 @@ import { CloudThreadsSection } from "./cloud/CloudThreads";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuRadioItemIndicator,
+  MenuSeparator,
+  MenuTrigger,
+} from "./ui/menu";
 import { TooltipProvider } from "./ui/tooltip";
 import {
   composerDraftHasUserContent,
@@ -992,7 +1007,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   });
   const boringSidebarEnabled = useClientSettings((settings) => settings.boringSidebarEnabled);
   const threadRows = useClientSettings((settings) => settings.sidebarThreadRows);
-  const folderRowsMultiline = threadRows === "two_lines";
+  const sidebarViewMode = useClientSettings((settings) => settings.sidebarViewMode);
+  const folderRowsMultiline = threadRows !== "one_line";
   const newThreadContext = useHandleNewThread();
   // Row callbacks capture only the handler; the rest of the context changes with the route.
   const { handleNewThread } = newThreadContext;
@@ -2992,6 +3008,81 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             <SidebarThreadHeader
               showNewThread={!isMobile}
               hasProjects={projectGroups.length > 0}
+              viewControls={
+                <Menu>
+                  <MenuTrigger
+                    render={
+                      <SidebarHeaderIconButton
+                        data-testid="sidebar-view-toggle"
+                        label={gt("View & density")}
+                      />
+                    }
+                  >
+                    <AlignJustifyIcon />
+                  </MenuTrigger>
+                  <MenuPopup align="end" className="min-w-44">
+                    <MenuGroup>
+                      <MenuGroupLabel>{gt("View")}</MenuGroupLabel>
+                      <MenuRadioGroup
+                        value={sidebarViewMode}
+                        onValueChange={(value) => {
+                          if (value === "priority" || value === "chronological") {
+                            void updateClientSettings({ sidebarViewMode: value });
+                          }
+                        }}
+                      >
+                        <MenuRadioItem value="priority" closeOnClick>
+                          <span className="flex items-center justify-between gap-3">
+                            <span>{gt("Priority")}</span>
+                            <MenuRadioItemIndicator />
+                          </span>
+                        </MenuRadioItem>
+                        <MenuRadioItem value="chronological" closeOnClick>
+                          <span className="flex items-center justify-between gap-3">
+                            <span>{gt("Day by day")}</span>
+                            <MenuRadioItemIndicator />
+                          </span>
+                        </MenuRadioItem>
+                      </MenuRadioGroup>
+                    </MenuGroup>
+                    <MenuSeparator />
+                    <MenuGroup>
+                      <MenuGroupLabel>{gt("Density")}</MenuGroupLabel>
+                      <MenuRadioGroup
+                        value={threadRows}
+                        onValueChange={(value) => {
+                          if (
+                            value === "one_line" ||
+                            value === "two_lines" ||
+                            value === "three_lines"
+                          ) {
+                            void updateClientSettings({ sidebarThreadRows: value });
+                          }
+                        }}
+                      >
+                        <MenuRadioItem value="one_line" closeOnClick>
+                          <span className="flex items-center justify-between gap-3">
+                            <span>{gt("1 line")}</span>
+                            <MenuRadioItemIndicator />
+                          </span>
+                        </MenuRadioItem>
+                        <MenuRadioItem value="two_lines" closeOnClick>
+                          <span className="flex items-center justify-between gap-3">
+                            <span>{gt("2 lines")}</span>
+                            <MenuRadioItemIndicator />
+                          </span>
+                        </MenuRadioItem>
+                        <MenuRadioItem value="three_lines" closeOnClick>
+                          <span className="flex items-center justify-between gap-3">
+                            <span>{gt("3 lines")}</span>
+                            <MenuRadioItemIndicator />
+                          </span>
+                        </MenuRadioItem>
+                      </MenuRadioGroup>
+                    </MenuGroup>
+                  </MenuPopup>
+                </Menu>
+              }
               projectScope={
                 <Combobox
                   items={projectScopeItems}
@@ -3427,7 +3518,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             }
                             thread={thread}
                             variant={rowVariant}
-                            oneLine={threadRows === "one_line"}
+                            density={threadRows}
                             navigationParent={
                               folderRow ??
                               (section === "working" ||
@@ -3531,6 +3622,71 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           onDraftContextMenu={handleDraftContextMenu}
                         />,
                       ];
+                      if (sidebarViewMode === "chronological") {
+                        const chronological = [
+                          ...pinnedThreads,
+                          ...activeThreads,
+                          ...workingThreads,
+                          ...snoozedThreads,
+                          ...renderedSettledThreads,
+                        ].toSorted(
+                          (left, right) =>
+                            firstValidTimestampMs(resolveThreadActivityTimestamp(right)) -
+                            firstValidTimestampMs(resolveThreadActivityTimestamp(left)),
+                        );
+                        const startOfDay = (ms: number) => {
+                          const date = new Date(ms);
+                          date.setHours(0, 0, 0, 0);
+                          return date.getTime();
+                        };
+                        const todayStart = startOfDay(Date.parse(snoozeNow));
+                        let currentBucket: string | null = null;
+                        for (const thread of chronological) {
+                          const ts = firstValidTimestampMs(resolveThreadActivityTimestamp(thread));
+                          const diffDays = Number.isFinite(ts)
+                            ? Math.floor((todayStart - startOfDay(ts)) / 86_400_000)
+                            : Number.POSITIVE_INFINITY;
+                          const bucket =
+                            diffDays <= 0
+                              ? "today"
+                              : diffDays === 1
+                                ? "yesterday"
+                                : diffDays <= 7
+                                  ? "week"
+                                  : diffDays <= 30
+                                    ? "month"
+                                    : "older";
+                          if (bucket !== currentBucket) {
+                            currentBucket = bucket;
+                            const label =
+                              bucket === "today"
+                                ? gt("Today")
+                                : bucket === "yesterday"
+                                  ? gt("Yesterday")
+                                  : bucket === "week"
+                                    ? gt("Previous 7 days")
+                                    : bucket === "month"
+                                      ? gt("Previous 30 days")
+                                      : gt("Older");
+                            items.push(
+                              <li
+                                key={`day-bucket:${bucket}`}
+                                role="presentation"
+                                data-sidebar-day-group={bucket}
+                                className="list-none px-2.5 pt-2 pb-0.5 text-2xs font-medium text-sidebar-muted-foreground/75 first:pt-1"
+                              >
+                                {label}
+                              </li>,
+                            );
+                          }
+                          const key = scopedThreadKey(
+                            scopeThreadRef(thread.environmentId, thread.id),
+                          );
+                          const section = sectionByThreadKey.get(key) ?? "active";
+                          items.push(renderThreadRow(thread, section));
+                        }
+                        return items;
+                      }
                       const foldable = sidebarListItems.filter(
                         (item) =>
                           item.kind === "thread" &&

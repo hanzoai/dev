@@ -36,7 +36,7 @@ import {
   type ScopedThreadRef,
 } from "@hanzodev/contracts";
 
-import type { TimestampFormat } from "@hanzodev/contracts/settings";
+import type { SidebarThreadRows, TimestampFormat } from "@hanzodev/contracts/settings";
 import {
   AlarmClockIcon,
   AlarmClockOffIcon,
@@ -577,9 +577,8 @@ type SidebarThreadRowProps = {
   // "folder" is a one-line row inside a boring sidebar project folder;
   // "folder-multiline" adds the card's branch and PR line under it.
   variant: "card" | "slim" | "folder" | "folder-multiline";
-  // Card rows only: the title, status dot, and time on one line, without the
-  // project, branch, and preview lines.
-  oneLine: boolean;
+  // Row density: 1-line compact title, 2-line title + repo/branch/status, or 3-line full context.
+  density: SidebarThreadRows;
   navigationParent?: string | undefined;
   variantAction: SidebarSweepAction;
   settlementSupported: boolean;
@@ -1534,17 +1533,96 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     );
   }
 
+  const isOneLine = props.density === "one_line";
+  const isTwoLines = props.density === "two_lines";
+  const isThreeLines = props.density === "three_lines";
+  const threeLineContext =
+    isThreeLines && metaLine === null ? (
+      <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+        <span className="min-w-0 flex-1 truncate">
+          {[modelLabel, props.environmentLabel].filter(Boolean).join(" · ")}
+        </span>
+        <span
+          aria-hidden
+          className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
+        >
+          {remoteMachineIcon}
+          <SidebarProviderStack
+            thread={thread}
+            providerEntryByInstanceId={props.providerEntryByInstanceId}
+          />
+        </span>
+      </div>
+    ) : null;
+  const twoLineMeta = isTwoLines ? (
+    <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+      {props.projectDisplayName ? (
+        <span className="min-w-0 shrink truncate">{props.projectDisplayName}</span>
+      ) : null}
+      {checkoutThread.branch ? (
+        <>
+          {props.projectDisplayName ? (
+            <span aria-hidden className="opacity-50">
+              ·
+            </span>
+          ) : null}
+          <ThreadWorktreeIndicator thread={checkoutThread} />
+          <span className="flex min-w-0 flex-1">
+            <MiddleTruncate value={checkoutThread.branch} showTitle={false} />
+          </span>
+        </>
+      ) : showsScratchMachine ? (
+        <>
+          {props.projectDisplayName ? (
+            <span aria-hidden className="opacity-50">
+              ·
+            </span>
+          ) : null}
+          <EnvironmentMachineIcon
+            aria-hidden
+            kind={props.environmentMachine}
+            className="size-3 shrink-0"
+          />
+          <span className="min-w-0 flex-1 truncate">{props.scratchMachineLabel}</span>
+        </>
+      ) : (
+        <span className="flex-1" />
+      )}
+      {terminalStatusIcon}
+      {prBadge}
+      {issueBadge}
+      {diff ? (
+        <span className="shrink-0 font-mono">
+          <span className="text-diff-addition-foreground">+{formatDiffCount(diff.insertions)}</span>{" "}
+          <span className="text-diff-deletion-foreground">−{formatDiffCount(diff.deletions)}</span>
+        </span>
+      ) : null}
+      <span
+        aria-hidden
+        className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
+      >
+        {remoteMachineIcon}
+        <SidebarProviderStack
+          thread={thread}
+          providerEntryByInstanceId={props.providerEntryByInstanceId}
+        />
+      </span>
+    </div>
+  ) : null;
+
   return (
     <li
       data-thread-item={threadKey}
+      data-sidebar-density={props.density}
       {...sortableRootProps}
       {...(fileDropHandlers ?? {})}
       // The hints are the rendered heights inside py-0.5. Revealing the open thread measures rows
       // that have not rendered yet, so a hint off by a pixel lands it a pixel short per row above.
       className={cn(
         "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_78px]",
-        metaLineEmpty && "[contain-intrinsic-size:auto_60px]",
-        props.oneLine && "[contain-intrinsic-size:auto_36px]",
+        isTwoLines && "[contain-intrinsic-size:auto_56px]",
+        metaLineEmpty && isThreeLines && "[contain-intrinsic-size:auto_60px]",
+        isOneLine && "[contain-intrinsic-size:auto_36px]",
         sortable?.isDragging && "relative z-20",
       )}
     >
@@ -1572,7 +1650,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           <div
             className={cn(
               "relative z-10 h-[4.875rem] px-(--sidebar-row-content-inset) py-(--sidebar-content-inset)",
-              (metaLineEmpty || props.oneLine) && "h-auto",
+              (metaLineEmpty || isOneLine || isTwoLines) && "h-auto",
             )}
           >
             <div className="flex h-5 min-w-0 items-center gap-1.5">
@@ -1583,7 +1661,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               {/* Left of the status slot, the pin would slide when hover swaps the
                 label for the wider row controls. */}
               {pinIndicator}
-              {props.oneLine ? (
+              {isOneLine || isTwoLines ? (
                 <>
                   {title}
                   {isRegeneratingTitle ? (
@@ -1620,7 +1698,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       snoozeMenuOpen && "pointer-events-none absolute right-0 opacity-0",
                     )}
                   >
-                    {topStatus && props.oneLine && !isWokeStatus ? (
+                    {topStatus && isOneLine && !isWokeStatus ? (
                       <span className="inline-flex items-center gap-1.5">
                         <span
                           aria-hidden
@@ -1753,7 +1831,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               )}
               {props.sweepAction !== null ? dragDestination : null}
             </div>
-            {props.oneLine ? null : (
+            {isOneLine ? null : isTwoLines ? (
+              twoLineMeta
+            ) : (
               <>
                 <div className="mt-1 flex min-w-0 items-center gap-1.5">
                   {title}
@@ -1764,7 +1844,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   ) : null}
                   {titleLineIcons}
                 </div>
-                {metaLine}
+                {metaLine ?? threeLineContext}
               </>
             )}
           </div>

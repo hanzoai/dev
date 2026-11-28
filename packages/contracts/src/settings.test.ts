@@ -555,3 +555,22 @@ describe("server model preferences", () => {
     expect(decodeServerSettingsPatch(input)).toEqual(input);
   });
 });
+
+describe("ClientSettings sidebar density and view mode", () => {
+  it("supports 1/2/3-line density and priority/chronological view modes", () => {
+    expect(decodeClientSettings({}).sidebarThreadRows).toBe("one_line");
+    expect(decodeClientSettings({}).sidebarViewMode).toBe("priority");
+    for (const rows of ["one_line", "two_lines", "three_lines"] as const) {
+      expect(decodeClientSettings({ sidebarThreadRows: rows }).sidebarThreadRows).toBe(rows);
+      expect(decodeClientSettingsPatch({ sidebarThreadRows: rows })).toEqual({
+        sidebarThreadRows: rows,
+      });
+    }
+    for (const mode of ["priority", "chronological"] as const) {
+      expect(decodeClientSettings({ sidebarViewMode: mode }).sidebarViewMode).toBe(mode);
+      expect(decodeClientSettingsPatch({ sidebarViewMode: mode })).toEqual({
+        sidebarViewMode: mode,
+      });
+    }
+  });
+});

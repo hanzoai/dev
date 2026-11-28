@@ -7,7 +7,7 @@ import {
 import type { ProviderOptionDescriptor, RuntimeMode } from "@hanzodev/contracts";
 import type { EffortDisplay } from "@hanzodev/contracts/settings";
 import { getProviderOptionCurrentLabel } from "@hanzodev/shared/model";
-import { ensoRingDot, ensoRingGap, isEnsoModel } from "@hanzodev/client-runtime/enso-ring";
+import { ensoModelGap, ensoRingDot, isEnsoModel } from "@hanzodev/client-runtime/enso-ring";
 import { msg, T, useGT, useMessages } from "gt-react";
 import { CheckIcon, ChevronRightIcon, ChevronUpIcon, WorkflowIcon } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, use, useRef, useState } from "react";
@@ -106,8 +106,15 @@ export function describeComposerEffort(
   resolve: MessageResolver = m,
 ): { suffix: ReactNode; detail: string | null; ring: EnsoRingState | null } {
   if (!traits) return { suffix: null, detail: null, ring: null };
+  const isEnso = Boolean(traits.model && isEnsoModel(traits.model));
   const visibility = getTraitsSectionVisibility({ ...traits, resolve });
-  if (!visibility.hasAnyControls) return { suffix: null, detail: null, ring: null };
+  if (!visibility.hasAnyControls) {
+    return {
+      suffix: null,
+      detail: null,
+      ring: isEnso ? { gap: ensoModelGap(traits.model!), dot: false } : null,
+    };
+  }
   const modelSelection =
     traits.instanceId && traits.model
       ? { instanceId: traits.instanceId, model: traits.model, options: traits.modelOptions ?? [] }
@@ -153,10 +160,9 @@ export function describeComposerEffort(
               modelSelection,
               traits.reportedModelSelection,
             ) ?? (reasoning.id === "thinking" ? reasoning.label : null));
-  // Enso shows its effort as the open gap of its ring, so the chip drops the word and bars.
-  const ensoSelect =
-    traits.model && isEnsoModel(traits.model) && reasoning?.type === "select" ? reasoning : null;
-  // Auto is the closed ring: a level the user never chose (the model's default) reads as Auto.
+  // Enso models display their progressive tier arc as the ring (closed only for Enso Auto),
+  // with a center dot when effort is Max.
+  const ensoSelect = isEnso && reasoning?.type === "select" ? reasoning : null;
   const ensoChosen =
     ensoSelect !== null &&
     (modelSelection?.options ?? []).some((option) => option.id === ensoSelect.id);
@@ -167,12 +173,9 @@ export function describeComposerEffort(
         ? getDescriptorStringValue(ensoSelect, modelSelection, traits.reportedModelSelection)
         : null
     : null;
-  const ring: EnsoRingState | null = ensoSelect
+  const ring: EnsoRingState | null = isEnso
     ? {
-        gap: ensoRingGap(
-          ensoSelect.options.map((option) => option.id),
-          ensoEffort,
-        ),
+        gap: ensoModelGap(traits.model!),
         dot: ensoRingDot(ensoEffort),
       }
     : null;

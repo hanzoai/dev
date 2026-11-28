@@ -12,7 +12,7 @@ import {
   type ServerProvider,
   type ServerProviderModel,
 } from "@hanzodev/contracts";
-import { HANZO_REASONING_CAPABILITIES } from "@hanzodev/shared/model";
+import { HANZO_REASONING_CAPABILITIES, isEnsoFreeModel } from "@hanzodev/shared/model";
 
 import type { CloudChatModel } from "./api.ts";
 import { isLocalChatSlug, LOCAL_CHAT_DRIVER, localChatSlug, type LocalChatModel } from "./local.ts";
@@ -105,6 +105,7 @@ export function cloudChatProviders(
   const byDriver = new Map<string, ServerProviderModel[]>();
   const owners = new Map<string, string>();
   for (const [index, model] of models.entries()) {
+    if (isEnsoFreeModel(model.id, model.label)) continue;
     const driver = cloudChatDriver(model);
     const list = byDriver.get(driver) ?? [];
     if (!owners.has(driver) && model.provider !== undefined) owners.set(driver, model.provider);

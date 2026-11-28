@@ -76,9 +76,13 @@ export const SidebarProjectSortOrder = Schema.Literals(["updated_at", "created_a
 export type SidebarProjectSortOrder = typeof SidebarProjectSortOrder.Type;
 export const DEFAULT_SIDEBAR_PROJECT_SORT_ORDER: SidebarProjectSortOrder = "updated_at";
 
-export const SidebarThreadRows = Schema.Literals(["one_line", "two_lines"]);
+export const SidebarThreadRows = Schema.Literals(["one_line", "two_lines", "three_lines"]);
 export type SidebarThreadRows = typeof SidebarThreadRows.Type;
 const DEFAULT_SIDEBAR_THREAD_ROWS: SidebarThreadRows = "one_line";
+
+export const SidebarViewMode = Schema.Literals(["priority", "chronological"]);
+export type SidebarViewMode = typeof SidebarViewMode.Type;
+const DEFAULT_SIDEBAR_VIEW_MODE: SidebarViewMode = "priority";
 
 export const SidebarThreadSortOrder = Schema.Literals(["updated_at", "created_at"]);
 export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
@@ -534,6 +538,9 @@ export const ClientSettingsSchema = Schema.Struct({
   boringSidebarEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   sidebarThreadRows: SidebarThreadRows.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_THREAD_ROWS)),
+  ),
+  sidebarViewMode: SidebarViewMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_VIEW_MODE)),
   ),
   toolCallVisibility: ToolCallVisibility.pipe(
     Schema.withDecodingDefault(Effect.succeed("showAll" as const)),
@@ -2220,6 +2227,7 @@ export const ClientSettingsPatch = Schema.Struct({
   showSkillsInSlashMenu: Schema.optionalKey(Schema.Boolean),
   boringSidebarEnabled: Schema.optionalKey(Schema.Boolean),
   sidebarThreadRows: Schema.optionalKey(SidebarThreadRows),
+  sidebarViewMode: Schema.optionalKey(SidebarViewMode),
   toolCallVisibility: Schema.optionalKey(ToolCallVisibility),
   screenReaderAnnouncements: Schema.optionalKey(ScreenReaderAnnouncements),
   screenReaderWindowTitle: Schema.optionalKey(Schema.Boolean),

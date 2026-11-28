@@ -8,7 +8,11 @@ import {
   type ServerProvider,
   type ServerProviderModel,
 } from "@hanzodev/contracts";
-import { createModelCapabilities, resolveSelectableModel } from "@hanzodev/shared/model";
+import {
+  createModelCapabilities,
+  resolveSelectableModel,
+  withHanzoReasoningCapabilities,
+} from "@hanzodev/shared/model";
 
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
@@ -92,7 +96,11 @@ export function getProviderModelCapabilities(
 ): ModelCapabilities {
   const slug = resolveSelectableModel(provider, model, models);
   const selectedModel = models.find((candidate) => candidate.slug === slug);
-  const caps = selectedModel?.capabilities ?? EMPTY_CAPABILITIES;
+  const rawCaps = selectedModel?.capabilities ?? EMPTY_CAPABILITIES;
+  const caps =
+    provider === "hanzo" || provider === "hanzoGen"
+      ? withHanzoReasoningCapabilities(rawCaps)
+      : rawCaps;
   if (includePlanAgent) {
     return caps;
   }

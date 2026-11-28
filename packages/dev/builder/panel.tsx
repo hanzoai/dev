@@ -82,9 +82,9 @@ const BLANK = phrase('New tab')
 /** On an icon that points along the line (Back, Forward): it turns in a right-to-left page. */
 const MIRROR = { 'data-i18n-mirror': '' } as object
 
-/** The row heights, px: the strip (the conversation header's row), and a page's bar. */
-const STRIP = 56
-const BAR = 48
+/** The row heights, px: the strip (aligned to the host shell's 40px top-right bar), and a page's bar. */
+const STRIP = 40
+const BAR = 44
 /** A round control in a page's bar, px. */
 const PILL = 34
 
@@ -739,8 +739,8 @@ function Strip({ tab, on, side, index, label, icon, ...rest }: { tab: Tab; on: b
       gap="$1"
       pl="$2.5"
       pr={on || tab.pinned ? '$1' : '$2.5'}
-      minH={32}
-      $max-md={{ minH: 40 }}
+      minH={28}
+      $max-md={{ minH: 36 }}
       // Keep every tab label legible at narrow viewports; the tablist scrolls horizontally instead of crushing tabs.
       shrink={0}
       maxW={220}
@@ -1008,11 +1008,11 @@ export function Panel({ side, kinds, onHide, sheet = false, bar, menu, label, su
           aria-keyshortcuts={SHORTCUTS}
           {...({ title: say('Hide tabs ({keys})', { keys: KEYS }) } as object)}
           onPress={onHide}
-          width={32}
-          height={32}
+          width={28}
+          height={28}
           {...quiet(true)}
         >
-          <Columns2 size={16} />
+          <Columns2 size={15} />
         </XStack>
       </XStack>
       {bar}

@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { ENSO_MAX_GAP, ensoRingDot, ensoRingGap, ensoRingPath, isEnsoModel } from "./ensoRing.ts";
+import {
+  ENSO_MAX_GAP,
+  ENSO_MODEL_GAPS,
+  ensoModelGap,
+  ensoRingDot,
+  ensoRingGap,
+  ensoRingPath,
+  isEnsoModel,
+} from "./ensoRing.ts";
 
 const LEVELS = ["low", "medium", "high"];
 
@@ -56,7 +64,37 @@ describe("isEnsoModel", () => {
     ["enso", true],
     ["enso-auto", true],
     ["enso-max", true],
+    ["hanzo/enso-ultra", true],
+    ["HANZO/ENSO-FLASH", true],
     ["zen6", false],
     ["ensorcelled", false],
   ])("%s -> %s", (slug, expected) => expect(isEnsoModel(slug)).toBe(expected));
+});
+
+describe("ensoModelGap", () => {
+  it("keeps only Enso Auto closed and opens progressively from Ultra to Flash", () => {
+    expect(ENSO_MODEL_GAPS).toEqual({
+      "enso-auto": 0,
+      "enso-ultra": 0.08,
+      "enso-max": 0.16,
+      "enso-pro": 0.24,
+      enso: 0.32,
+      "enso-flash": 0.42,
+    });
+    const order = ["enso-auto", "enso-ultra", "enso-max", "enso-pro", "enso", "enso-flash"];
+    const gaps = order.map(ensoModelGap);
+    expect(gaps[0]).toBe(0);
+    for (let i = 1; i < gaps.length; i++) {
+      expect(gaps[i]!).toBeGreaterThan(gaps[i - 1]!);
+    }
+  });
+
+  it("normalizes hanzo/ prefixes and mixed case", () => {
+    expect(ensoModelGap("hanzo/enso-auto")).toBe(0);
+    expect(ensoModelGap("hanzo/enso-ultra")).toBe(0.08);
+    expect(ensoModelGap("HANZO/ENSO-MAX")).toBe(0.16);
+    expect(ensoModelGap("Enso-Pro")).toBe(0.24);
+    expect(ensoModelGap("hanzo/enso")).toBe(0.32);
+    expect(ensoModelGap("hanzo/enso-flash")).toBe(0.42);
+  });
 });

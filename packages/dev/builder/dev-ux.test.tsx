@@ -70,6 +70,7 @@ const { box, text, btn, none } = vi.hoisted(() => {
 })
 
 vi.mock('@hanzo/gui', () => ({
+  ScrollView: box,
   SizableText: text,
   XStack: box,
   YStack: box,
@@ -128,6 +129,7 @@ vi.mock('@hanzo/ui/agents', () => ({
 }))
 
 vi.mock('@hanzo/ui/chat', () => ({
+  Code: box,
   Composer: (props: Record<string, unknown>) => {
     state.composerProps = props
     return box({
@@ -293,7 +295,8 @@ vi.mock('./tabs.ts', async (importOriginal) => {
 
 const { Run } = await import('./run.tsx')
 const { Panel } = await import('./panel.tsx')
-const { Desk, SEED } = await import('./desk.tsx')
+const { Desk, FallbackPreviewBody, SEED } = await import('./desk.tsx')
+const { pane } = await import('./pane.ts')
 const { DevSection } = await import('./section.tsx')
 const { Project } = await import('./project.tsx')
 
@@ -643,5 +646,83 @@ describe('narrow-viewport tab strip, shell top-right inset, and mobile responsiv
     expect(html).toContain('Live site')
     expect(html).toContain('data-slot="preview-stale-banner"')
     expect(html).toContain('Publish changes')
+  })
+
+  it('uses a 40px tab strip, subtle pane border without harsh white fallback, and clean fallback preview renderers', () => {
+    expect(here('panel.tsx')).toContain('const STRIP = 40')
+    expect(pane.borderColor).toBe('var(--pane-edge, rgba(255, 255, 255, 0.08))')
+    expect(pane.borderColor).not.toContain('--white-08')
+
+    // Empty session with no site renders quiet "No files yet" instead of dead "Nothing is serving yet".
+    const emptyHtml = renderToStaticMarkup(
+      h(Desk, {
+        id: SESSION_A,
+        repo: '',
+        branch: '',
+        base: '',
+        environment: 'sandbox',
+        mode: 'build',
+        pr: { href: '', label: '' },
+        title: 'Blank session',
+        project: '',
+        sandbox: '',
+        site: '',
+        published: 0,
+        sessionStatus: 'done',
+        events: [],
+        live: false,
+        menu: [],
+        refused: '',
+        retry: 'Retry',
+        onRetry: vi.fn(),
+        side: {
+          tabs: SEED.tabs,
+          at: 'preview',
+          open: vi.fn(),
+          pick: vi.fn(),
+          shut: vi.fn(),
+          pin: vi.fn(),
+          unpin: vi.fn(),
+          move: vi.fn(),
+          go: vi.fn(),
+          back: vi.fn(),
+          forward: vi.fn(),
+          rename: vi.fn(),
+        } as never,
+        sheet: false,
+        onHide: vi.fn(),
+      }),
+    )
+    expect(emptyHtml).toContain('No files yet')
+    expect(emptyHtml).not.toContain('Nothing is serving yet')
+
+    // FallbackPreviewBody renders markdown, html, image, and numbered source code cleanly.
+    const mdHtml = renderToStaticMarkup(
+      h(FallbackPreviewBody, {
+        preview: { path: 'README.md', format: 'markdown', source: 'readme', text: '# Hello World' },
+        device: 'desktop',
+      }),
+    )
+    expect(mdHtml).toContain('data-format="markdown"')
+    expect(mdHtml).toContain('Hello World')
+
+    const codeHtml = renderToStaticMarkup(
+      h(FallbackPreviewBody, {
+        preview: { path: 'src/index.ts', format: 'code', source: 'session', text: 'const x = 1\nconst y = 2' },
+        device: 'desktop',
+      }),
+    )
+    expect(codeHtml).toContain('data-format="code"')
+    expect(codeHtml).toContain('const x = 1')
+    expect(codeHtml).toContain('const y = 2')
+
+    const imgHtml = renderToStaticMarkup(
+      h(FallbackPreviewBody, {
+        preview: { path: 'hero.png', format: 'image', source: 'session', text: '', imageUrl: 'data:image/png;base64,AA==' },
+        device: 'desktop',
+      }),
+    )
+    expect(imgHtml).toContain('data-format="image"')
+    expect(imgHtml).toContain('hero.png')
   })
 })

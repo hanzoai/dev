@@ -9,9 +9,12 @@ import {
   createModelSelection,
   getProviderOptionCurrentLabel,
   getProviderOptionDescriptors,
+  HANZO_REASONING_CAPABILITIES,
+  isEnsoFreeModel,
   readCustomModelEntries,
   modelSelectionsEqual,
   pickModelSelection,
+  withHanzoReasoningCapabilities,
   withImplicitFastModeDefault,
 } from "./model.ts";
 
@@ -263,6 +266,65 @@ describe("withImplicitFastModeDefault", () => {
     ]);
     expect(withImplicitFastModeDefault(caps, [{ id: "fastMode", value: true }])).toEqual([
       { id: "fastMode", value: true },
+    ]);
+  });
+});
+
+describe("Hanzo reasoning capabilities and Enso Free filtering", () => {
+  it("exposes the full 7-level reasoning ladder on HANZO_REASONING_CAPABILITIES", () => {
+    const reasoning = HANZO_REASONING_CAPABILITIES.optionDescriptors?.[0];
+    expect(reasoning?.type).toBe("select");
+    if (reasoning?.type === "select") {
+      expect(reasoning.options.map((o) => o.id)).toEqual([
+        "off",
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+      ]);
+      expect(reasoning.options.find((o) => o.isDefault)?.id).toBe("medium");
+    }
+  });
+
+  it("identifies retired Enso Free slugs and display names", () => {
+    expect(isEnsoFreeModel("enso-free")).toBe(true);
+    expect(isEnsoFreeModel("hanzo/enso-free")).toBe(true);
+    expect(isEnsoFreeModel("enso_free")).toBe(true);
+    expect(isEnsoFreeModel("custom-slug", "Enso Free")).toBe(true);
+    expect(isEnsoFreeModel("enso-auto", "Enso Auto")).toBe(false);
+    expect(isEnsoFreeModel("enso-flash", "Enso Flash")).toBe(false);
+  });
+
+  it("upgrades narrow reasoning capabilities while preserving non-reasoning descriptors", () => {
+    const narrow = createModelCapabilities({
+      optionDescriptors: [
+        {
+          id: "reasoningEffort",
+          label: "Reasoning",
+          type: "select",
+          options: [
+            { id: "low", label: "Low" },
+            { id: "medium", label: "Medium", isDefault: true },
+            { id: "high", label: "High" },
+          ],
+          currentValue: "medium",
+        },
+        { id: "fastMode", label: "Fast Mode", type: "boolean" },
+      ],
+    });
+    const upgraded = withHanzoReasoningCapabilities(narrow);
+    expect(upgraded.optionDescriptors?.map((d) => d.id)).toEqual(["reasoningEffort", "fastMode"]);
+    const first = upgraded.optionDescriptors?.[0];
+    expect(first?.type === "select" ? first.options.map((o) => o.id) : []).toEqual([
+      "off",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
     ]);
   });
 });
