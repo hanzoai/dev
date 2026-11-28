@@ -392,18 +392,18 @@ export type Ran = 'running' | 'done' | 'error' | 'cancelled'
  *   ask    a question the run asked its person, with its options, and the answer once given
  */
 export type Card =
-  | { kind: 'said'; key: string; who: 'person' | 'agent'; text: string }
-  | { kind: 'think'; key: string; text: string }
-  | { kind: 'shell'; key: string; command: string; output: string; ran: Ran }
-  | { kind: 'explore'; key: string; calls: Explore[]; ran: Ran }
-  | { kind: 'edit'; key: string; files: Changed[]; ran: Ran }
-  | { kind: 'step'; key: string; name: string; detail: string; output: string; ran: Ran }
-  | { kind: 'todo'; key: string; items: { text: string; done: boolean }[] }
+  | { kind: 'said'; key: string; who: 'person' | 'agent'; text: string; at?: string }
+  | { kind: 'think'; key: string; text: string; at?: string }
+  | { kind: 'shell'; key: string; command: string; output: string; ran: Ran; at?: string; durationMs?: number }
+  | { kind: 'explore'; key: string; calls: Explore[]; ran: Ran; at?: string; durationMs?: number }
+  | { kind: 'edit'; key: string; files: Changed[]; ran: Ran; at?: string; durationMs?: number }
+  | { kind: 'step'; key: string; name: string; detail: string; output: string; ran: Ran; at?: string; durationMs?: number }
+  | { kind: 'todo'; key: string; items: { text: string; done: boolean }[]; at?: string }
   /** `step`: a line about the run getting going (started, sent to a machine), the process rather than its end. */
-  | { kind: 'note'; key: string; text: string; step?: true; funds?: true }
-  | { kind: 'plan'; key: string; text: string }
-  | { kind: 'run'; key: string; session: string }
-  | { kind: 'ask'; key: string; question: string; text: string; options: string[]; answer: string }
+  | { kind: 'note'; key: string; text: string; step?: true; funds?: true; at?: string }
+  | { kind: 'plan'; key: string; text: string; at?: string }
+  | { kind: 'run'; key: string; session: string; at?: string }
+  | { kind: 'ask'; key: string; question: string; text: string; options: string[]; answer: string; at?: string }
 
 /** What the run's own steps are called on a card: English, marked (`phrase`); the transcript draws them through `t`. */
 const NAMES: Record<string, string> = {
@@ -491,50 +491,187 @@ function item(it: Record<string, unknown>, key: string): Card | null {
   return null
 }
 
+/** Duration in ms between two RFC3339 timestamps, or undefined when invalid/negative. */
+function spanMs(start?: string, end?: string): number | undefined {
+  if (!start || !end) return undefined
+  const a = Date.parse(start)
+  const b = Date.parse(end)
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return undefined
+  return b - a
+}
+
+/** Map a normalized `hanzoai/gen` `tool-call` event ({ name, input, id, output, exitCode, status }) into a Card. */
+function genToolCall(b: Record<string, unknown>, key: string, at?: string): Card | null {
+  const rawName = str(b.name).trim()
+  if (!rawName) return null
+  const lower = rawName.toLowerCase()
+  const inp = obj(b.input)
+  const output = str(b.error) || str(b.output)
+  const exit = typeof b.exitCode === 'number' ? b.exitCode : typeof b.exit_code === 'number' ? b.exit_code : null
+  const statusStr = str(b.status).toLowerCase()
+  const inputStatus = str(inp.status).toLowerCase()
+  const effectiveStatus = statusStr || inputStatus
+  const hasId = Boolean(str(b.id))
+  const settledNow = Boolean(output) || exit !== null || 'output' in b || effectiveStatus === 'completed' || effectiveStatus === 'done' || effectiveStatus === 'ok'
+  const ran: Ran =
+    effectiveStatus === 'in_progress' || effectiveStatus === 'running'
+      ? 'running'
+      : effectiveStatus === 'failed' || effectiveStatus === 'error' || Boolean(str(b.error)) || (exit !== null && exit !== 0)
+        ? 'error'
+        : effectiveStatus === 'declined' || effectiveStatus === 'cancelled'
+          ? 'cancelled'
+          : settledNow
+            ? 'done'
+            : hasId
+              ? 'running'
+              : 'done'
+  const dur = typeof b.durationMs === 'number' && Number.isFinite(b.durationMs) && b.durationMs >= 0 ? b.durationMs : undefined
+  const meta = { ...(at ? { at } : {}), ...(dur !== undefined ? { durationMs: dur } : {}) }
+
+  // Shell / command execution
+  if (lower === 'shell' || lower === 'bash' || lower === 'exec' || lower === 'zsh' || lower === 'sh' || lower === 'run_command' || lower === 'command_execution') {
+    const cmd = str(inp.command) || str(inp.cmd) || str(inp.CommandLine) || str(b.command)
+    return { kind: 'shell', key, command: shown(cmd || rawName), output, ran, ...meta }
+  }
+
+  // File read / search / listing (exploration)
+  if (lower === 'read' || lower === 'read_file' || lower === 'view_file') {
+    const fp = rel(str(inp.file_path) || str(inp.path) || str(inp.Path) || str(inp.AbsolutePath))
+    return {
+      kind: 'explore',
+      key,
+      calls: [{ actions: [{ type: 'read', command: rawName, name: base(fp) || fp || rawName, path: fp }], exit }],
+      ran,
+      ...meta,
+    }
+  }
+  if (lower === 'glob' || lower === 'list_dir' || lower === 'find_by_name' || lower === 'ls') {
+    const fp = rel(str(inp.path) || str(inp.pattern) || str(inp.DirectoryPath) || str(inp.SearchDirectory))
+    return {
+      kind: 'explore',
+      key,
+      calls: [{ actions: [{ type: 'listFiles', command: rawName, path: fp || null }], exit }],
+      ran,
+      ...meta,
+    }
+  }
+  if (lower === 'grep' || lower === 'grep_search' || lower === 'ripgrep' || lower === 'search_files') {
+    const q = str(inp.pattern) || str(inp.query) || str(inp.Query)
+    const fp = rel(str(inp.path) || str(inp.SearchPath))
+    return {
+      kind: 'explore',
+      key,
+      calls: [{ actions: [{ type: 'search', command: rawName, query: q || null, path: fp || null }], exit }],
+      ran,
+      ...meta,
+    }
+  }
+
+  // File edit / write / patch
+  if (lower === 'edit' || lower === 'edit_file' || lower === 'write' || lower === 'write_file' || lower === 'multiedit' || lower === 'apply_patch' || lower === 'notebookedit') {
+    const changes = Array.isArray(inp.changes) ? inp.changes : []
+    const files: Changed[] = changes
+      .map((c): Changed => {
+        const o = obj(c)
+        const kind = o.kind === 'add' || o.kind === 'delete' ? o.kind : 'update'
+        const n = (v: unknown) => (typeof v === 'number' ? v : null)
+        return { path: rel(str(o.path)), kind, added: n(o.added), removed: n(o.removed) }
+      })
+      .filter((f) => f.path)
+    if (!files.length) {
+      const fp = rel(str(inp.file_path) || str(inp.path) || str(inp.Path) || str(inp.TargetFile) || str(inp.notebook_path))
+      if (fp) files.push({ path: fp, kind: lower === 'write' || lower === 'write_file' ? 'add' : 'update', added: null, removed: null })
+    }
+    return { kind: 'edit', key, files, ran, ...meta }
+  }
+
+  // Web search / fetch
+  if (lower === 'web_search' || lower === 'websearch' || lower === 'search_web' || lower === 'web_fetch' || lower === 'webfetch' || lower === 'fetch') {
+    const detail = str(inp.query) || str(inp.url) || str(inp.prompt)
+    return { kind: 'step', key, name: phrase('Search'), detail, output, ran, ...meta }
+  }
+
+  // Tool loading / discovery (Claude ToolSearch / MCP discovery)
+  if (lower === 'toolsearch' || lower === 'tool_search' || lower === 'load_tool' || lower === 'list_tools' || lower === 'mcp_tool_search') {
+    const detail = str(inp.query) || str(inp.name) || rawName
+    return { kind: 'step', key, name: ran === 'running' ? phrase('Loading tools') : phrase('Loaded tools'), detail, output, ran, ...meta }
+  }
+
+  // Generic / MCP tool call (`server/tool` or `mcp__server__tool` or tool name)
+  const detail = rawName.includes('/')
+    ? called(rawName.slice(0, rawName.indexOf('/')), rawName.slice(rawName.indexOf('/') + 1), b.input)
+    : `${rawName}(${b.input === undefined || b.input === null ? '' : JSON.stringify(b.input)})`
+  return {
+    kind: 'step',
+    key,
+    name: ran === 'running' ? phrase('Calling') : phrase('Called'),
+    detail,
+    output,
+    ran,
+    ...meta,
+  }
+}
+
 /**
  * A run's events, as the cards its transcript draws. `mode` is the run's, from
  * its record: a plan's final status is its plan, and nothing else draws a plan.
  *
- * The run's own steps arrive as `tool-call` {step, message, status}. The agent
- * narrates itself as `event` lines: an item is started, updated and completed
- * under one id, and its card is drawn once and kept current. Ids count from zero
- * in each agent process, so an id is the agent's within the thread it started. A
- * turn that fails is one plain line with the detail folded beneath it, drawn once
- * however many times it is said; an `error` on its own is the agent retrying and
- * is drawn only if the turn then fails. The final status carries the agent's
- * answer, drawn once. `log` is never drawn here.
+ * The run's own steps arrive as `tool-call` {step, message, status}, and
+ * `hanzoai/gen` harness runs also emit normalized `tool-call` {name, input, id}
+ * paired with `log` {type: 'tool-result', toolUseId, output, isError} plus
+ * `log` {type: 'reasoning' | 'todo' | 'error', text}. The agent narrates itself
+ * as `event` lines: an item is started, updated and completed under one id, and
+ * its card is drawn once and kept current. Ids count from zero in each agent
+ * process, so an id is the agent's within the thread it started. A turn that
+ * fails is one plain line with the detail folded beneath it, drawn once however
+ * many times it is said; an `error` on its own is the agent retrying and is
+ * drawn only if the turn then fails. The final status carries the agent's
+ * answer, drawn once. Raw `log` lines are never drawn here.
  */
-export function cards(events: Pick<Event, 'kind' | 'payload' | 'seq'>[], mode = '', t: Say = english): Card[] {
+export function cards(events: (Pick<Event, 'kind' | 'payload' | 'seq'> & { createdAt?: string })[], mode = '', t: Say = english): Card[] {
   const out: Card[] = []
   let seq = 0
   let n = 0
   const mint = () => `${seq}.${n++}`
   let phase: Extract<Card, { kind: 'step' }> | null = null
   const items = new Map<string, number>()
+  const toolUses = new Map<string, number>()
   let thread = 0
   let said = ''
   const answers = new Set<string>()
   const steered = new Set<Said>()
-  const person = (text: string) => {
-    const c: Said = { kind: 'said', key: mint(), who: 'person', text }
+  const stamp = (at?: string): { at?: string } => (at ? { at } : {})
+  const settlePendingTools = () => {
+    for (const idx of toolUses.values()) {
+      const c = out[idx]
+      if (!c || !('ran' in c) || c.ran !== 'running') continue
+      if (c.kind === 'step' && c.name === 'Calling') out[idx] = { ...c, name: phrase('Called'), ran: 'done' }
+      else if (c.kind === 'step' && c.name === 'Loading tools') out[idx] = { ...c, name: phrase('Loaded tools'), ran: 'done' }
+      else out[idx] = { ...c, ran: 'done' }
+    }
+    toolUses.clear()
+  }
+  const person = (text: string, at?: string) => {
+    const c: Said = { kind: 'said', key: mint(), who: 'person', text, ...stamp(at) }
     out.push(c)
     return c
   }
   const failures = new Set<string>()
   const spawned = new Set<string>()
   const asked = new Map<string, number>()
-  const failed = (message: string) => {
+  const failed = (message: string, at?: string) => {
     if (failures.has(message)) return
     failures.add(message)
     const rawStep = Boolean(message && !vendor(message))
     const noteFunds = !rawStep && needsFunds(message)
-    out.push({ kind: 'note', key: mint(), text: plain(message, t), ...(noteFunds ? { funds: true as const } : {}) })
+    out.push({ kind: 'note', key: mint(), text: plain(message, t), ...(noteFunds ? { funds: true as const } : {}), ...stamp(at) })
     // The reason, read whole, when it is the run's own; a vendor's words stay off the page.
-    if (rawStep) out.push({ kind: 'step', key: mint(), name: phrase('Error'), detail: '', output: message, ran: 'error' })
+    if (rawStep) out.push({ kind: 'step', key: mint(), name: phrase('Error'), detail: '', output: message, ran: 'error', ...stamp(at) })
   }
   for (const e of [...events].sort((a, b) => a.seq - b.seq)) {
     seq = e.seq
     n = 0
+    const at = typeof e.createdAt === 'string' && e.createdAt ? e.createdAt : undefined
     const body = decode(e.payload)
     const b = body && typeof body === 'object' ? body : null
     switch (e.kind) {
@@ -543,17 +680,18 @@ export function cards(events: Pick<Event, 'kind' | 'payload' | 'seq'>[], mode = 
         const type = str(b.type)
         if (type === 'thread.started') thread++
         if (type === 'error') said = str(b.message)
-        if (type === 'turn.failed') failed(str(obj(b.error).message) || said)
+        if (type === 'turn.failed') failed(str(obj(b.error).message) || said, at)
         if (type !== 'item.started' && type !== 'item.updated' && type !== 'item.completed') break
         const it = obj(b.item)
         const id = str(it.id) && `${thread}:${str(it.id)}`
-        const at = id ? items.get(id) : undefined
-        const card = item(it, at === undefined ? mint() : out[at]!.key)
+        const atIdx = id ? items.get(id) : undefined
+        const card = item(it, atIdx === undefined ? mint() : out[atIdx]!.key)
         if (!card) break
-        if (at === undefined) {
+        const stamped = at ? { ...card, at: (atIdx !== undefined ? out[atIdx]?.at : undefined) ?? at } : card
+        if (atIdx === undefined) {
           if (id) items.set(id, out.length)
-          out.push(card)
-        } else out[at] = card
+          out.push(stamped)
+        } else out[atIdx] = stamped
         break
       }
       case 'tool-call': {
@@ -569,69 +707,84 @@ export function cards(events: Pick<Event, 'kind' | 'payload' | 'seq'>[], mode = 
           const lease = out.find((c): c is Extract<Card, { kind: 'step' }> => c.kind === 'step' && c.name === NAMES.lease)
           if (lease) lease.ran = 'done'
         }
-        if (!step || QUIET.has(step)) break
-        const name = NAMES[step] ?? step.charAt(0).toUpperCase() + step.slice(1)
-        if (phase && phase.name === name) {
-          phase.ran = ranOf(str(b.status))
-          if (message) phase.detail = message
+        if (step) {
+          if (QUIET.has(step)) break
+          const name = NAMES[step] ?? step.charAt(0).toUpperCase() + step.slice(1)
+          if (phase && phase.name === name) {
+            phase.ran = ranOf(str(b.status))
+            if (message) phase.detail = message
+            break
+          }
+          phase = { kind: 'step', key: mint(), name, detail: message, output: '', ran: ranOf(str(b.status)), ...stamp(at) }
+          out.push(phase)
           break
         }
-        phase = { kind: 'step', key: mint(), name, detail: message, output: '', ran: ranOf(str(b.status)) }
-        out.push(phase)
+        // Normalized `hanzoai/gen` tool call ({ name, input, id, ... }).
+        const genCard = genToolCall(b, mint(), at)
+        if (!genCard) break
+        phase = null
+        const toolId = str(b.id)
+        const idx = out.length
+        out.push(genCard)
+        if (toolId && 'ran' in genCard && genCard.ran === 'running') {
+          toolUses.set(toolId, idx)
+        }
         break
       }
       case 'status': {
         phase = null
+        settlePendingTools()
         if (!b) break
         // A question the run asked its person (apps/agents ask.go), and its answer, drawn on the question.
         if (str(b.status) === 'asked') {
           const options = (Array.isArray(b.options) ? b.options : []).map((o) => str(obj(o).label)).filter(Boolean)
           asked.set(str(b.question), out.length)
-          out.push({ kind: 'ask', key: mint(), question: str(b.question), text: str(b.text), options, answer: '' })
+          out.push({ kind: 'ask', key: mint(), question: str(b.question), text: str(b.text), options, answer: '', ...stamp(at) })
           break
         }
         if (str(b.status) === 'answered') {
-          const at = asked.get(str(b.question))
-          const card = at === undefined ? undefined : out[at]
-          if (card?.kind === 'ask') out[at!] = { ...card, answer: str(b.answer) }
+          const idx = asked.get(str(b.question))
+          const card = idx === undefined ? undefined : out[idx]
+          if (card?.kind === 'ask') out[idx!] = { ...card, answer: str(b.answer) }
           break
         }
         const done = str(b.status) === 'done'
         const text = str(b.plan) || str(b.answer)
         if (done && (mode === 'plan' || mode === 'setup') && text) {
           answers.add(text.trim())
-          out.push(mode === 'plan' ? { kind: 'plan', key: mint(), text } : { kind: 'said', key: mint(), who: 'agent', text })
+          out.push(mode === 'plan' ? { kind: 'plan', key: mint(), text, ...stamp(at) } : { kind: 'said', key: mint(), who: 'agent', text, ...stamp(at) })
           break
         }
         const answer = str(b.answer).trim()
         if (answer) {
           answers.add(answer)
-          out.push({ kind: 'said', key: mint(), who: 'agent', text: answer })
+          out.push({ kind: 'said', key: mint(), who: 'agent', text: answer, ...stamp(at) })
         }
         if (str(b.status) === 'error') {
-          failed(str(b.error))
+          failed(str(b.error), at)
           break
         }
         const line = status(b, mode, t)
         const going = str(b.status) === 'started' || str(b.status) === 'routed'
-        if (line) out.push(going ? { kind: 'note', key: mint(), text: line, step: true } : { kind: 'note', key: mint(), text: line })
+        if (line) out.push(going ? { kind: 'note', key: mint(), text: line, step: true, ...stamp(at) } : { kind: 'note', key: mint(), text: line, ...stamp(at) })
         break
       }
       case 'control': {
         if (!b) break
         const command = str(b.command)
         const said = str(b.message)
-        if (command === 'message' && said) steered.add(person(said))
-        else if (command === 'pause') out.push({ kind: 'note', key: mint(), text: t('Pause asked') })
-        else if (command === 'resume') out.push({ kind: 'note', key: mint(), text: t('Resume asked') })
-        else if (command === 'stop') out.push({ kind: 'note', key: mint(), text: t('Stop asked') })
+        if (command === 'message' && said) steered.add(person(said, at))
+        else if (command === 'pause') out.push({ kind: 'note', key: mint(), text: t('Pause asked'), ...stamp(at) })
+        else if (command === 'resume') out.push({ kind: 'note', key: mint(), text: t('Resume asked'), ...stamp(at) })
+        else if (command === 'stop') out.push({ kind: 'note', key: mint(), text: t('Stop asked'), ...stamp(at) })
         break
       }
       case 'message': {
+        settlePendingTools()
         const text = typeof body === 'string' ? body : str(b?.text) || str(b?.content) || str(b?.message)
         if (!text) break
-        if (str(b?.role) === 'user') person(text)
-        else out.push({ kind: 'said', key: mint(), who: 'agent', text })
+        if (str(b?.role) === 'user') person(text, at)
+        else out.push({ kind: 'said', key: mint(), who: 'agent', text, ...stamp(at) })
         break
       }
       case 'spawn': {
@@ -639,14 +792,73 @@ export function cards(events: Pick<Event, 'kind' | 'payload' | 'seq'>[], mode = 
         const session = str(b?.session)
         if (!session || spawned.has(session)) break
         spawned.add(session)
-        out.push({ kind: 'run', key: mint(), session })
+        out.push({ kind: 'run', key: mint(), session, ...stamp(at) })
         break
       }
       case 'log': {
+        // Normalized `hanzoai/gen` log notes: tool-result, reasoning, todo, error.
+        if (b) {
+          const logType = str(b.type)
+          if (logType === 'tool-result') {
+            const toolUseId = str(b.toolUseId)
+            const idx = toolUseId ? toolUses.get(toolUseId) : undefined
+            if (idx !== undefined) {
+              const target = out[idx]
+              const isErr = b.isError === true
+              const resultOut = str(b.output)
+              const dur = spanMs(target?.at, at)
+              if (target && 'ran' in target) {
+                const nextRan: Ran = isErr ? 'error' : 'done'
+                if (target.kind === 'shell') {
+                  out[idx] = { ...target, output: resultOut || target.output, ran: nextRan, ...(dur !== undefined ? { durationMs: dur } : {}) }
+                } else if (target.kind === 'step') {
+                  const nextName =
+                    target.name === 'Calling'
+                      ? phrase('Called')
+                      : target.name === 'Loading tools'
+                        ? phrase('Loaded tools')
+                        : target.name
+                  out[idx] = { ...target, name: nextName, output: resultOut || target.output, ran: nextRan, ...(dur !== undefined ? { durationMs: dur } : {}) }
+                } else {
+                  out[idx] = { ...target, ran: nextRan, ...(dur !== undefined ? { durationMs: dur } : {}) }
+                }
+              }
+              toolUses.delete(toolUseId)
+            }
+            break
+          }
+          if (logType === 'reasoning') {
+            const text = str(b.text)
+            if (text) out.push({ kind: 'think', key: mint(), text, ...stamp(at) })
+            break
+          }
+          if (logType === 'todo') {
+            const rawText = str(b.text)
+            if (rawText) {
+              try {
+                const parsed = JSON.parse(rawText) as unknown
+                if (Array.isArray(parsed)) {
+                  const todoItems = parsed
+                    .map((x) => ({ text: str(obj(x).text) || str(obj(x).content), done: obj(x).completed === true || str(obj(x).status) === 'completed' }))
+                    .filter((x) => x.text)
+                  if (todoItems.length) out.push({ kind: 'todo', key: mint(), items: todoItems, ...stamp(at) })
+                }
+              } catch {
+                // Ignore malformed todo payload.
+              }
+            }
+            break
+          }
+          if (logType === 'error') {
+            const text = str(b.text)
+            if (text) failed(text, at)
+            break
+          }
+        }
         // A conversation's turn or coding run that failed says why on its record of the run.
         // A turn the platform refuses before it starts (no balance) carries the reason and no status.
         const err = logError(b)
-        if (err !== null) failed(err)
+        if (err !== null) failed(err, at)
         break
       }
     }

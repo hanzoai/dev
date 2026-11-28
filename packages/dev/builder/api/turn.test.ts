@@ -410,4 +410,42 @@ describe('cards', () => {
       { kind: 'said', who: 'agent', text: 'from message' },
     ])
   })
+
+  it('maps normalized hanzoai/gen tool-call, tool-result, reasoning, todo, error, and createdAt events', () => {
+    const dated = (seq: number, kind: string, payload: unknown, createdAt: string) => ({ id: `e${seq}`, seq, kind, payload, createdAt })
+    const got = cards([
+      dated(1, 'message', { role: 'user', text: 'Fix tests' }, '2026-11-28T11:00:00Z'),
+      dated(2, 'log', { type: 'reasoning', text: 'Inspecting failing suite' }, '2026-11-28T11:00:01Z'),
+      dated(3, 'tool-call', { name: 'ToolSearch', id: 'tu_0', input: { query: 'playwright' } }, '2026-11-28T11:00:02Z'),
+      dated(4, 'log', { type: 'tool-result', toolUseId: 'tu_0', isError: false, output: 'loaded' }, '2026-11-28T11:00:02.400Z'),
+      dated(5, 'tool-call', { name: 'Read', id: 'tu_1', input: { file_path: '/work/src/app.ts' } }, '2026-11-28T11:00:03Z'),
+      dated(6, 'log', { type: 'tool-result', toolUseId: 'tu_1', isError: false, output: 'code' }, '2026-11-28T11:00:03.250Z'),
+      dated(7, 'tool-call', { name: 'Bash', id: 'tu_2', input: { command: 'pnpm test' } }, '2026-11-28T11:00:04Z'),
+      dated(8, 'log', { type: 'tool-result', toolUseId: 'tu_2', isError: false, output: '35 passed' }, '2026-11-28T11:00:05.500Z'),
+      dated(9, 'tool-call', { name: 'Edit', id: 'tu_3', input: { file_path: '/work/src/app.ts' } }, '2026-11-28T11:00:06Z'),
+      dated(10, 'log', { type: 'tool-result', toolUseId: 'tu_3', isError: false, output: 'ok' }, '2026-11-28T11:00:06.100Z'),
+      dated(11, 'tool-call', { name: 'web_search', id: 'tu_4', input: { query: 'vitest isolation' } }, '2026-11-28T11:00:07Z'),
+      dated(12, 'tool-call', { name: 'hanzo/search', id: 'tu_5', input: { q: 'enso' }, status: 'completed' }, '2026-11-28T11:00:08Z'),
+      dated(13, 'log', { type: 'todo', text: JSON.stringify([{ text: 'Run suite', completed: true }]) }, '2026-11-28T11:00:09Z'),
+      dated(14, 'message', { role: 'assistant', text: 'All 35 tests pass.' }, '2026-11-28T11:00:10Z'),
+    ])
+    expect(bare(got)).toEqual([
+      { kind: 'said', who: 'person', text: 'Fix tests', at: '2026-11-28T11:00:00Z' },
+      { kind: 'think', text: 'Inspecting failing suite', at: '2026-11-28T11:00:01Z' },
+      { kind: 'step', name: 'Loaded tools', detail: 'playwright', output: 'loaded', ran: 'done', at: '2026-11-28T11:00:02Z', durationMs: 400 },
+      {
+        kind: 'explore',
+        calls: [{ actions: [{ type: 'read', command: 'Read', name: 'app.ts', path: 'src/app.ts' }], exit: null }],
+        ran: 'done',
+        at: '2026-11-28T11:00:03Z',
+        durationMs: 250,
+      },
+      { kind: 'shell', command: 'pnpm test', output: '35 passed', ran: 'done', at: '2026-11-28T11:00:04Z', durationMs: 1500 },
+      { kind: 'edit', files: [{ path: 'src/app.ts', kind: 'update', added: null, removed: null }], ran: 'done', at: '2026-11-28T11:00:06Z', durationMs: 100 },
+      { kind: 'step', name: 'Search', detail: 'vitest isolation', output: '', ran: 'done', at: '2026-11-28T11:00:07Z' },
+      { kind: 'step', name: 'Called', detail: 'hanzo.search({"q":"enso"})', output: '', ran: 'done', at: '2026-11-28T11:00:08Z' },
+      { kind: 'todo', items: [{ text: 'Run suite', done: true }], at: '2026-11-28T11:00:09Z' },
+      { kind: 'said', who: 'agent', text: 'All 35 tests pass.', at: '2026-11-28T11:00:10Z' },
+    ])
+  })
 })

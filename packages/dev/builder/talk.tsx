@@ -17,7 +17,7 @@ import { useI18n } from '@hanzo/i18n/react'
 import { Steer } from '@hanzo/ui/agents'
 import { Composer, measure } from '@hanzo/ui/chat'
 import { useLimits } from '@hanzo/ui/product/useLimits'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { DEV_MODES, MODES, type Mode } from './gear.ts'
 
@@ -30,12 +30,12 @@ import { verdict } from './api/verdict.ts'
 import { useRead, type RunState } from './data.ts'
 import { useHost, useTarget } from './host.tsx'
 import { level, useMind } from './mind.ts'
-import { pane } from './pane.ts'
+import { pane, RING } from './pane.ts'
 import { speaker } from './reply.tsx'
 import { path } from './route.ts'
 import { cleanErrorText } from './thread.ts'
 import { carrying, compose, pick, type Attached } from './tools.tsx'
-import { Transcript } from './transcript.tsx'
+import { SteerStack, Transcript, type QueuedMessage } from './transcript.tsx'
 
 export function Talk({ id, state }: { id: string; state: RunState }) {
   const { t: say } = useI18n()
@@ -49,6 +49,7 @@ export function Talk({ id, state }: { id: string; state: RunState }) {
   const events = useMemo(() => merge(whole.value, state.events), [whole.value, state.events])
   const [draft, setDraft] = useState('')
   const [files, setFiles] = useState<Attached[]>([])
+  const [queued, setQueued] = useState<QueuedMessage[]>([])
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const { limits } = useLimits(signed ? (signal) => readLimits(t, signal) : null, t)
@@ -78,23 +79,96 @@ export function Talk({ id, state }: { id: string; state: RunState }) {
     }
   }
 
+  const dispatch = async (words: string): Promise<string> => {
+    const next = () => talk(t, { session: id, input: words, model: mind.model, effort: level(mind.effort), ...(picked ? { mode: picked } : {}) })
+    if (!working) {
+      await next()
+      return ''
+    }
+    try {
+      await message(t, id, words)
+    } catch (e) {
+      // The turn answered as the words were sent: they are the next turn.
+      if (!(e instanceof Refusal) || e.status !== 409) throw e
+      await next()
+    }
+    return ''
+  }
+
+  const enqueue = (wordsOverride?: string) => {
+    const words = wordsOverride ?? compose(draft.trim(), files)
+    if (!words) return
+    setQueued((prev) => [...prev, { id: `q-${Date.now()}-${prev.length}`, text: words, mode: 'queued', createdAt: new Date().toISOString() }])
+    setDraft('')
+    setFiles([])
+  }
+
+  const steerQueued = (qid: string) => {
+    const item = queued.find((q) => q.id === qid)
+    if (!item || busy) return
+    setQueued((prev) => prev.map((q) => (q.id === qid ? { ...q, mode: 'steering' } : q)))
+    void act(async () => {
+      try {
+        const res = await dispatch(item.text)
+        setQueued((prev) => prev.filter((q) => q.id !== qid))
+        return res
+      } catch (e) {
+        setQueued((prev) => prev.map((q) => (q.id === qid ? { ...q, mode: 'queued' } : q)))
+        throw e
+      }
+    })
+  }
+
+  const interruptQueued = (qid: string) => {
+    const item = queued.find((q) => q.id === qid)
+    if (!item || busy) return
+    setQueued((prev) => prev.map((q) => (q.id === qid ? { ...q, mode: 'steering' } : q)))
+    void act(async () => {
+      try {
+        await stop(t, id)
+        await talk(t, { session: id, input: item.text, model: mind.model, effort: level(mind.effort), ...(picked ? { mode: picked } : {}) })
+        setQueued((prev) => prev.filter((q) => q.id !== qid))
+        return ''
+      } catch (e) {
+        setQueued((prev) => prev.map((q) => (q.id === qid ? { ...q, mode: 'queued' } : q)))
+        throw e
+      }
+    })
+  }
+
+  const editQueued = (qid: string) => {
+    const item = queued.find((q) => q.id === qid)
+    if (!item) return
+    setQueued((prev) => prev.filter((q) => q.id !== qid))
+    setDraft((prev) => (prev.trim() ? `${item.text}\n${prev}` : item.text))
+  }
+
+  const removeQueued = (qid: string) => {
+    setQueued((prev) => prev.filter((q) => q.id !== qid))
+  }
+
+  // Drain stacked follow-ups FIFO once the active turn completes.
+  const drainRef = useRef(steerQueued)
+  drainRef.current = steerQueued
+  useEffect(() => {
+    if (working || busy || !signed || !record) return
+    const nextItem = queued.find((q) => q.mode !== 'steering')
+    if (!nextItem) return
+    drainRef.current(nextItem.id)
+  }, [working, busy, signed, record, queued])
+
   const send = () => {
     const words = compose(draft.trim(), files)
     if (!words) return
-    const next = () => talk(t, { session: id, input: words, model: mind.model, effort: level(mind.effort), ...(picked ? { mode: picked } : {}) })
+    if (busy && working) {
+      enqueue(words)
+      return
+    }
     void act(async () => {
-      if (!working) await next()
-      else
-        try {
-          await message(t, id, words)
-        } catch (e) {
-          // The turn answered as the words were sent: they are the next turn.
-          if (!(e instanceof Refusal) || e.status !== 409) throw e
-          await next()
-        }
+      const res = await dispatch(words)
       setDraft('')
       setFiles([])
-      return ''
+      return res
     })
   }
 
@@ -121,6 +195,7 @@ export function Talk({ id, state }: { id: string; state: RunState }) {
       <Transcript
         cards={shown}
         live={working}
+        activity={working ? doing || say('Thinking…') : ''}
         empty={empty}
         listen={signed ? listen : undefined}
         onVerdict={(v) => verdict(t, id, '', v)}
@@ -134,6 +209,16 @@ export function Talk({ id, state }: { id: string; state: RunState }) {
             <SizableText size="$1" color="$soft" role="status">
               {note || refused}
             </SizableText>
+          ) : null}
+          {queued.length > 0 ? (
+            <SteerStack
+              items={queued}
+              onSteer={steerQueued}
+              onInterrupt={working ? interruptQueued : undefined}
+              onEdit={editQueued}
+              onRemove={removeQueued}
+              busy={busy}
+            />
           ) : null}
           {working ? (
             <XStack items="center" gap="$2" px="$3" py="$2" rounded="$10" borderWidth={1} borderColor="$borderColor">
@@ -157,14 +242,45 @@ export function Talk({ id, state }: { id: string; state: RunState }) {
           onStop={working ? () => void act(async () => (await stop(t, id), say('Stopped'))) : undefined}
           busy={working && !draft.trim()}
           ready={Boolean(draft.trim())}
-          disabled={!signed || busy || !record}
-          placeholder={!signed ? say('Sign in to reply') : working ? say('Add to what it is doing') : say('Reply')}
+          disabled={!signed || (busy && !working) || !record}
+          placeholder={!signed ? say('Sign in to reply') : working ? say('Steer or queue a follow-up…') : say('Reply')}
           label={say('Reply to this conversation')}
+          field={{
+            onKeyDown: (e: { key?: string; ctrlKey?: boolean; metaKey?: boolean; preventDefault?: () => void }) => {
+              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && working && draft.trim()) {
+                e.preventDefault?.()
+                enqueue()
+              }
+            },
+          }}
           plus={{ upload: () => pick(files, setFiles, setNote, say) }}
           carried={carrying(files, setFiles)}
           mind={signed && !working ? mind : null}
           mode={signed && !working ? { value: mode, set: (m) => setPicked(m as Mode), items: MODES.filter((m) => DEV_MODES.includes(m.id)) } : null}
-        />
+        >
+          {working && draft.trim() ? (
+            <XStack
+              render="button"
+              data-slot="composer-queue"
+              aria-label={say('Queue follow-up')}
+              onPress={() => enqueue()}
+              items="center"
+              px="$2.5"
+              height={30}
+              rounded={999}
+              borderWidth={1}
+              borderColor="$borderColor"
+              bg="$panel"
+              cursor="pointer"
+              hoverStyle={{ bg: '$hover' }}
+              focusVisibleStyle={RING}
+            >
+              <SizableText size="$1" color="$soft" fontWeight="500">
+                {say('Queue')}
+              </SizableText>
+            </XStack>
+          ) : null}
+        </Composer>
       </YStack>
     </YStack>
   )
