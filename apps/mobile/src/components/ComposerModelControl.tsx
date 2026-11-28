@@ -44,14 +44,16 @@ export function ComposerModelControl(props: {
         m,
       ).label
     : "";
-  // Enso shows its effort as the open gap of its ring instead of a word.
-  const ensoSelect =
+  const ensoModel =
     props.provider === "hanzo" && props.selection && isEnsoModel(props.selection.model)
-      ? descriptors.find(
-          (descriptor): descriptor is Extract<typeof descriptor, { type: "select" }> =>
-            descriptor.type === "select" && isReasoningControl(descriptor),
-        )
-      : undefined;
+      ? props.selection.model
+      : null;
+  const ensoSelect = ensoModel
+    ? descriptors.find(
+        (descriptor): descriptor is Extract<typeof descriptor, { type: "select" }> =>
+          descriptor.type === "select" && isReasoningControl(descriptor),
+      )
+    : undefined;
   const ensoEffort = ensoSelect
     ? getDescriptorStringValue(ensoSelect, props.selection, props.reportedSelection)
     : null;
@@ -87,10 +89,10 @@ export function ComposerModelControl(props: {
       disabled={props.disabled}
       emphasized
       renderIcon={(size) =>
-        ensoSelect && props.selection ? (
+        ensoModel ? (
           <ProviderIcon
             provider="enso"
-            ensoGap={ensoModelGap(props.selection.model)}
+            ensoGap={ensoModelGap(ensoModel)}
             ensoDot={ensoRingDot(ensoEffort)}
             size={size}
           />
