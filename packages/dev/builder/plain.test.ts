@@ -1,7 +1,20 @@
 import { describe, expect, it } from 'vitest'
 
 import { cards, type Card } from './api/turn.ts'
-import { doing, fold, isProcess, plainAnswer, plainPath, ranOf, worked } from './plain.ts'
+import {
+  cardCategory,
+  categoryOf,
+  doing,
+  fold,
+  formatDuration,
+  formatTurnTimestamp,
+  isProcess,
+  plainAnswer,
+  plainPath,
+  ranOf,
+  shouldShowTimestamp,
+  worked,
+} from './plain.ts'
 
 const said = (key: string, text: string, who: 'person' | 'agent' = 'agent'): Card => ({ kind: 'said', key, who, text })
 const shell = (key: string, command: string, ran: 'running' | 'done' = 'done'): Card => ({ kind: 'shell', key, command, output: '', ran })
@@ -119,5 +132,43 @@ describe('what an agent said in a folder, in words', () => {
 
   it('leaves a text with no path as it was', () => {
     expect(plainAnswer('I made the page faster.', folder)).toBe('I made the page faster.')
+  })
+})
+
+describe('work categories, durations, and turn timestamp dividers', () => {
+  it('classifies work cards and groups into crisp icon categories matching the summary lead', () => {
+    expect(cardCategory(shell('c', 'pnpm test'))).toBe('command')
+    expect(cardCategory(read('r', 'index.ts'))).toBe('read')
+    expect(cardCategory(edit('e', 'index.ts'))).toBe('edit')
+    expect(cardCategory(step('s', 'Search', 'vitest'))).toBe('search')
+    expect(cardCategory(step('l', 'Loaded tools', 'playwright'))).toBe('tool')
+    expect(cardCategory({ kind: 'think', key: 't', text: 'Plan' })).toBe('think')
+
+    // Grouped work chooses the active step while running, and the leading summary category when done.
+    expect(categoryOf([step('l', 'Loaded tools', 'playwright'), shell('c', 'ls')])).toBe('tool')
+    expect(worked([step('l', 'Loaded tools', 'playwright'), shell('c1', 'ls'), shell('c2', 'pwd')])).toBe('Loaded tools, ran 2 commands')
+    expect(categoryOf([read('r', 'a.ts'), shell('c', 'ls')])).toBe('read')
+    expect(categoryOf([shell('c1', 'ls'), shell('c2', 'pwd')])).toBe('command')
+    expect(categoryOf([edit('e', 'a.ts')])).toBe('edit')
+    expect(categoryOf([read('r', 'a.ts'), shell('c', 'pnpm test', 'running')])).toBe('command')
+  })
+
+  it('formats compact durations and centered turn timestamps cleanly', () => {
+    expect(formatDuration(undefined)).toBe('')
+    expect(formatDuration(340)).toBe('340ms')
+    expect(formatDuration(1450)).toBe('1.5s')
+    expect(formatDuration(12_300)).toBe('12s')
+    expect(formatDuration(75_000)).toBe('1m 15s')
+
+    const now = new Date('2026-11-28T15:00:00')
+    expect(formatTurnTimestamp('2026-11-28T11:09:00', now)).toBe('Today 11:09')
+    expect(formatTurnTimestamp('2026-11-27T09:05:00', now)).toBe('Yesterday 09:05')
+    expect(formatTurnTimestamp('2026-11-20T18:30:00', now)).toBe('Nov 20 18:30')
+    expect(formatTurnTimestamp('2025-12-01T08:00:00', now)).toBe('Dec 1, 2025 08:00')
+
+    expect(shouldShowTimestamp('2026-11-28T10:00:00', '2026-11-28T10:05:00')).toBe(false)
+    expect(shouldShowTimestamp('2026-11-28T10:00:00', '2026-11-28T10:20:00')).toBe(true)
+    expect(shouldShowTimestamp('2026-11-27T23:55:00', '2026-11-28T00:02:00')).toBe(true)
+    expect(shouldShowTimestamp('2026-11-28T10:00:00', '2026-11-28T10:01:00', true)).toBe(true)
   })
 })

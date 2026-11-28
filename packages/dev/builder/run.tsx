@@ -68,7 +68,7 @@ import { Steer, type Command } from '@hanzo/ui/agents'
 import { Composer, Failure, measure } from '@hanzo/ui/chat'
 import { useLimits } from '@hanzo/ui/product/useLimits'
 import { useDictation, useVoice } from '@hanzo/voice'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Confirm } from './ask.tsx'
 import { copy as toClipboard } from './clipboard.ts'
@@ -76,7 +76,7 @@ import { approve, followUp, headline, retry, start, steer, type Ask, type Earlie
 import { limits as readLimits } from './api/models.ts'
 import { get, list, message, pause, publish, remove, rename, resume, stop, story, took, type Event } from './api/sessions.ts'
 import { answer, cards, followed, outcome, pull, settled, steps, type Card } from './api/turn.ts'
-import { answer as reply, say as talk, talks } from './api/talk.ts'
+import { answer as reply, now as liveActivity, say as talk, talks } from './api/talk.ts'
 import { verdict } from './api/verdict.ts'
 import { useKept, useProjects, useRead, useRun, type RunState } from './data.ts'
 import { mark } from './runmeta.ts'
@@ -110,7 +110,7 @@ import {
 import { carrying, compose, pick, read as readFiles, type Attached } from './tools.tsx'
 import { useCarry } from './carry.tsx'
 import { Talk } from './talk.tsx'
-import { Transcript, type QueuedMessage, type TranscriptView } from './transcript.tsx'
+import { SteerStack, Transcript, type QueuedMessage, type TranscriptView } from './transcript.tsx'
 
 /** A session's status as the line under its title says it; one the service adds later is drawn as it comes. */
 const STATUS: Record<string, string> = {
@@ -517,6 +517,10 @@ function Job({ id, activeId, chain, state: read }: { id: string; activeId: strin
     const words = compose([tools.text, draft.trim()].filter(Boolean).join('\n\n'), files)
     if (!words) return
     if (steering) {
+      if (busy) {
+        enqueue(words)
+        return
+      }
       void act(async () => {
         const said = await tell(words)
         setDraft('')
@@ -612,22 +616,72 @@ function Job({ id, activeId, chain, state: read }: { id: string; activeId: strin
 
   const sendQueued = (qid: string) => {
     const item = queued.find((q) => q.id === qid)
-    if (!item) return
-    setQueued((prev) => prev.filter((q) => q.id !== qid))
-    if (steering) {
-      void act(() => tell(item.text))
-      return
-    }
-    void act(() => carry(item.text))
+    if (!item || busy) return
+    setQueued((prev) => prev.map((q) => (q.id === qid ? { ...q, mode: 'steering' } : q)))
+    void act(async () => {
+      try {
+        const res = steering ? await tell(item.text) : await carry(item.text)
+        setQueued((prev) => prev.filter((q) => q.id !== qid))
+        return res
+      } catch (e) {
+        setQueued((prev) => prev.map((q) => (q.id === qid ? { ...q, mode: 'queued' } : q)))
+        throw e
+      }
+    })
   }
 
-  const enqueue = () => {
-    const words = compose([tools.text, draft.trim()].filter(Boolean).join('\n\n'), files)
+  const interruptQueued = (qid: string) => {
+    const item = queued.find((q) => q.id === qid)
+    if (!item || busy) return
+    setQueued((prev) => prev.map((q) => (q.id === qid ? { ...q, mode: 'steering' } : q)))
+    void act(async () => {
+      try {
+        if (held) {
+          // On sandbox sessions, `steer` atomically stops with work kept and launches the redirect turn.
+          const res = await tell(item.text)
+          setQueued((prev) => prev.filter((q) => q.id !== qid))
+          return res
+        }
+        await stop(t, activeId)
+        setStopping(true)
+        const res = await carry(item.text)
+        setQueued((prev) => prev.filter((q) => q.id !== qid))
+        return res
+      } catch (e) {
+        setQueued((prev) => prev.map((q) => (q.id === qid ? { ...q, mode: 'queued' } : q)))
+        throw e
+      }
+    })
+  }
+
+  const editQueued = (qid: string) => {
+    const item = queued.find((q) => q.id === qid)
+    if (!item) return
+    setQueued((prev) => prev.filter((q) => q.id !== qid))
+    setDraft((prev) => (prev.trim() ? `${item.text}\n${prev}` : item.text))
+  }
+
+  const removeQueued = (qid: string) => {
+    setQueued((prev) => prev.filter((q) => q.id !== qid))
+  }
+
+  const enqueue = (wordsOverride?: string) => {
+    const words = wordsOverride ?? compose([tools.text, draft.trim()].filter(Boolean).join('\n\n'), files)
     if (!words) return
-    setQueued((prev) => [...prev, { id: `q-${Date.now()}-${prev.length}`, text: words }])
+    setQueued((prev) => [...prev, { id: `q-${Date.now()}-${prev.length}`, text: words, mode: 'queued', createdAt: new Date().toISOString() }])
     setDraft('')
     setFiles([])
   }
+
+  // Drain stacked follow-ups FIFO once the active turn finishes and settles.
+  const drainQueuedRef = useRef(sendQueued)
+  drainQueuedRef.current = sendQueued
+  useEffect(() => {
+    if (running || !finished || busy || waiting) return
+    const nextItem = queued.find((q) => q.mode !== 'steering')
+    if (!nextItem) return
+    drainQueuedRef.current(nextItem.id)
+  }, [running, finished, busy, waiting, queued])
 
   useEffect(() => {
     if (!running || paused) return
@@ -1251,8 +1305,7 @@ function Job({ id, activeId, chain, state: read }: { id: string; activeId: strin
               cards={shown}
               devMode={devMode}
               view={transcriptView}
-              queued={queued}
-              onSendQueued={sendQueued}
+              activity={running && !paused ? liveActivity(events) || current?.name || '' : ''}
               onOpen={look}
               onDiff={() => {
                 side.open({ kind: 'diff', title: say('Diff') })
@@ -1380,6 +1433,16 @@ function Job({ id, activeId, chain, state: read }: { id: string; activeId: strin
                     </SizableText>
                   </XStack>
                 ) : null}
+                {queued.length > 0 ? (
+                  <SteerStack
+                    items={queued}
+                    onSteer={sendQueued}
+                    onInterrupt={active && !waiting ? interruptQueued : undefined}
+                    onEdit={editQueued}
+                    onRemove={removeQueued}
+                    busy={busy}
+                  />
+                ) : null}
                 {running ? (
                   <XStack items="center" gap="$2" px="$3" py="$2" rounded="$10" borderWidth={1} borderColor="$borderColor" flexWrap="wrap" rowGap="$1">
                     <SizableText size="$2" color="$ink" flex={1} minW={160}>
@@ -1443,29 +1506,55 @@ function Job({ id, activeId, chain, state: read }: { id: string; activeId: strin
                 voice={voice}
               >
                 {active && !waiting && draft.trim() ? (
-                  <XStack
-                    render="button"
-                    data-slot="composer-stop"
-                    aria-label={say('Stop session')}
-                    {...({ title: say('Stop session') } as object)}
-                    onPress={() => command('stop')}
-                    items="center"
-                    gap="$1.5"
-                    px="$2.5"
-                    height={30}
-                    $max-md={{ minH: 40 }}
-                    rounded={999}
-                    borderWidth={1}
-                    borderColor="var(--border-strong)"
-                    bg="$panel"
-                    cursor="pointer"
-                    hoverStyle={{ bg: '$hover' }}
-                    focusVisibleStyle={RING}
-                  >
-                    <Square size={10} fill="currentColor" />
-                    <SizableText size="$1" fontWeight="500" color="$ink">
-                      {say('Stop')}
-                    </SizableText>
+                  <XStack items="center" gap="$1.5">
+                    {steering ? (
+                      <XStack
+                        render="button"
+                        data-slot="composer-queue"
+                        aria-label={say('Queue follow-up')}
+                        {...({ title: say('Queue follow-up (Ctrl+Enter)') } as object)}
+                        onPress={() => enqueue()}
+                        items="center"
+                        px="$2.5"
+                        height={30}
+                        $max-md={{ minH: 40 }}
+                        rounded={999}
+                        borderWidth={1}
+                        borderColor="$borderColor"
+                        bg="$panel"
+                        cursor="pointer"
+                        hoverStyle={{ bg: '$hover' }}
+                        focusVisibleStyle={RING}
+                      >
+                        <SizableText size="$1" fontWeight="500" color="$soft">
+                          {say('Queue')}
+                        </SizableText>
+                      </XStack>
+                    ) : null}
+                    <XStack
+                      render="button"
+                      data-slot="composer-stop"
+                      aria-label={say('Stop session')}
+                      {...({ title: say('Stop session') } as object)}
+                      onPress={() => command('stop')}
+                      items="center"
+                      gap="$1.5"
+                      px="$2.5"
+                      height={30}
+                      $max-md={{ minH: 40 }}
+                      rounded={999}
+                      borderWidth={1}
+                      borderColor="var(--border-strong)"
+                      bg="$panel"
+                      cursor="pointer"
+                      hoverStyle={{ bg: '$hover' }}
+                      focusVisibleStyle={RING}
+                    >
+                      <Square size={10} fill="currentColor" />
+                      <SizableText size="$1" fontWeight="500" color="$ink">
+                        {say('Stop')}
+                      </SizableText>
+                    </XStack>
                   </XStack>
                 ) : null}
               </Composer>

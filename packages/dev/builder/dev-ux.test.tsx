@@ -264,7 +264,11 @@ vi.mock('./awake.tsx', () => ({ KeepAwake: none, useKeepAwake: () => [false, vi.
 vi.mock('./dev-mode.ts', () => ({ useDevMode: () => [false, vi.fn()] as const, formatDeviceLabel: () => ({ title: 'Cloud workspace', detail: '' }) }))
 vi.mock('./voice.ts', () => ({ useEar: () => vi.fn(), useSpoken: () => 'en' }))
 vi.mock('./reply.tsx', () => ({ speaker: () => vi.fn() }))
-vi.mock('./transcript.tsx', () => ({ Transcript: ({ cards }: { cards: unknown[] }) => box({ 'data-slot': 'transcript', 'data-cards': String(cards.length) }) }))
+vi.mock('./transcript.tsx', () => ({
+  Transcript: ({ cards, activity }: { cards: unknown[]; activity?: string }) =>
+    box({ 'data-slot': 'transcript', 'data-cards': String(cards.length), 'data-activity': activity ?? '' }),
+  SteerStack: ({ items }: { items: unknown[] }) => box({ 'data-slot': 'steer-stack', 'data-count': String(items.length) }),
+}))
 vi.mock('./side.tsx', () => ({
   SideProvider: ({ children }: { children?: unknown }) => box({ children }),
   useSide: () => null,
