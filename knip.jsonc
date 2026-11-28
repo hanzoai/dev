@@ -147,6 +147,8 @@
     "packages/dev": {
       // @hanzo/dev ships both the apps/web embed build (core + keymap) and the absorbed Builder
       // modules (compiled from packages/dev/builder via tsconfig.builder.json).
+      // Hand-authored core.d.ts and keymap.d.ts are copied into dist/ by scripts/assemble.mjs.
+      "ignore": ["core.d.ts", "keymap.d.ts"],
       "entry": [
         "builder/index.ts!",
         "builder/plan.ts!",

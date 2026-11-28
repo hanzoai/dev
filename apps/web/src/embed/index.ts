@@ -1,8 +1,7 @@
 import "./embedded";
 
-// The app's one stylesheet (Tailwind and Dev's tokens): without it the library draws unstyled.
+// The app's one stylesheet (Tailwind and Dev's tokens); hosts load `@hanzo/font/css` themselves.
 import "../index.css";
-import "@hanzo/font/css";
 
 export { DevProvider } from "./DevProvider";
 export { DevThreadList } from "./DevThreadList";
