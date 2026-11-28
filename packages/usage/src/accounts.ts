@@ -76,6 +76,7 @@ const accountDirs = async (
     readonly defaultDir: string;
     readonly prefix: string;
     readonly marker: (dir: string) => string;
+    readonly hasAccount?: (dir: string) => Promise<boolean>;
   },
 ): Promise<ReadonlyArray<{ dir: string; instance?: Instance }>> => {
   const out: Array<{ dir: string; instance?: Instance }> = (
@@ -90,7 +91,11 @@ const accountDirs = async (
     .map((name) => `${env.home}/${name}`)
     .toSorted();
   for (const dir of found) {
-    if (known.has(dir) || (await env.readText(options.marker(dir))) === undefined) continue;
+    if (known.has(dir)) continue;
+    const present = options.hasAccount
+      ? await options.hasAccount(dir)
+      : (await env.readText(options.marker(dir))) !== undefined;
+    if (!present) continue;
     out.push({ dir });
   }
   return out;
@@ -110,7 +115,32 @@ const identityOf = (
 const claudeProfile = async (env: UsageEnv, dir: string) => {
   const file = dir === `${env.home}/.claude` ? `${env.home}/.claude.json` : `${dir}/.claude.json`;
   const oauth = obj(parseJson(await env.readText(file)).oauthAccount);
-  return { email: str(oauth.emailAddress) };
+  const display = str(oauth.planDisplayName);
+  const tier = str(oauth.organizationRateLimitTier) ?? str(oauth.userRateLimitTier);
+  const billing = str(oauth.billingType);
+  const tierPlan = tier
+    ? (() => {
+        const mult = /(\d+x)$/.exec(tier)?.[1];
+        if (/max/i.test(tier)) return mult ? `Max ${mult}` : "Max";
+        if (/pro/i.test(tier)) return mult ? `Pro ${mult}` : "Pro";
+        if (/team/i.test(tier)) return "Team";
+        if (/enterprise/i.test(tier)) return "Enterprise";
+        if (/free/i.test(tier)) return "Free";
+        return undefined;
+      })()
+    : undefined;
+  const plan = display ?? tierPlan ?? (billing === "free" ? "Free" : undefined);
+  const isFree =
+    billing === "free" ||
+    /^free$/i.test(plan ?? "") ||
+    str(oauth.subscriptionType)?.toLowerCase() === "free";
+  return { email: str(oauth.emailAddress), plan, isFree };
+};
+
+const claudeHasLocalUsage = async (env: UsageEnv, dir: string): Promise<boolean> => {
+  if ((await env.readText(`${dir}/stats-cache.json`)) !== undefined) return true;
+  if ((await env.readText(`${dir}/history.jsonl`)) !== undefined) return true;
+  return (await env.listDir(`${dir}/projects`)).length > 0;
 };
 
 const claudeCredential = async (env: UsageEnv, dir: string): Promise<Record<string, unknown>> => {
@@ -189,20 +219,50 @@ export const claude: Fetcher = async (env, instances) =>
   Promise.all(
     (
       await accountDirs(env, instances, {
-        defaultDir: `${env.home}/.claude`,
+        defaultDir: env.env.CLAUDE_CONFIG_DIR?.trim() || `${env.home}/.claude`,
         prefix: ".claude",
         marker: (dir) => `${dir}/.claude.json`,
+        hasAccount: async (dir) =>
+          (await env.readText(`${dir}/.claude.json`)) !== undefined ||
+          (await env.readText(`${dir}/.credentials.json`)) !== undefined ||
+          (await claudeHasLocalUsage(env, dir)),
       })
     ).map(async ({ dir, instance }): Promise<ProviderSnapshot> => {
       const profile = await claudeProfile(env, dir);
       const who = identityOf(dir, instance, profile.email);
       const oauth = await claudeCredential(env, dir);
+      const plan = claudePlan(oauth) ?? profile.plan;
+      const isFree =
+        profile.isFree || str(oauth.subscriptionType)?.toLowerCase() === "free";
+      const localFallback = async (error?: string): Promise<ProviderSnapshot> => {
+        const hasLocal = await claudeHasLocalUsage(env, dir);
+        if (hasLocal && isFree) {
+          return {
+            ...base(env, "claude", "local"),
+            ...who,
+            ...(plan ? { plan } : {}),
+            windows: [],
+          };
+        }
+        return {
+          ...base(env, "claude", hasLocal ? "local" : "none"),
+          ...who,
+          ...(plan ? { plan } : {}),
+          windows: [],
+          ...(error ? { error } : {}),
+        };
+      };
       const token = str(oauth.accessToken);
-      if (!token)
-        return failed(env, "claude", who, "Not signed in. Run `claude` for this account.");
+      if (!token) {
+        if (isFree && (await claudeHasLocalUsage(env, dir))) {
+          return localFallback();
+        }
+        return localFallback("Not signed in. Run `claude` for this account.");
+      }
       const expiresAt = num(oauth.expiresAt);
-      if (expiresAt !== undefined && expiresAt <= env.now().getTime())
-        return failed(env, "claude", who, SIGN_IN_AGAIN);
+      if (expiresAt !== undefined && expiresAt <= env.now().getTime()) {
+        return localFallback(SIGN_IN_AGAIN);
+      }
       const res = await env.fetch("https://api.anthropic.com/api/oauth/usage", {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -210,17 +270,25 @@ export const claude: Fetcher = async (env, instances) =>
           Accept: "application/json",
         },
       });
-      if (res.status === 401 || res.status === 403)
-        return failed(env, "claude", who, SIGN_IN_AGAIN);
-      if (res.status === 429)
-        return failed(env, "claude", who, "Rate limited by Anthropic; will retry.");
-      if (!res.ok) return failed(env, "claude", who, `HTTP ${res.status}`);
-      const plan = claudePlan(oauth);
+      if (res.status === 401 || res.status === 403) {
+        return localFallback(isFree ? undefined : SIGN_IN_AGAIN);
+      }
+      if (res.status === 429) {
+        return localFallback("Rate limited by Anthropic; will retry.");
+      }
+      if (!res.ok) return localFallback(`HTTP ${res.status}`);
+      const parsed = parseClaude(obj(await res.json()));
+      const source =
+        parsed.windows.length > 0 || parsed.credits !== undefined
+          ? "oauth"
+          : (await claudeHasLocalUsage(env, dir))
+            ? "local"
+            : "oauth";
       return {
-        ...base(env, "claude", "oauth"),
+        ...base(env, "claude", source),
         ...who,
         ...(plan ? { plan } : {}),
-        ...parseClaude(obj(await res.json())),
+        ...parsed,
       };
     }),
   );

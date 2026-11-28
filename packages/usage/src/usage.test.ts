@@ -650,6 +650,53 @@ describe("accounts", () => {
     assert.isUndefined(rows[0]!.unconfigured);
     assert.strictEqual(rows[0]!.instance, "claude_extra");
   });
+  it("keeps free/unpaid and expired Claude accounts visible via local ~/.claude data instead of going dark", async () => {
+    const env = fakeEnv(
+      {
+        "/h/.claude.json": JSON.stringify({
+          oauthAccount: {
+            emailAddress: "free@example.com",
+            billingType: "free",
+            planDisplayName: "Free",
+          },
+        }),
+        "/h/.claude/stats-cache.json": JSON.stringify({ version: 5, dailyActivity: [] }),
+        "/h/.claude-hanzo/.claude.json": JSON.stringify({
+          oauthAccount: {
+            emailAddress: "z@hanzo.ai",
+            organizationRateLimitTier: "default_claude_max_20x",
+          },
+        }),
+        "/h/.claude-hanzo/.credentials.json": credential(1),
+        "/h/.claude-hanzo/projects/proj/session.jsonl": '{"type":"assistant"}\n',
+        "/h/.claude-localonly/projects/proj/session.jsonl": '{"type":"assistant"}\n',
+        "/h/.claude-flow/readme.txt": "not an account",
+      },
+      {},
+      {},
+      {
+        fetch: (async () => new Response("{}", { status: 403 })) as typeof fetch,
+      },
+    );
+    const rows = await FETCHERS.claude!(env, [{ id: "claudeAgent", name: "Default" }]);
+    const byId = new Map(rows.map((r) => [r.instance, r]));
+    // Default Free account: detected locally without going dark or throwing Sign in again.
+    const freeRow = byId.get("claudeAgent")!;
+    assert.strictEqual(freeRow.source, "local");
+    assert.strictEqual(freeRow.account, "free@example.com");
+    assert.strictEqual(freeRow.plan, "Free");
+    assert.isUndefined(freeRow.error);
+    // Sibling expired Max 20x account with local projects/: preserves plan + local source.
+    const hanzoRow = byId.get("dir:/h/.claude-hanzo")!;
+    assert.strictEqual(hanzoRow.source, "local");
+    assert.strictEqual(hanzoRow.account, "z@hanzo.ai");
+    assert.strictEqual(hanzoRow.plan, "Max 20x");
+    assert.strictEqual(hanzoRow.error, "Sign in again.");
+    // Sibling dir with only projects/ (no .claude.json) is discovered; .claude-flow is ignored.
+    assert.isDefined(byId.get("dir:/h/.claude-localonly"));
+    assert.strictEqual(byId.get("dir:/h/.claude-localonly")!.source, "local");
+    assert.isUndefined(byId.get("dir:/h/.claude-flow"));
+  });
   it("antigravity runs agy in a scratch HOME holding a copy of the token, never the real one", async () => {
     let staged: Record<string, string> = {};
     let ran: { file: string; home: string | undefined } | undefined;

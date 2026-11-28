@@ -1,7 +1,16 @@
+import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+
+import * as HostProcess from "@hanzodev/shared/HostProcess";
 
 import { parseRateTable, priceUsage } from "../../usage/usagePricing.ts";
-import { claudeUsageFormat, parseClaudeLine } from "./claudeUsage.ts";
+import { claudeUsageFormat, claudeUsageReader, parseClaudeLine } from "./claudeUsage.ts";
 
 function claudeLine(overrides: {
   messageId: string;
@@ -259,4 +268,49 @@ describe("Claude cache write pricing", () => {
     // 0.4M x $6.25/M + 0.6M x $10/M
     expect(priceUsage(rates, record).costUsd).toBeCloseTo(8.5, 9);
   });
+});
+
+describe("claudeUsageReader.directories", () => {
+  it.effect("discovers primary ~/.claude/projects and sibling ~/.claude-* account transcript dirs", () =>
+    Effect.gen(function* () {
+      const home = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "claude-usage-dirs-")),
+      );
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(() => NodeFSP.rm(home, { recursive: true, force: true })),
+      );
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(NodePath.join(home, ".claude", "projects"), { recursive: true });
+        await NodeFSP.mkdir(NodePath.join(home, ".claude-hanzo", "projects"), { recursive: true });
+        await NodeFSP.mkdir(NodePath.join(home, ".claude-flow"), { recursive: true });
+      });
+      const dirs = yield* claudeUsageReader
+        .directories(
+          {
+            instanceId: "claudeAgent" as never,
+            config: {
+              binaryPath: "claude",
+              homePath: "",
+              customModels: [],
+              enabled: true,
+              launchArgs: "",
+            } as never,
+            environment: {},
+          },
+          { awaitRefresh: false },
+        )
+        .pipe(
+          Effect.provide(
+            Layer.merge(
+              NodeServices.layer,
+              Layer.succeed(HostProcess.HomeDirectory, home),
+            ),
+          ),
+        );
+      expect(dirs.map((d) => d.dir)).toEqual([
+        NodePath.resolve(home, ".claude", "projects"),
+        NodePath.resolve(home, ".claude-hanzo", "projects"),
+      ]);
+    }),
+  );
 });
