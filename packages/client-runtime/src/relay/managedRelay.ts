@@ -582,6 +582,7 @@ function disabledManagedRelayClient(
 }
 
 const SourcesResponse = Schema.Union([
+  Schema.Struct({ machines: Schema.Array(Schema.Unknown) }),
   Schema.Struct({ sources: Schema.Array(Schema.Unknown) }),
   Schema.Struct({ data: Schema.Array(Schema.Unknown) }),
   Schema.Array(Schema.Unknown),
@@ -617,7 +618,7 @@ const SOURCE_CONNECT_TTL_MS = 5 * 60_000;
 const sourceOperations = (http: HttpClient.HttpClient) => ({
   listEnvironments: Effect.fnUntraced(
     function* (input: { readonly iamToken: string }) {
-      return yield* HttpClientRequest.get(`${DEFAULT_HANZO_API_BASE_URL}/v1/sources`).pipe(
+      return yield* HttpClientRequest.get(`${DEFAULT_HANZO_API_BASE_URL}/v1/machines`).pipe(
         HttpClientRequest.bearerToken(input.iamToken),
         http.execute,
         Effect.flatMap(HttpClientResponse.filterStatusOk),
@@ -637,7 +638,7 @@ const sourceOperations = (http: HttpClient.HttpClient) => ({
       readonly environmentId: RelayClientEnvironmentRecord["environmentId"];
     }) {
       const source = yield* HttpClientRequest.get(
-        `${DEFAULT_HANZO_API_BASE_URL}/v1/sources/${encodeURIComponent(input.environmentId)}`,
+        `${DEFAULT_HANZO_API_BASE_URL}/v1/machines/${encodeURIComponent(input.environmentId)}`,
       ).pipe(
         HttpClientRequest.bearerToken(input.iamToken),
         http.execute,

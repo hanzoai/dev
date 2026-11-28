@@ -97,7 +97,7 @@ it.effect(
                       token_type: "bearer",
                     });
                   }
-                  if (url.pathname === "/v1/sources") {
+                  if (url.pathname === "/v1/machines") {
                     return respond(request, { id: "src_1", interval: 30, level: "metadata" }, 201);
                   }
                   return respond(request, { interval: 30, level: "metadata", revoked: false });
@@ -127,7 +127,7 @@ it.effect(
         assert.include(exchange?.body ?? "", "code=issued-code");
         assert.include(exchange?.body ?? "", "code_verifier=");
         const registration = seen.find(
-          (request) => request.method === "POST" && request.url.endsWith("/v1/sources"),
+          (request) => request.method === "POST" && request.url.endsWith("/v1/machines"),
         );
         assert.equal(registration?.auth, "Bearer issued-access-token");
         assert.equal(

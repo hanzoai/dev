@@ -32,7 +32,7 @@ describe("discoverEnvironments", () => {
     const calls: Array<string> = [];
     const fetch: DiscoveryFetch = async (url, init) => {
       calls.push(`${init?.method} ${url}`);
-      return url.endsWith("/v1/sources")
+      return url.endsWith("/v1/machines")
         ? json(200, { sources: [mac, { ...mac, id: "m2", name: "Gone", state: "revoked" }] })
         : json(405, {});
     };
@@ -47,13 +47,13 @@ describe("discoverEnvironments", () => {
     expect(result.showLinkPrompt).toBe(false);
     expect(calls.toSorted()).toEqual([
       "GET https://api.hanzo.ai/v1/dev/sessions",
-      "GET https://api.hanzo.ai/v1/sources",
+      "GET https://api.hanzo.ai/v1/machines",
     ]);
   });
 
   it("lists cloud as not available yet when its route is not deployed", async () => {
     const fetch: DiscoveryFetch = async (url) =>
-      url.endsWith("/v1/sources") ? json(200, { sources: [] }) : json(404, {});
+      url.endsWith("/v1/machines") ? json(200, { sources: [] }) : json(404, {});
     const result = await discoverEnvironments(auth, known, { fetch });
     expect(result.environments.map((e) => `${e.type}:${e.id}`)).toEqual([
       "cloud:cloud",

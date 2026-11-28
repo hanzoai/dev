@@ -67,7 +67,7 @@ export const layer = Layer.effect(
       const token = yield* requireToken;
       const response = yield* call({
         method: "GET",
-        path: "/v1/sources/accounts",
+        path: "/v1/machines/accounts",
         accessToken: token.accessToken,
       });
       if (response.status !== 200) return yield* reject(response.status);
@@ -81,7 +81,7 @@ export const layer = Layer.effect(
       const token = yield* requireToken;
       const response = yield* call({
         method: "POST",
-        path: "/v1/sources/accounts",
+        path: "/v1/machines/accounts",
         accessToken: token.accessToken,
         body: encodeAddBody({
           provider: input.provider,
@@ -101,7 +101,7 @@ export const layer = Layer.effect(
       const token = yield* requireToken;
       const response = yield* call({
         method: "DELETE",
-        path: `/v1/sources/accounts/${encodeURIComponent(id)}`,
+        path: `/v1/machines/accounts/${encodeURIComponent(id)}`,
         accessToken: token.accessToken,
       });
       if (response.status !== 404 && response.status >= 300) {

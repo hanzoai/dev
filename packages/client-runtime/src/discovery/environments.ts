@@ -154,11 +154,13 @@ function parseMachine(value: unknown): LinkedMachine | null {
 export function parseSources(body: unknown): ReadonlyArray<LinkedMachine> | null {
   const raw = Array.isArray(body)
     ? (body as ReadonlyArray<unknown>)
-    : isRecord(body) && Array.isArray(body.sources)
-      ? (body.sources as ReadonlyArray<unknown>)
-      : isRecord(body) && Array.isArray(body.data)
-        ? (body.data as ReadonlyArray<unknown>)
-        : null;
+    : isRecord(body) && Array.isArray(body.machines)
+      ? (body.machines as ReadonlyArray<unknown>)
+      : isRecord(body) && Array.isArray(body.sources)
+        ? (body.sources as ReadonlyArray<unknown>)
+        : isRecord(body) && Array.isArray(body.data)
+          ? (body.data as ReadonlyArray<unknown>)
+          : null;
   if (raw === null) return null;
   return raw
     .map(parseMachine)
@@ -208,7 +210,7 @@ async function listLinkedMachines(
   const { fetch, baseUrl } = resolve(options);
   let response: Response;
   try {
-    response = await fetch(`${baseUrl}/v1/sources`, {
+    response = await fetch(`${baseUrl}/v1/machines`, {
       method: "GET",
       headers: headers({ ...auth, accessToken: auth.accessToken }),
     });
