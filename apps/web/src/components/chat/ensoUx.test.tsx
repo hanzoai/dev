@@ -181,6 +181,7 @@ describe("Thinking & reasoning timeline rows hide brain icon and align with Work
     const row: Extract<TimelineRow, { kind: "thinking" }> = {
       kind: "thinking",
       id: "thinking-1",
+      createdAt: null,
       label: "Starting",
       groupId: "g-1",
       expanded: false,
@@ -203,8 +204,10 @@ describe("Thinking & reasoning timeline rows hide brain icon and align with Work
     const row: Extract<TimelineRow, { kind: "work-live" }> = {
       kind: "work-live",
       id: "live-1",
+      createdAt: reasoningEntry.createdAt,
       groupId: "g-1",
       entry: reasoningEntry,
+      groupedEntries: [reasoningEntry],
       thought: reasoningEntry,
       active: true,
       expanded: false,
@@ -226,9 +229,10 @@ describe("Thinking & reasoning timeline rows hide brain icon and align with Work
     const row: Extract<TimelineRow, { kind: "work-live" }> = {
       kind: "work-live",
       id: "live-2",
+      createdAt: commandEntry.createdAt,
       groupId: "g-1",
       entry: commandEntry,
-      thought: null,
+      groupedEntries: [commandEntry],
       active: true,
       expanded: false,
     };
