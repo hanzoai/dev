@@ -50,6 +50,7 @@ function RestoreDeviceDefaultsButton({ onRestored }: { onRestored: () => void })
 function SettingsScopeBoundary({ pathname, children }: { pathname: string; children: ReactNode }) {
   const { scope, connectedEnvironments } = useSettingsScope();
   const { environments } = useEnvironments();
+  const host = useEmbedSettingsHost();
   const gt = useGT();
   const m = useMessages();
   const hash = useLocation({ select: (location) => location.hash });
@@ -101,6 +102,9 @@ function SettingsScopeBoundary({ pathname, children }: { pathname: string; child
     );
   }
   if (SETTINGS_DEVICE_ONLY_PATHS.has(pathname) || pathname === "/settings/projects") {
+    return children;
+  }
+  if (pathname === "/settings/providers" && host?.providersFallback) {
     return children;
   }
   if (scope.kind === "unavailable")

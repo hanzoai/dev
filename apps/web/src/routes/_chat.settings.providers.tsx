@@ -9,10 +9,10 @@ import { useEmbedSettingsHost } from "../embed/settingsHost";
 
 function SettingsProvidersRoute() {
   const target = Route.useSearch();
-  const { environment, scope } = useSettingsScope();
+  const { environment, scope, connectedEnvironments } = useSettingsScope();
   const host = useEmbedSettingsHost();
   const gt = useGT();
-  if (!environment) {
+  if (!environment || connectedEnvironments.length === 0) {
     if (host?.providersFallback) {
       return <SettingsPageContainer>{host.providersFallback}</SettingsPageContainer>;
     }
