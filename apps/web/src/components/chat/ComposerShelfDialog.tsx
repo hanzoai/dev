@@ -239,7 +239,7 @@ function CloudShelf({
         let accessToken = "";
         let orgId: string | null = null;
         try {
-          accessToken = await auth.getToken();
+          accessToken = (await auth.getToken()) ?? "";
           orgId = auth.activeOrgId;
         } catch {
           // Embedded inside @hanzo/app: fall back to IAM session in localStorage
