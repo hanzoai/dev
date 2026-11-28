@@ -17,7 +17,8 @@
     {
       "type": "interrupt",
       "targetRunIndex": 1,
-      "waitForTurnItemType": "command_execution"
+      "waitForTurnItemType": "command_execution",
+      "waitForTurnItemStatus": "running"
     }
   ]
 }

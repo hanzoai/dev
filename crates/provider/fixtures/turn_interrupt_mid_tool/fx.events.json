@@ -729,34 +729,7 @@
     }
   },
   {
-    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aturn_interrupt_mid_tool%3Ainterrupt-1%3A<uuid:5>:<uuid:20>",
-    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
-    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
-    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
-    "providerInstanceId": "fx",
-    "occurredAt": "<time>",
-    "type": "turn-item.updated",
-    "payload": {
-      "id": "turn-item:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:signal:interrupt-request",
-      "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
-      "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
-      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
-      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
-      "providerTurnId": "provider-turn:provider:fx:native-turn:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1",
-      "nativeItemRef": null,
-      "parentItemId": null,
-      "ordinal": 1000004,
-      "status": "completed",
-      "title": "Interrupt requested",
-      "startedAt": "<time>",
-      "completedAt": "<time>",
-      "updatedAt": "<time>",
-      "type": "run_interrupt_request",
-      "message": "Stopped by user"
-    }
-  },
-  {
-    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:21>",
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:provider-session:provider-session%3Aprovider-instance%3Afx%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3A<uuid:2>:<uuid:20>",
     "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
     "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
     "nodeId": "node:provider:fx:native-item:provider-instance%3Afx%3Afx-session-01%3Atool%3Acall_573669dc43cb4393aeceab4ea77cffbb",
@@ -785,6 +758,33 @@
       "updatedAt": "<time>",
       "type": "command_execution",
       "input": "node -e \"console.log('interrupt fixture tool started'); setTimeout(() => {}, 30000)\""
+    }
+  },
+  {
+    "id": "event:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:command:command%3Afixture%3Aturn_interrupt_mid_tool%3Ainterrupt-1%3A<uuid:5>:<uuid:21>",
+    "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+    "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+    "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+    "providerInstanceId": "fx",
+    "occurredAt": "<time>",
+    "type": "turn-item.updated",
+    "payload": {
+      "id": "turn-item:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:signal:interrupt-request",
+      "threadId": "thread:fixture:turn_interrupt_mid_tool:project:project%3Afixture%3Aturn_interrupt_mid_tool%3A<uuid:0>:<uuid:1>",
+      "runId": "run:thread:thread%3Afixture%3Aturn_interrupt_mid_tool%3Aproject%3Aproject%253Afixture%253Aturn_interrupt_mid_tool%253A<uuid:0>%3A<uuid:1>:ordinal:1",
+      "nodeId": "node:run:run%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1:root",
+      "providerThreadId": "provider-thread:provider:fx:native-thread:pending%3Arun%3Athread%3Athread%253Afixture%253Aturn_interrupt_mid_tool%253Aproject%253Aproject%25253Afixture%25253Aturn_interrupt_mid_tool%25253A<uuid:0>%253A<uuid:1>%3Aordinal%3A1",
+      "providerTurnId": "provider-turn:provider:fx:native-turn:provider-instance%3Afx%3Afx-session-01%3Aturn%3A1",
+      "nativeItemRef": null,
+      "parentItemId": null,
+      "ordinal": 1000004,
+      "status": "completed",
+      "title": "Interrupt requested",
+      "startedAt": "<time>",
+      "completedAt": "<time>",
+      "updatedAt": "<time>",
+      "type": "run_interrupt_request",
+      "message": "Stopped by user"
     }
   },
   {
