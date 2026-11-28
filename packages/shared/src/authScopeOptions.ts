@@ -44,7 +44,7 @@ export const AUTH_SCOPE_OPTIONS: ReadonlyArray<{
   {
     scope: AuthProvidersManageScope,
     title: msg("Manage providers"),
-    description: msg("Configure, install, sign in to, and update providers and usage sources."),
+    description: msg("Configure, install, sign in to, and update providers and usage."),
   },
   {
     scope: AuthEnvironmentMaintainScope,

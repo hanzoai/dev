@@ -78,11 +78,11 @@ const setup = (sources: ReadonlyArray<BrowserSource>) => {
   mocks.browsersAtom = Atom.make(AsyncResult.success({ sources }));
 };
 
-describe("Browsers on this computer", () => {
-  it("shows the extension as a view-only linked source on its browser", async () => {
+describe("Browsers on this machine", () => {
+  it("shows the extension as a view-only browser on this machine", async () => {
     setup([firefox]);
     await using screen = await render(<LinkedDesktopSettings />);
-    await expect.element(screen.getByText("Browsers on this computer")).toBeVisible();
+    await expect.element(screen.getByText("Browsers on this machine")).toBeVisible();
     await expect.element(screen.getByText("Firefox · Hanzo extension")).toBeVisible();
     await expect.element(screen.getByText("on Firefox")).toBeVisible();
     await expect

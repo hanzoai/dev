@@ -1,5 +1,5 @@
 import { snapshotKey } from "./account.ts";
-import { CATALOG, DEFAULT_ENABLED, providerById } from "./catalog.ts";
+import { AUTO_DETECT_PROVIDERS, CATALOG, DEFAULT_ENABLED, providerById } from "./catalog.ts";
 import type { UsageEnv } from "./env.ts";
 import { NotConfigured, type Instance } from "./fetchers.ts";
 import { CONNECTORS, FETCHERS } from "./readers.ts";
@@ -58,16 +58,21 @@ const refreshOne = async (
   id: string,
   local: ReadonlyArray<ProviderSnapshot>,
   instances: ReadonlyArray<Instance>,
+  quietIfUnconfigured = false,
 ): Promise<ProviderSnapshot[]> => {
   const p = providerById(id);
   const fetcher = FETCHERS[id];
   const read = fetcher
-    ? await fetcher(env, instances).catch((e: unknown) => [
-        failure(env, id, e instanceof NotConfigured || e instanceof Error ? e.message : String(e)),
-      ])
+    ? await fetcher(env, instances).catch((e: unknown) => {
+        if (quietIfUnconfigured && e instanceof NotConfigured) return [];
+        return [
+          failure(env, id, e instanceof NotConfigured || e instanceof Error ? e.message : String(e)),
+        ];
+      })
     : [];
   const snapshots = merge(read, local);
-  if (snapshots.length === 0)
+  if (snapshots.length === 0) {
+    if (quietIfUnconfigured) return [];
     snapshots.push(
       failure(
         env,
@@ -77,6 +82,7 @@ const refreshOne = async (
           : "No usage API for this provider.",
       ),
     );
+  }
   const status = p ? await fetchStatus(env, p) : undefined;
   return status ? snapshots.map((s) => ({ ...s, status })) : snapshots;
 };
@@ -137,21 +143,30 @@ export const createUsageService = (
   ): Promise<{ summary: UsageSummary; alerts: LimitAlert[] }> => {
     const settings = getSettings();
     const refreshEnv = withHostEnv(host);
-    const ids = CATALOG.map((p) => p.id).filter((id) =>
+    const enabledIds = CATALOG.map((p) => p.id).filter((id) =>
       isEnabled(
         settings,
         id,
         host.instances.some((i) => i.provider === id),
       ),
     );
+    const enabledSet = new Set(enabledIds);
+    const autoIds = AUTO_DETECT_PROVIDERS.filter(
+      (id) => !enabledSet.has(id) && settings.providers[id]?.enabled !== false,
+    );
+    const allTargets = [
+      ...enabledIds.map((id) => ({ id, quiet: false })),
+      ...autoIds.map((id) => ({ id, quiet: true })),
+    ];
     const fresh = await Promise.all(
-      ids.map((id) =>
+      allTargets.map(({ id, quiet }) =>
         budgeted(id, () =>
           refreshOne(
             refreshEnv,
             id,
             host.local.filter((s) => s.provider === id),
             host.instances.filter((i) => i.provider === id),
+            quiet,
           ),
         ),
       ),
