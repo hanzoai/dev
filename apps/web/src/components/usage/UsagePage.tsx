@@ -1169,8 +1169,8 @@ function UsageCoverageNotice({
       ))}
       {duplicateSources.length > 0 ? (
         <span>
-          {gt("Counted once across environments sharing a transcript directory: {sources}", {
-            sources: duplicateSources.join(", "),
+          {gt("Counted once across machines sharing a transcript directory: {providers}", {
+            providers: duplicateSources.join(", "),
           })}
         </span>
       ) : null}

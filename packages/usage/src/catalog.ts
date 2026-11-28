@@ -941,6 +941,23 @@ export const DEFAULT_ENABLED: ReadonlyArray<string> = [
   "opencode",
   "muse",
   "zai",
+  "grok",
+];
+
+/**
+ * Additional providers with local/API readers that are probed automatically on each machine and
+ * shown whenever local credentials or usage data exist, without cluttering machines that do not
+ * use them.
+ */
+export const AUTO_DETECT_PROVIDERS: ReadonlyArray<string> = [
+  "gemini",
+  "qwencloud",
+  "mistral",
+  "windsurf",
+  "groq",
+  "ollama",
+  "openrouter",
+  "deepseek",
 ];
 
 /** Providers with a live reader (`FETCHERS`), or whose limits the host reads from the sessions it runs. */
@@ -956,6 +973,13 @@ export const LIVE_PROVIDERS: ReadonlyArray<string> = [
   "zai",
   "opencode",
   "muse",
+  "grok",
+  "gemini",
+  "qwencloud",
+  "mistral",
+  "windsurf",
+  "groq",
+  "ollama",
 ];
 
 /** Environment variables the live readers take a provider key from. */
@@ -972,4 +996,17 @@ export const USAGE_ENV_KEYS: ReadonlyArray<string> = [
   "HANZO_API_KEY",
   "COPILOT_API_TOKEN",
   "MUSE_DEVICE_TOKEN",
+  "OPENCODE_API_KEY",
+  "XAI_API_KEY",
+  "XAI_MANAGEMENT_API_KEY",
+  "GROK_API_KEY",
+  "GEMINI_API_KEY",
+  "GOOGLE_API_KEY",
+  "DASHSCOPE_API_KEY",
+  "ALIBABA_CODING_PLAN_API_KEY",
+  "ALIBABA_QWEN_API_KEY",
+  "MISTRAL_API_KEY",
+  "GROQ_API_KEY",
+  "OLLAMA_API_KEY",
+  "OLLAMA_KEY",
 ];

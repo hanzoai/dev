@@ -35,7 +35,7 @@ export function BrowserSourcesSection({
   });
   const sources = list.data?.sources ?? null;
   return (
-    <SettingsSection title={gt("Browsers on this computer")}>
+    <SettingsSection title={gt("Browsers on this machine")}>
       {list.error ? (
         <SettingsRow title={gt("Could not load your browsers")} description={list.error} />
       ) : sources === null ? (
@@ -44,7 +44,7 @@ export function BrowserSourcesSection({
         <SettingsRow
           title={gt("No browser extension connected")}
           description={gt(
-            "Install the Hanzo extension in a browser and sign in. It joins this computer by itself.",
+            "Install the Hanzo extension in a browser and sign in. It joins this machine by itself.",
           )}
         />
       ) : (

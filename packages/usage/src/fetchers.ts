@@ -64,6 +64,62 @@ export const parseJson = (text: string | undefined): Record<string, unknown> => 
 export const firstEnv = (env: UsageEnv, keys: ReadonlyArray<string>) =>
   keys.map((k) => env.env[k]?.trim()).find((v): v is string => !!v);
 
+/** Parse a simple KEY=VALUE `.env` file into a map without executing anything. */
+export const parseDotEnv = (text: string | undefined): Record<string, string> => {
+  if (!text) return {};
+  const out: Record<string, string> = {};
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const stripped = line.startsWith("export ") ? line.slice(7).trim() : line;
+    const eq = stripped.indexOf("=");
+    if (eq <= 0) continue;
+    const key = stripped.slice(0, eq).trim();
+    let val = stripped.slice(eq + 1).trim();
+    if (
+      val.length >= 2 &&
+      ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'")))
+    ) {
+      val = val.slice(1, -1);
+    }
+    if (key && val) out[key] = val;
+  }
+  return out;
+};
+
+/** Look up any of `keys` in env first, then in common local tool settings `env` maps. */
+export const firstEnvOrSettings = async (
+  env: UsageEnv,
+  keys: ReadonlyArray<string>,
+  extraJsonFiles: ReadonlyArray<string> = [],
+  extraDotEnvFiles: ReadonlyArray<string> = [],
+): Promise<string | undefined> => {
+  const direct = firstEnv(env, keys);
+  if (direct) return direct;
+  for (const file of extraDotEnvFiles) {
+    const parsed = parseDotEnv(await env.readText(file));
+    for (const k of keys) {
+      if (parsed[k]) return parsed[k];
+    }
+  }
+  const jsonFiles = [
+    ...extraJsonFiles,
+    `${env.home}/.claude/settings.json`,
+    `${env.home}/.qwen/settings.json`,
+  ];
+  for (const file of jsonFiles) {
+    const data = parseJson(await env.readText(file));
+    const nested = obj(data.env);
+    for (const k of keys) {
+      const v = str(data[k]) ?? str(nested[k]);
+      if (v) return v.trim();
+    }
+    const lowerApiKey = str(data.apiKey) ?? str(data.api_key);
+    if (extraJsonFiles.includes(file) && lowerApiKey) return lowerApiKey.trim();
+  }
+  return undefined;
+};
+
 const copilotToken = async (env: UsageEnv): Promise<string | undefined> => {
   const direct = firstEnv(env, ["COPILOT_API_TOKEN"]);
   if (direct) return direct;
@@ -131,7 +187,7 @@ export const copilot: SingleFetcher = async (env) => {
 };
 
 export const openrouter: SingleFetcher = async (env) => {
-  const key = firstEnv(env, ["OPENROUTER_API_KEY"]);
+  const key = await firstEnvOrSettings(env, ["OPENROUTER_API_KEY"]);
   if (!key) throw new NotConfigured("Set OPENROUTER_API_KEY.");
   const data = obj(
     (
@@ -157,7 +213,7 @@ export const openrouter: SingleFetcher = async (env) => {
 };
 
 export const deepseek: SingleFetcher = async (env) => {
-  const key = firstEnv(env, ["DEEPSEEK_API_KEY"]);
+  const key = await firstEnvOrSettings(env, ["DEEPSEEK_API_KEY"]);
   if (!key) throw new NotConfigured("Set DEEPSEEK_API_KEY.");
   const body = await json(
     await env.fetch("https://api.deepseek.com/user/balance", {

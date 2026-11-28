@@ -141,7 +141,8 @@ describe("LinkedDesktopSettings", () => {
     );
     await using screen = await render(<LinkedDesktopSettings />);
     await expect.element(screen.getByText("Linked as z@hanzo.ai · org hanzo")).toBeVisible();
-    await expect.element(screen.getByText("This desktop only")).toBeVisible();
+    await expect.element(screen.getByText("Your linked machines")).toBeVisible();
+    await expect.element(screen.getByText("This machine only")).toBeVisible();
     await expect.element(screen.getByText(/"version": "1.8.4"/)).toBeVisible();
     await expect.element(screen.getByText("Chrome")).toBeVisible();
 
@@ -149,7 +150,7 @@ describe("LinkedDesktopSettings", () => {
     expect(mocks.calls).toEqual([
       { label: "revoke", value: { environmentId, input: { id: "src_2" } } },
     ]);
-    await userEvent.click(screen.getByRole("button", { name: "Unlink this desktop" }));
+    await userEvent.click(screen.getByRole("button", { name: "Unlink this machine" }));
     expect(mocks.calls.at(-1)).toEqual({ label: "unlink", value: { environmentId, input: {} } });
   });
 
@@ -238,7 +239,7 @@ describe("LinkedDesktopSettings", () => {
       [thisDesktop],
     );
     await using screen = await render(<LinkedDesktopSettings />);
-    await expect.element(screen.getByText("This desktop only")).toBeVisible();
+    await expect.element(screen.getByText("This machine only")).toBeVisible();
     await userEvent.click(screen.getByRole("switch", { name: "Share with my other surfaces" }));
     expect(mocks.calls).toEqual([
       {

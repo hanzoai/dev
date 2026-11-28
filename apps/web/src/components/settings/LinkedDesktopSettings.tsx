@@ -151,7 +151,7 @@ function StatusRow({
 
   const startLink = async () => {
     if (status.signedIn) {
-      await settle(() => link({ environmentId, input: {} }), gt("Could not link this desktop"));
+      await settle(() => link({ environmentId, input: {} }), gt("Could not link this machine"));
       return;
     }
     const accessToken = activeAccount === null ? null : await getToken();
@@ -159,7 +159,7 @@ function StatusRow({
       // No sign-in anywhere: this server opens the browser at Hanzo's authorization endpoint.
       await settle(
         () => link({ environmentId, input: { signIn: "browser" } }),
-        gt("Could not link this desktop"),
+        gt("Could not link this machine"),
       );
       return;
     }
@@ -175,7 +175,7 @@ function StatusRow({
             },
           },
         }),
-      gt("Could not link this desktop"),
+      gt("Could not link this machine"),
     );
   };
 
@@ -184,26 +184,26 @@ function StatusRow({
     setTimeout(onRefresh, 2_000);
     await settle(
       () => link({ environmentId, input: { signIn: "device" } }),
-      gt("Could not link this desktop"),
+      gt("Could not link this machine"),
     );
   };
 
   const startUnlink = async () => {
     const confirmed = await (requestConfirmDialog(
       gt(
-        "Unlink this desktop from Hanzo? It stops reporting and disappears from your linked desktops.",
+        "Unlink this machine from Hanzo? It stops reporting and disappears from your linked machines.",
       ),
       { variant: "destructive" },
     ) ?? Promise.resolve(false));
     if (!confirmed) return;
-    await settle(() => unlink({ environmentId, input: {} }), gt("Could not unlink this desktop"));
+    await settle(() => unlink({ environmentId, input: {} }), gt("Could not unlink this machine"));
   };
 
   const saveName = async () => {
     if (draftName === null) return;
     const saved = await settle(
       () => rename({ environmentId, input: { name: draftName } }),
-      gt("Could not rename this desktop"),
+      gt("Could not rename this machine"),
     );
     if (saved) setDraftName(null);
   };
@@ -213,7 +213,7 @@ function StatusRow({
       <SettingsRow
         title={gt("Not linked")}
         description={gt(
-          "Link this desktop to your Hanzo account to see it, and the providers it can reach, on hanzo.app.",
+          "Link this machine to your Hanzo account to see it, and the providers it can reach, on hanzo.app.",
         )}
         control={
           <>
@@ -279,12 +279,12 @@ function StatusRow({
             disabled={busy || !canUnlink}
             onClick={() => void startUnlink()}
           >
-            {gt("Unlink this desktop")}
+            {gt("Unlink this machine")}
           </Button>
         }
       />
       <SettingsRow
-        title={gt("This desktop's name")}
+        title={gt("This machine's name")}
         control={
           <form
             className="flex items-center gap-2"
@@ -294,7 +294,7 @@ function StatusRow({
             }}
           >
             <Input
-              aria-label={gt("This desktop's name")}
+              aria-label={gt("This machine's name")}
               value={name}
               disabled={busy || !canRename}
               onChange={(event) => setDraftName(event.target.value)}
@@ -338,13 +338,13 @@ function DesktopsSection({
     useMessages(),
   );
   return (
-    <SettingsSection title={gt("Your linked sources")}>
+    <SettingsSection title={gt("Your linked machines")}>
       {list.error ? (
-        <SettingsRow title={gt("Could not load your linked sources")} description={list.error} />
+        <SettingsRow title={gt("Could not load your linked machines")} description={list.error} />
       ) : list.data === null ? (
         <SettingsRow title={gt("Loading…")} role="status" />
       ) : list.data.desktops.length === 0 ? (
-        <SettingsRow title={gt("No linked sources")} />
+        <SettingsRow title={gt("No linked machines")} />
       ) : (
         list.data.desktops.map((desktop) => (
           <DesktopRow
@@ -387,7 +387,7 @@ function DesktopRow({
     const result = await revoke({ environmentId, input: { id: desktop.id } });
     setBusy(false);
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-      reportFailure(gt("Could not revoke the desktop"), squashAtomCommandFailure(result));
+      reportFailure(gt("Could not revoke the machine"), squashAtomCommandFailure(result));
     }
   };
   return (
@@ -398,11 +398,11 @@ function DesktopRow({
             <OnlineDot online={online} label={online ? gt("Online") : gt("Offline")} />
             <h3 className="text-sm font-medium text-foreground">{desktop.name}</h3>
             <Badge variant="outline" size="sm">
-              {desktop.kind === "browser" ? gt("Browser") : gt("Desktop")}
+              {desktop.kind === "browser" ? gt("Browser") : gt("Machine")}
             </Badge>
             {isThisDesktop ? (
               <Badge variant="outline" size="sm">
-                {gt("This desktop")}
+                {gt("This machine")}
               </Badge>
             ) : null}
           </div>
@@ -457,7 +457,7 @@ function ProvidersSection({
     }
   };
   return (
-    <SettingsSection title={gt("Providers on this desktop")}>
+    <SettingsSection title={gt("Providers on this machine")}>
       {providers.length === 0 ? (
         <SettingsRow title={gt("No providers to report")} />
       ) : (
@@ -473,7 +473,7 @@ function ProvidersSection({
                 {provider.shareable ? (
                   <span className="block">
                     {gt(
-                      "On by default for your own devices: hanzo.app and your other signed-in devices can start runs here, and no one else can. Your login never leaves this computer.",
+                      "On by default for your own devices: hanzo.app and your other signed-in devices can start runs here, and no one else can. Your login never leaves this machine.",
                     )}
                   </span>
                 ) : provider.kind === "login" ? (
@@ -514,7 +514,7 @@ const providerRouteClass = (provider: DesktopProviderRow): ProviderRouteClass =>
 
 const routeLabel = (gt: ReturnType<typeof useGT>, route: ProviderRouteClass) =>
   route === "local"
-    ? gt("This desktop only")
+    ? gt("This machine only")
     : route === "desktop"
       ? gt("Available on hanzo.app")
       : gt("API key");
@@ -574,7 +574,7 @@ function ApiKeysSection({ environmentId }: { readonly environmentId: Environment
     <SettingsSection title={gt("API keys")}>
       <SettingsRow
         title={gt("Add a key")}
-        description={gt("The key goes to Hanzo KMS once. This desktop does not keep it.")}
+        description={gt("The key goes to Hanzo KMS once. This machine does not keep it.")}
         control={
           <form
             className="flex flex-wrap items-center justify-end gap-2"
@@ -717,7 +717,7 @@ function ReportedSection({
       <SettingsRow
         title={gt("Send nothing")}
         description={gt(
-          "Stop sending usage reports. Heartbeats still tell Hanzo this desktop is online.",
+          "Stop sending usage reports. Heartbeats still tell Hanzo this machine is online.",
         )}
         control={
           <Switch
@@ -733,7 +733,7 @@ function ReportedSection({
         description={
           status.report.sent
             ? gt("The exact bytes sent to Hanzo.")
-            : gt("Sent once this desktop is linked.")
+            : gt("Sent once this machine is linked.")
         }
       >
         <pre

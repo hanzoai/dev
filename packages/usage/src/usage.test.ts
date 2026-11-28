@@ -786,14 +786,225 @@ describe("accounts", () => {
   });
   it("providers with no usage API say so", async () => {
     const svc = createUsageService(fakeEnv({}, {}), () => ({
-      providers: { grok: { enabled: true } },
+      providers: { abacus: { enabled: true } },
       trayMode: "merged",
       showInMenuBar: false,
       notifyAtPercent: [],
       refreshSeconds: 300,
     }));
     const { summary } = await svc.refresh({ instances: [], local: [], cost: [] });
-    assert.match(summary.snapshots.find((x) => x.provider === "grok")!.error ?? "", /No usage API/);
+    assert.match(
+      summary.snapshots.find((x) => x.provider === "abacus")!.error ?? "",
+      /No usage API/,
+    );
+  });
+  it("antigravity runs agy against local state when ~/.gemini/antigravity-cli exists without a legacy token file", async () => {
+    let ranHome: string | undefined;
+    const report = JSON.stringify({
+      command: {
+        data: {
+          groups: [
+            {
+              name: "Gemini Models",
+              buckets: [
+                { window: "weekly", remaining_fraction: 0, reset_time: "2026-12-03T17:37:49Z" },
+                { window: "5h", disabled: true, remaining_fraction: 1 },
+              ],
+            },
+            {
+              name: "Claude and GPT models",
+              buckets: [
+                { window: "weekly", remaining_fraction: 1, reset_time: "1970-01-01T00:00:00Z" },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    const env = fakeEnv(
+      { "/h/.gemini/antigravity-cli/settings.json": "{}" },
+      {},
+      {},
+      {
+        exec: async (_file, _args, o) => {
+          ranHome = o.env.HOME;
+          return report;
+        },
+      },
+    );
+    const [r] = await FETCHERS.antigravity!(env, []);
+    assert.strictEqual(ranHome, "/h");
+    assert.strictEqual(r!.windows.length, 2);
+    assert.strictEqual(r!.windows[0]!.usedPercent, 100);
+    assert.strictEqual(r!.windows[0]!.resetsAt, "2026-12-03T17:37:49.000Z");
+    assert.strictEqual(r!.windows[1]!.usedPercent, 0);
+    assert.isUndefined(r!.windows[1]!.resetsAt);
+  });
+  it("z.ai reads local config files and surfaces local ~/.zai activity when no API key is set", async () => {
+    const withDotEnv = fakeEnv(
+      { "/h/.zai/.env": 'Z_AI_API_KEY="local-key"\n' },
+      {
+        "https://api.z.ai/api/monitor/usage/quota/limit": {
+          success: true,
+          data: { planName: "GLM Pro", limits: [{ type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 18 }] },
+        },
+      },
+    );
+    const [live] = await FETCHERS.zai!(withDotEnv, []);
+    assert.strictEqual(live!.source, "api");
+    assert.strictEqual(live!.plan, "GLM Pro");
+    assert.strictEqual(live!.windows[0]!.usedPercent, 18);
+
+    const localOnly = fakeEnv({ "/h/.zai/zai-mcp-2026-08-04.log": "INFO: Running in mode ZAI\n" }, {});
+    const [local] = await FETCHERS.zai!(localOnly, []);
+    assert.strictEqual(local!.source, "local");
+    assert.strictEqual(local!.plan, "Local MCP");
+    assert.match(local!.error ?? "", /Z_AI_API_KEY/);
+  });
+  it("muse surfaces providers.meta profile locally without reading the keychain on refresh", async () => {
+    let keychainReads = 0;
+    const env = fakeEnv(
+      {
+        "/h/.config/muse/auth.json": JSON.stringify({
+          schema_version: 2,
+          providers: {
+            meta: {
+              mechanism: "oauth",
+              storage: "keychain",
+              subs_active: true,
+              user_email: "z@example.com",
+            },
+          },
+        }),
+      },
+      {},
+      {},
+      {
+        keychain: async () => {
+          keychainReads++;
+          return undefined;
+        },
+      },
+    );
+    const [r] = await FETCHERS.muse!(env, []);
+    assert.strictEqual(keychainReads, 0);
+    assert.strictEqual(r!.source, "local");
+    assert.strictEqual(r!.account, "z@example.com");
+    assert.strictEqual(r!.plan, "Muse Code");
+  });
+  it("reads local grok, opencode, qwencloud, gemini, mistral, windsurf, groq, ollama, and cursor CLI", async () => {
+    const env = fakeEnv(
+      {
+        "/h/.grok/auth.json": JSON.stringify({
+          "https://auth.x.ai::cid": {
+            email: "g@example.com",
+            coding_data_team: "personal",
+            expires_at: "2026-12-01T00:00:00Z",
+          },
+        }),
+        "/h/.qwen/settings.json": JSON.stringify({
+          env: { DASHSCOPE_API_KEY: "sk-qwen" },
+          model: { name: "qwen3.8-max" },
+        }),
+        "/h/.gemini/google_accounts.json": JSON.stringify({ active: "gem@example.com", old: [] }),
+        "/h/.vibe/.env": "MISTRAL_API_KEY=ms-key\n",
+        "/h/.vibe/config.toml": 'active_model = "devstral-2"\n',
+        "/h/.vibe/logs/session/s1.json": JSON.stringify({ metadata: { stats: { session_cost: 0.42 } } }),
+        "/h/Library/Application Support/groq-desktop-app/settings.json": JSON.stringify({
+          GROQ_API_KEY: "gsk_123",
+          model: "llama-3.3-70b",
+        }),
+        "/h/.ollama/models/manifests/registry.ollama.ai/library/qwen3/latest": "{}",
+        "/h/.cursor/cli-config.json": JSON.stringify({ authInfo: { email: "cli@example.com" } }),
+      },
+      {},
+      {},
+      {
+        sqliteValue: async (file, _sql, param) => {
+          if (file.includes("opencode.db") && param === "opencode") {
+            return JSON.stringify({
+              type: "oauth",
+              access: "st_tok",
+              expires: NOW.getTime() + 60_000,
+              metadata: { email: "oc@example.com", orgName: "Default" },
+            });
+          }
+          if (file.includes("Windsurf") && param === "windsurf.settings.cachedPlanInfo") {
+            return JSON.stringify({
+              planName: "Pro",
+              endTimestamp: NOW.getTime() + 86_400_000,
+              usage: { messages: 500, usedMessages: 125, flowActions: 1000, usedFlowActions: 250 },
+            });
+          }
+          return undefined;
+        },
+      },
+    );
+
+    const [grk] = await FETCHERS.grok!(env, []);
+    assert.deepStrictEqual([grk!.account, grk!.plan, grk!.source], ["g@example.com", "Personal", "local"]);
+
+    const [oc] = await FETCHERS.opencode!(env, []);
+    assert.deepStrictEqual([oc!.account, oc!.plan, oc!.source], ["oc@example.com", "Console", "local"]);
+
+    const [qw] = await FETCHERS.qwencloud!(env, []);
+    assert.strictEqual(qw!.plan, "DashScope · qwen3.8-max");
+
+    const [gem] = await FETCHERS.gemini!(env, []);
+    assert.deepStrictEqual([gem!.account, gem!.plan], ["gem@example.com", "Gemini CLI"]);
+
+    const [mis] = await FETCHERS.mistral!(env, []);
+    assert.strictEqual(mis!.plan, "Vibe · devstral-2");
+    assert.strictEqual(mis!.credits?.spent, 0.42);
+
+    const [ws] = await FETCHERS.windsurf!(env, []);
+    assert.strictEqual(ws!.plan, "Pro");
+    assert.deepStrictEqual(
+      ws!.windows.map((w) => [w.label, w.usedPercent]),
+      [
+        ["Messages", 25],
+        ["Flow Actions", 25],
+      ],
+    );
+
+    const [gq] = await FETCHERS.groq!(env, []);
+    assert.strictEqual(gq!.plan, "Groq · llama-3.3-70b");
+
+    const [ol] = await FETCHERS.ollama!(env, []);
+    assert.strictEqual(ol!.plan, "1 local model");
+
+    const [cur] = await FETCHERS.cursor!(env, []);
+    assert.deepStrictEqual([cur!.instance, cur!.account, cur!.source], ["cursor-cli", "cli@example.com", "local"]);
+
+    // Auto-detect surfaces local providers automatically and skips unconfigured ones silently.
+    const svc = createUsageService(env, () => ({
+      providers: {
+        hanzo: { enabled: false },
+        claude: { enabled: false },
+        codex: { enabled: false },
+        copilot: { enabled: false },
+        antigravity: { enabled: false },
+        muse: { enabled: false },
+        zai: { enabled: false },
+      },
+      trayMode: "merged",
+      showInMenuBar: false,
+      notifyAtPercent: [],
+      refreshSeconds: 300,
+    }));
+    const { summary } = await svc.refresh({ instances: [], local: [], cost: [] });
+    const detectedIds = summary.snapshots.map((s) => s.provider).toSorted();
+    assert.deepStrictEqual(detectedIds, [
+      "cursor",
+      "gemini",
+      "grok",
+      "groq",
+      "mistral",
+      "ollama",
+      "opencode",
+      "qwencloud",
+      "windsurf",
+    ]);
   });
   it("reads provider API keys supplied via HostReadings.env", async () => {
     let authHeader = "";

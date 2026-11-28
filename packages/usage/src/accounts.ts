@@ -14,10 +14,12 @@ import {
   base,
   clamp,
   firstEnv,
+  firstEnvOrSettings,
   iso,
   NotConfigured,
   num,
   obj,
+  parseDotEnv,
   parseJson,
   str,
   type Fetcher,
@@ -488,7 +490,9 @@ export const parseAntigravity = (stdout: string): Pick<ProviderSnapshot, "window
       const remaining = num(bucket.remaining_fraction);
       if (bucket.disabled === true || remaining === undefined) continue;
       const five = bucket.window === "5h";
-      const resetsAt = iso(bucket.reset_time);
+      const rawReset = iso(bucket.reset_time);
+      // Untouched Antigravity buckets report Unix epoch 0 (1970-01-01T00:00:00.000Z); omit it.
+      const resetsAt = rawReset && Date.parse(rawReset) > 86_400_000 ? rawReset : undefined;
       windows.push({
         kind: five ? "session" : "weekly",
         label: `${name} · ${five ? "5-hour" : "Weekly"}`,
@@ -502,8 +506,10 @@ export const parseAntigravity = (stdout: string): Pick<ProviderSnapshot, "window
 };
 
 /**
- * `agy -p /usage` is Antigravity's own usage report. It refreshes its sign-in as it runs, so it runs
- * in a scratch HOME holding a copy of the token: the user's real token file is never written.
+ * `agy -p /usage` is Antigravity's own usage report. When a legacy standalone token file exists it
+ * runs in a scratch HOME holding a copy of the token so the real file is never rewritten; on newer
+ * installs whose sign-in lives in OS keychain / `~/.gemini/antigravity-cli`, it runs against the
+ * local state with browser-open stubs so it never launches a browser window.
  */
 export const antigravity: Fetcher = async (env, instances) => {
   const instance = instances[0];
@@ -519,34 +525,38 @@ export const antigravity: Fetcher = async (env, instances) => {
     tokenText = await env.readText(file);
     if (tokenText) break;
   }
-  if (!tokenText) throw new NotConfigured("Sign in to Antigravity (run `agy`).");
-  const email = str(parseJson(tokenText).id_token_email);
+  const hasLocalState =
+    Boolean(tokenText) ||
+    instances.length > 0 ||
+    (await env.listDir(`${env.home}/.gemini/antigravity-cli`)).length > 0 ||
+    (await env.listDir(`${env.home}/.gemini/antigravity`)).length > 0;
+  if (!hasLocalState) throw new NotConfigured("Sign in to Antigravity (run `agy`).");
+  const email = tokenText ? str(parseJson(tokenText).id_token_email) : undefined;
   const withEmail = email ? { ...who, account: email } : who;
-  const stdout = await env.withScratch(
-    {
-      ".gemini/antigravity-cli/antigravity-oauth-token": tokenText,
-      "bin/open": "#!/bin/sh\nexit 1\n",
-      "bin/xdg-open": "#!/bin/sh\nexit 1\n",
-    },
-    async (dir) => {
-      // agy shells out to `open` to start a browser sign-in; the stubs keep it from ever opening one.
-      return env.exec(
-        instance?.binary || "agy",
-        ["-p", "/usage", "--output-format", "json", "--print-timeout", "60s"],
-        {
-          env: {
-            HOME: dir,
-            PWD: dir,
-            SSH_TTY: "hanzo-usage",
-            BROWSER: `${dir}/bin/open`,
-            PATH: `${dir}/bin:${env.home}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin`,
-          },
-          cwd: dir,
-          timeoutMs: 90_000,
+  const scratchFiles: Record<string, string> = {
+    "bin/open": "#!/bin/sh\nexit 1\n",
+    "bin/xdg-open": "#!/bin/sh\nexit 1\n",
+    ...(tokenText ? { ".gemini/antigravity-cli/antigravity-oauth-token": tokenText } : {}),
+  };
+  const stdout = await env.withScratch(scratchFiles, async (dir) => {
+    // agy shells out to `open` to start a browser sign-in; the stubs keep it from ever opening one.
+    const runHome = tokenText ? dir : env.home;
+    return env.exec(
+      instance?.binary || "agy",
+      ["-p", "/usage", "--output-format", "json", "--print-timeout", "60s"],
+      {
+        env: {
+          HOME: runHome,
+          PWD: dir,
+          SSH_TTY: "hanzo-usage",
+          BROWSER: `${dir}/bin/open`,
+          PATH: `${dir}/bin:${env.home}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin`,
         },
-      );
-    },
-  );
+        cwd: dir,
+        timeoutMs: 90_000,
+      },
+    );
+  });
   if (!stdout)
     return [
       failed(
@@ -604,29 +614,47 @@ export const cursor: Fetcher = async (env, instances) => {
     "SELECT value FROM ItemTable WHERE key = ?",
     "cursorAuth/accessToken",
   );
-  if (!token) throw new NotConfigured("Sign in to Cursor.");
-  const email = await env.sqliteValue(
-    db,
-    "SELECT value FROM ItemTable WHERE key = ?",
-    "cursorAuth/cachedEmail",
-  );
-  const who: Identity = {
-    instance: instance?.id ?? "cursor",
-    ...(instance ? { label: instance.name } : {}),
-    ...(email ? { account: email } : {}),
-  };
-  const user = str(jwtClaims(token).sub)?.split("|").pop();
-  if (!user || !/^[\w.-]+$/.test(user)) return [failed(env, "cursor", who, SIGN_IN_AGAIN)];
-  if (expired(env, token)) return [failed(env, "cursor", who, SIGN_IN_AGAIN)];
-  const res = await env.fetch("https://cursor.com/api/usage-summary", {
-    headers: {
-      Cookie: `WorkosCursorSessionToken=${user}%3A%3A${token}`,
-      Accept: "application/json",
-    },
-  });
-  if (res.status === 401 || res.status === 403) return [failed(env, "cursor", who, SIGN_IN_AGAIN)];
-  if (!res.ok) return [failed(env, "cursor", who, `HTTP ${res.status}`)];
-  return [{ ...base(env, "cursor", "oauth"), ...who, ...parseCursor(obj(await res.json())) }];
+  const cliConfig = parseJson(await env.readText(`${env.home}/.cursor/cli-config.json`));
+  const cliEmail = str(obj(cliConfig.authInfo).email);
+  if (!token && !cliEmail) throw new NotConfigured("Sign in to Cursor.");
+  const out: ProviderSnapshot[] = [];
+  let desktopEmail: string | undefined;
+  if (token) {
+    desktopEmail = await env.sqliteValue(
+      db,
+      "SELECT value FROM ItemTable WHERE key = ?",
+      "cursorAuth/cachedEmail",
+    );
+    const who: Identity = {
+      instance: instance?.id ?? "cursor",
+      ...(instance ? { label: instance.name } : {}),
+      ...(desktopEmail ? { account: desktopEmail } : {}),
+    };
+    const user = str(jwtClaims(token).sub)?.split("|").pop();
+    if (!user || !/^[\w.-]+$/.test(user) || expired(env, token)) {
+      out.push(failed(env, "cursor", who, SIGN_IN_AGAIN));
+    } else {
+      const res = await env.fetch("https://cursor.com/api/usage-summary", {
+        headers: {
+          Cookie: `WorkosCursorSessionToken=${user}%3A%3A${token}`,
+          Accept: "application/json",
+        },
+      });
+      if (res.status === 401 || res.status === 403) out.push(failed(env, "cursor", who, SIGN_IN_AGAIN));
+      else if (!res.ok) out.push(failed(env, "cursor", who, `HTTP ${res.status}`));
+      else out.push({ ...base(env, "cursor", "oauth"), ...who, ...parseCursor(obj(await res.json())) });
+    }
+  }
+  if (cliEmail && cliEmail !== desktopEmail) {
+    out.push({
+      ...base(env, "cursor", "local"),
+      instance: "cursor-cli",
+      label: "Cursor CLI",
+      account: cliEmail,
+      windows: [],
+    });
+  }
+  return out;
 };
 
 const ZAI_REGIONS = [
@@ -695,12 +723,36 @@ export const parseZai = (
 
 export const zai: Fetcher = async (env, instances) => {
   const instance = instances[0];
-  const regions = ZAI_REGIONS.flatMap((r) => {
-    const key = firstEnv(env, r.keys);
-    return key ? [{ ...r, key }] : [];
-  });
-  if (regions.length === 0)
+  const zaiConfigFiles = [
+    `${env.home}/.zai/config.json`,
+    `${env.home}/.config/zai/config.json`,
+    `${env.home}/.config/z-ai/config.json`,
+  ];
+  const zaiEnvFiles = [`${env.home}/.zai/.env`, `${env.home}/.config/zai/.env`];
+  const regions = (
+    await Promise.all(
+      ZAI_REGIONS.map(async (r) => {
+        const key = await firstEnvOrSettings(env, r.keys, zaiConfigFiles, zaiEnvFiles);
+        return key ? { ...r, key } : undefined;
+      }),
+    )
+  ).filter((r): r is (typeof ZAI_REGIONS)[number] & { readonly key: string } => Boolean(r));
+  if (regions.length === 0) {
+    const localFiles = await env.listDir(`${env.home}/.zai`);
+    if (localFiles.length > 0) {
+      return [
+        {
+          ...base(env, "zai", "local"),
+          instance: instance?.id ?? "zai-local",
+          label: instance?.name ?? "z.ai",
+          plan: "Local MCP",
+          windows: [],
+          error: "Set Z_AI_API_KEY to read live GLM coding-plan limits.",
+        },
+      ];
+    }
     throw new NotConfigured("Set Z_AI_API_KEY to read your GLM coding plan.");
+  }
   return Promise.all(
     regions.map(async (r): Promise<ProviderSnapshot> => {
       const who: Identity = {
@@ -727,12 +779,35 @@ export const zai: Fetcher = async (env, instances) => {
   );
 };
 
-/** Muse's login without the keychain: what is set in the environment or in Muse's own config file. */
-const museToken = async (env: UsageEnv): Promise<string | undefined> => {
+interface MuseLocalInfo {
+  readonly token?: string;
+  readonly account?: string;
+  readonly plan?: string;
+  readonly hasProfile: boolean;
+}
+
+/** Muse's local config without touching the keychain: checks env, top-level, providers.meta and providers.muse. */
+const museLocalInfo = async (env: UsageEnv): Promise<MuseLocalInfo> => {
   const direct = firstEnv(env, ["MUSE_DEVICE_TOKEN"]);
-  if (direct) return direct;
   const file = parseJson(await env.readText(`${env.home}/.config/muse/auth.json`));
-  return str(file.access_token) ?? str(obj(obj(file.providers).muse).access_token);
+  const providers = obj(file.providers);
+  const meta = obj(providers.meta);
+  const museEntry = obj(providers.muse);
+  const token =
+    direct ?? str(file.access_token) ?? str(meta.access_token) ?? str(museEntry.access_token);
+  const account = str(meta.user_email) ?? str(museEntry.user_email) ?? str(file.user_email);
+  const subsActive = meta.subs_active === true || museEntry.subs_active === true;
+  const plan =
+    str(meta.subs_tier_name) ??
+    str(museEntry.subs_tier_name) ??
+    (subsActive ? "Muse Code" : undefined);
+  const hasProfile = Boolean(account || subsActive || str(meta.storage) || str(museEntry.storage));
+  return {
+    ...(token ? { token } : {}),
+    ...(account ? { account } : {}),
+    ...(plan ? { plan } : {}),
+    hasProfile,
+  };
 };
 
 export const parseMuse = (
@@ -793,9 +868,23 @@ const readMuse = async (
 
 /** The timer's reader: never the keychain, which asks the user for a password every time. */
 export const muse: Fetcher = async (env, instances) => {
-  const token = await museToken(env);
-  if (!token?.startsWith("dca:")) throw new NotConfigured("Connect Muse Code to read its usage.");
-  return readMuse(env, instances, token);
+  const info = await museLocalInfo(env);
+  if (info.token?.startsWith("dca:")) return readMuse(env, instances, info.token);
+  if (info.hasProfile) {
+    const instance = instances[0];
+    return [
+      {
+        ...base(env, "muse", "local"),
+        instance: instance?.id ?? "muse",
+        ...(instance ? { label: instance.name } : {}),
+        ...(info.account ? { account: info.account } : {}),
+        ...(info.plan ? { plan: info.plan } : {}),
+        windows: [],
+        error: "Connect Muse Code to read live limits.",
+      },
+    ];
+  }
+  throw new NotConfigured("Connect Muse Code to read its usage.");
 };
 
 /**
@@ -803,10 +892,315 @@ export const muse: Fetcher = async (env, instances) => {
  * is kept (never the login), so no later refresh asks again.
  */
 export const connectMuse: Fetcher = async (env, instances) => {
+  const info = await museLocalInfo(env);
   const token =
-    (await museToken(env)) ??
-    str(parseJson(await env.keychain("ai.meta.dev.credentials")).access_token);
+    info.token ?? str(parseJson(await env.keychain("ai.meta.dev.credentials")).access_token);
   if (!token?.startsWith("dca:"))
     throw new NotConfigured("Sign in to Muse Code (run `muse login`).");
   return readMuse(env, instances, token);
+};
+
+export const grok: Fetcher = async (env, instances) => {
+  const instance = instances[0];
+  const auth = parseJson(await env.readText(`${env.home}/.grok/auth.json`));
+  const entries = Object.entries(auth)
+    .map(([key, raw]) => ({ key, data: obj(raw) }))
+    .filter(({ data }) => Boolean(str(data.email) || str(data.user_id) || str(data.key)));
+  if (entries.length > 0) {
+    return entries.map(({ key, data }, idx): ProviderSnapshot => {
+      const email = str(data.email);
+      const team = str(data.coding_data_team);
+      const expiresAt = str(data.expires_at);
+      const isExpired = expiresAt ? Date.parse(expiresAt) <= env.now().getTime() : false;
+      const who: Identity = {
+        instance: idx === 0 && instance ? instance.id : `grok:${str(data.user_id) ?? key}`,
+        ...(idx === 0 && instance ? { label: instance.name } : {}),
+        ...(email ? { account: email } : {}),
+      };
+      return {
+        ...base(env, "grok", "local"),
+        ...who,
+        ...(team ? { plan: title(team) } : {}),
+        windows: [],
+        ...(isExpired ? { error: SIGN_IN_AGAIN } : {}),
+      };
+    });
+  }
+  const apiKey = await firstEnvOrSettings(env, ["XAI_API_KEY", "XAI_MANAGEMENT_API_KEY", "GROK_API_KEY"]);
+  if (apiKey) {
+    return [
+      {
+        ...base(env, "grok", "local"),
+        instance: instance?.id ?? "grok-api",
+        label: instance?.name ?? "API key",
+        windows: [],
+      },
+    ];
+  }
+  throw new NotConfigured("Sign in to Grok CLI or set XAI_API_KEY.");
+};
+
+export const parseOpenCodeGo = (
+  body: Record<string, unknown>,
+): Pick<ProviderSnapshot, "windows" | "plan"> => {
+  const usage = obj(body.usage);
+  const windows: UsageWindow[] = [];
+  for (const [key, kind, label, minutes] of [
+    ["rolling", "session", "Rolling", 300],
+    ["weekly", "weekly", "Weekly", 10080],
+    ["monthly", "monthly", "Monthly", 43200],
+  ] as const) {
+    const w = obj(usage[key]);
+    const used = num(w.percent);
+    if (used === undefined) continue;
+    const resetsAt = iso(w.resetsAt);
+    windows.push({
+      kind,
+      label,
+      usedPercent: clamp(used),
+      windowMinutes: minutes,
+      ...(resetsAt ? { resetsAt } : {}),
+    });
+  }
+  return { windows, plan: "Go" };
+};
+
+export const opencode: Fetcher = async (env, instances) => {
+  const instance = instances[0];
+  const dataHome = env.env.XDG_DATA_HOME || `${env.home}/.local/share`;
+  const dbPath = `${dataHome}/opencode/${env.env.OPENCODE_DB ?? "opencode.db"}`;
+  const authFile = parseJson(await env.readText(`${dataHome}/opencode/auth.json`));
+  const goAuth = obj(authFile["opencode-go"]);
+  const fileKey = str(goAuth.type) === "api" ? str(goAuth.key) : undefined;
+  const envKey = firstEnv(env, ["OPENCODE_API_KEY"]);
+
+  const dbRow =
+    (await env.sqliteValue(
+      dbPath,
+      "SELECT value FROM credential WHERE integration_id = ? AND active IS NOT 0 ORDER BY active DESC, time_created DESC, id DESC LIMIT 1",
+      "opencode",
+    )) ??
+    (await env.sqliteValue(
+      dbPath,
+      "SELECT value FROM credential WHERE integration_id = ? AND active IS NOT 0 ORDER BY active DESC, time_created DESC, id DESC LIMIT 1",
+      "opencode-go",
+    ));
+  const stored = parseJson(dbRow);
+  const storedType = str(stored.type);
+  const storedMeta = obj(stored.metadata);
+  const storedKey = storedType === "key" ? str(stored.key) : undefined;
+  const apiKey = storedKey ?? fileKey ?? envKey;
+
+  const who: Identity = {
+    instance: instance?.id ?? "opencode",
+    ...(instance ? { label: instance.name } : {}),
+    ...(str(storedMeta.email) ? { account: str(storedMeta.email)! } : {}),
+  };
+
+  if (apiKey) {
+    const res = await env.fetch("https://opencode.ai/zen/go/v1/usage", {
+      headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
+    });
+    if (res.ok) {
+      return [{ ...base(env, "opencode", "api"), ...who, ...parseOpenCodeGo(obj(await res.json())) }];
+    }
+    if (res.status === 401) return [failed(env, "opencode", who, SIGN_IN_AGAIN)];
+    // HTTP 403 means a valid Zen key without a Go subscription; surface local presence cleanly.
+    return [{ ...base(env, "opencode", "local"), ...who, plan: "Zen", windows: [] }];
+  }
+
+  if (storedType === "oauth" && (str(stored.access) || str(storedMeta.email))) {
+    const expires = num(stored.expires);
+    const isExpired = expires !== undefined && expires <= env.now().getTime();
+    const orgName = str(storedMeta.orgName);
+    return [
+      {
+        ...base(env, "opencode", "local"),
+        ...who,
+        ...(orgName ? { plan: orgName === "Default" ? "Console" : orgName } : {}),
+        windows: [],
+        ...(isExpired ? { error: SIGN_IN_AGAIN } : {}),
+      },
+    ];
+  }
+
+  throw new NotConfigured("Sign in to OpenCode or set OPENCODE_API_KEY.");
+};
+
+export const qwencloud: Fetcher = async (env, instances) => {
+  const instance = instances[0];
+  const settings = parseJson(await env.readText(`${env.home}/.qwen/settings.json`));
+  const settingsEnv = obj(settings.env);
+  const oauth = parseJson(await env.readText(`${env.home}/.qwen/oauth_creds.json`));
+  const accounts = parseJson(await env.readText(`${env.home}/.qwen/google_accounts.json`));
+  const key =
+    firstEnv(env, ["DASHSCOPE_API_KEY", "ALIBABA_CODING_PLAN_API_KEY", "ALIBABA_QWEN_API_KEY"]) ??
+    str(settingsEnv.DASHSCOPE_API_KEY) ??
+    str(settingsEnv.ALIBABA_CODING_PLAN_API_KEY) ??
+    str(settingsEnv.ALIBABA_QWEN_API_KEY);
+  const hasOauth = Boolean(str(oauth.access_token) || str(oauth.refresh_token));
+  if (!key && !hasOauth) throw new NotConfigured("Sign in to Qwen CLI or set DASHSCOPE_API_KEY.");
+  const model = str(obj(settings.model).name);
+  const account = str(accounts.active);
+  const plan = key ? (model ? `DashScope · ${model}` : "DashScope") : "Qwen OAuth";
+  return [
+    {
+      ...base(env, "qwencloud", "local"),
+      instance: instance?.id ?? "qwencloud",
+      ...(instance ? { label: instance.name } : {}),
+      ...(account ? { account } : {}),
+      plan,
+      windows: [],
+    },
+  ];
+};
+
+export const gemini: Fetcher = async (env, instances) => {
+  const instance = instances[0];
+  const accounts = parseJson(await env.readText(`${env.home}/.gemini/google_accounts.json`));
+  const active = str(accounts.active);
+  const oldList = Array.isArray(accounts.old)
+    ? accounts.old.filter((v): v is string => typeof v === "string" && v.length > 0)
+    : [];
+  const oauth = parseJson(await env.readText(`${env.home}/.gemini/oauth_creds.json`));
+  const apiKey = await firstEnvOrSettings(env, ["GEMINI_API_KEY", "GOOGLE_API_KEY"]);
+  const hasHistory =
+    (await env.listDir(`${env.home}/.gemini/tmp`)).length > 0 ||
+    (await env.listDir(`${env.home}/.gemini/history`)).length > 0;
+  const account = active ?? (hasHistory ? oldList[0] : undefined);
+  if (!account && !str(oauth.access_token) && !apiKey) {
+    throw new NotConfigured("Sign in to Gemini CLI or set GEMINI_API_KEY.");
+  }
+  return [
+    {
+      ...base(env, "gemini", "local"),
+      instance: instance?.id ?? "gemini",
+      ...(instance ? { label: instance.name } : {}),
+      ...(account ? { account } : {}),
+      plan: apiKey ? "API key" : active ? "Gemini CLI" : "Gemini CLI (local)",
+      windows: [],
+    },
+  ];
+};
+
+export const mistral: Fetcher = async (env, instances) => {
+  const instance = instances[0];
+  const vibeEnv = parseDotEnv(await env.readText(`${env.home}/.vibe/.env`));
+  const key = firstEnv(env, ["MISTRAL_API_KEY"]) ?? vibeEnv.MISTRAL_API_KEY;
+  const configToml = (await env.readText(`${env.home}/.vibe/config.toml`)) ?? "";
+  const activeModel = /^\s*active_model\s*=\s*"([^"]+)"/m.exec(configToml)?.[1];
+  const sessionFiles = await env.listFiles(`${env.home}/.vibe/logs/session`, ".json");
+  if (!key && sessionFiles.length === 0) {
+    throw new NotConfigured("Set MISTRAL_API_KEY or run Mistral Vibe.");
+  }
+  let spentUsd = 0;
+  let hasCost = false;
+  for (const file of sessionFiles.slice(-100)) {
+    const parsed = parseJson(await env.readText(file));
+    const cost = num(obj(obj(parsed.metadata).stats).session_cost);
+    if (cost !== undefined && cost >= 0) {
+      spentUsd += cost;
+      hasCost = true;
+    }
+  }
+  return [
+    {
+      ...base(env, "mistral", "local"),
+      instance: instance?.id ?? "mistral",
+      ...(instance ? { label: instance.name } : {}),
+      plan: activeModel ? `Vibe · ${activeModel}` : "Mistral",
+      windows: [],
+      ...(hasCost ? { credits: { currency: "USD", spent: Math.round(spentUsd * 100) / 100 } } : {}),
+    },
+  ];
+};
+
+export const parseWindsurf = (
+  body: Record<string, unknown>,
+): Pick<ProviderSnapshot, "windows" | "plan"> => {
+  const usage = obj(body.usage);
+  const resetsAt = iso(body.endTimestamp);
+  const windows: UsageWindow[] = [];
+  for (const [totalKey, usedKey, label] of [
+    ["messages", "usedMessages", "Messages"],
+    ["flowActions", "usedFlowActions", "Flow Actions"],
+  ] as const) {
+    const total = num(usage[totalKey]);
+    const used = num(usage[usedKey]);
+    if (total === undefined || total <= 0 || used === undefined) continue;
+    windows.push({
+      kind: "monthly",
+      label,
+      usedPercent: clamp((used / total) * 100),
+      ...(resetsAt ? { resetsAt } : {}),
+    });
+  }
+  const plan = str(body.planName);
+  return { windows, ...(plan ? { plan } : {}) };
+};
+
+export const windsurf: Fetcher = async (env, instances) => {
+  const instance = instances[0];
+  const db =
+    env.platform === "darwin"
+      ? `${env.home}/Library/Application Support/Windsurf/User/globalStorage/state.vscdb`
+      : `${env.env.XDG_CONFIG_HOME ?? `${env.home}/.config`}/Windsurf/User/globalStorage/state.vscdb`;
+  const raw = await env.sqliteValue(
+    db,
+    "SELECT value FROM ItemTable WHERE key = ?",
+    "windsurf.settings.cachedPlanInfo",
+  );
+  if (!raw) throw new NotConfigured("Sign in to Windsurf.");
+  const parsed = parseWindsurf(parseJson(raw));
+  if (!parsed.plan && parsed.windows.length === 0) throw new NotConfigured("Sign in to Windsurf.");
+  return [
+    {
+      ...base(env, "windsurf", "local"),
+      instance: instance?.id ?? "windsurf",
+      ...(instance ? { label: instance.name } : {}),
+      ...parsed,
+    },
+  ];
+};
+
+export const groq: Fetcher = async (env, instances) => {
+  const instance = instances[0];
+  const desktopSettings =
+    env.platform === "darwin"
+      ? `${env.home}/Library/Application Support/groq-desktop-app/settings.json`
+      : `${env.env.XDG_CONFIG_HOME ?? `${env.home}/.config`}/groq-desktop-app/settings.json`;
+  const file = parseJson(await env.readText(desktopSettings));
+  const key = firstEnv(env, ["GROQ_API_KEY"]) ?? str(file.GROQ_API_KEY);
+  if (!key) throw new NotConfigured("Set GROQ_API_KEY or sign in to Groq Desktop.");
+  const model = str(file.model);
+  return [
+    {
+      ...base(env, "groq", "local"),
+      instance: instance?.id ?? "groq",
+      ...(instance ? { label: instance.name } : {}),
+      plan: model ? `Groq · ${model}` : "API key",
+      windows: [],
+    },
+  ];
+};
+
+export const ollama: Fetcher = async (env, instances) => {
+  const instance = instances[0];
+  const apiKey = firstEnv(env, ["OLLAMA_API_KEY", "OLLAMA_KEY"]);
+  const manifests = await env.listFiles(`${env.home}/.ollama/models/manifests`, "");
+  if (!apiKey && manifests.length === 0) {
+    throw new NotConfigured("Install an Ollama model or set OLLAMA_API_KEY.");
+  }
+  const count = manifests.length;
+  const plan =
+    count > 0 ? `${count} local ${count === 1 ? "model" : "models"}` : "Ollama Cloud";
+  return [
+    {
+      ...base(env, "ollama", "local"),
+      instance: instance?.id ?? "ollama",
+      ...(instance ? { label: instance.name } : {}),
+      plan,
+      windows: [],
+    },
+  ];
 };
