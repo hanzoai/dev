@@ -12,6 +12,15 @@ export { useDevOpen } from "./useDevOpen";
 export type { DevCloud, DevEnvironment, DevRuntime, DevRuntimeSource } from "./runtime";
 export { focusComposer, focusThreadList } from "./focus";
 export { DevHome } from "./DevHome";
+export {
+  DevSettings,
+  DEV_SETTINGS_PATHS,
+  isDevSettingsPath,
+  normalizeDevSettingsPath,
+  type DevSettingsExtraSection,
+  type DevSettingsNavGroup,
+  type DevSettingsProps,
+} from "./DevSettings";
 export { DevChatList } from "./ChatList";
 export { useReplyModels } from "./useReplyModels";
 export { PublishDialog as DevPublish } from "./PublishDialog";

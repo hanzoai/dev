@@ -1,9 +1,12 @@
 import { useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
+import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
+import { ThemeEditorHost } from "../components/settings/ThemeEditorHost";
 import { SidebarProvider } from "../components/ui/sidebar";
 import ThreadSidebar from "../components/Sidebar";
 import { useEmbed, type Slot } from "./context";
+import { useEmbedSettingsHost } from "./settingsHost";
 
 const sidebarRouteReveal = { observedKey: null, pendingKey: null };
 
@@ -18,6 +21,7 @@ function useSlot(slot: Slot): HTMLElement | null {
  */
 export function EmbedShell({ children }: { children: ReactNode }) {
   const embed = useEmbed();
+  const settingsHost = useEmbedSettingsHost();
   const threads = useSlot(embed!.slots.threads);
   const workspace = useSlot(embed!.slots.workspace);
   return (
@@ -25,6 +29,12 @@ export function EmbedShell({ children }: { children: ReactNode }) {
     <SidebarProvider style={{ display: "contents" }} storageKey="dev_embed_sidebar_open">
       {threads ? createPortal(<ThreadSidebar routeReveal={sidebarRouteReveal} />, threads) : null}
       {workspace ? createPortal(children, workspace) : null}
+      {settingsHost ? (
+        <>
+          <ConfirmDialogHost />
+          <ThemeEditorHost />
+        </>
+      ) : null}
     </SidebarProvider>
   );
 }

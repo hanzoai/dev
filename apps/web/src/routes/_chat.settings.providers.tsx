@@ -3,13 +3,19 @@ import { EnvironmentId, ProviderInstanceId } from "@hanzodev/contracts";
 import { useGT } from "gt-react";
 
 import { ProviderSettingsPanel } from "../components/settings/ProviderSettingsPanel";
+import { SettingsPageContainer } from "../components/settings/settingsLayout";
 import { useSettingsScope } from "../components/settings/SettingsScopeContext";
+import { useEmbedSettingsHost } from "../embed/settingsHost";
 
 function SettingsProvidersRoute() {
   const target = Route.useSearch();
   const { environment, scope } = useSettingsScope();
+  const host = useEmbedSettingsHost();
   const gt = useGT();
   if (!environment) {
+    if (host?.providersFallback) {
+      return <SettingsPageContainer>{host.providersFallback}</SettingsPageContainer>;
+    }
     return (
       <p className="p-8 text-sm text-muted-foreground">
         {scope.kind === "environment"

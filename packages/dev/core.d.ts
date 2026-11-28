@@ -136,3 +136,41 @@ export function DevChatList(props: {
   onOpen?: (ref: string | null) => void;
   className?: string;
 }): ReactNode;
+
+export type DevSettingsNavGroup =
+  | "Account"
+  | "Preferences"
+  | "Agents"
+  | "Code"
+  | "Connections"
+  | "More";
+
+export interface DevSettingsExtraSection {
+  readonly path: string;
+  readonly label: string;
+  readonly group?: DevSettingsNavGroup;
+  readonly icon?: ReactNode;
+  readonly searchTerms?: readonly string[];
+  readonly render: () => ReactNode;
+}
+
+export interface DevSettingsProps {
+  readonly pathname?: string;
+  readonly onNavigate?: (pathname: string) => void;
+  readonly onClose?: () => void;
+  readonly extraSections?: readonly DevSettingsExtraSection[];
+  readonly usageHeader?: ReactNode;
+  readonly sidebarFooter?: ReactNode;
+  readonly providersFallback?: ReactNode;
+  readonly className?: string;
+}
+
+export const DEV_SETTINGS_PATHS: ReadonlySet<string>;
+export function isDevSettingsPath(pathname: string): boolean;
+export function normalizeDevSettingsPath(
+  pathname: string,
+  extraPaths?: ReadonlySet<string>,
+): string;
+
+/** Hanzo Dev's canonical Settings UI for host apps (hanzo.app, Desktop, etc.). */
+export function DevSettings(props: DevSettingsProps): ReactNode;

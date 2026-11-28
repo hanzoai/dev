@@ -17,11 +17,15 @@ import type { DevRuntime } from "./runtime";
 // Services are app-lifetime singletons; one router per page.
 let started: { readonly router: EmbedState["router"] } | null = null;
 
-function start() {
+export function ensureEmbeddedRouter(): EmbedState["router"] {
   if (started === null) {
     started = { router: startAppServices(createMemoryHistory({ initialEntries: ["/"] })) };
   }
   return started.router;
+}
+
+function start() {
+  return ensureEmbeddedRouter();
 }
 
 const paired = new Map<string, EnvironmentId>();

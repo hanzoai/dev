@@ -5,6 +5,7 @@ import {
   WorkspaceBreadcrumbItem,
   WorkspaceBreadcrumbSeparator,
 } from "../WorkspaceBreadcrumb";
+import { useEmbedSettingsHost } from "../../embed/settingsHost";
 import { SETTINGS_SECTION_LABELS } from "./settingsSearch";
 
 const SETTINGS_LABEL = msg("Settings");
@@ -23,18 +24,23 @@ function settingsBreadcrumbLabel(pathname: string): string | null {
 export function SettingsBreadcrumb({ pathname }: { pathname: string }) {
   const gt = useGT();
   const m = useMessages();
-  const sectionLabel = settingsBreadcrumbLabel(pathname);
+  const host = useEmbedSettingsHost();
+  const normalizedPathname = pathname.replace(/\/+$/, "") || "/";
+  const extraLabel =
+    host?.extraSections.find((section) => section.path === normalizedPathname)?.label ?? null;
+  const sectionLabel = settingsBreadcrumbLabel(normalizedPathname);
+  const resolvedLabel = extraLabel ?? (sectionLabel ? m(sectionLabel) : null);
 
   return (
     <WorkspaceBreadcrumb ariaLabel={gt("Settings breadcrumb")}>
-      {sectionLabel ? (
+      {resolvedLabel ? (
         <>
           <WorkspaceBreadcrumbItem>{m(SETTINGS_LABEL)}</WorkspaceBreadcrumbItem>
           <WorkspaceBreadcrumbSeparator />
         </>
       ) : null}
       <WorkspaceBreadcrumbItem current className="truncate">
-        {m(sectionLabel ?? SETTINGS_LABEL)}
+        {resolvedLabel ?? m(SETTINGS_LABEL)}
       </WorkspaceBreadcrumbItem>
     </WorkspaceBreadcrumb>
   );

@@ -1,6 +1,6 @@
 {
   "name": "@hanzo/dev",
-  "version": "4.2.1",
+  "version": "4.2.2",
   "description": "The unified Hanzo Dev & Builder library (Dev core threads/composer/runtime + Builder workspace, sessions, routes, plans, and host providers).",
   "license": "MIT",
   "repository": {
@@ -15,13 +15,6 @@
   "sideEffects": [
     "**/*.css"
   ],
-  "scripts": {
-    "build:builder": "rm -rf dist/builder && tsc -p tsconfig.builder.json",
-    "build:assemble": "node scripts/assemble.mjs",
-    "build": "pnpm --filter @hanzodev/web build:embed && pnpm run build:builder && pnpm run build:assemble",
-    "typecheck": "tsc -p tsconfig.builder.json --noEmit",
-    "test": "vp test run --config vitest.config.ts"
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -79,10 +72,33 @@
   "publishConfig": {
     "access": "public"
   },
+  "scripts": {
+    "build:builder": "rm -rf dist/builder && tsc -p tsconfig.builder.json",
+    "build:assemble": "node scripts/assemble.mjs",
+    "build": "pnpm --filter @hanzodev/web build:embed && pnpm run build:builder && pnpm run build:assemble",
+    "typecheck": "tsc -p tsconfig.builder.json --noEmit",
+    "test": "vp test run --config vitest.config.ts"
+  },
   "dependencies": {
     "@tanstack/react-router": "^1.160.2",
     "@tanstack/react-store": "^0.8.1",
     "use-sync-external-store": "^1.6.0"
+  },
+  "devDependencies": {
+    "@hanzo/composer": "0.2.0",
+    "@hanzo/gui": "8.3.5",
+    "@hanzo/i18n": "0.5.5",
+    "@hanzo/ui": "8.30.3",
+    "@hanzo/voice": "0.1.19",
+    "@hanzogui/lucide-icons-2": "8.3.5",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "react-hook-form": "^7.87.0",
+    "react-native-svg": "15.16.1",
+    "typescript": "7.0.2"
   },
   "peerDependencies": {
     "@hanzo/composer": ">=0.2.0",
@@ -113,21 +129,5 @@
     "@hanzogui/lucide-icons-2": {
       "optional": true
     }
-  },
-  "devDependencies": {
-    "@hanzo/composer": "0.2.0",
-    "@hanzo/gui": "8.3.5",
-    "@hanzo/i18n": "0.5.5",
-    "@hanzo/ui": "8.30.3",
-    "@hanzo/voice": "0.1.19",
-    "@hanzogui/lucide-icons-2": "8.3.5",
-    "@types/node": "catalog:",
-    "@types/react": "catalog:",
-    "@types/react-dom": "catalog:",
-    "react": "catalog:",
-    "react-dom": "catalog:",
-    "react-hook-form": "^7.87.0",
-    "react-native-svg": "15.16.1",
-    "typescript": "7.0.2"
   }
 }

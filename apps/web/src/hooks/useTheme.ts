@@ -3,6 +3,7 @@ import type { DesktopBridge } from "@hanzodev/contracts";
 import { safeErrorLogAttributes } from "@hanzodev/client-runtime/errors";
 import * as Schema from "effect/Schema";
 import { useSyncExternalStore } from "react";
+import { isEmbedded } from "../embed/context";
 import {
   applyThemePalette,
   CUSTOM_THEMES_STORAGE_KEY,
@@ -184,6 +185,64 @@ function writeAppearanceModePreference(appearanceMode: ThemePreferenceMode): voi
   }
 }
 
+function readEmbeddedHostThemePreference(): Theme | null {
+  if (typeof window === "undefined" || !isEmbedded()) return null;
+  try {
+    const raw = window.localStorage.getItem("hanzo.appearance");
+    if (raw) {
+      const parsed = JSON.parse(raw) as { theme?: string; profile?: string };
+      if (parsed.theme === "light" || parsed.theme === "dark" || parsed.theme === "system") {
+        return parsed.theme;
+      }
+      if (parsed.profile === "light") return "light";
+      if (parsed.profile === "zen" || parsed.profile === "clay" || parsed.profile === "lelouch") {
+        return "dark";
+      }
+    }
+  } catch {}
+  if (typeof document !== "undefined") {
+    if (
+      document.documentElement.classList.contains("light") ||
+      document.documentElement.classList.contains("t_light")
+    ) {
+      return "light";
+    }
+  }
+  return null;
+}
+
+function syncEmbeddedHostAppearance(
+  appearanceMode: ThemePreferenceMode,
+  resolvedAppearance: ThemeAppearance,
+): void {
+  if (typeof window === "undefined" || typeof document === "undefined" || !isEmbedded()) return;
+  const root = document.documentElement;
+  root.classList.toggle("light", resolvedAppearance === "light");
+  root.classList.toggle("dark", resolvedAppearance === "dark");
+  root.classList.toggle("t_light", resolvedAppearance === "light");
+  root.classList.toggle("t_dark", resolvedAppearance === "dark");
+  root.dataset.theme = resolvedAppearance;
+  root.style.colorScheme = resolvedAppearance;
+  try {
+    const raw = window.localStorage.getItem("hanzo.appearance");
+    const existing = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    const next = {
+      ...existing,
+      theme: appearanceMode,
+      profile:
+        resolvedAppearance === "light" ? "light" : existing.profile === "clay" ? "clay" : "zen",
+      userSelected: true,
+    };
+    window.localStorage.setItem("hanzo.appearance", JSON.stringify(next));
+    window.dispatchEvent(
+      new CustomEvent("hanzo:appearance-change", {
+        detail: { theme: appearanceMode, profile: next.profile },
+      }),
+    );
+    window.dispatchEvent(new Event("hanzo:appearance"));
+  } catch {}
+}
+
 export function readThemePreference(): Theme {
   if (typeof window === "undefined") return DEFAULT_THEME_SNAPSHOT.theme;
   let raw: string | null;
@@ -199,7 +258,7 @@ export function readThemePreference(): Theme {
   if (raw !== null && isKnownThemePreference(raw)) {
     return canonicalThemePreference(raw);
   }
-  return DEFAULT_THEME_SNAPSHOT.theme;
+  return readEmbeddedHostThemePreference() ?? DEFAULT_THEME_SNAPSHOT.theme;
 }
 
 function writeThemePreference(theme: Theme): void {
@@ -551,6 +610,15 @@ export function setTheme(next: Theme): boolean {
     return false;
   }
   applyTheme(next, { suppressTransitions: true });
+  const mode = readAppearanceModePreference(next);
+  const resolved = resolveThemeAppearance(
+    next,
+    mode === "system" ? getSystemDark() : false,
+    mode === "system",
+    mode,
+    readStoredThemeHalves(),
+  );
+  syncEmbeddedHostAppearance(mode, resolved);
   emitChange();
   return true;
 }
@@ -575,7 +643,16 @@ export function setAppearanceMode(nextAppearanceMode: ThemePreferenceMode): bool
     return false;
   }
   themeStorageReadFailure = null;
-  applyTheme(getStored(), { suppressTransitions: true });
+  const current = getStored();
+  applyTheme(current, { suppressTransitions: true });
+  const resolved = resolveThemeAppearance(
+    current,
+    nextAppearanceMode === "system" ? getSystemDark() : false,
+    nextAppearanceMode === "system",
+    nextAppearanceMode,
+    readStoredThemeHalves(),
+  );
+  syncEmbeddedHostAppearance(nextAppearanceMode, resolved);
   emitChange();
   return true;
 }

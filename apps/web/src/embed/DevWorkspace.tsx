@@ -44,7 +44,9 @@ export function DevWorkspace({
       }}
     >
       <div ref={ref} style={{ display: "flex", minWidth: 0, minHeight: 0, flex: 1 }} />
-      {embed && dock && workspace ? dock({ runtime: embed.runtime, thread: open }) : null}
+      {embed && embed.runtime && dock && workspace
+        ? dock({ runtime: embed.runtime, thread: open })
+        : null}
     </div>
   );
 }

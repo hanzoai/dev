@@ -7,11 +7,16 @@ import { SidebarInset } from "../components/ui/sidebar";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { retainThreadFindForRoute } from "../components/chat/threadFindStore";
 import { ThreadLinkPrompt } from "../components/promptLinks/ThreadLinkPrompt";
+import { useEmbedSettingsHost } from "../embed/settingsHost";
 import { useShownThreadRouteTarget } from "../hooks/useShownThreadRouteTarget";
 
 function ChatRouteLayout() {
   // Render both routes here so draft promotion keeps the same ChatView mounted.
   const { shownTarget, modalOpen } = useShownThreadRouteTarget();
+  const inlineSettings = useEmbedSettingsHost()?.inline === true;
+  if (inlineSettings && modalOpen) {
+    return <Outlet />;
+  }
   return (
     <>
       {shownTarget?.kind === "server" && !modalOpen ? (

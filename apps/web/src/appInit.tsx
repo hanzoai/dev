@@ -71,8 +71,12 @@ import { registerOpenFavoriteEditorCommand } from "./components/chat/OpenInPicke
 import { environmentThreadShells, threadEnvironment } from "./state/threads";
 import { resolveActiveThreadRouteRef, resolveThreadRouteTarget } from "./threadRoutes";
 
+let clientAppearanceStarted = false;
+
 /** Writes appearance settings onto the document, touching only the groups that changed. */
 function startClientAppearance(): void {
+  if (clientAppearanceStarted) return;
+  clientAppearanceStarted = true;
   const root = document.documentElement;
   let applied: ClientSettings | null = null;
   let appliedSeparateFonts: boolean | null = null;
@@ -129,6 +133,11 @@ function startClientAppearance(): void {
   subscribeClientSettings(apply);
   subscribeLocalStorageKey(TYPOGRAPHY_ADVANCED_STORAGE_KEY, apply);
   apply();
+}
+
+/** Idempotently activates client appearance vars (contrast, glass opacity, typography, chat width) in embedded hosts. */
+export function ensureClientAppearance(): void {
+  startClientAppearance();
 }
 
 function readOpenThreadRef(router: AppRouter): ScopedThreadRef | null {
