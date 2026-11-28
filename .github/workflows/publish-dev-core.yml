@@ -49,9 +49,16 @@ jobs:
         run: |
           set -euo pipefail
           corepack enable
-          pnpm install --frozen-lockfile --ignore-scripts --filter '@hanzodev/web...'
+          pnpm install --frozen-lockfile --ignore-scripts --filter '@hanzodev/web...' --filter '@hanzo/dev...'
           (cd apps/web && ./node_modules/.bin/vp build --config vite.embed.config.ts)
+          pnpm --filter @hanzo/dev run build:builder
+          pnpm --filter @hanzo/dev run build:assemble
           test -s packages/dev/dist/index.js
+          test -s packages/dev/dist/index.d.ts
+          test -s packages/dev/dist/core.js
+          test -s packages/dev/dist/core.d.ts
+          test -s packages/dev/dist/builder/index.js
+          test -s packages/dev/dist/builder/index.d.ts
           test -s packages/dev/dist/index.css
 
       # A host bundles this library itself: no file may call require("react"), and every package it

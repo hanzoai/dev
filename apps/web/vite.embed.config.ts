@@ -79,6 +79,12 @@ export default defineConfig({
         find: /^use-sync-external-store\/(shim(\/index\.js)?|(shim\/)?with-selector(\.js)?)$/,
         replacement: fileURLToPath(new URL("./vite/syncExternalStore.ts", import.meta.url)),
       },
+      {
+        find: /^decode-named-character-reference$/,
+        replacement: fileURLToPath(
+          new URL("./vite/decodeNamedCharacterReference.ts", import.meta.url),
+        ),
+      },
     ],
   },
   build: {
@@ -86,9 +92,10 @@ export default defineConfig({
     emptyOutDir: true,
     cssCodeSplit: false,
     sourcemap: false,
-    // `keymap` is its own small entry: a host resolves window keys before it has loaded the core.
+    // `core` is the embedded Dev core; `keymap` is its own small entry so a host resolves window
+    // keys before loading the core. `packages/dev` assembles `dist/index.js` over `core` + `builder`.
     lib: {
-      entry: { index: "src/embed/index.ts", keymap: "src/embed/keymap.ts" },
+      entry: { core: "src/embed/index.ts", keymap: "src/embed/keymap.ts" },
       formats: ["es"],
       cssFileName: "index",
     },
