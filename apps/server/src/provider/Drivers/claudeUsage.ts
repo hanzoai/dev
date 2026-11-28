@@ -1,5 +1,6 @@
 import type { ClaudeSettings } from "@hanzodev/contracts";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
 import { expandHomePath } from "@hanzodev/provider-core/server/pathExpansion";
@@ -132,18 +133,40 @@ export const claudeUsageFormat: TranscriptUsageFormat<void> = {
   parseProjected: (projected) => parseClaudeRecord(projected),
 };
 
-export const claudeUsageReader: ProviderUsageReader<ClaudeSettings, Path.Path> = {
+export const claudeUsageReader: ProviderUsageReader<
+  ClaudeSettings,
+  Path.Path | FileSystem.FileSystem
+> = {
   kind: "transcripts",
   provider: "claude",
   format: claudeUsageFormat,
   directories: Effect.fn("claudeUsageReader.directories")(function* ({ config, environment }) {
     if (config === undefined) return [];
     const path = yield* Path.Path;
+    const fs = yield* FileSystem.FileSystem;
     const homeDirectory = yield* HostProcess.HomeDirectory;
     const configured = config.homePath.trim();
-    const home = configured
+    const primary = configured
       ? expandHomePath(configured, homeDirectory)
       : environment.CLAUDE_CONFIG_DIR?.trim() || path.join(homeDirectory, ".claude");
-    return [{ dir: path.resolve(home, "projects") }];
+    const out: Array<{ readonly dir: string }> = [{ dir: path.resolve(primary, "projects") }];
+    if (configured || environment.CLAUDE_CONFIG_DIR?.trim()) return out;
+    // Also discover sibling ~/.claude* account directories (e.g. ~/.claude-hanzo) that hold local transcripts.
+    const seen = new Set(out.map((entry) => entry.dir));
+    const entries = yield* fs
+      .readDirectory(homeDirectory)
+      .pipe(Effect.catchCause(() => Effect.succeed([] as ReadonlyArray<string>)));
+    for (const name of [...entries].toSorted()) {
+      if (!name.startsWith(".claude") || name === ".claude") continue;
+      const projectsDir = path.resolve(homeDirectory, name, "projects");
+      if (seen.has(projectsDir)) continue;
+      const stat = yield* fs
+        .stat(projectsDir)
+        .pipe(Effect.catchCause(() => Effect.succeed(undefined)));
+      if (stat?.type !== "Directory") continue;
+      seen.add(projectsDir);
+      out.push({ dir: projectsDir });
+    }
+    return out;
   }),
 };
