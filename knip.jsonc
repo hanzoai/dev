@@ -145,11 +145,26 @@
       "includeEntryExports": true,
     },
     "packages/dev": {
-      // @hanzo/dev ships only the apps/web embed build; its dist imports these bare,
-      // and scripts/embed-dist-check.ts requires every such import to be a listed dependency.
+      // @hanzo/dev ships both the apps/web embed build (core + keymap) and the absorbed Builder
+      // modules (compiled from packages/dev/builder via tsconfig.builder.json).
+      "entry": [
+        "builder/index.ts!",
+        "builder/plan.ts!",
+        "builder/route.ts!",
+        "builder/mind.ts!",
+        "builder/handoff.ts!",
+        "builder/dev-mode.ts!",
+        "builder/names.ts!",
+        "scripts/assemble.mjs",
+        "vitest.config.ts",
+      ],
       "ignoreDependencies": [
+        "@hanzo/composer",
         "@tanstack/react-router",
         "@tanstack/react-store",
+        "react-hook-form",
+        "react-native-svg",
+        "typescript",
         "use-sync-external-store",
       ],
     },

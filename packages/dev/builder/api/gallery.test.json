@@ -1,0 +1,596 @@
+{
+  "version": 2,
+  "origin": "https://gallery.hanzo.ai",
+  "count": 58,
+  "screenshots": 58,
+  "seeds": [
+    "instrument",
+    "fernline",
+    "aerva",
+    "tensile",
+    "nova",
+    "minimal-ui",
+    "component-states",
+    "lighthouse",
+    "warp-tunnel",
+    "dotted-globe",
+    "tracking-3d",
+    "line-illustrations",
+    "holo",
+    "warp-shader",
+    "animated-rings",
+    "bestiary",
+    "emptykit",
+    "synapse",
+    "circle",
+    "metrics",
+    "kinetic",
+    "savor",
+    "mint"
+  ],
+  "generatedAt": "2026-11-08T20:11:23.187Z",
+  "templates": [
+    {
+      "id": 76,
+      "name": "instrument",
+      "displayName": "Instrument Lab",
+      "slug": "instrument",
+      "category": "Portfolio",
+      "screenshot": "instrument",
+      "path": "apps/instrument",
+      "framework": "React 19 + Vite + TS",
+      "rating": 5,
+      "features": [
+        "Cmd+K Zen AI Palette",
+        "Hanzo Insights Telemetry",
+        "Interactive 3D Lab",
+        "Theme Switcher",
+        "Procedural Audio"
+      ],
+      "components": "30+ comp",
+      "easeOfSetup": 5,
+      "useCase": "AI Creative Lab & Developer Studio · Zen AI + Analytics",
+      "tier": 1,
+      "description": "Monospace AI creative lab and engineering studio with interactive 3D project cards, Cmd+K Zen AI command palette, WebGL/ASCII playgrounds, and out-of-the-box Hanzo Analytics & Insights event tracking.",
+      "updatedDate": "2026-04-20",
+      "port": 3108,
+      "family": "instrument",
+      "seed": true,
+      "generation": "modern",
+      "intents": [
+        "portfolio",
+        "design engineer",
+        "creative developer",
+        "interactive lab",
+        "command palette",
+        "personal site",
+        "case study"
+      ],
+      "blocks": [
+        "hero-editorial",
+        "command-palette-cmdk",
+        "interactive-lab-grid",
+        "case-study-reel",
+        "audio-tactile-keys",
+        "theme-switcher"
+      ],
+      "params": [
+        {
+          "key": "brandName",
+          "label": "Brand / Project Name",
+          "type": "string",
+          "default": "Instrument Lab",
+          "envVar": "VITE_SITE_NAME",
+          "description": "Primary brand or product title rendered in navigation and metadata"
+        },
+        {
+          "key": "tagline",
+          "label": "Hero Tagline",
+          "type": "string",
+          "default": "AI Creative Lab & Developer Studio · Zen AI + Analytics",
+          "envVar": "VITE_SITE_TAGLINE",
+          "description": "Headline or value proposition displayed in the hero section"
+        },
+        {
+          "key": "hanzoApiKey",
+          "label": "Hanzo AI API Key",
+          "type": "string",
+          "default": "hz_live_your_api_key",
+          "envVar": "HANZO_API_KEY",
+          "description": "API key for Zen AI models, embeddings, and agents via https://api.hanzo.ai/v1"
+        },
+        {
+          "key": "hanzoAiModel",
+          "label": "Default Zen AI Model",
+          "type": "enum",
+          "default": "zen4",
+          "options": [
+            "zen4",
+            "zen4-mini",
+            "zen4-coder",
+            "enso"
+          ],
+          "envVar": "VITE_HANZO_AI_MODEL",
+          "description": "Default Hanzo AI model routed for chat, copilot, and structured completions"
+        },
+        {
+          "key": "hanzoAnalyticsId",
+          "label": "Hanzo Analytics & Insights ID",
+          "type": "string",
+          "default": "hz_ins_instrument",
+          "envVar": "VITE_HANZO_ANALYTICS_ID",
+          "description": "Project telemetry key for real-time pageviews, conversion funnels & AI token insights"
+        },
+        {
+          "key": "hanzoIamOrg",
+          "label": "Hanzo IAM Organization",
+          "type": "string",
+          "default": "hanzo",
+          "envVar": "VITE_HANZO_IAM_ORG",
+          "description": "Organization tenant slug on hanzo.id for zero-config SSO and RBAC"
+        },
+        {
+          "key": "accentColor",
+          "label": "Accent Color",
+          "type": "color",
+          "default": "#ffffff",
+          "envVar": "VITE_ACCENT_COLOR",
+          "description": "Primary interactive accent token (hex or CSS color)"
+        },
+        {
+          "key": "themeMode",
+          "label": "Default Theme",
+          "type": "enum",
+          "default": "dark",
+          "options": [
+            "dark",
+            "light",
+            "system"
+          ],
+          "envVar": "VITE_THEME_MODE",
+          "description": "Initial color scheme applied on first visit"
+        },
+        {
+          "key": "personaRole",
+          "label": "Role / Discipline",
+          "type": "string",
+          "default": "Design Engineer",
+          "envVar": "VITE_PERSONA_ROLE",
+          "description": "Primary role subtitle displayed in the editorial header"
+        },
+        {
+          "key": "enableAudio",
+          "label": "Tactile Audio Feedback",
+          "type": "boolean",
+          "default": "true",
+          "envVar": "VITE_ENABLE_AUDIO",
+          "description": "Enable synthesized keystroke and interaction clicks"
+        }
+      ],
+      "commands": {
+        "install": "pnpm install",
+        "dev": "pnpm dev",
+        "build": "pnpm build",
+        "deploy": "npx hanzo deploy --path \"apps/instrument\""
+      },
+      "screenshotUrl": "https://gallery.hanzo.ai/screenshots/instrument.webp",
+      "hasScreenshot": true,
+      "templateUrl": "https://gallery.hanzo.ai/templates/instrument",
+      "previewUrl": "https://gallery.hanzo.ai/previews/instrument/index.html",
+      "repo": "https://github.com/hanzo-apps/template-instrument",
+      "deployUrl": "https://hanzo.app/new?template=https%3A%2F%2Fgithub.com%2Fhanzo-apps%2Ftemplate-instrument&seed=instrument",
+      "platformDeployUrl": "https://platform.hanzo.ai/new?repo=https%3A%2F%2Fgithub.com%2Fhanzo-apps%2Ftemplate-instrument&template=instrument"
+    },
+    {
+      "id": 81,
+      "name": "warp-tunnel",
+      "displayName": "Hyperion Tunnel",
+      "slug": "warp-tunnel",
+      "category": "3D & Shaders",
+      "screenshot": "warp-tunnel",
+      "path": "apps/warp-tunnel",
+      "framework": "Three.js WebGPU + React 19",
+      "rating": 5,
+      "features": [
+        "Three.js TSL WebGPU",
+        "AI Stream Reactive",
+        "Bloom Post-Processing",
+        "60fps Edge Render",
+        "Hanzo Perf Telemetry"
+      ],
+      "components": "10+ comp",
+      "easeOfSetup": 5,
+      "useCase": "WebGPU AI Throughput & Launch Portal · Three.js TSL + Cloud",
+      "tier": 1,
+      "description": "High-speed procedural WebGPU tunnel built with Three.js Shading Language (TSL) with dynamic camera banking, bloom post-processing, and real-time Hanzo AI token throughput bindings.",
+      "updatedDate": "2026-04-20",
+      "port": 3113,
+      "family": "warp-tunnel",
+      "seed": true,
+      "generation": "modern",
+      "intents": [
+        "3d hero",
+        "webgpu shader",
+        "immersive launch",
+        "ai portal",
+        "cyberpunk",
+        "webgl background",
+        "event page"
+      ],
+      "blocks": [
+        "webgpu-warp-canvas",
+        "tsl-postprocessing-bloom",
+        "floating-glass-hero",
+        "pointer-velocity-controller",
+        "cta-dock"
+      ],
+      "params": [
+        {
+          "key": "brandName",
+          "label": "Brand / Project Name",
+          "type": "string",
+          "default": "Hyperion Tunnel",
+          "envVar": "VITE_SITE_NAME",
+          "description": "Primary brand or product title rendered in navigation and metadata"
+        },
+        {
+          "key": "tagline",
+          "label": "Hero Tagline",
+          "type": "string",
+          "default": "WebGPU AI Throughput & Launch Portal · Three.js TSL + Cloud",
+          "envVar": "VITE_SITE_TAGLINE",
+          "description": "Headline or value proposition displayed in the hero section"
+        },
+        {
+          "key": "hanzoApiKey",
+          "label": "Hanzo AI API Key",
+          "type": "string",
+          "default": "hz_live_your_api_key",
+          "envVar": "HANZO_API_KEY",
+          "description": "API key for Zen AI models, embeddings, and agents via https://api.hanzo.ai/v1"
+        },
+        {
+          "key": "hanzoAiModel",
+          "label": "Default Zen AI Model",
+          "type": "enum",
+          "default": "zen4",
+          "options": [
+            "zen4",
+            "zen4-mini",
+            "zen4-coder",
+            "enso"
+          ],
+          "envVar": "VITE_HANZO_AI_MODEL",
+          "description": "Default Hanzo AI model routed for chat, copilot, and structured completions"
+        },
+        {
+          "key": "hanzoAnalyticsId",
+          "label": "Hanzo Analytics & Insights ID",
+          "type": "string",
+          "default": "hz_ins_warp-tunnel",
+          "envVar": "VITE_HANZO_ANALYTICS_ID",
+          "description": "Project telemetry key for real-time pageviews, conversion funnels & AI token insights"
+        },
+        {
+          "key": "hanzoIamOrg",
+          "label": "Hanzo IAM Organization",
+          "type": "string",
+          "default": "hanzo",
+          "envVar": "VITE_HANZO_IAM_ORG",
+          "description": "Organization tenant slug on hanzo.id for zero-config SSO and RBAC"
+        },
+        {
+          "key": "accentColor",
+          "label": "Accent Color",
+          "type": "color",
+          "default": "#ffffff",
+          "envVar": "VITE_ACCENT_COLOR",
+          "description": "Primary interactive accent token (hex or CSS color)"
+        },
+        {
+          "key": "themeMode",
+          "label": "Default Theme",
+          "type": "enum",
+          "default": "dark",
+          "options": [
+            "dark",
+            "light",
+            "system"
+          ],
+          "envVar": "VITE_THEME_MODE",
+          "description": "Initial color scheme applied on first visit"
+        },
+        {
+          "key": "warpSpeed",
+          "label": "Tunnel Velocity",
+          "type": "enum",
+          "default": "1.0",
+          "options": [
+            "0.5",
+            "1.0",
+            "1.75",
+            "2.5"
+          ],
+          "envVar": "VITE_WARP_SPEED",
+          "description": "Base forward speed multiplier for the TSL tunnel shader"
+        }
+      ],
+      "commands": {
+        "install": "npm install",
+        "dev": "npm start",
+        "build": "npm run build",
+        "deploy": "npx hanzo deploy --path \"apps/warp-tunnel\""
+      },
+      "screenshotUrl": "https://gallery.hanzo.ai/screenshots/warp-tunnel.webp",
+      "hasScreenshot": true,
+      "templateUrl": "https://gallery.hanzo.ai/templates/warp-tunnel",
+      "previewUrl": "https://gallery.hanzo.ai/previews/warp-tunnel/index.html",
+      "repo": "https://github.com/hanzo-apps/template-warp-tunnel",
+      "deployUrl": "https://hanzo.app/new?template=https%3A%2F%2Fgithub.com%2Fhanzo-apps%2Ftemplate-warp-tunnel&seed=warp-tunnel",
+      "platformDeployUrl": "https://platform.hanzo.ai/new?repo=https%3A%2F%2Fgithub.com%2Fhanzo-apps%2Ftemplate-warp-tunnel&template=warp-tunnel"
+    },
+    {
+      "id": 3,
+      "name": "metrics",
+      "displayName": "Metrics",
+      "slug": "metrics",
+      "category": "Dashboard",
+      "screenshot": "metrics",
+      "path": "apps/metrics",
+      "framework": "Next.js 13.3 + TS",
+      "rating": 5,
+      "features": [
+        "Hanzo Insights Dashboard",
+        "AI Token & Cost FinOps",
+        "CRM & Revenue Funnels",
+        "API Key Usage Charts",
+        "Role-Based Access"
+      ],
+      "components": "60+ comp",
+      "easeOfSetup": 5,
+      "useCase": "Cloud Analytics, AI FinOps & Admin Dashboard · Hanzo Insights",
+      "tier": 1,
+      "description": "Executive admin and analytics console pre-wired for Hanzo Insights, AI API key spend & token telemetry, CRM pipeline analytics, and multi-tenant organization reporting.",
+      "port": 3003,
+      "family": "metrics",
+      "seed": true,
+      "generation": "classic",
+      "intents": [
+        "admin dashboard",
+        "analytics",
+        "crm",
+        "backoffice",
+        "cloud analytics, ai finops & admin dashboard · hanzo insights"
+      ],
+      "blocks": [
+        "sidebar-nav",
+        "kpi-stat-cards",
+        "revenue-chart",
+        "activity-table",
+        "hanzo-insights-dashboard",
+        "ai-token-cost-finops",
+        "crm-revenue-funnels"
+      ],
+      "params": [
+        {
+          "key": "brandName",
+          "label": "Brand / Project Name",
+          "type": "string",
+          "default": "Metrics",
+          "envVar": "NEXT_PUBLIC_SITE_NAME",
+          "description": "Primary brand or product title rendered in navigation and metadata"
+        },
+        {
+          "key": "tagline",
+          "label": "Hero Tagline",
+          "type": "string",
+          "default": "Cloud Analytics, AI FinOps & Admin Dashboard · Hanzo Insights",
+          "envVar": "NEXT_PUBLIC_SITE_TAGLINE",
+          "description": "Headline or value proposition displayed in the hero section"
+        },
+        {
+          "key": "hanzoApiKey",
+          "label": "Hanzo AI API Key",
+          "type": "string",
+          "default": "hz_live_your_api_key",
+          "envVar": "HANZO_API_KEY",
+          "description": "API key for Zen AI models, embeddings, and agents via https://api.hanzo.ai/v1"
+        },
+        {
+          "key": "hanzoAiModel",
+          "label": "Default Zen AI Model",
+          "type": "enum",
+          "default": "zen4",
+          "options": [
+            "zen4",
+            "zen4-mini",
+            "zen4-coder",
+            "enso"
+          ],
+          "envVar": "NEXT_PUBLIC_HANZO_AI_MODEL",
+          "description": "Default Hanzo AI model routed for chat, copilot, and structured completions"
+        },
+        {
+          "key": "hanzoAnalyticsId",
+          "label": "Hanzo Analytics & Insights ID",
+          "type": "string",
+          "default": "hz_ins_metrics",
+          "envVar": "NEXT_PUBLIC_HANZO_ANALYTICS_ID",
+          "description": "Project telemetry key for real-time pageviews, conversion funnels & AI token insights"
+        },
+        {
+          "key": "hanzoIamOrg",
+          "label": "Hanzo IAM Organization",
+          "type": "string",
+          "default": "hanzo",
+          "envVar": "NEXT_PUBLIC_HANZO_IAM_ORG",
+          "description": "Organization tenant slug on hanzo.id for zero-config SSO and RBAC"
+        },
+        {
+          "key": "accentColor",
+          "label": "Accent Color",
+          "type": "color",
+          "default": "#ffffff",
+          "envVar": "NEXT_PUBLIC_ACCENT_COLOR",
+          "description": "Primary interactive accent token (hex or CSS color)"
+        },
+        {
+          "key": "themeMode",
+          "label": "Default Theme",
+          "type": "enum",
+          "default": "dark",
+          "options": [
+            "dark",
+            "light",
+            "system"
+          ],
+          "envVar": "NEXT_PUBLIC_THEME_MODE",
+          "description": "Initial color scheme applied on first visit"
+        }
+      ],
+      "commands": {
+        "install": "pnpm install",
+        "dev": "pnpm dev",
+        "build": "pnpm build",
+        "deploy": "npx hanzo deploy --path \"apps/metrics\""
+      },
+      "screenshotUrl": "https://gallery.hanzo.ai/screenshots/metrics.webp",
+      "hasScreenshot": true,
+      "templateUrl": "https://gallery.hanzo.ai/templates/metrics",
+      "previewUrl": "https://gallery.hanzo.ai/previews/metrics/index.html",
+      "repo": "https://github.com/hanzo-apps/template-metrics",
+      "deployUrl": "https://hanzo.app/new?template=https%3A%2F%2Fgithub.com%2Fhanzo-apps%2Ftemplate-metrics&seed=metrics",
+      "platformDeployUrl": "https://platform.hanzo.ai/new?repo=https%3A%2F%2Fgithub.com%2Fhanzo-apps%2Ftemplate-metrics&template=metrics"
+    },
+    {
+      "id": 47,
+      "name": "folio-about",
+      "displayName": "Folio About",
+      "slug": "folio-about",
+      "category": "Folio Portfolio",
+      "screenshot": "folio-about",
+      "path": "apps/Folio - HTML Templates/about",
+      "framework": "HTML/Gulp",
+      "rating": 3,
+      "features": [
+        "About",
+        "Bio",
+        "Profile",
+        "Responsive"
+      ],
+      "components": "5+ comp",
+      "easeOfSetup": 3,
+      "useCase": "About pages",
+      "tier": 3,
+      "port": 3060,
+      "seed": false,
+      "generation": "classic",
+      "intents": [
+        "portfolio",
+        "creative agency",
+        "case studies",
+        "personal site",
+        "about pages"
+      ],
+      "blocks": [
+        "project-showcase-grid",
+        "case-study-detail",
+        "about-bio",
+        "contact-form",
+        "about",
+        "bio",
+        "profile"
+      ],
+      "params": [
+        {
+          "key": "brandName",
+          "label": "Brand / Project Name",
+          "type": "string",
+          "default": "Folio About",
+          "envVar": "VITE_SITE_NAME",
+          "description": "Primary brand or product title rendered in navigation and metadata"
+        },
+        {
+          "key": "tagline",
+          "label": "Hero Tagline",
+          "type": "string",
+          "default": "About pages",
+          "envVar": "VITE_SITE_TAGLINE",
+          "description": "Headline or value proposition displayed in the hero section"
+        },
+        {
+          "key": "hanzoApiKey",
+          "label": "Hanzo AI API Key",
+          "type": "string",
+          "default": "hz_live_your_api_key",
+          "envVar": "HANZO_API_KEY",
+          "description": "API key for Zen AI models, embeddings, and agents via https://api.hanzo.ai/v1"
+        },
+        {
+          "key": "hanzoAiModel",
+          "label": "Default Zen AI Model",
+          "type": "enum",
+          "default": "zen4",
+          "options": [
+            "zen4",
+            "zen4-mini",
+            "zen4-coder",
+            "enso"
+          ],
+          "envVar": "VITE_HANZO_AI_MODEL",
+          "description": "Default Hanzo AI model routed for chat, copilot, and structured completions"
+        },
+        {
+          "key": "hanzoAnalyticsId",
+          "label": "Hanzo Analytics & Insights ID",
+          "type": "string",
+          "default": "hz_ins_folio-about",
+          "envVar": "VITE_HANZO_ANALYTICS_ID",
+          "description": "Project telemetry key for real-time pageviews, conversion funnels & AI token insights"
+        },
+        {
+          "key": "hanzoIamOrg",
+          "label": "Hanzo IAM Organization",
+          "type": "string",
+          "default": "hanzo",
+          "envVar": "VITE_HANZO_IAM_ORG",
+          "description": "Organization tenant slug on hanzo.id for zero-config SSO and RBAC"
+        },
+        {
+          "key": "accentColor",
+          "label": "Accent Color",
+          "type": "color",
+          "default": "#ffffff",
+          "envVar": "VITE_ACCENT_COLOR",
+          "description": "Primary interactive accent token (hex or CSS color)"
+        },
+        {
+          "key": "themeMode",
+          "label": "Default Theme",
+          "type": "enum",
+          "default": "dark",
+          "options": [
+            "dark",
+            "light",
+            "system"
+          ],
+          "envVar": "VITE_THEME_MODE",
+          "description": "Initial color scheme applied on first visit"
+        }
+      ],
+      "commands": {
+        "install": "npm install",
+        "dev": "npx gulp",
+        "build": "npx gulp build",
+        "deploy": "npx hanzo deploy --static --path \"apps/Folio - HTML Templates/about\""
+      },
+      "screenshotUrl": "https://gallery.hanzo.ai/screenshots/folio-about.webp",
+      "hasScreenshot": true,
+      "templateUrl": "https://gallery.hanzo.ai/templates/folio-about",
+      "previewUrl": "https://gallery.hanzo.ai/previews/folio-about/index.html",
+      "repo": "https://github.com/hanzo-apps/template-folio-about",
+      "deployUrl": "https://hanzo.app/new?template=https%3A%2F%2Fgithub.com%2Fhanzo-apps%2Ftemplate-folio-about&seed=folio-about",
+      "platformDeployUrl": "https://platform.hanzo.ai/new?repo=https%3A%2F%2Fgithub.com%2Fhanzo-apps%2Ftemplate-folio-about&template=folio-about"
+    }
+  ]
+}
