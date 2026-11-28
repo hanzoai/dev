@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import * as changes from './changes.ts'
-import { call, query, Refusal, type Target } from './call.ts'
+import { call, isExpired, query, Refusal, type Target } from './call.ts'
 import * as coding from './coding.ts'
 import * as git from './git.ts'
 import * as github from './github.ts'
@@ -87,6 +87,63 @@ describe('call', () => {
   it('builds a query from the defined, non-empty values only', () => {
     expect(query({ a: 'x y', b: '', c: undefined, d: null, e: 0, f: false })).toBe('?a=x+y&e=0&f=false')
     expect(query({})).toBe('')
+  })
+
+  it('detects expired JWTs and leaves opaque tokens alone', () => {
+    const jwtOf = (exp: number) => `eyJhbGciOiJSUzI1NiJ9.${Buffer.from(JSON.stringify({ exp })).toString('base64url')}.sig`
+    const now = 1_700_000_000_000
+    expect(isExpired(jwtOf(Math.floor(now / 1000) - 10), now)).toBe(true)
+    expect(isExpired(jwtOf(Math.floor(now / 1000) + 15), now)).toBe(true)
+    expect(isExpired(jwtOf(Math.floor(now / 1000) + 300), now)).toBe(false)
+    expect(isExpired('hk-opaque-key', now)).toBe(false)
+  })
+
+  it('proactively refreshes an expired or missing token before calling the platform', async () => {
+    const expired = `eyJhbGciOiJSUzI1NiJ9.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) - 60 })).toString('base64url')}.sig`
+    const fresh = `eyJhbGciOiJSUzI1NiJ9.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url')}.sig`
+    const refresh = vi.fn(async () => fresh)
+    const seen = answer(200, { data: [] })
+    await call({ api: 'https://api.hanzo.ai', token: () => expired, refresh, org: 'mvee85560' }, 'GET', '/v1/git/repos')
+    expect(refresh).toHaveBeenCalledWith(false)
+    expect(seen).toHaveLength(1)
+    expect(seen[0].headers.get('authorization')).toBe(`Bearer ${fresh}`)
+  })
+
+  it('retries once after forcing a token refresh on 401', async () => {
+    const seen: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit = {}) => {
+        const auth = new Headers(init.headers).get('authorization') ?? ''
+        seen.push(auth)
+        if (auth === 'Bearer fresh-tok') {
+          return new Response(JSON.stringify({ data: [{ name: 'site' }] }), { status: 200, headers: { 'content-type': 'application/json' } })
+        }
+        return new Response(JSON.stringify({ detail: 'a validated principal is required: send Authorization: Bearer <API key>' }), {
+          status: 401,
+          headers: { 'content-type': 'application/problem+json' },
+        })
+      }),
+    )
+    const refresh = vi.fn(async (force?: boolean) => (force ? 'fresh-tok' : null))
+    const res = await call<{ data: { name: string }[] }>(
+      { api: 'https://api.hanzo.ai', token: () => 'stale-tok', refresh, org: 'mvee85560' },
+      'GET',
+      '/v1/git/repos',
+    )
+    expect(refresh).toHaveBeenCalledWith(true)
+    expect(seen).toEqual(['Bearer stale-tok', 'Bearer fresh-tok'])
+    expect(res.data).toEqual([{ name: 'site' }])
+  })
+
+  it('surfaces the 401 refusal when refresh returns no new token', async () => {
+    const seen = answer(401, { detail: 'a validated principal is required: send Authorization: Bearer <API key>' }, 'application/problem+json')
+    const refresh = vi.fn(async () => null)
+    await expect(
+      call({ api: 'https://api.hanzo.ai', token: () => 'stale-tok', refresh, org: 'mvee85560' }, 'GET', '/v1/git/repos'),
+    ).rejects.toMatchObject({ status: 401, message: 'a validated principal is required: send Authorization: Bearer <API key>' })
+    expect(seen).toHaveLength(1)
+    expect(refresh).toHaveBeenCalledWith(true)
   })
 })
 

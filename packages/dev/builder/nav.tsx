@@ -166,7 +166,7 @@ function keep(host: Host, say: Say): void {
   input.type = 'file'
   input.multiple = true
   input.onchange = async () => {
-    const t = { api: host.api, token: host.token, org: host.org }
+    const t = { api: host.api, token: host.token, refresh: host.refresh, org: host.org }
     for (const f of Array.from(input.files ?? [])) {
       try {
         await upload(t, { name: f.name, type: f.type, blob: f }, { source: 'chat' })
@@ -218,7 +218,7 @@ export function library(host: Host, go: (path: string) => void, t: Say = english
 /** Scheduled tasks' sidebar: New task, then each of the person's tasks, the one open lit. Read only while `on`. */
 export function useScheduled(host: Host, go: (path: string) => void, on: boolean): Group[] {
   const { t: say } = useI18n()
-  const t = useMemo(() => ({ api: host.api, token: host.token, org: host.org }), [host.api, host.token, host.org])
+  const t = useMemo(() => ({ api: host.api, token: host.token, refresh: host.refresh, org: host.org }), [host.api, host.token, host.refresh, host.org])
   const list = useRead(on && host.person ? () => automations(t) : null, [], [t, on, host.path])
   const r = route(host.path)
   const at = r.kind === 'automation' ? r.id : ''

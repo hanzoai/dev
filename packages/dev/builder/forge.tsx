@@ -45,6 +45,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { copy as toClipboard } from './clipboard.ts'
 import { RING, RING_INSET } from './pane.ts'
 import { ago } from './ago.ts'
+import { Refusal } from './api/call.ts'
 import { codebases, remove as removeRepo, type Codebase } from './api/codebases.ts'
 import { unlink as removeLink } from './api/links.ts'
 import { remove as removeProject, name as repoName } from './api/projects.ts'
@@ -284,21 +285,29 @@ function Projects() {
   }
 
   return (
-    <YStack flex={1} minH={0} overflow="scroll" px="$6" py="$6" $max-md={{ px: '$4' }}>
-      <YStack width="100%" maxW={1040} mx="auto" gap="$4">
-        <XStack justify="space-between" items="flex-start" gap="$4" flexWrap="wrap">
-          <YStack gap="$1" flex={1} minW={240}>
+    <YStack flex={1} minH={0} minW={0} width="100%" overflowY="auto" overflowX="hidden" px="$6" py="$6" $max-md={{ px: '$4', py: '$4' }}>
+      <YStack width="100%" maxW={1040} minW={0} mx="auto" gap="$4">
+        <XStack
+          justify="space-between"
+          items="flex-start"
+          gap="$4"
+          flexWrap="wrap"
+          minW={0}
+          maxW="100%"
+          $max-md={{ flexDirection: 'column', items: 'stretch', gap: '$3' }}
+        >
+          <YStack gap="$1" flex={1} flexBasis={240} minW={0} maxW="100%" $max-md={{ flex: 0, flexBasis: 'auto', width: '100%' }}>
             <SizableText render="h1" size="$6" fontWeight="500" color="$ink">
               {t('Projects')}
             </SizableText>
-            <SizableText size="$2" color="$soft">
+            <SizableText size="$2" color="$soft" maxW="100%">
               {host.org
                 ? t('{org}’s projects and linked GitHub repositories. Open one to work on it.', { org: host.org })
                 : t('Projects and linked GitHub repositories. Open one to work on it.')}
             </SizableText>
           </YStack>
           {signed ? (
-            <XStack gap="$2" items="center" flexWrap="wrap">
+            <XStack gap="$2" items="center" flexWrap="wrap" minW={0} maxW="100%" $max-md={{ width: '100%' }}>
               <Button size="sm" variant="outline" onPress={template}>
                 <LayoutTemplate size={14} />
                 {t('Create from template')}
@@ -323,13 +332,22 @@ function Projects() {
           </SizableText>
         ) : null}
         {list.error ? (
-          <YStack borderWidth={1} borderColor="$borderColor" rounded="$4" bg="$panel" px="$5" py="$8" gap="$3" items="center">
-            <SizableText size="$2" color="var(--state-error)" text="center">
-              {list.error.message}
+          <YStack width="100%" minW={0} borderWidth={1} borderColor="$borderColor" rounded="$4" bg="$panel" px="$5" py="$8" gap="$3" items="center" $max-md={{ px: '$4', py: '$6' }}>
+            <SizableText size="$2" color="var(--state-error)" text="center" maxW="100%" style={{ overflowWrap: 'anywhere' }}>
+              {list.error instanceof Refusal && list.error.status === 401 && host.signIn
+                ? t('Your session expired. Sign in again to see your projects.')
+                : list.error.message}
             </SizableText>
-            <Button size="sm" variant="outline" onPress={list.reload}>
-              {t('Try again')}
-            </Button>
+            <XStack gap="$2" items="center" justify="center" flexWrap="wrap">
+              {list.error instanceof Refusal && list.error.status === 401 && host.signIn ? (
+                <Button size="sm" variant="primary" onPress={() => host.signIn?.()}>
+                  {t('Sign in')}
+                </Button>
+              ) : null}
+              <Button size="sm" variant="outline" onPress={list.reload}>
+                {t('Try again')}
+              </Button>
+            </XStack>
           </YStack>
         ) : !signed ? (
           <YStack borderWidth={1} borderColor="$borderColor" rounded="$4" bg="$panel" px="$5" py="$8" gap="$3" items="center">
@@ -750,9 +768,12 @@ function GitHubLink({
       borderColor="$borderColor"
       bg="$panel"
       flexWrap="wrap"
+      minW={0}
+      maxW="100%"
+      $max-md={{ flexDirection: 'column', items: 'flex-start' }}
     >
       <Github size={16} />
-      <YStack flex={1} minW={200}>
+      <YStack flex={1} flexBasis={200} minW={0} maxW="100%" $max-md={{ flex: 0, flexBasis: 'auto', width: '100%' }}>
         <SizableText size="$2" color="$ink">
           {c.connected ? t('GitHub connected as {login}', { login: `@${c.login}` }) : t('Connect GitHub to bring your repositories here')}
         </SizableText>
@@ -1152,10 +1173,18 @@ function Issues() {
   }
 
   return (
-    <YStack flex={1} minH={0} overflow="scroll" px="$6" py="$6" $max-md={{ px: '$4' }}>
-      <YStack width="100%" maxW={1120} mx="auto" gap="$4">
-        <XStack justify="space-between" items="flex-start" gap="$4" flexWrap="wrap">
-          <YStack gap="$1" flex={1} minW={240}>
+    <YStack flex={1} minH={0} minW={0} width="100%" overflowY="auto" overflowX="hidden" px="$6" py="$6" $max-md={{ px: '$4', py: '$4' }}>
+      <YStack width="100%" maxW={1120} minW={0} mx="auto" gap="$4">
+        <XStack
+          justify="space-between"
+          items="flex-start"
+          gap="$4"
+          flexWrap="wrap"
+          minW={0}
+          maxW="100%"
+          $max-md={{ flexDirection: 'column', items: 'stretch', gap: '$3' }}
+        >
+          <YStack gap="$1" flex={1} flexBasis={240} minW={0} maxW="100%" $max-md={{ flex: 0, flexBasis: 'auto', width: '100%' }}>
             <SizableText render="h1" size="$6" fontWeight="500" color="$ink">
               {board ? t('Issues · {project}', { project: title }) : t('Issues')}
             </SizableText>
