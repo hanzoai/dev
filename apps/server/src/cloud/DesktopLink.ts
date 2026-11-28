@@ -176,7 +176,10 @@ const WireDesktop = Schema.Struct({
   linked_at: Schema.String,
   providers: Schema.optional(Schema.Array(WireProvider)),
 });
-const WireDesktopList = Schema.Struct({ sources: Schema.Array(WireDesktop) });
+const WireDesktopList = Schema.Struct({
+  machines: Schema.optional(Schema.Array(WireDesktop)),
+  sources: Schema.optional(Schema.Array(WireDesktop)),
+});
 
 const decodeLinkReply = Schema.decodeUnknownEffect(LinkReply);
 const decodeBeatReply = Schema.decodeUnknownEffect(BeatReply);
@@ -502,7 +505,7 @@ const make = Effect.gen(function* () {
     const body = yield* signedBeat(record.value.id, key, yield* reportedProviders);
     const response = yield* call({
       method: "POST",
-      path: `/v1/sources/${encodeURIComponent(record.value.id)}/heartbeat`,
+      path: `/v1/machines/${encodeURIComponent(record.value.id)}/heartbeat`,
       accessToken: stored.value.accessToken,
       body,
     });
@@ -533,7 +536,7 @@ const make = Effect.gen(function* () {
     const key = yield* readDeviceKey;
     const response = yield* call({
       method: "POST",
-      path: "/v1/sources",
+      path: "/v1/machines",
       accessToken,
       body: encodeBody({
         kind: "desktop",
@@ -617,7 +620,7 @@ const make = Effect.gen(function* () {
     const stored = yield* requireToken;
     const response = yield* call({
       method: "DELETE",
-      path: `/v1/sources/${encodeURIComponent(id)}`,
+      path: `/v1/machines/${encodeURIComponent(id)}`,
       accessToken: stored.accessToken,
     });
     // A desktop that is already revoked or gone is the state the caller asked for.
@@ -662,14 +665,14 @@ const make = Effect.gen(function* () {
     const stored = yield* requireToken;
     const response = yield* call({
       method: "GET",
-      path: "/v1/sources",
+      path: "/v1/machines",
       accessToken: stored.accessToken,
     });
     if (response.status !== 200) return yield* reject(response.status);
     const wire = yield* decodeDesktopList(response.json).pipe(
       Effect.mapError((cause) => fail("rejected", "Hanzo sent an unreadable reply.", cause)),
     );
-    return wire.sources.map(toDesktop);
+    return (wire.machines ?? wire.sources ?? []).map(toDesktop);
   });
 
   const revoke = Effect.fn("DesktopLink.revoke")(function* (id: string) {
@@ -731,7 +734,7 @@ const make = Effect.gen(function* () {
     const sig = yield* signBeat(key, usageMessage(id, digest));
     return yield* call({
       method: "POST",
-      path: `/v1/sources/${encodeURIComponent(id)}/usage`,
+      path: `/v1/machines/${encodeURIComponent(id)}/usage`,
       accessToken,
       body: batch.body,
       headers: { "x-hanzo-sig": sig },

@@ -152,7 +152,7 @@ const makeHarness = (options: { readonly signedIn?: boolean } = {}) =>
                 });
                 const heartbeat = url.pathname.endsWith("/heartbeat");
                 const usage = url.pathname.endsWith("/usage");
-                if (url.pathname.startsWith("/v1/sources/accounts")) {
+                if (url.pathname.startsWith("/v1/machines/accounts")) {
                   const account = {
                     id: "acc_1",
                     provider: "anthropic",
@@ -205,7 +205,7 @@ it.effect("relinking the same install keeps one device key and one id", () =>
       const linkBodies: Array<{ readonly key: string }> = [];
       for (let index = 0; index < 4; index += 1) {
         const request = yield* Queue.take(requests);
-        if (request.path === "/v1/sources") linkBodies.push(JSON.parse(request.body));
+        if (request.path === "/v1/machines") linkBodies.push(JSON.parse(request.body));
       }
       assert.equal(linkBodies.length, 2);
       assert.equal((linkBodies[0] as { readonly kind?: string }).kind, "desktop");
@@ -225,7 +225,7 @@ it.effect("a heartbeat reports provider state only and is signed by the device k
       const status = yield* desktopLink.link({});
       const registration = yield* Queue.take(requests);
       const heartbeat = yield* Queue.take(requests);
-      assert.equal(heartbeat.path, "/v1/sources/src_1/heartbeat");
+      assert.equal(heartbeat.path, "/v1/machines/src_1/heartbeat");
       assert.deepEqual(Object.keys(JSON.parse(heartbeat.body)).toSorted(), [
         "at",
         "busy",
@@ -309,7 +309,7 @@ it.effect("a 410 on the next heartbeat unlinks and clears the local state", () =
       replies.heartbeat = 410;
       yield* TestClock.adjust("30 seconds");
       const heartbeat = yield* Queue.take(requests);
-      assert.equal(heartbeat.path, "/v1/sources/src_1/heartbeat");
+      assert.equal(heartbeat.path, "/v1/machines/src_1/heartbeat");
       const status = yield* desktopLink.status;
       assert.equal(status.desktop, null);
       assert.equal(secrets.has("desktop-link"), false);
@@ -330,7 +330,7 @@ it.effect("unlinking revokes the desktop at Hanzo and forgets the link", () =>
       yield* Queue.take(requests);
       const status = yield* desktopLink.unlink;
       const revoke = yield* Queue.take(requests);
-      assert.deepInclude(revoke, { method: "DELETE", path: "/v1/sources/src_1" });
+      assert.deepInclude(revoke, { method: "DELETE", path: "/v1/machines/src_1" });
       assert.equal(status.desktop, null);
       assert.equal(secrets.has("desktop-link"), false);
     }).pipe(Effect.provide(layer));
@@ -343,9 +343,9 @@ it.effect("a signed-in desktop links itself on start", () =>
     yield* Effect.gen(function* () {
       const desktopLink = yield* DesktopLink.DesktopLink;
       const register = yield* Queue.take(requests);
-      assert.deepInclude(register, { method: "POST", path: "/v1/sources" });
+      assert.deepInclude(register, { method: "POST", path: "/v1/machines" });
       const heartbeat = yield* Queue.take(requests);
-      assert.equal(heartbeat.path, "/v1/sources/src_1/heartbeat");
+      assert.equal(heartbeat.path, "/v1/machines/src_1/heartbeat");
       const status = yield* desktopLink.status;
       assert.equal(status.desktop?.id, "src_1");
       assert.equal(secrets.has("desktop-link"), true);
@@ -358,19 +358,19 @@ it.effect("a desktop unlinked on purpose stays unlinked while signed in", () =>
     const { requests, secrets, layer } = yield* makeHarness({ signedIn: true });
     yield* Effect.gen(function* () {
       const desktopLink = yield* DesktopLink.DesktopLink;
-      assert.equal((yield* Queue.take(requests)).path, "/v1/sources");
-      assert.equal((yield* Queue.take(requests)).path, "/v1/sources/src_1/heartbeat");
+      assert.equal((yield* Queue.take(requests)).path, "/v1/machines");
+      assert.equal((yield* Queue.take(requests)).path, "/v1/machines/src_1/heartbeat");
       yield* desktopLink.unlink;
       assert.deepInclude(yield* Queue.take(requests), {
         method: "DELETE",
-        path: "/v1/sources/src_1",
+        path: "/v1/machines/src_1",
       });
       assert.equal(secrets.has("desktop-link-declined"), true);
       // The next passes of the loop find the declined marker and do not register again.
       yield* TestClock.adjust("30 seconds");
       yield* TestClock.adjust("30 seconds");
       const later = yield* Queue.clear(requests);
-      assert.isFalse(later.some((request) => request.path === "/v1/sources"));
+      assert.isFalse(later.some((request) => request.path === "/v1/machines"));
       assert.equal((yield* desktopLink.status).desktop, null);
       // Linking again by hand clears the marker.
       yield* desktopLink.link({});
@@ -393,7 +393,7 @@ it.effect("a usage report drops the account, codes the error, and is signed over
       yield* TestClock.adjust("30 seconds");
       yield* Queue.take(requests);
       const usage = yield* Queue.take(requests);
-      assert.equal(usage.path, "/v1/sources/src_1/usage");
+      assert.equal(usage.path, "/v1/machines/src_1/usage");
       const report = JSON.parse(usage.body);
       assert.equal(report.deviceId, "src_1");
       assert.equal(report.version, 1);
@@ -498,7 +498,7 @@ it.effect("an API key's value is sent to Hanzo once and is in no file this deskt
       const sent = [];
       while ((yield* Queue.size(requests)) > 0) sent.push(yield* Queue.take(requests));
       const post = sent.find(
-        (request) => request.path === "/v1/sources/accounts" && request.method === "POST",
+        (request) => request.path === "/v1/machines/accounts" && request.method === "POST",
       );
       assert.equal(JSON.parse(post?.body ?? "{}").value, SECRET_KEY_VALUE);
       for (const [, bytes] of secrets) {

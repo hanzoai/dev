@@ -378,7 +378,7 @@ describe("ManagedRelayClient", () => {
     }).pipe(Effect.provide(layerManagedRelayTest(fetchFn, undefined, accessTokenStore)));
   });
 
-  it.effect("lists environments from the /v1/sources registry", () => {
+  it.effect("lists environments from the /v1/machines registry", () => {
     const requests: Array<{ url: string; authorization: string | null }> = [];
     const fetchFn = ((input, init) => {
       requests.push({
@@ -406,7 +406,7 @@ describe("ManagedRelayClient", () => {
       const environments = yield* relayClient.listEnvironments({ iamToken: "iam-token" });
 
       expect(requests).toEqual([
-        { url: "https://api.hanzo.ai/v1/sources", authorization: "Bearer iam-token" },
+        { url: "https://api.hanzo.ai/v1/machines", authorization: "Bearer iam-token" },
       ]);
       expect(environments).toMatchObject([
         { environmentId: "mac-1", label: "Zs Mac", state: "online" },
@@ -414,7 +414,7 @@ describe("ManagedRelayClient", () => {
     }).pipe(Effect.provide(layerManagedRelayTest(fetchFn)));
   });
 
-  it.effect("connects a linked machine through /v1/sources at its reported ZAP address", () => {
+  it.effect("connects a linked machine through /v1/machines at its reported ZAP address", () => {
     const requests: Array<string> = [];
     const fetchFn = ((input) => {
       requests.push(String(input));
@@ -436,7 +436,7 @@ describe("ManagedRelayClient", () => {
         scopes: [RelayEnvironmentConnectScope],
         environmentId: EnvironmentId.make("mac-1"),
       });
-      expect(requests).toEqual(["https://api.hanzo.ai/v1/sources/mac-1"]);
+      expect(requests).toEqual(["https://api.hanzo.ai/v1/machines/mac-1"]);
       expect(connected).toMatchObject({
         environmentId: "mac-1",
         endpoint: {
@@ -457,7 +457,7 @@ describe("ManagedRelayClient", () => {
     }).pipe(Effect.provide(layerManagedRelayTest(fetchFn, "http://relay.invalid")));
   });
 
-  it.effect("reports an unauthorized /v1/sources as a failed listing", () => {
+  it.effect("reports an unauthorized /v1/machines as a failed listing", () => {
     const fetchFn = (() =>
       Promise.resolve(
         Response.json({ code: "unauthorized" }, { status: 401 }),

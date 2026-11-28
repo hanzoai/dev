@@ -32,7 +32,7 @@ describe("drawerMacs", () => {
     ]);
   });
 
-  it.each([404, 501, 500])("is quietly empty when /v1/sources answers %i", async (status) => {
+  it.each([404, 501, 500])("is quietly empty when /v1/machines answers %i", async (status) => {
     expect(drawerMacs(await discover(() => json(status, {})))).toEqual([]);
   });
 
@@ -59,7 +59,7 @@ describe("drawerCloud", () => {
   it("lists Cloud as available when the sessions route is deployed", async () => {
     const discovery = await discoverEnvironments({ accessToken: "t" }, [], {
       fetch: async (url) =>
-        url.endsWith("/v1/sources") ? json(200, { sources: [] }) : json(405, {}),
+        url.endsWith("/v1/machines") ? json(200, { sources: [] }) : json(405, {}),
     });
     expect(drawerCloud(discovery)).toEqual({ available: true });
   });
@@ -67,7 +67,7 @@ describe("drawerCloud", () => {
   it("lists Cloud as not available yet when the route is missing", async () => {
     const discovery = await discoverEnvironments({ accessToken: "t" }, [], {
       fetch: async (url) =>
-        url.endsWith("/v1/sources") ? json(200, { sources: [] }) : json(404, {}),
+        url.endsWith("/v1/machines") ? json(200, { sources: [] }) : json(404, {}),
     });
     expect(drawerCloud(discovery)).toEqual({ available: false });
   });
