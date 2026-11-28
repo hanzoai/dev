@@ -23,6 +23,11 @@ export interface Target {
   api: string
   /** The signed-in person's bearer, or null for nobody. */
   token: () => string | null
+  /**
+   * Obtain a fresh bearer when the stored token is missing/expired (`force = false`)
+   * or after a 401 (`force = true`). Absent, `call` sends `token()` as-is.
+   */
+  refresh?: (force?: boolean) => Promise<string | null>
   /** The org every call is scoped to, sent as `X-Org-Id`. */
   org: string | null
 }
@@ -75,10 +80,24 @@ export function query(q: Query = {}): string {
   return out ? `?${out}` : ''
 }
 
+/** Whether a JWT's `exp` claim is expired (or within 30s clock skew). Opaque tokens return false. */
+export function isExpired(token: string, now = Date.now()): boolean {
+  const parts = token.split('.')
+  if (parts.length !== 3 || !parts[1]) return false
+  try {
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const pad = b64.length % 4 ? '='.repeat(4 - (b64.length % 4)) : ''
+    const payload = JSON.parse(atob(b64 + pad)) as { exp?: unknown }
+    return typeof payload.exp === 'number' && payload.exp * 1000 <= now + 30_000
+  } catch {
+    return false
+  }
+}
+
 /** The headers every call carries: the bearer and the org, when there are ones. */
-export function headers(t: Target, extra?: HeadersInit): Headers {
+export function headers(t: Target, extra?: HeadersInit, resolvedToken?: string | null): Headers {
   const h = new Headers(extra)
-  const token = t.token()
+  const token = resolvedToken !== undefined ? resolvedToken : t.token()
   if (token && !h.has('Authorization')) h.set('Authorization', `Bearer ${token}`)
   if (t.org && !h.has('X-Org-Id')) h.set('X-Org-Id', t.org)
   return h
@@ -121,16 +140,39 @@ export async function call<T>(
   body?: unknown,
   init?: { signal?: AbortSignal },
 ): Promise<T> {
-  const h = headers(t, body === undefined ? undefined : { 'Content-Type': 'application/json' })
-  const res = await fetch(`${t.api}${path}`, {
-    method,
-    headers: h,
-    body: body === undefined ? undefined : JSON.stringify(body),
-    // A run, a repo list and a status are facts about now. A cached refusal
-    // outlives the fix.
-    cache: 'no-store',
-    signal: init?.signal,
-  })
+  let token = t.token()
+  if (t.refresh && (!token || isExpired(token)) && !init?.signal?.aborted) {
+    try {
+      const fresh = await t.refresh(false)
+      if (fresh) token = fresh
+    } catch {
+      /* keep the current token; a 401 refusal below still surfaces */
+    }
+  }
+  const extra = body === undefined ? undefined : { 'Content-Type': 'application/json' }
+  const payload = body === undefined ? undefined : JSON.stringify(body)
+  const send = (tok: string | null) =>
+    fetch(`${t.api}${path}`, {
+      method,
+      headers: headers(t, extra, tok),
+      body: payload,
+      // A run, a repo list and a status are facts about now. A cached refusal
+      // outlives the fix.
+      cache: 'no-store',
+      signal: init?.signal,
+    })
+  let res = await send(token)
+  if (res.status === 401 && t.refresh && !init?.signal?.aborted) {
+    try {
+      const fresh = await t.refresh(true)
+      if (fresh && fresh !== token) {
+        token = fresh
+        res = await send(token)
+      }
+    } catch {
+      /* fall through to the original 401 refusal */
+    }
+  }
   if (!res.ok) {
     const { why, code } = await problem(res)
     throw new Refusal(res.status, why || `${method} ${path.split('?')[0]} answered ${res.status}`, code)

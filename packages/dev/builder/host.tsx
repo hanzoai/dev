@@ -96,6 +96,8 @@ export interface Host {
   api: string
   /** The signed-in person's bearer, or null. Read at call time, so a refresh is picked up. */
   token: () => string | null
+  /** Refresh an expired or rejected bearer on demand (`force = true` after a 401). */
+  refresh?: (force?: boolean) => Promise<string | null>
   /** The org every call is scoped to. */
   org: string | null
   /** The org's own logo, an https address, when it has chosen one; its mark is drawn from it. */
@@ -204,8 +206,8 @@ export function useBrowser(): Browser | null {
   return useContext(Context)?.browser ?? null
 }
 
-/** The call target for this host — stable while the host's api, token reader and org are. */
+/** The call target for this host — stable while the host's api, token reader, refresh hook and org are. */
 export function useTarget(): Target {
-  const { api, token, org } = useHost()
-  return useMemo(() => ({ api, token, org }), [api, token, org])
+  const { api, token, refresh, org } = useHost()
+  return useMemo(() => ({ api, token, refresh, org }), [api, token, refresh, org])
 }

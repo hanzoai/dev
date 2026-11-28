@@ -39,7 +39,7 @@ export const dot = (s: Pick<Session, 'status' | 'channel' | 'parent'>): SessionS
 
 /** The org's coding runs, newest first, kept live by the org's feed. */
 export function useSessions(host: Host): Read<Session[]> {
-  const t = useMemo(() => ({ api: host.api, token: host.token, org: host.org }), [host.api, host.token, host.org])
+  const t = useMemo(() => ({ api: host.api, token: host.token, refresh: host.refresh, org: host.org }), [host.api, host.token, host.refresh, host.org])
   return useRecents(t, Boolean(host.person))
 }
 

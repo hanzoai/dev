@@ -1,6 +1,6 @@
 {
   "name": "@hanzo/dev",
-  "version": "4.2.3",
+  "version": "4.2.4",
   "description": "The unified Hanzo Dev & Builder library (Dev core threads/composer/runtime + Builder workspace, sessions, routes, plans, and host providers).",
   "license": "MIT",
   "repository": {
