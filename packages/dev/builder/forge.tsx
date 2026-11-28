@@ -27,10 +27,12 @@ import {
   ExternalLink,
   FolderGit2,
   GitBranch,
+  GitFork,
   Github,
   GitPullRequest,
   LayoutTemplate,
   MoreHorizontal,
+  Plus,
   RefreshCw,
   Search,
   SlidersHorizontal,
@@ -45,7 +47,7 @@ import { RING, RING_INSET } from './pane.ts'
 import { ago } from './ago.ts'
 import { codebases, remove as removeRepo, type Codebase } from './api/codebases.ts'
 import { unlink as removeLink } from './api/links.ts'
-import { remove as removeProject } from './api/projects.ts'
+import { remove as removeProject, name as repoName } from './api/projects.ts'
 import { Scheduled } from './scheduled.tsx'
 import { boards, everything, sources, UNREAD, type Board, type Sources } from './api/work.ts'
 import { boardKey, pinRepo, readPending, writePending } from './choice.ts'
@@ -56,9 +58,26 @@ import type { Screen } from './route.ts'
 import { path } from './route.ts'
 import { Customize } from './customize/index.tsx'
 import { Sync } from './sync.tsx'
-import { changed, connect, connection, disconnect as unlink, grants, heard, installations, linked, syncIssues, type Connection, type Installation } from './api/github.ts'
+import {
+  changed,
+  connect,
+  connection,
+  disconnect as unlink,
+  githubRepoFrom,
+  grants,
+  heard,
+  installations,
+  linked,
+  listGitTargets,
+  syncIssues,
+  type Connection,
+  type GitHubRepoBadgeInfo,
+  type GitTarget,
+  type Installation,
+} from './api/github.ts'
 import { disconnect } from './api/provider.ts'
 import { here, useBack } from './back.ts'
+import { GitHubBadge, GitHubReposModal, SyncToGitHubDialog } from './github-sync.tsx'
 import { Out } from './out.tsx'
 import { ask, assemble, attach, closes, facets, handle, home, keyOf, matches, pickProjects, place, type Issue, type Project } from './merge.ts'
 import { removal, stopped, type Removal, type Step } from './removal.ts'
@@ -174,12 +193,54 @@ function Projects() {
   const none = !list.loading && !list.error && list.value.length === 0 && pending.length === 0
 
   const open = (c: Codebase) => host.go(path({ kind: 'repo', org: c.org || host.org || '', name: c.name }))
-  const link = () => host.go(path({ kind: 'screen', screen: 'sync' }))
+  const [githubModal, setGitHubModal] = useState<{ open: boolean; tab: 'browse' | 'create' | 'fork' }>({ open: false, tab: 'browse' })
+  const openGitHubModal = (tab: 'browse' | 'create' | 'fork' = 'browse') => setGitHubModal({ open: true, tab })
+  const link = () => openGitHubModal('browse')
   const template = () => host.go(path({ kind: 'screen', screen: 'templates' }))
+
+  // Outbound GitHub mirror targets for visible repositories, plus optimistic sync state.
+  const [syncTarget, setSyncTarget] = useState<Codebase | null>(null)
+  const [syncedMap, setSyncedMap] = useState<Record<string, GitHubRepoBadgeInfo>>({})
+  const [rowTargets, setRowTargets] = useState<Record<string, GitTarget[]>>({})
+  const visibleNames = slice.filter((c) => !syncing.has(c.name)).map((c) => c.name)
+  const visibleKey = visibleNames.join('\n')
+  useEffect(() => {
+    if (!signed || !visibleKey) return
+    let stop = false
+    const names = visibleKey.split('\n')
+    void Promise.all(
+      names.map(async (n) => [n, await listGitTargets(target, n).catch(() => [] as GitTarget[])] as const),
+    ).then((entries) => {
+      if (stop) return
+      setRowTargets((prev) => ({ ...prev, ...Object.fromEntries(entries) }))
+    })
+    return () => {
+      stop = true
+    }
+  }, [signed, target, visibleKey, landed])
 
   // What each repository is tied to on Hanzo — the links into it, GitHub's names
   // for the copies it made, the projects built from it — read for Remove alone.
   const made = useRead(signed ? () => sources(target) : null, NONE, [target, signed, landed])
+  const githubFor = (c: Codebase): GitHubRepoBadgeInfo | null => {
+    if (syncedMap[c.name]) return syncedMap[c.name]
+    const directOrTarget = githubRepoFrom(c.clone, rowTargets[c.name])
+    if (directOrTarget) return directOrTarget
+    const inbound = made.value.linked.find((l) => l.forge.toLowerCase() === c.name.toLowerCase())
+    if (inbound && inbound.owner && inbound.name) {
+      return {
+        owner: inbound.owner,
+        name: inbound.name,
+        fullName: `${inbound.owner}/${inbound.name}`,
+        htmlUrl: `https://github.com/${inbound.owner}/${inbound.name}`,
+        source: 'link',
+      }
+    }
+    const site = made.value.sites.find(
+      (s) => s.slug.toLowerCase() === c.name.toLowerCase() || (s.repo && repoName(s.repo).toLowerCase() === c.name.toLowerCase()),
+    )
+    return site?.repo ? githubRepoFrom(site.repo) : null
+  }
   const [confirming, setConfirming] = useState<Removal | null>(null)
   const [removing, setRemoving] = useState(false)
   const [said, setSaid] = useState('')
@@ -249,7 +310,13 @@ function Projects() {
             </XStack>
           ) : null}
         </XStack>
-        {signed ? <GitHubLink onSync={link} /> : null}
+        {signed ? (
+          <GitHubLink
+            onSync={() => openGitHubModal('browse')}
+            onCreate={() => openGitHubModal('create')}
+            onFork={() => openGitHubModal('fork')}
+          />
+        ) : null}
         {said ? (
           <SizableText size="$2" color={saidError ? 'var(--state-error)' : '$soft'} role="status">
             {said}
@@ -369,6 +436,9 @@ function Projects() {
                     </SizableText>
                     {sort === 'updated' ? <ChevronDown size={12} /> : null}
                   </XStack>
+                  <SizableText size="$1" color="$soft" width={180} shrink={0} text="end" $max-md={{ display: 'none' }}>
+                    GitHub
+                  </SizableText>
                   {/* Actions column, so every row's columns stand under their headers. */}
                   <YStack width={32} shrink={0} />
                 </XStack>
@@ -376,6 +446,7 @@ function Projects() {
                   const key = `${c.org}/${c.name}`
                   const named = `${c.org ? `${c.org}/` : ''}${c.name}`
                   const r = plan(c)
+                  const gh = githubFor(c)
                   return (
                     <YStack key={key} borderTopWidth={1} borderColor="$borderColor">
                       <XStack items="center" gap="$3" paddingInlineEnd="$3" hoverStyle={{ bg: '$hover' }}>
@@ -414,6 +485,11 @@ function Projects() {
                                 {c.description}
                               </SizableText>
                             ) : null}
+                            {gh ? (
+                              <SizableText size="$1" color="$soft" numberOfLines={1} display="none" $max-md={{ display: 'flex' }}>
+                                {`GitHub · ${gh.fullName}`}
+                              </SizableText>
+                            ) : null}
                           </YStack>
                           <XStack width={120} items="center" gap="$1.5" minW={0} $max-md={{ display: 'none' }}>
                             <GitBranch size={12} color="$soft" />
@@ -424,6 +500,22 @@ function Projects() {
                           <SizableText size="$1" color="$soft" width={120} shrink={0} $max-md={{ width: 84 }} text="end" numberOfLines={1}>
                             {syncing.has(c.name) ? t('Syncing…') : ago(c.updated)}
                           </SizableText>
+                        </XStack>
+                        <XStack width={180} justify="flex-end" items="center" gap="$2" shrink={0} $max-md={{ display: 'none' }}>
+                          {gh ? (
+                            <GitHubBadge fullName={gh.fullName} htmlUrl={gh.htmlUrl} compact />
+                          ) : !syncing.has(c.name) ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              data-slot="row-sync-github"
+                              aria-label={t('Sync {repo} to GitHub', { repo: c.name })}
+                              onPress={() => setSyncTarget(c)}
+                            >
+                              <Github size={13} />
+                              {t('Sync to GitHub')}
+                            </Button>
+                          ) : null}
                         </XStack>
                         <XStack width={32} shrink={0} justify="center">
                           <DropdownMenu
@@ -443,6 +535,25 @@ function Projects() {
                             }
                             items={[
                               { key: 'open', label: t('Open workspace'), icon: <ArrowRight size={14} />, onSelect: () => open(c) },
+                              ...(gh
+                                ? [
+                                    {
+                                      key: 'open-github',
+                                      label: t('Open {repo} on GitHub', { repo: gh.fullName }),
+                                      icon: <ExternalLink size={14} />,
+                                      onSelect: () => host.open(gh.htmlUrl),
+                                    },
+                                  ]
+                                : !syncing.has(c.name)
+                                  ? [
+                                      {
+                                        key: 'sync-github',
+                                        label: t('Sync to GitHub'),
+                                        icon: <Github size={14} />,
+                                        onSelect: () => setSyncTarget(c),
+                                      },
+                                    ]
+                                  : []),
                               { key: 'copy', label: t('Copy repository'), icon: <Copy size={14} />, onSelect: () => copyRepo(named) },
                               ...(r
                                 ? [
@@ -492,6 +603,29 @@ function Projects() {
           if (confirming) await remove(confirming)
         }}
       />
+      <GitHubReposModal
+        open={githubModal.open}
+        initialTab={githubModal.tab}
+        onOpenChange={(o) => setGitHubModal((prev) => ({ ...prev, open: o }))}
+        onChanged={() => {
+          list.reload()
+          made.reload()
+          setLanded((n) => n + 1)
+        }}
+      />
+      {syncTarget ? (
+        <SyncToGitHubDialog
+          open
+          onOpenChange={(o) => !o && setSyncTarget(null)}
+          repoName={syncTarget.name}
+          defaultName={syncTarget.name}
+          defaultDescription={syncTarget.description}
+          onSynced={(info) => {
+            setSyncedMap((prev) => ({ ...prev, [syncTarget.name]: info }))
+            setLanded((n) => n + 1)
+          }}
+        />
+      ) : null}
     </YStack>
   )
 }
@@ -543,7 +677,15 @@ function Choice({ label, icon, says, onPress }: { label: string; icon: ReactNode
  * A change made here, in Settings or in the Hanzo app's Quick setup is said on
  * the window (api/github.ts `changed`), and this line reads it again.
  */
-function GitHubLink({ onSync }: { onSync: () => void }) {
+function GitHubLink({
+  onSync,
+  onCreate,
+  onFork,
+}: {
+  onSync: () => void
+  onCreate?: () => void
+  onFork?: () => void
+}) {
   const host = useHost()
   const target = useTarget()
   const { t } = useI18n()
@@ -632,11 +774,23 @@ function GitHubLink({ onSync }: { onSync: () => void }) {
           </Button>
         </XStack>
       ) : c.connected ? (
-        <XStack gap="$2">
+        <XStack gap="$2" flexWrap="wrap">
           <Button size="sm" variant="outline" onPress={onSync}>
             <RefreshCw size={14} />
             {t('Sync repositories')}
           </Button>
+          {onCreate ? (
+            <Button size="sm" variant="outline" onPress={onCreate}>
+              <Plus size={14} />
+              {t('Create new repo')}
+            </Button>
+          ) : null}
+          {onFork ? (
+            <Button size="sm" variant="outline" onPress={onFork}>
+              <GitFork size={14} />
+              {t('Fork repo')}
+            </Button>
+          ) : null}
           {leave ? (
             <Button size="sm" variant="outline" disabled={busy} onPress={() => setAsking(true)}>
               {t('Disconnect')}
